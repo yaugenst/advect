@@ -1,0 +1,6 @@
+edition = "2024"
+use_field_init_shorthand = true
+
+# Desired but still nightly-only on rustfmt 1.8 stable:
+# imports_granularity = "Crate"
+# group_imports = "StdExternalCrate"

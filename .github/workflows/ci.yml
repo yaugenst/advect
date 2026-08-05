@@ -1,0 +1,371 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  FORCE_COLOR: "1"
+  UV_SYSTEM_PYTHON: "1"
+
+jobs:
+  python:
+    name: Python
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+        with:
+          toolchain: 1.94.0
+
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --all-groups --frozen
+
+      - name: Check formatting
+        run: uv run ruff format --check .
+
+      - name: Lint
+        run: uv run ruff check .
+
+      - name: Check types
+        run: >-
+          uv run pyrefly check --config pyproject.toml --preset strict
+          packages/advect/src
+
+      - name: Test
+        run: uv run pytest --maxfail=1
+
+      - name: Search primitive conformance thoroughly
+        run: >-
+          uv run pytest packages/advect/tests/advect_conformance_tests
+          --hypothesis-profile=thorough
+
+  numpy-compatibility:
+    name: NumPy ${{ matrix.numpy-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        numpy-version: ["2.0.*", "2.1.*", "2.2.*", "2.3.*", "2.4.*"]
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+        with:
+          toolchain: 1.94.0
+
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install locked environment
+        run: uv sync --all-groups --frozen
+
+      - name: Select NumPy ${{ matrix.numpy-version }}
+        env:
+          NUMPY_VERSION: ${{ matrix.numpy-version }}
+        run: uv pip install --python .venv/bin/python "numpy==$NUMPY_VERSION"
+
+      - name: Test the qualified NumPy surface
+        run: >-
+          .venv/bin/python -m pytest
+          packages/advect/tests/advect_numpy_tests/test_support_evidence.py
+          packages/advect/tests/advect_numpy_tests/test_version_compatibility.py
+          packages/advect/tests/advect_numpy_tests/test_registration.py
+          packages/advect/tests/advect_numpy_tests/test_stage_rng.py
+          packages/advect/tests/advect_numpy_tests/test_op_bindings.py
+          packages/advect/tests/advect_grad_tests/test_numpy_autodiff.py
+          packages/advect/tests/advect_grad_tests/test_jvp_api.py
+
+  array-api-compatibility:
+    name: array-api-compat ${{ matrix.label }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: 1.11.2
+            requirement: array-api-compat==1.11.2
+          - label: latest-1.x
+            requirement: array-api-compat>=1.11.2,<2
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+        with:
+          toolchain: 1.94.0
+
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install locked environment
+        run: uv sync --all-groups --frozen
+
+      - name: Select ${{ matrix.requirement }}
+        env:
+          ARRAY_API_COMPAT_REQUIREMENT: ${{ matrix.requirement }}
+        run: uv pip install --python .venv/bin/python "$ARRAY_API_COMPAT_REQUIREMENT"
+
+      - name: Test every supported revision request
+        run: >-
+          .venv/bin/python -m pytest
+          packages/advect/tests/advect_array_api_compat_tests/test_provider.py
+
+  host-autodiff-interop:
+    name: Host Autodiff Interop
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+        with:
+          toolchain: 1.94.0
+
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install Advect, JAX, and HIPS Autograd
+        run: uv sync --all-groups --extra jax --frozen
+
+      - name: Install the qualified CPU PyTorch build
+        run: >-
+          uv pip install --python .venv/bin/python
+          'torch>=2.10,<2.11'
+          --index https://download.pytorch.org/whl/cpu
+
+      - name: Test every host-autodiff bridge
+        run: >-
+          uv run --no-sync pytest
+          packages/advect/tests/advect_interop_tests
+
+  pyodide:
+    name: Pyodide / NumPy 2.4
+    runs-on: ubuntu-latest
+    env:
+      PYODIDE_XBUILDENV_PATH: ${{ github.workspace }}/.cache/pyodide-xbuildenv
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.14"
+
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+        with:
+          enable-cache: true
+
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+        with:
+          toolchain: 1.94.0
+          targets: wasm32-unknown-emscripten
+
+      - name: Cache the Pyodide cross-build environment
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: ${{ env.PYODIDE_XBUILDENV_PATH }}
+          key: pyodide-0.36.0-${{ runner.os }}-${{ hashFiles('pyproject.toml', 'Cargo.lock') }}
+          restore-keys: |
+            pyodide-0.36.0-${{ runner.os }}-
+
+      - name: Install Pyodide build tools
+        run: python -m pip install pyodide-build==0.36.0
+
+      - name: Build the WebAssembly wheel
+        run: |
+          mkdir -p dist
+          pyodide build . --outdir dist/pyodide
+
+      - name: Upload the WebAssembly wheel
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: pyodide-wheel
+          path: dist/pyodide/*.whl
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Create the Pyodide runtime
+        run: pyodide venv .venv-pyodide
+
+      - name: Install Advect into Pyodide
+        run: .venv-pyodide/bin/python -m pip install dist/pyodide/advect-*.whl
+
+      - name: Execute the gradient smoke test in Pyodide
+        run: .venv-pyodide/bin/python scripts/smoke_pyodide.py
+
+      - name: Run the documentation snippets in Pyodide
+        run: .venv-pyodide/bin/python scripts/run_doc_snippets.py docs
+
+  docs:
+    name: Documentation
+    needs: pyodide
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+        with:
+          toolchain: 1.94.0
+
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --all-groups --frozen
+
+      - name: Download the WebAssembly wheel
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: pyodide-wheel
+          path: dist/pyodide
+
+      - name: Run the documentation snippets
+        run: uv run python scripts/run_doc_snippets.py docs
+
+      - name: Build documentation
+        run: uv run mkdocs build --strict
+
+  rust:
+    name: Rust
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+        with:
+          toolchain: 1.94.0
+          components: clippy, rustfmt
+
+      - name: Check formatting
+        run: cargo fmt --all --check
+
+      - name: Lint
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+      - name: Test
+        run: cargo test --workspace --all-targets
+
+      - name: Check dependency policy
+        uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        with:
+          command: check
+          arguments: --all-features
+          command-arguments: -W unmaintained
+
+  native-wheels:
+    name: Native Wheels
+    uses: ./.github/workflows/native-wheels.yml
+    permissions:
+      contents: read
+
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install Gitleaks
+        env:
+          GITLEAKS_VERSION: 8.30.1
+        run: |
+          curl -fsSL \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+            -o gitleaks.tar.gz
+          echo "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  gitleaks.tar.gz" \
+            | sha256sum --check
+          tar -xzf gitleaks.tar.gz gitleaks
+
+      - name: Scan Git history
+        env:
+          SOURCE_REVISION: ${{ github.sha }}
+        run: ./gitleaks git --redact --verbose --log-opts="$SOURCE_REVISION"
+
+  ci-success:
+    name: CI Success
+    needs:
+      - python
+      - numpy-compatibility
+      - array-api-compatibility
+      - host-autodiff-interop
+      - pyodide
+      - docs
+      - rust
+      - native-wheels
+      - secrets
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Check blocking jobs
+        env:
+          PYTHON_RESULT: ${{ needs.python.result }}
+          NUMPY_RESULT: ${{ needs.numpy-compatibility.result }}
+          ARRAY_API_COMPAT_RESULT: ${{ needs.array-api-compatibility.result }}
+          HOST_INTEROP_RESULT: ${{ needs.host-autodiff-interop.result }}
+          PYODIDE_RESULT: ${{ needs.pyodide.result }}
+          DOCS_RESULT: ${{ needs.docs.result }}
+          RUST_RESULT: ${{ needs.rust.result }}
+          WHEELS_RESULT: ${{ needs.native-wheels.result }}
+          SECRETS_RESULT: ${{ needs.secrets.result }}
+        run: |
+          for result in \
+            "$PYTHON_RESULT" \
+            "$NUMPY_RESULT" \
+            "$ARRAY_API_COMPAT_RESULT" \
+            "$HOST_INTEROP_RESULT" \
+            "$PYODIDE_RESULT" \
+            "$DOCS_RESULT" \
+            "$RUST_RESULT" \
+            "$WHEELS_RESULT" \
+            "$SECRETS_RESULT"; do
+            test "$result" = "success"
+          done

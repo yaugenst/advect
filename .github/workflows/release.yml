@@ -1,0 +1,187 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  FORCE_COLOR: "1"
+
+jobs:
+  validate:
+    name: Validate release identity
+    runs-on: ubuntu-22.04
+    outputs:
+      version: ${{ steps.identity.outputs.version }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+
+      - name: Check tag and package metadata
+        id: identity
+        env:
+          RELEASE_REF_NAME: ${{ github.ref_name }}
+          RELEASE_REF_TYPE: ${{ github.ref_type }}
+        run: |
+          python - <<'PY'
+          import os
+          import re
+          import tomllib
+          from pathlib import Path
+
+          cargo = tomllib.loads(Path("Cargo.toml").read_text())
+          pyproject = tomllib.loads(Path("pyproject.toml").read_text())
+          version = cargo["workspace"]["package"]["version"]
+          if re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", version) is None:
+              raise SystemExit("the first public release path accepts stable semantic versions only")
+          project = pyproject["project"]
+          if "version" in project or "version" not in project.get("dynamic", []):
+              raise SystemExit("pyproject.toml must derive its version from Cargo metadata")
+          if os.environ["RELEASE_REF_TYPE"] == "tag":
+              expected_tag = f"v{version}"
+              if os.environ["RELEASE_REF_NAME"] != expected_tag:
+                  raise SystemExit(
+                      f"release tag {os.environ['RELEASE_REF_NAME']!r} must be {expected_tag!r}"
+                  )
+          with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as output:
+              print(f"version={version}", file=output)
+          PY
+
+  distributions:
+    name: Build and smoke-test distributions
+    needs: validate
+    uses: ./.github/workflows/native-wheels.yml
+    permissions:
+      contents: read
+
+  assemble:
+    name: Assemble release bundle
+    needs: [validate, distributions]
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+
+      - name: Download candidate distributions
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: advect-distribution-*
+          path: dist
+          merge-multiple: true
+
+      - name: Validate and record release provenance
+        env:
+          RELEASE_VERSION: ${{ needs.validate.outputs.version }}
+          SOURCE_REVISION: ${{ github.sha }}
+        run: |
+          uv run --script scripts/assemble_release_artifacts.py \
+            --dist-dir dist \
+            --version "$RELEASE_VERSION" \
+            --source-revision "$SOURCE_REVISION" \
+            --manifest-path provenance/RELEASE-PROVENANCE.json \
+            --checksums-path provenance/SHA256SUMS
+          (cd dist && sha256sum --check ../provenance/SHA256SUMS)
+
+      - name: Validate package metadata and rendered README
+        run: uvx --from twine==7.0.0 twine check dist/advect-*
+
+      - name: Upload release distributions
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: advect-release-distributions-${{ needs.validate.outputs.version }}
+          path: |
+            dist/advect-*.whl
+            dist/advect-*.tar.gz
+          if-no-files-found: error
+
+      - name: Upload release provenance
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: advect-release-provenance-${{ needs.validate.outputs.version }}
+          path: provenance
+          if-no-files-found: error
+
+  docs:
+    name: Publish versioned documentation
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [validate, assemble]
+    uses: ./.github/workflows/docs.yml
+    with:
+      version: ${{ needs.validate.outputs.version }}
+    permissions:
+      contents: write # the reusable docs workflow pushes gh-pages
+
+  github-release:
+    name: Publish GitHub release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [validate, assemble, docs]
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write # this job creates the GitHub release
+    steps:
+      - name: Download release distributions
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: advect-release-distributions-${{ needs.validate.outputs.version }}
+          path: release
+
+      - name: Download release provenance
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: advect-release-provenance-${{ needs.validate.outputs.version }}
+          path: release
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_VERSION: ${{ needs.validate.outputs.version }}
+        run: >-
+          gh release create "$RELEASE_TAG"
+          release/*
+          --verify-tag
+          --generate-notes
+          --title "Advect $RELEASE_VERSION"
+
+  pypi:
+    name: Publish to PyPI
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [validate, assemble, github-release]
+    runs-on: ubuntu-22.04
+    environment:
+      name: pypi
+      url: https://pypi.org/p/advect
+    permissions:
+      id-token: write # PyPI trusted publishing exchanges the OIDC identity
+    steps:
+      - name: Download release distributions
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: advect-release-distributions-${{ needs.validate.outputs.version }}
+          path: dist
+
+      - name: Publish distributions with trusted publishing
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # release/v1
+        with:
+          packages-dir: dist

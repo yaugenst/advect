@@ -1,0 +1,626 @@
+"""Concrete dynamic reverse-mode transforms."""
+
+from __future__ import annotations
+
+import functools
+from typing import TYPE_CHECKING, Any, Self, cast
+
+from advect.autodiff._ephemeral import (
+    LinearMap,
+    apply_unary_array_pullback,
+    linearize_call,
+    trace_unary_array_call,
+    unary_array_trace_provider,
+)
+from advect.autodiff.api._reverse_scalars import (
+    _extract_scalar_output_for_grad,
+    _extract_scalar_output_for_value_and_grad,
+    _scalar_cotangent_for_output,
+    _scalar_cotangent_leaf,
+)
+from advect.autodiff.api._scalar_boundary import _unlift_scalar_array
+from advect.autodiff.api.inputs import (
+    _get_positional_param_names,
+    _get_signature,
+    _normalize_argnums_for_call,
+    _normalize_argnums_spec,
+    _prefix_for_argnum,
+    _validate_argnames,
+)
+from advect.core._abstract_model import ArraySpec
+from advect.core._context import _get_active_trace_kind
+from advect.core._protocols import _snapshot_traced
+from advect.core._pytree import tree_flatten, tree_unflatten
+from advect.core._stage import StagedProgram
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+
+_CACHE_MISS = object()
+
+
+class Pullback:
+    """One-shot reverse linearization returned by :func:`vjp`.
+
+    Examples
+    --------
+    >>> import advect as ad
+    >>> import numpy as np
+    >>> _, pullback = ad.vjp(lambda x: x**2)(np.array([1.0, 2.0]))
+    >>> pullback(np.ones(2)).tolist()
+    [2.0, 4.0]
+    """
+
+    def __init__(self, linear: LinearMap) -> None:
+        self._linear = linear
+
+    def __call__(self, cotangent: Any) -> Any:
+        """Apply the pullback once and release its retained trace."""
+        return self._linear._consume_pullback(cotangent)  # noqa: SLF001
+
+    def close(self) -> None:
+        """Release the retained trace without applying the pullback."""
+        self._linear.close()
+
+    def __enter__(self) -> Self:
+        """Enter an ownership scope for the pending pullback."""
+        return self
+
+    def __exit__(self, *_exc_info: object) -> None:
+        """Release the pullback when leaving its ownership scope."""
+        self.close()
+
+
+class _UnaryArrayProviderCache:
+    """Cache only type-stable input plumbing, never a traced program."""
+
+    __slots__ = ("_input_type", "_result")
+
+    def __init__(self) -> None:
+        self._input_type: type[Any] | None = None
+        self._result: tuple[bool, Any] | object = _CACHE_MISS
+
+    def resolve(self, value: object) -> tuple[bool, Any]:
+        value_type = type(value)
+        if self._input_type is value_type and self._result is not _CACHE_MISS:
+            return cast("tuple[bool, Any]", self._result)
+
+        result = unary_array_trace_provider(value)
+        attrs = getattr(value, "__dict__", None)
+        instance_specific = (isinstance(attrs, dict) and "__array_namespace__" in attrs) or bool(
+            getattr(value_type, "__advect_namespace_is_instance_specific__", False)
+        )
+        if not instance_specific:
+            self._input_type = value_type
+            self._result = result
+        return result
+
+
+def _selected_arguments(
+    f: Callable[..., Any],
+    *,
+    argnums: int | tuple[int, ...] | None,
+    argnames: tuple[str, ...] | None,
+) -> tuple[tuple[int, ...], bool]:
+    if argnames is not None and not isinstance(f, StagedProgram):
+        _validate_argnames(_get_signature(f), argnames)
+    resolved = 0 if argnums is None and argnames is None else (() if argnums is None else argnums)
+    return _normalize_argnums_spec(resolved)
+
+
+def _staged_gradient_scalar_mask(
+    f: StagedProgram,
+    *,
+    argnums: tuple[int, ...],
+    single_argnum: bool,
+    argnames: tuple[str, ...] | None,
+) -> tuple[bool, ...]:
+    """Return the weak-scalar category of each selected staged input leaf."""
+    positional_specs, named_specs = f.signature
+    selected_argnums = _normalize_argnums_for_call(argnums, nargs=len(positional_specs))
+    positional = [positional_specs[index] for index in selected_argnums]
+    names = () if argnames is None else argnames
+    missing = [name for name in names if name not in named_specs]
+    if missing:
+        msg = f"Staged argument name(s) {missing!r} are not present in the compiled signature"
+        raise ValueError(msg)
+    named = {name: named_specs[name] for name in names}
+
+    selected_leaves, _selected_treedef = tree_flatten((tuple(positional), named))
+    for spec in selected_leaves:
+        if not isinstance(spec, ArraySpec):
+            continue
+        dtype = str(spec.dtype).lower()
+        if spec.weak and not dtype.startswith("float"):
+            msg = (
+                "Differentiating a staged weak scalar requires a real floating signature; "
+                f"got dtype={spec.dtype!r}. Use a strong rank-zero array for complex "
+                "differentiation."
+            )
+            raise TypeError(msg)
+
+    positional_masks = [
+        tree_unflatten(
+            treedef,
+            [isinstance(spec, ArraySpec) and spec.weak and spec.shape == () for spec in leaves],
+        )
+        for spec_tree in positional
+        for leaves, treedef in [tree_flatten(spec_tree)]
+    ]
+    named_masks = {
+        name: tree_unflatten(
+            treedef,
+            [isinstance(spec, ArraySpec) and spec.weak and spec.shape == () for spec in leaves],
+        )
+        for name, spec_tree in named.items()
+        for leaves, treedef in [tree_flatten(spec_tree)]
+    }
+    if named_masks:
+        if not positional_masks:
+            result: Any = named_masks
+        else:
+            positional_result: Any = (
+                positional_masks[0]
+                if single_argnum and len(positional_masks) == 1
+                else tuple(positional_masks)
+            )
+            result = positional_result, named_masks
+    elif single_argnum:
+        result = positional_masks[0]
+    else:
+        result = tuple(positional_masks)
+    leaves, _treedef = tree_flatten(result)
+    return tuple(bool(leaf) for leaf in leaves)
+
+
+def _is_complex_scalar(value: Any) -> bool:
+    if isinstance(value, complex):
+        return True
+    dtype = getattr(value, "dtype", None)
+    kind = getattr(dtype, "kind", None)
+    if kind is not None:
+        return bool(kind == "c")
+    return "complex" in str(dtype).lower()
+
+
+def _reject_complex_grad_output(out_leaf: Any) -> None:
+    if _is_complex_scalar(out_leaf):
+        msg = (
+            "grad requires a real scalar output. For complex outputs use "
+            "linearize(), jvp(), or vjp(); Advect does not guess a holomorphic convention."
+        )
+        raise ValueError(msg)
+
+
+def _materialize_aux(aux: Any) -> Any:
+    """Snapshot auxiliary tracer leaves while their trace is active."""
+    leaves, treedef = tree_flatten(aux)
+    concrete: list[Any] = []
+    for leaf in leaves:
+        restore_python_scalar = bool(getattr(leaf, "_advect_weak", False))
+        value = leaf
+        while callable(getattr(value, "_advect_snapshot", None)):
+            _node_id, next_value = _snapshot_traced(value)
+            if next_value is value:
+                break
+            value = next_value
+        concrete.append(_unlift_scalar_array(value) if restore_python_scalar else value)
+    return tree_unflatten(treedef, concrete)
+
+
+def _unary_array_fast_path(
+    f: Callable[..., Any],
+    *,
+    argnums: tuple[int, ...],
+    single_argnum: bool,
+    argnames: tuple[str, ...] | None,
+    has_aux: bool,
+) -> tuple[bool, str]:
+    enabled = single_argnum and argnums == (0,) and argnames is None and not has_aux
+    if not enabled:
+        return False, "arg0"
+    fixed_names, varargs_name = _get_positional_param_names(f)
+    return True, _prefix_for_argnum(0, fixed=fixed_names, varargs_name=varargs_name)
+
+
+def _try_unary_array_value_and_grad(
+    f: Callable[..., Any],
+    *,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+    input_name: str,
+    provider_cache: _UnaryArrayProviderCache,
+    value_and_grad: bool,
+) -> tuple[Any, Any] | None:
+    # The concrete unary fast path performs provider introspection that an
+    # enclosing abstract trace deliberately cannot answer. The general
+    # dynamic path can use that outer tracer as its provider value and emit
+    # the derivative program into the enclosing staged graph.
+    if _get_active_trace_kind() == "stage_abstract":
+        return None
+    if not args:
+        return None
+    supported, provider = provider_cache.resolve(args[0])
+    if not supported:
+        return None
+    trace = trace_unary_array_call(
+        f,
+        args=args,
+        kwargs=kwargs,
+        input_name=input_name,
+        provider=provider,
+    )
+    try:
+        cotangent = _real_scalar_seed(
+            trace.output,
+            output_is_leaf=trace.output_treedef.node_type is None,
+            value_and_grad=value_and_grad,
+        )
+        return trace.output, apply_unary_array_pullback(trace, cotangent)
+    except Exception:
+        trace.tape.release_payloads()
+        raise
+
+
+def _real_scalar_seed(
+    output: Any,
+    *,
+    output_is_leaf: bool,
+    value_and_grad: bool,
+) -> Any:
+    """Validate and seed the common concrete rank-zero output directly."""
+    if output_is_leaf and getattr(output, "shape", None) == ():
+        dtype = getattr(output, "dtype", None)
+        kind = getattr(dtype, "kind", None)
+        if kind == "c":
+            _reject_complex_grad_output(output)
+        scalar_type = getattr(dtype, "type", None)
+        output_provider = type(output).__module__.partition(".")[0]
+        scalar_provider = str(getattr(scalar_type, "__module__", "")).partition(".")[0]
+        if callable(scalar_type) and output_provider == scalar_provider:
+            return scalar_type(1)
+        return _scalar_cotangent_leaf(output)
+
+    extractor = (
+        _extract_scalar_output_for_value_and_grad
+        if value_and_grad
+        else _extract_scalar_output_for_grad
+    )
+    out_leaf, _out_treedef = extractor(output)
+    _reject_complex_grad_output(out_leaf)
+    return _scalar_cotangent_leaf(out_leaf)
+
+
+def vjp(
+    f: Callable[..., Any],
+    argnums: int | tuple[int, ...] = 0,
+) -> Callable[..., tuple[Any, Pullback]]:
+    """Return a concrete value and a one-shot, tape-owning pullback.
+
+    Examples
+    --------
+    >>> import advect as ad
+    >>> import numpy as np
+    >>> value, pullback = ad.vjp(lambda x: x**2)(np.array([1.0, 2.0]))
+    >>> value.tolist()
+    [1.0, 4.0]
+    >>> pullback(np.ones(2)).tolist()
+    [2.0, 4.0]
+    """
+    argnums_tuple, single_argnum = _normalize_argnums_spec(argnums)
+
+    @functools.wraps(f)
+    def vjp_fn(*args: Any, **kwargs: Any) -> tuple[Any, Pullback]:
+        value, linear = linearize_call(
+            f,
+            args=args,
+            kwargs=kwargs,
+            argnums=argnums_tuple,
+            argnames=None,
+            single_argnum=single_argnum,
+            reverse_only=True,
+        )
+
+        pullback = Pullback(linear)
+        return linear._unlift_outputs(value), pullback  # noqa: SLF001
+
+    return vjp_fn
+
+
+def vjp_program(
+    f: StagedProgram,
+    argnums: int | tuple[int, ...] | None = None,
+    *,
+    argnames: tuple[str, ...] | None = None,
+) -> StagedProgram:
+    """Compile a reusable staged pullback with a keyword-only ``cotangent=`` input.
+
+    Examples
+    --------
+    >>> import advect as ad
+    >>> import numpy as np
+    >>> square = ad.stage(lambda x: x**2, np.array([1.0, 2.0]))
+    >>> pullback = ad.vjp_program(square)
+    >>> pullback(np.array([3.0, 4.0]), cotangent=np.ones(2)).tolist()
+    [6.0, 8.0]
+    """
+    if not isinstance(f, StagedProgram):
+        msg = "vjp_program() requires a StagedProgram; call stage() first"
+        raise TypeError(msg)
+
+    argnums_tuple, single_argnum = _selected_arguments(
+        f,
+        argnums=argnums,
+        argnames=argnames,
+    )
+    scalar_mask = _staged_gradient_scalar_mask(
+        f,
+        argnums=argnums_tuple,
+        single_argnum=single_argnum,
+        argnames=argnames,
+    )
+
+    def pullback_program(*args: Any, cotangent: Any, **kwargs: Any) -> Any:
+        _value, linear = linearize_call(
+            f,
+            args=args,
+            kwargs=kwargs,
+            argnums=argnums_tuple,
+            argnames=argnames,
+            single_argnum=single_argnum,
+            reverse_only=True,
+        )
+        try:
+            return linear._consume_pullback(cotangent)  # noqa: SLF001
+        except Exception:
+            linear.close()
+            raise
+
+    return f._staged_transform(  # noqa: SLF001
+        pullback_program,
+        output_argname="cotangent",
+        scalar_output_override=(0, scalar_mask),
+    )
+
+
+def _dynamic_grad(
+    f: Callable[..., Any],
+    argnums: int | tuple[int, ...] | None = None,
+    *,
+    argnames: tuple[str, ...] | None = None,
+    has_aux: bool = False,
+) -> Callable[..., Any]:
+    """Build the concrete reverse transform used by both lifetimes."""
+    argnums_tuple, single_argnum = _selected_arguments(
+        f,
+        argnums=argnums,
+        argnames=argnames,
+    )
+    use_unary_fast_path, input_name = _unary_array_fast_path(
+        f,
+        argnums=argnums_tuple,
+        single_argnum=single_argnum,
+        argnames=argnames,
+        has_aux=has_aux,
+    )
+    provider_cache = _UnaryArrayProviderCache()
+
+    def grad_fn(*args: Any, **kwargs: Any) -> Any:
+        if use_unary_fast_path:
+            fast_result = _try_unary_array_value_and_grad(
+                f,
+                args=args,
+                kwargs=kwargs,
+                input_name=input_name,
+                provider_cache=provider_cache,
+                value_and_grad=False,
+            )
+            if fast_result is not None:
+                _value, gradient = fast_result
+                return gradient
+
+        aux_box: list[Any] = []
+        trace_target = f
+        if has_aux:
+
+            def trace_target(*inner_args: Any, **inner_kwargs: Any) -> Any:
+                value, aux = f(*inner_args, **inner_kwargs)
+                aux_box.append(_materialize_aux(aux))
+                return value
+
+        value, linear = linearize_call(
+            trace_target,
+            args=args,
+            kwargs=kwargs,
+            argnums=argnums_tuple,
+            argnames=argnames,
+            single_argnum=single_argnum,
+            reverse_only=True,
+        )
+        try:
+            out_leaf, out_treedef = _extract_scalar_output_for_grad(value)
+            _reject_complex_grad_output(out_leaf)
+            cotangent = _scalar_cotangent_for_output(
+                out_leaf=out_leaf,
+                out_treedef=out_treedef,
+            )
+            gradients = linear._consume_pullback(cotangent)  # noqa: SLF001
+        except Exception:
+            linear.close()
+            raise
+        if has_aux:
+            return gradients, _materialize_aux(aux_box[-1])
+        return gradients
+
+    if not isinstance(f, StagedProgram):
+        functools.update_wrapper(grad_fn, f)
+    return grad_fn
+
+
+def _dynamic_value_and_grad(
+    f: Callable[..., Any],
+    argnums: int | tuple[int, ...] | None = None,
+    *,
+    argnames: tuple[str, ...] | None = None,
+    has_aux: bool = False,
+) -> Callable[..., tuple[Any, ...]]:
+    """Build the concrete value-and-gradient transform for either lifetime."""
+    argnums_tuple, single_argnum = _selected_arguments(
+        f,
+        argnums=argnums,
+        argnames=argnames,
+    )
+    use_unary_fast_path, input_name = _unary_array_fast_path(
+        f,
+        argnums=argnums_tuple,
+        single_argnum=single_argnum,
+        argnames=argnames,
+        has_aux=has_aux,
+    )
+    provider_cache = _UnaryArrayProviderCache()
+
+    def value_and_grad_fn(*args: Any, **kwargs: Any) -> tuple[Any, ...]:
+        if use_unary_fast_path:
+            fast_result = _try_unary_array_value_and_grad(
+                f,
+                args=args,
+                kwargs=kwargs,
+                input_name=input_name,
+                provider_cache=provider_cache,
+                value_and_grad=True,
+            )
+            if fast_result is not None:
+                return fast_result
+
+        aux_box: list[Any] = []
+        trace_target = f
+        if has_aux:
+
+            def trace_target(*inner_args: Any, **inner_kwargs: Any) -> Any:
+                value, aux = f(*inner_args, **inner_kwargs)
+                aux_box.append(_materialize_aux(aux))
+                return value
+
+        value, linear = linearize_call(
+            trace_target,
+            args=args,
+            kwargs=kwargs,
+            argnums=argnums_tuple,
+            argnames=argnames,
+            single_argnum=single_argnum,
+            reverse_only=True,
+        )
+        try:
+            out_leaf, out_treedef = _extract_scalar_output_for_value_and_grad(value)
+            _reject_complex_grad_output(out_leaf)
+            cotangent = _scalar_cotangent_for_output(
+                out_leaf=out_leaf,
+                out_treedef=out_treedef,
+            )
+            gradients = linear._consume_pullback(cotangent)  # noqa: SLF001
+        except Exception:
+            linear.close()
+            raise
+        if has_aux:
+            return (
+                linear._unlift_outputs(value),  # noqa: SLF001
+                gradients,
+                _materialize_aux(aux_box[-1]),
+            )
+        return linear._unlift_outputs(value), gradients  # noqa: SLF001
+
+    if not isinstance(f, StagedProgram):
+        functools.update_wrapper(value_and_grad_fn, f)
+    return value_and_grad_fn
+
+
+def grad(
+    f: Callable[..., Any],
+    argnums: int | tuple[int, ...] | None = None,
+    *,
+    argnames: tuple[str, ...] | None = None,
+    has_aux: bool = False,
+) -> Callable[..., Any]:
+    """Differentiate a scalar-valued function with reverse mode.
+
+    A normal callable is traced from its concrete inputs on every invocation.
+    Passing a :class:`StagedProgram` instead returns another staged program.
+
+    Examples
+    --------
+    >>> import advect as ad
+    >>> import numpy as np
+    >>> x = np.array([1.0, 2.0, 3.0])
+    >>> ad.grad(lambda value: np.sum(value**2))(x).tolist()
+    [2.0, 4.0, 6.0]
+    """
+    transformed = _dynamic_grad(
+        f,
+        argnums=argnums,
+        argnames=argnames,
+        has_aux=has_aux,
+    )
+    if isinstance(f, StagedProgram):
+        argnums_tuple, single_argnum = _selected_arguments(
+            f,
+            argnums=argnums,
+            argnames=argnames,
+        )
+        scalar_mask = _staged_gradient_scalar_mask(
+            f,
+            argnums=argnums_tuple,
+            single_argnum=single_argnum,
+            argnames=argnames,
+        )
+        return f._staged_transform(  # noqa: SLF001
+            transformed,
+            scalar_output_override=(0, scalar_mask),
+        )
+    return transformed
+
+
+def value_and_grad(
+    f: Callable[..., Any],
+    argnums: int | tuple[int, ...] | None = None,
+    *,
+    argnames: tuple[str, ...] | None = None,
+    has_aux: bool = False,
+) -> Callable[..., tuple[Any, ...]]:
+    """Compute a scalar value and its reverse-mode gradient together.
+
+    Examples
+    --------
+    >>> import advect as ad
+    >>> import numpy as np
+    >>> x = np.array([1.0, 2.0, 3.0])
+    >>> value, gradient = ad.value_and_grad(lambda v: np.sum(v**2))(x)
+    >>> float(value), gradient.tolist()
+    (14.0, [2.0, 4.0, 6.0])
+    """
+    transformed = _dynamic_value_and_grad(
+        f,
+        argnums=argnums,
+        argnames=argnames,
+        has_aux=has_aux,
+    )
+    if isinstance(f, StagedProgram):
+        argnums_tuple, single_argnum = _selected_arguments(
+            f,
+            argnums=argnums,
+            argnames=argnames,
+        )
+        scalar_mask = _staged_gradient_scalar_mask(
+            f,
+            argnums=argnums_tuple,
+            single_argnum=single_argnum,
+            argnames=argnames,
+        )
+        return f._staged_transform(  # noqa: SLF001
+            transformed,
+            scalar_output_override=(1, scalar_mask),
+        )
+    return transformed
+
+
+__all__ = ["LinearMap", "Pullback", "grad", "value_and_grad", "vjp", "vjp_program"]

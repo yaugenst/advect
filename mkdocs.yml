@@ -1,0 +1,144 @@
+# yaml-language-server: $schema=https://json.schemastore.org/mkdocs-1.6.json
+
+site_name: Advect
+site_description: A small extensible automatic-differentiation core for Python
+site_url: https://yaugenst.github.io/advect/
+repo_url: https://github.com/yaugenst/advect
+
+copyright: Copyright &copy; 2025 Flexcompute; 2026 Yannick Augenstein
+
+theme:
+  name: null
+  custom_dir: docs-theme
+  static_templates:
+    - 404.html
+
+hooks:
+  - scripts/mkdocs_hooks.py
+
+plugins:
+  - search
+  - llmstxt:
+      markdown_description: |
+        Advect has two explicit execution lifetimes. Dynamic transforms trace
+        one concrete call, while stage() compiles one immutable, serializable
+        input signature. Use the public advect namespace and the API reference;
+        do not infer support from an underlying NumPy, Array API, or SciPy
+        function alone. The compatibility pages state separate dynamic,
+        staged, and serialized support claims. Linked Markdown files are
+        generated from this same documentation build and include expanded API
+        docstrings.
+      sections:
+        Start here:
+          - index.md: Project overview, installation, and first gradient
+          - tutorials/index.md: Guided learning path
+          - architecture.md: Dynamic tracing, staging, and extension boundaries
+          - api/index.md: Public API contract and shared semantics
+        Tutorials:
+          - tutorials/gradients.md
+          - tutorials/control-flow.md
+          - tutorials/staging.md
+          - tutorials/interop.md
+          - tutorials/primitives.md
+          - tutorials/debugging.md
+        API reference:
+          - api/transforms.md
+          - api/staging.md
+          - api/primitives.md
+          - api/arrays.md
+          - api/errors.md
+        Compatibility:
+          - compatibility/index.md
+          - compatibility/numpy.md
+          - compatibility/array-api.md
+          - compatibility/cupy.md
+          - compatibility/scipy.md
+          - compatibility/xarray.md
+        Optional:
+          - playground.md: In-browser expression and derivative-graph explorer
+  - mkdocstrings:
+      default_handler: python
+      handlers:
+        python:
+          paths:
+            - packages/advect/src
+          options:
+            docstring_style: numpy
+            # advect's autodiff exports are lazy (module __getattr__), which
+            # static analysis cannot see; the extension mirrors that mapping.
+            extensions:
+              - scripts/griffe_lazy_exports.py
+            show_source: false
+            show_root_heading: true
+            show_root_full_path: false
+            members_order: source
+            merge_init_into_class: true
+            separate_signature: true
+            signature_crossrefs: true
+            show_signature_annotations: true
+            annotations_path: brief
+
+markdown_extensions:
+  # Python Markdown
+  - abbr
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+      toc_depth: 3
+
+  # Python Markdown Extensions
+  - pymdownx.betterem:
+      smart_enable: all
+  - pymdownx.caret
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.keys
+  - pymdownx.magiclink
+  - pymdownx.mark
+  - pymdownx.smartsymbols
+  - pymdownx.snippets:
+      check_paths: true
+  - pymdownx.superfences
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - pymdownx.tilde
+
+extra:
+  version:
+    provider: mike
+
+nav:
+  - Home: index.md
+  - Tutorials:
+      - tutorials/index.md
+      - Gradients and Pytrees: tutorials/gradients.md
+      - Control Flow and Mutation: tutorials/control-flow.md
+      - Staging and Serialization: tutorials/staging.md
+      - Providers and Interop: tutorials/interop.md
+      - Custom Primitives: tutorials/primitives.md
+      - Debugging: tutorials/debugging.md
+  - Architecture: architecture.md
+  - Compatibility:
+      - compatibility/index.md
+      - NumPy: compatibility/numpy.md
+      - Array API: compatibility/array-api.md
+      - CuPy: compatibility/cupy.md
+      - SciPy: compatibility/scipy.md
+      - xarray: compatibility/xarray.md
+  - API Reference:
+      - api/index.md
+      - Host Autodiff Interop: api/interop.md
+      - Transforms: api/transforms.md
+      - Staging: api/staging.md
+      - Primitives: api/primitives.md
+      - Arrays and Structure: api/arrays.md
+      - Errors: api/errors.md

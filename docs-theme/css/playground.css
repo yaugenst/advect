@@ -1,0 +1,174 @@
+/* Four-pane playground. Base tokens and pane chrome live in theme.css. */
+.wm {
+  flex: 1 1 auto; min-width: 0;
+  display: grid; gap: 16px;
+  grid-template-columns: minmax(430px, 1fr) minmax(300px, 1.3fr) minmax(300px, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-areas: "fn tree prog" "sess tree prog";
+}
+.pane { padding: 14px 14px 10px; }
+.pane-fn { grid-area: fn; }
+.pane-tree { grid-area: tree; }
+.pane-prog { grid-area: prog; }
+.pane-sess { grid-area: sess; }
+
+.fxrow { margin: 2px 0; }
+.fxrow .lbl { color: var(--dim); }
+.fin {
+  font: inherit; color: inherit; background: transparent;
+  border: 0; border-bottom: 1px dashed var(--dim);
+  padding: 0 1px; width: 37ch; max-width: 100%;
+}
+.fin:focus { outline: none; border-bottom-color: var(--accent); }
+.fin:disabled { color: var(--dim); }
+.ferr {
+  color: var(--accent); margin: 4px 0 0; display: none; font-size: 13px;
+  white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.screen {
+  position: relative; display: inline-block; align-self: flex-start;
+  border: 1px solid var(--faint); padding: 8px 10px; cursor: ew-resize;
+  touch-action: none; max-width: 100%; overflow-x: auto; margin-top: 10px;
+}
+.screen pre {
+  margin: 0; font-family: "Source Code Pro", "Braille Mono", ui-monospace, monospace;
+  font-size: 12px; line-height: 12px; letter-spacing: 0; user-select: none;
+}
+.screen pre.lay { position: absolute; top: 8px; left: 10px; }
+.screen pre.grid { color: var(--dim); opacity: .7; }
+.screen pre.curve { color: var(--ink); }
+.screen pre.tan { color: var(--accent); font-weight: 700; }
+.xlabels {
+  margin: 2px 0 0 11px; color: var(--dim); white-space: pre;
+  font-family: "Source Code Pro", ui-monospace, monospace; font-size: 12px; line-height: 12px;
+}
+.readrow { margin: 8px 0 0; color: var(--dim); font-size: 13.5px; }
+.readrow + .readrow { margin-top: 1px; }
+/* fixed 8ch value slots, right-aligned: dragging never jiggles the row, and
+   toFixed(4) keeps the decimal points of both lines vertically aligned */
+.readrow b, .readrow .g, .readrow .h2 { display: inline-block; min-width: 8ch; text-align: right; }
+.readrow b { color: var(--ink); font-weight: 700; }
+.readrow .g { color: var(--accent); font-weight: 700; }
+
+.tapewrap, .treewrap { flex: 1 1 auto; min-height: 0; overflow: auto; margin-top: 2px; }
+pre.tape, pre.ctree { margin: 0; line-height: 1.5; }
+pre.ctree { line-height: 1.55; }
+.irline { display: block; cursor: pointer; padding: 0 4px; white-space: pre; }
+.irline:hover, .irline.hl { background: var(--faint); }
+.irline.peer { box-shadow: inset 3px 0 var(--ink); }
+/* chain roles from the runtime: f-only stays ink, df-only accent, shared amber */
+.irline.role-derivative { color: var(--accent); }
+.irline.role-shared { color: var(--warn); }
+.irline.shr { color: var(--dim); }
+.irline.sel { background: var(--warn); color: var(--bg); text-shadow: none; font-weight: 700; }
+.irline.sel .tid { color: var(--bg); }
+.irplain { display: block; padding: 0 4px; }
+.tid { color: var(--dim); }
+.pfoot { border-top: 1px solid var(--faint); margin-top: 8px; padding-top: 7px; font-size: 13px; flex: 0 0 auto; }
+
+/* mode toggles as chips on the right end of the pane's border line */
+.ptitle.pr { left: auto; right: 12px; }
+.pane-fn > .ptitle:not(.pr), .pane-tree > .ptitle:not(.pr), .pane-prog > .ptitle:not(.pr) {
+  max-width: calc(96% - 15ch);
+}
+
+.sessgrid { display: flex; gap: 20px; flex: 1 1 auto; min-height: 0; }
+.bootcol { flex: 0 0 auto; }
+.logo { position: relative; display: inline-block; }
+.logo pre {
+  margin: 0; font-family: "Source Code Pro", "Braille Mono", ui-monospace, monospace;
+  font-size: 13px; line-height: 13px; user-select: none;
+}
+.logo pre.lay { position: absolute; top: 0; left: 0; }
+.logo .lg-ink { color: var(--ink); }
+.logo .lg-acc { color: var(--accent); }
+.logo-meta { color: var(--dim); font-size: 12px; margin-top: 8px; line-height: 1.45; }
+.logo-meta b { color: var(--ink); font-weight: 700; }
+.transcript {
+  margin: 0; flex: 1 1 auto; min-width: 0; overflow-y: auto;
+  line-height: 1.5; white-space: pre-wrap; word-break: break-word; font-size: 12.5px;
+}
+.transcript .ps { color: var(--dim); user-select: none; }
+.transcript .out { font-weight: 700; }
+.transcript .err { color: var(--accent); }
+.transcript .cmt { color: var(--dim); }
+
+@media (max-width: 1100px), (max-height: 620px) {
+  /* the playground stacks earlier than the docs shell (its grid needs more
+     width), so it must also switch the page to normal scrolling itself */
+  html, body { overflow: auto; height: auto; }
+  .desktop { height: auto; }
+  .wm { display: flex; flex-direction: column; }
+  .pane-tree .treewrap, .pane-prog .tapewrap { max-height: 50vh; }
+  .transcript { max-height: 40vh; }
+}
+@media (max-width: 700px) {
+  /* scale the braille plot to the viewport so touch-drag never fights a
+     horizontally scrolling box (56 columns ≈ 33.6em at 0.6em per glyph) */
+  .screen { overflow: hidden; }
+  .screen pre {
+    font-size: clamp(7px, calc((100vw - 76px) / 33.6), 12px);
+    line-height: clamp(7px, calc((100vw - 76px) / 33.6), 12px);
+  }
+  .xlabels {
+    font-size: clamp(7px, calc((100vw - 76px) / 33.6), 12px);
+    line-height: clamp(7px, calc((100vw - 76px) / 33.6), 12px);
+  }
+  .sessgrid { flex-direction: column; gap: 10px; }
+  .bootcol { display: flex; gap: 14px; align-items: flex-start; }
+  .transcript { max-height: 30vh; }
+}
+
+/* equation mirror: paints linked source spans under the transparent input */
+.finwrap { position: relative; display: inline-block; }
+.finwrap .fin { position: relative; z-index: 1; }
+.finmirror {
+  position: absolute; inset: 0; z-index: 0; pointer-events: none;
+  font: inherit; white-space: pre; color: transparent;
+  padding: 0 1px; overflow: hidden;
+}
+.finmirror mark {
+  background: color-mix(in srgb, var(--warn) 40%, transparent);
+  color: transparent; border-radius: 2px;
+}
+.fold { color: var(--warn); font-weight: 700; font-size: 11.5px; }
+.irline.sel .fold { color: var(--bg); }
+
+/* autocomplete: a terminal-style dropdown pinned under the caret */
+.complete {
+  position: fixed; z-index: 40; min-width: 14ch; max-width: 30ch;
+  background: var(--bg); border: 1px solid var(--dim);
+  font-size: 13px; line-height: 1.5;
+}
+.complete .ci { display: block; padding: 0 8px; cursor: pointer; color: var(--dim); white-space: pre; }
+.complete .ci b { color: var(--ink); font-weight: 700; }
+.complete .ci.on { background: var(--ink); color: var(--bg); }
+.complete .ci.on b { color: var(--bg); font-weight: 700; }
+
+/* def-mode editor: highlight mirror behind a transparent-background textarea,
+   same trick as .finwrap — metrics must match the textarea exactly */
+.fdefwrap { position: relative; display: block; margin: 2px 0; }
+.fdefwrap[hidden] { display: none; }
+.fdef {
+  position: relative; z-index: 1; display: block; margin: 0;
+  font: inherit; color: inherit; background: transparent; width: 100%;
+  border: 1px solid var(--faint); padding: 6px 8px;
+  resize: vertical; line-height: 1.45; tab-size: 4;
+}
+.fdef:focus { outline: none; border-color: var(--accent); }
+.fdefmirror {
+  position: absolute; inset: 0; z-index: 0; pointer-events: none; overflow: hidden;
+  margin: 0; font: inherit; line-height: 1.45; tab-size: 4;
+  white-space: pre-wrap; overflow-wrap: break-word;
+  border: 1px solid transparent; padding: 6px 8px; color: transparent;
+}
+.fdefmirror mark {
+  background: color-mix(in srgb, var(--warn) 40%, transparent);
+  color: transparent; border-radius: 2px;
+}
+.screen pre.para { color: var(--add); }
+.readrow .h2 { color: var(--add); font-weight: 700; }
+.irline.irrun { color: var(--del); opacity: .75; }
+.irline.irrun:hover { background: var(--faint); opacity: 1; }
+.pfoot .btns { display: flex; gap: 14px; flex-wrap: wrap; }
+#loadfile { display: none; }

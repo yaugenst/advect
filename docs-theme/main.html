@@ -1,0 +1,150 @@
+<!doctype html>
+{#- ---- man-page identity: NAME(section) + section label ---------------- -#}
+{%- set segs = page.url.rstrip("/").split("/") if page and page.url and page.url != "." else [] -%}
+{%- set top = segs[0] if segs else "" -%}
+{%- set mansec = "3" if top == "api" else ("7" if top in ("architecture", "compatibility") else "1") -%}
+{%- set seclabel = {"1": "User Commands", "3": "Library Calls", "7": "Miscellanea"}[mansec] -%}
+{%- set manname = (segs[-1] if segs else "advect") -%}
+{#- ---- tree pane: nav rendered as `tree docs/` ------------------------- -#}
+{%- macro tree_label(item) -%}
+  {%- if item.is_page -%}
+    {%- set seg = item.url.rstrip("/").split("/")[-1] if item.url and item.url != "." else "" -%}
+    {%- if not seg or item.is_index -%}
+index
+    {%- elif seg[:2] == "20" and seg[4:5] == "-" and seg[7:8] == "-" and seg[10:11] == "-" -%}
+{{- seg[11:] -}}
+    {%- else -%}
+{{- seg -}}
+    {%- endif -%}
+  {%- else -%}
+    {{- item.title|lower|replace(" ", "-") -}}
+  {%- endif -%}
+{%- endmacro -%}
+{%- macro tree_children(items, prefix) -%}
+  {%- for item in items -%}
+    {%- set branch = "└── " if loop.last else "├── " -%}
+    {%- set below = "    " if loop.last else "│   " -%}
+    {%- set indent = (prefix ~ branch)|length -%}
+    {%- if item.children -%}
+<span class="trow" style="--ti:{{ indent }}ch"><span class="dim">{{ prefix }}{{ branch }}</span>{{ tree_label(item) }}/</span>
+{{- tree_children(item.children, prefix + below) -}}
+    {%- else -%}
+<span class="trow" style="--ti:{{ indent }}ch"><span class="dim">{{ prefix }}{{ branch }}</span><a href="{{ item.url|url }}"{% if page and item == page %} class="cur" aria-current="page"{% endif %} title="{{ item.title }}">{{ tree_label(item) }}</a></span>
+    {%- endif -%}
+  {%- endfor -%}
+{%- endmacro -%}
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+{% if page and page.meta and page.meta.description %}<meta name="description" content="{{ page.meta.description }}">
+{% elif config.site_description %}<meta name="description" content="{{ config.site_description }}">
+{% endif -%}
+{% if page and page.canonical_url %}<link rel="canonical" href="{{ page.canonical_url }}">
+{% endif -%}
+{% if page and page.is_homepage %}<link rel="alternate" type="text/plain" title="Advect documentation for AI agents" href="{{ 'llms.txt'|url }}">
+{% endif -%}
+<title>{% if page and page.title %}{{ manname }}({{ mansec }}) · {{ config.site_name|lower }}{% else %}{{ config.site_name|lower }}{% endif %}</title>
+<link rel="icon" href="{{ 'img/favicon.svg'|url }}" type="image/svg+xml">
+<link rel="stylesheet" href="{{ 'css/fonts.css'|url }}">
+<link rel="stylesheet" href="{{ 'css/theme.css'|url }}?v={{ config.extra.theme_css_version }}">
+{%- for path in config.extra_css %}
+<link rel="stylesheet" href="{{ path|url }}">
+{%- endfor %}
+<script>
+var base_url = "{{ base_url }}";
+/* pre-paint: apply persisted display mode and tree state to avoid a theme
+   flash and the tree pane animating open on every navigation */
+(function () {
+  var m = null, t = null;
+  try {
+    m = localStorage.getItem("advect-mode");
+    t = localStorage.getItem("advect-tree");
+  } catch (e) { /* private mode */ }
+  if (m) document.documentElement.dataset.theme = m;
+  var open = t === null ? window.innerWidth > 1100 : t === "1";
+  if (open) document.documentElement.classList.add("tree-open");
+})();
+</script>
+{% block head %}{% endblock %}
+</head>
+<body data-base="{{ base_url }}">
+
+<div class="desktop" id="desktop">
+{%- block desktop %}
+  <aside class="tile treetile" id="treetile" aria-label="Documentation tree" aria-hidden="true">
+    <span class="ptitle"><span class="pn">tree</span> docs/</span>
+    <pre class="tree"><span class="trow">docs/</span>{{- tree_children(nav, "") -}}</pre>
+  </aside>
+
+  <article class="tile manwin" aria-label="Manual page">
+    <span class="ptitle"><span class="pn">man</span> advect{% if page and page.url and page.url != "." %}/{{ page.url.rstrip("/") }}{% endif %}</span>
+    <div class="manscroll" id="manscroll"><div class="mancol">
+      <div class="manhead"><span>{{ manname|upper }}({{ mansec }})</span><span class="mid">{{ seclabel }}</span><span>{{ manname|upper }}({{ mansec }})</span></div>
+      <div class="rule">────────────────────────────────────────────────────────────────────────────────────────</div>
+
+      {% block content %}
+      <div class="md">
+        {% if page and page.is_homepage %}
+        <section class="agent-context" aria-label="Machine-readable documentation">
+          <h2>Documentation for AI agents</h2>
+          <p>
+            AI agents: start with <a href="{{ 'llms.txt'|url }}">llms.txt</a>
+            and prefer its linked, version-matched Markdown documents over
+            extracting this presentation HTML.
+          </p>
+        </section>
+        {% endif %}
+        {{ page.content }}
+      </div>
+      {% endblock %}
+
+      {% if page and (page.previous_page or page.next_page) %}
+      <nav class="seealso" aria-label="Adjacent pages">
+        <span>{% if page.previous_page %}<a href="{{ page.previous_page.url|url }}">← {{ page.previous_page.title|lower }}</a>{% endif %}</span>
+        <span class="nn">{% if page.next_page %}<a href="{{ page.next_page.url|url }}">{{ page.next_page.title|lower }} →</a>{% endif %}</span>
+      </nav>
+      {% endif %}
+      <p class="prompt">$ <span class="cursor">█</span></p>
+    </div></div>
+  </article>
+{% endblock -%}
+</div>
+
+<div class="overlay" id="help" role="dialog" aria-label="Keyboard shortcuts">
+  <h3>Keys</h3>
+  <table>
+    <tr><td class="kk">j k d u g G</td><td>scroll the page</td></tr>
+    <tr><td class="kk">n / p</td><td>next / previous page</td></tr>
+    <tr><td class="kk">e</td><td>toggle the docs tree pane</td></tr>
+    <tr><td class="kk">/</td><td>search the manual</td></tr>
+    <tr><td class="kk">2</td><td>open the playground</td></tr>
+    <tr><td class="kk">t</td><td>lp0 → dark → crt</td></tr>
+    <tr><td class="kk">?</td><td>close this help</td></tr>
+  </table>
+</div>
+
+<div class="overlay search-box" id="search" role="dialog" aria-label="Search">
+  <div class="search-in"><span class="ps">/</span><input id="searchq" spellcheck="false" autocomplete="off" aria-label="Search query" placeholder="search the manual…"></div>
+  <div class="search-hits" id="searchhits"></div>
+</div>
+
+<div class="bar">
+  <a href="{{ '.'|url }}" class="b"{% if not (page and page.url.startswith('playground')) %} aria-current="true"{% endif %}>[1:docs]</a>
+  <a href="{{ 'playground/'|url }}" class="b" id="wsplay"{% if page and page.url.startswith('playground') %} aria-current="true"{% endif %}>[2:playground]</a>
+  <span class="path hidesm">$ man advect{% if page and page.url and page.url != "." %}/{{ page.url.rstrip("/") }}{% endif %}</span>
+  <span class="grow"></span>
+  <button class="tbtn" id="treebtn" aria-label="Toggle documentation tree">[e] tree</button>
+  <button class="tbtn" id="searchbtn" aria-label="Search">[/] search</button>
+  <button class="tbtn hidesm" id="helpbtn" aria-label="Keyboard help">[?] keys</button>
+  <button class="tbtn" id="themeToggle" aria-label="Cycle display mode">[ mode: … ]</button>
+</div>
+
+<script src="{{ 'js/theme.js'|url }}"></script>
+<script src="{{ 'js/examples.js'|url }}"></script>
+{%- for script in config.extra_javascript %}
+{{ script|script_tag }}
+{%- endfor %}
+{% block scripts %}{% endblock %}
+</body>
+</html>

@@ -1,0 +1,310 @@
+[project]
+name = "advect"
+dynamic = [ "version" ]
+description = "Extensible array tracing and automatic differentiation for Python"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+license-files = [ "LICENSE" ]
+authors = [ { name = "Yannick Augenstein" } ]
+keywords = [
+  "tracing",
+  "autodiff",
+  "array-api",
+  "numpy",
+]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Intended Audience :: Science/Research",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Rust",
+  "Topic :: Scientific/Engineering",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+  "Topic :: Scientific/Engineering :: Mathematics",
+  "Typing :: Typed",
+]
+
+dependencies = [
+  "array-api-compat>=1.11.2,<2",
+  "numpy>=2.0,<2.5",
+]
+
+[project.urls]
+Documentation = "https://yaugenst.github.io/advect/"
+Issues = "https://github.com/yaugenst/advect/issues"
+Repository = "https://github.com/yaugenst/advect"
+
+[project.optional-dependencies]
+autograd = [ "autograd>=1.9,<1.10" ]
+jax = [ "jax>=0.11,<0.12" ]
+scipy = [ "scipy>=1.18,<1.19" ]
+scientific = [
+  "scipy>=1.18,<1.19",
+  "xarray>=2026.7,<2026.8",
+]
+torch = [ "torch>=2.10,<2.11" ]
+xarray = [ "xarray>=2026.7,<2026.8" ]
+
+[dependency-groups]
+dev = [
+  "array-api-strict==2.4.1",
+  "autograd>=1.9,<1.10",
+  "hypothesis[numpy]>=6.148.3",
+  "pyrefly==1.1.1",
+  "pytest>=9.0.1",
+  "ruff>=0.14.6",
+  "scipy>=1.18,<1.19",
+  "xarray>=2026.7,<2026.8",
+]
+docs = [
+  "mike>=2.1",
+  "mkdocs>=1.6",
+  "mkdocs-llmstxt>=0.5,<0.6",
+  "mkdocstrings[python]>=0.29",
+]
+
+[build-system]
+requires = [ "maturin>=1.12,<2" ]
+build-backend = "maturin"
+
+[tool.maturin]
+features = [ "extension-module" ]
+manifest-path = "packages/advect-native/Cargo.toml"
+module-name = "advect._native_core"
+python-source = "packages/advect/src"
+
+# ==============================================================================
+# Ruff Configuration - Maximum strictness
+# ==============================================================================
+
+[tool.ruff]
+src = [
+  "packages/advect/src",
+  "packages/advect/tests",
+]
+target-version = "py312"
+line-length = 100
+indent-width = 4
+namespace-packages = [  ]
+
+# Exclude common non-source directories
+exclude = [
+  ".direnv",
+  ".eggs",
+  ".git",
+  ".git-rewrite",
+  ".nox",
+  ".pants.d",
+  ".pyenv",
+  ".pytest_cache",
+  ".pytype",
+  ".ruff_cache",
+  ".tox",
+  ".venv",
+  ".vscode",
+  "__pypackages__",
+  "_build",
+  "build",
+  "dist",
+  "node_modules",
+  "site-packages",
+  "venv",
+]
+
+[tool.ruff.lint]
+# Enable ALL rules, then selectively disable problematic ones
+select = [ "ALL" ]
+
+ignore = [
+  # Formatter conflicts (let ruff format handle these)
+  "W191",   # tab-indentation
+  "E111",   # indentation-with-invalid-multiple
+  "E114",   # indentation-with-invalid-multiple-comment
+  "E117",   # over-indented
+  "D206",   # indent-with-spaces
+  "D300",   # triple-single-quotes
+  "Q000",   # bad-quotes-inline-string
+  "Q001",   # bad-quotes-multiline-string
+  "Q002",   # bad-quotes-docstring
+  "Q003",   # avoidable-escaped-quote
+  "COM812", # missing-trailing-comma (conflicts with formatter)
+  "COM819", # prohibited-trailing-comma
+  "ISC001", # single-line-implicit-string-concatenation (conflicts with formatter)
+  "ISC002", # multi-line-implicit-string-concatenation
+
+  # Opinionated rules we disagree with
+  "D100",   # undocumented-public-module (we document in __init__.py)
+  "D104",   # undocumented-public-package
+  "D107",   # undocumented-public-init (we document in class docstring)
+  "TD002",  # missing-todo-author
+  "TD003",  # missing-todo-link
+  "FIX002", # line-contains-todo (we allow TODOs)
+]
+
+fixable = [ "ALL" ]
+unfixable = [  ]
+
+# Allow unused variables when underscore-prefixed
+dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
+
+[tool.ruff.lint.per-file-ignores]
+# Tests can use magic values, assertions, and don't need full documentation
+"packages/**/tests/**/*.py" = [
+  "S101",    # assert
+  "PLR2004", # magic-value-comparison
+  "D103",    # undocumented-public-function (test functions)
+  "D101",    # undocumented-public-class (test classes)
+  "ANN",     # type annotations (tests are less strict)
+  "ARG001",  # unused-function-argument (fixtures)
+  "ARG002",  # unused-method-argument
+  "PLR0913", # too-many-arguments (test functions can have many fixtures)
+  "SLF001",  # private-member-access (tests need to access internals)
+]
+
+# __init__.py files can have unused imports (re-exports)
+"**/__init__.py" = [
+  "F401", # unused-import
+  "F403", # undefined-local-with-import-star
+]
+
+# Configuration files
+"conftest.py" = [
+  "D100", # undocumented-public-module
+  "D103", # undocumented-public-function
+]
+
+# Scripts can use print and shebangs
+"scripts/**/*.py" = [
+  "T201",   # print (scripts need to output)
+  "EXE001", # shebang (run via uv run python, not directly)
+]
+
+"packages/advect/src/advect/autodiff/rules/array_family/_impl/jvp/*.py" = [
+  "ANN401", # JVP rule signatures intentionally track runtime op contracts
+  "ARG001", # many signatures mirror traced op contracts
+  "D103",   # internal rule helpers are intentionally minimal-doc
+  "TC001",  # typed alias imports are intentionally runtime-local
+]
+"packages/advect/src/advect/autodiff/rules/array_family/_impl/vjp/**/*.py" = [
+  "ANN401", # VJP rule signatures intentionally mirror runtime op contracts
+  "ARG001", # many signatures mirror traced op contracts
+  "D103",   # internal rule helpers are intentionally minimal-doc
+  "N803",   # NumPy keyword casing (e.g. UPLO) is runtime contract
+  "TC001",  # runtime-local type imports in helper modules
+  "TC003",  # runtime-local callable imports in helper modules
+]
+"packages/advect/src/advect/autodiff/api/*.py" = [
+  "ANN401", # autodiff API signatures accept generic pytrees/array leaves
+]
+"packages/advect/src/advect/interop/*.py" = [
+  "ANN401", # host-framework callbacks and pytrees are dynamically typed
+]
+"packages/advect/src/advect/autodiff/rules/array_family/_transpose_utils.py" = [
+  "ANN401", # transpose utilities operate on generic cotangent pytrees
+]
+
+[tool.ruff.lint.isort]
+known-first-party = [
+  "advect",
+]
+known-third-party = [ "numpy", "scipy", "xarray" ]
+required-imports = [ "from __future__ import annotations" ]
+force-sort-within-sections = false
+force-single-line = false
+combine-as-imports = true
+split-on-trailing-comma = true
+
+[tool.ruff.lint.pydocstyle]
+convention = "numpy"
+
+[tool.ruff.lint.pylint]
+max-args = 8
+max-branches = 15
+max-returns = 8
+max-statements = 60
+
+[tool.ruff.lint.mccabe]
+max-complexity = 15
+
+[tool.ruff.lint.flake8-tidy-imports]
+ban-relative-imports = "all"
+
+[tool.ruff.lint.flake8-type-checking]
+strict = true
+runtime-evaluated-base-classes = [ "pydantic.BaseModel" ]
+
+[tool.ruff.lint.flake8-annotations]
+allow-star-arg-any = false
+mypy-init-return = true
+suppress-none-returning = false
+
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = [  ]
+
+[tool.ruff.lint.flake8-builtins]
+builtins-ignorelist = [  ]
+
+[tool.ruff.lint.flake8-pytest-style]
+fixture-parentheses = true
+parametrize-names-type = "tuple"
+parametrize-values-type = "list"
+parametrize-values-row-type = "tuple"
+
+[tool.ruff.lint.flake8-quotes]
+docstring-quotes = "double"
+inline-quotes = "double"
+multiline-quotes = "double"
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "lf"
+docstring-code-format = true
+docstring-code-line-length = "dynamic"
+
+# ==============================================================================
+# Pyrefly Configuration - Strict runtime-source checking
+# ==============================================================================
+
+[tool.pyrefly]
+preset = "strict"
+python-version = "3.12"
+use-ignore-files = false
+disable-search-path-heuristics = true
+disable-project-excludes-heuristics = true
+project-includes = [
+  "packages/advect/src",
+]
+search-path = [
+  "packages/advect/src",
+]
+
+# ==============================================================================
+# Pytest Configuration
+# ==============================================================================
+
+[tool.pytest.ini_options]
+testpaths = [ "packages/advect/src/advect", "packages/advect/tests" ]
+addopts = [ "--doctest-modules", "--ignore=packages/advect/src/advect/interop", "-ra", "--strict-markers", "--strict-config", "-v", "--tb=short" ]
+filterwarnings = [ "error", "ignore::DeprecationWarning:hypothesis.*" ]
+xfail_strict = true
+
+# ==============================================================================
+# Typos Configuration
+# ==============================================================================
+
+[tool.typos.files]
+extend-exclude = [ "uv.lock" ]
+
+[tool.typos.default.extend-words]
+NDArrayOperatorsMixin = "NDArrayOperatorsMixin"
+ND = "ND"
+nin = "nin"                                     # numpy ufunc attribute (number of inputs)
+
+[tool.typos.default.extend-identifiers]
+arange = "arange"

@@ -1,0 +1,29 @@
+[package]
+name = "advect-native"
+publish = false
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description.workspace = true
+readme = "README.md"
+homepage.workspace = true
+repository.workspace = true
+documentation.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[lib]
+name = "_native_core"
+crate-type = [ "cdylib" ]
+
+[dependencies]
+advect-runtime = { path = "../advect-runtime" }
+pyo3 = { workspace = true }
+
+[features]
+extension-module = [ "pyo3/extension-module" ]
+
+[lints]
+workspace = true

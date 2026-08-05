@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if echo \"$TOOL_INPUT\" | grep -qE 'git (commit|push)' && [ \"$(git -C \"$CLAUDE_PROJECT_DIR\" branch --show-current 2>/dev/null)\" = \"main\" ]; then echo 'BLOCKED: Direct commits/pushes to main are not allowed. Create a feature branch first.' >&2; exit 2; fi"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "FILE=$(echo \"$TOOL_INPUT\" | grep -oE '\"file_path\":\\s*\"[^\"]+\"' | sed 's/.*\"\\([^\"]*\\)\"$/\\1/' | head -1); if [ -n \"$FILE\" ] && echo \"$FILE\" | grep -qE '\\.py$'; then cd \"$CLAUDE_PROJECT_DIR\" && uv run ruff check \"$FILE\" 2>/dev/null | head -5 || true; fi"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "startup",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '# AGENTS' && head -50 \"$CLAUDE_PROJECT_DIR/CLAUDE.md\" | tail -45"
+          }
+        ]
+      }
+    ]
+  }
+}
