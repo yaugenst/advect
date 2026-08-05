@@ -1,0 +1,36 @@
+[graph]
+all-features = true
+
+[advisories]
+version = 2
+# cargo-deny 0.19 models unmaintained advisories as a scope rather than a
+# lint level. Automation downgrades them with `cargo deny check -W unmaintained`.
+unmaintained = "all"
+yanked = "warn"
+
+[licenses]
+version = 2
+allow = [
+  "MIT",
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "ISC",
+  "Unicode-3.0",
+]
+confidence-threshold = 0.8
+unused-allowed-license = "allow"
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+# Both workspace crates are private; their one internal path edge is not a
+# crates.io dependency and has no independent version contract.
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = [ "https://github.com/rust-lang/crates.io-index" ]
+allow-git = [  ]

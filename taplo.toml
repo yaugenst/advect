@@ -1,0 +1,23 @@
+# Taplo TOML formatter configuration
+# https://taplo.tamasfe.dev/configuration/formatter-options.html
+
+include = [ "*.toml", "**/*.toml" ]
+exclude = [ "uv.lock" ]
+
+[formatting]
+align_comments = true
+align_entries = false
+allowed_blank_lines = 1
+array_auto_collapse = false
+array_auto_expand = true
+array_trailing_comma = true
+column_width = 100
+compact_arrays = false
+compact_inline_tables = false
+indent_entries = false
+indent_string = "  "
+indent_tables = false
+inline_table_expand = false
+reorder_arrays = false
+reorder_keys = false
+trailing_newline = true
