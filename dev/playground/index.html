@@ -1,0 +1,125 @@
+<!doctype html><html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Explore a real Advect value-and-gradient graph in the browser with Python and Pyodide.">
+<link rel="canonical" href="https://yaugenst.github.io/advect/dev/playground/">
+<title>playground(1) · advect</title>
+<link rel="icon" href="../img/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../css/fonts.css">
+<link rel="stylesheet" href="../css/theme.css?v=86c97aee1cb2">
+<link rel="stylesheet" href="../assets/_mkdocstrings.css">
+<script>
+var base_url = "..";
+/* pre-paint: apply persisted display mode and tree state to avoid a theme
+   flash and the tree pane animating open on every navigation */
+(function () {
+  var m = null, t = null;
+  try {
+    m = localStorage.getItem("advect-mode");
+    t = localStorage.getItem("advect-tree");
+  } catch (e) { /* private mode */ }
+  if (m) document.documentElement.dataset.theme = m;
+  var open = t === null ? window.innerWidth > 1100 : t === "1";
+  if (open) document.documentElement.classList.add("tree-open");
+})();
+</script>
+
+<link rel="stylesheet" href="../css/playground.css">
+
+</head>
+<body data-base="..">
+
+<div class="desktop" id="desktop">
+    <div class="wm">
+      <section class="pane pane-fn" aria-label="Function and plot">
+        <span class="ptitle"><span class="pn">[a]</span> f(x) — edit · drag the plot</span>
+        <span class="ptitle pr"><button class="tbtn" id="pymode">[ python ]</button></span>
+        <div class="fxrow"><span class="lbl">f(x) = </span><span class="finwrap"><div class="finmirror" id="finmirror" aria-hidden="true"></div><input class="fin" id="fin" spellcheck="false"
+          autocomplete="off" aria-label="The function of x" value="sin(3*x) * exp(-x**2 / 4)" disabled></span></div>
+        <div class="fdefwrap" id="fdefwrap" hidden><pre class="fdefmirror" id="fdefmirror" aria-hidden="true"></pre><textarea class="fdef" id="fdef" rows="7" spellcheck="false" aria-label="A Python function of x"></textarea></div>
+        <div class="ferr" id="ferr" role="alert"></div>
+        <div class="screen" id="screen" aria-label="Plot of f, its tangent and osculating parabola at x0. Drag to move the point.">
+          <pre class="grid" id="lgrid" aria-hidden="true"></pre>
+          <pre class="lay para" id="lpara" aria-hidden="true"></pre>
+          <pre class="lay curve" id="lcurve" aria-hidden="true"></pre>
+          <pre class="lay tan" id="ltan" aria-hidden="true"></pre>
+        </div>
+        <div class="xlabels" id="xlabels"></div>
+        <div class="readrow" id="readrow">x₀ <b id="rx">+0.5500</b> · f(x₀) <b id="rf">…</b></div>
+        <div class="readrow">f′ <span class="g" id="rg">…</span> · f″ <span class="h2" id="rh">…</span></div>
+      </section>
+
+      <section class="pane pane-tree" aria-label="Computation graph">
+        <span class="ptitle"><span class="pn">[b]</span> graph — hover links f(x) ↔ program · click to pin</span>
+        <span class="ptitle pr"><button class="tbtn" id="dirToggle">[ graph: jvp ]</button></span>
+        <div class="treewrap"><pre class="ctree" id="ctree"><span class="irplain dim"># loading Python — Pyodide, NumPy, and Advect download once…</span></pre></div>
+        <div class="pfoot"><span class="dim">↖ = this exact SSA node already appears above · hover any line to find its copies</span></div>
+      </section>
+
+      <section class="pane pane-prog" aria-label="Staged program">
+        <span class="ptitle"><span class="pn">[c]</span> program — the staged derivative, as SSA</span>
+        <span class="ptitle pr"><button class="tbtn" id="tapeToggle">[ tape: live ]</button></span>
+        <div class="tapewrap"><pre class="tape" id="tape"><span class="irplain dim"># loading Python…</span></pre></div>
+        <div class="pfoot" id="report"></div>
+        <div class="pfoot" id="legend"></div>
+        <div class="pfoot"><div class="btns">
+          <button class="tbtn" id="save">[ save f.advect.json ]</button>
+          <label class="tbtn" for="loadfile">[ load… ]</label>
+          <input type="file" id="loadfile" accept=".json,application/json">
+        </div></div>
+      </section>
+
+      <section class="pane pane-sess" aria-label="Session log">
+        <span class="ptitle"><span class="pn">[d]</span> session — your gestures, as Python</span>
+        <div class="sessgrid">
+          <div class="bootcol">
+            <div class="logo" role="img" aria-label="Advect mark, dot matrix">
+              <pre class="lg-ink" id="logoInk"></pre>
+              <pre class="lay lg-acc" id="logoAcc" aria-hidden="true"></pre>
+            </div>
+            <div class="logo-meta" id="bootmeta"><b>advect</b><br>loading Pyodide…</div>
+          </div>
+          <pre class="transcript" id="transcript" aria-live="polite"></pre>
+        </div>
+      </section>
+    </div>
+</div>
+
+<div class="overlay" id="help" role="dialog" aria-label="Keyboard shortcuts">
+  <h3>Keys</h3>
+  <table>
+    <tr><td class="kk">j k d u g G</td><td>scroll the page</td></tr>
+    <tr><td class="kk">n / p</td><td>next / previous page</td></tr>
+    <tr><td class="kk">e</td><td>toggle the docs tree pane</td></tr>
+    <tr><td class="kk">/</td><td>search the manual</td></tr>
+    <tr><td class="kk">2</td><td>open the playground</td></tr>
+    <tr><td class="kk">t</td><td>lp0 → dark → crt</td></tr>
+    <tr><td class="kk">?</td><td>close this help</td></tr>
+  </table>
+</div>
+
+<div class="overlay search-box" id="search" role="dialog" aria-label="Search">
+  <div class="search-in"><span class="ps">/</span><input id="searchq" spellcheck="false" autocomplete="off" aria-label="Search query" placeholder="search the manual…"></div>
+  <div class="search-hits" id="searchhits"></div>
+</div>
+
+<div class="bar">
+  <a href=".." class="b">[1:docs]</a>
+  <a href="./" class="b" id="wsplay" aria-current="true">[2:playground]</a>
+  <span class="path hidesm">$ man advect/playground</span>
+  <span class="grow"></span>
+  <button class="tbtn" id="treebtn" aria-label="Toggle documentation tree">[e] tree</button>
+  <button class="tbtn" id="searchbtn" aria-label="Search">[/] search</button>
+  <button class="tbtn hidesm" id="helpbtn" aria-label="Keyboard help">[?] keys</button>
+  <button class="tbtn" id="themeToggle" aria-label="Cycle display mode">[ mode: … ]</button>
+</div>
+
+<script src="../js/theme.js"></script>
+<script src="../js/examples.js"></script>
+<script src="../search/main.js"></script>
+
+<script type="module" src="../js/playground.js"></script>
+
+</body>
+</html>

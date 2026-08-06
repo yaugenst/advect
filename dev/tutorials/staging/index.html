@@ -1,0 +1,152 @@
+<!doctype html><html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="A small extensible automatic-differentiation core for Python">
+<link rel="canonical" href="https://yaugenst.github.io/advect/dev/tutorials/staging/">
+<title>staging(1) · advect</title>
+<link rel="icon" href="../../img/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../css/fonts.css">
+<link rel="stylesheet" href="../../css/theme.css?v=86c97aee1cb2">
+<link rel="stylesheet" href="../../assets/_mkdocstrings.css">
+<script>
+var base_url = "../..";
+/* pre-paint: apply persisted display mode and tree state to avoid a theme
+   flash and the tree pane animating open on every navigation */
+(function () {
+  var m = null, t = null;
+  try {
+    m = localStorage.getItem("advect-mode");
+    t = localStorage.getItem("advect-tree");
+  } catch (e) { /* private mode */ }
+  if (m) document.documentElement.dataset.theme = m;
+  var open = t === null ? window.innerWidth > 1100 : t === "1";
+  if (open) document.documentElement.classList.add("tree-open");
+})();
+</script>
+
+</head>
+<body data-base="../..">
+
+<div class="desktop" id="desktop">
+  <aside class="tile treetile" id="treetile" aria-label="Documentation tree" aria-hidden="true">
+    <span class="ptitle"><span class="pn">tree</span> docs/</span>
+    <pre class="tree"><span class="trow">docs/</span><span class="trow" style="--ti:4ch"><span class="dim">├── </span><a href="../.." title="Home">index</a></span><span class="trow" style="--ti:4ch"><span class="dim">├── </span>tutorials/</span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../" title="Tutorials">index</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../gradients/" title="Gradients and Pytrees">gradients</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../control-flow/" title="Control Flow and Mutation">control-flow</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="./" class="cur" aria-current="page" title="Staging and Serialization">staging</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../interop/" title="Providers and Interop">interop</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../primitives/" title="Custom Primitives">primitives</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   └── </span><a href="../debugging/" title="Debugging">debugging</a></span><span class="trow" style="--ti:4ch"><span class="dim">├── </span><a href="../../architecture/" title="Architecture">architecture</a></span><span class="trow" style="--ti:4ch"><span class="dim">├── </span>compatibility/</span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../compatibility/" title="Compatibility">index</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../compatibility/numpy/" title="NumPy">numpy</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../compatibility/array-api/" title="Array API">array-api</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../compatibility/cupy/" title="CuPy">cupy</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../compatibility/scipy/" title="SciPy">scipy</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   └── </span><a href="../../compatibility/xarray/" title="xarray">xarray</a></span><span class="trow" style="--ti:4ch"><span class="dim">└── </span>api-reference/</span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="../../api/" title="API Reference">index</a></span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="../../api/interop/" title="Host Autodiff Interop">interop</a></span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="../../api/transforms/" title="Transforms">transforms</a></span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="../../api/staging/" title="Staging">staging</a></span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="../../api/primitives/" title="Primitives">primitives</a></span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="../../api/arrays/" title="Arrays and Structure">arrays</a></span><span class="trow" style="--ti:8ch"><span class="dim">    └── </span><a href="../../api/errors/" title="Errors">errors</a></span></pre>
+  </aside>
+
+  <article class="tile manwin" aria-label="Manual page">
+    <span class="ptitle"><span class="pn">man</span> advect/tutorials/staging</span>
+    <div class="manscroll" id="manscroll"><div class="mancol">
+      <div class="manhead"><span>STAGING(1)</span><span class="mid">User Commands</span><span>STAGING(1)</span></div>
+      <div class="rule">────────────────────────────────────────────────────────────────────────────────────────</div>
+
+      
+      <div class="md">
+        
+        <h1 id="staging-and-serialization">Staging and Serialization<a class="headerlink" href="#staging-and-serialization" title="Permanent link">&para;</a></h1>
+<h2 id="stage-repeated-work">Stage repeated work<a class="headerlink" href="#stage-repeated-work" title="Permanent link">&para;</a></h2>
+<p><code>stage</code> traces abstract shape and dtype values, builds a durable graph, and
+runs Advect's fixed optimization pipeline once:</p>
+<div class="language-python run highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="kn">import</span><span class="w"> </span><span class="nn">advect</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">ad</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="k">def</span><span class="w"> </span><span class="nf">loss</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>    <span class="k">return</span> <span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">sin</span><span class="p">(</span><span class="n">x</span><span class="p">)</span> <span class="o">**</span> <span class="mi">2</span><span class="p">)</span>
+</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>
+</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>
+</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="n">x</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">linspace</span><span class="p">(</span><span class="o">-</span><span class="mf">0.5</span><span class="p">,</span> <span class="mf">0.5</span><span class="p">,</span> <span class="mi">8</span><span class="p">)</span>
+</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>
+</span><span id="__span-0-12"><a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="n">program</span> <span class="o">=</span> <span class="n">ad</span><span class="o">.</span><span class="n">stage</span><span class="p">(</span><span class="n">loss</span><span class="p">,</span> <span class="n">x</span><span class="p">)</span>
+</span><span id="__span-0-13"><a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="n">gradient_program</span> <span class="o">=</span> <span class="n">ad</span><span class="o">.</span><span class="n">grad</span><span class="p">(</span><span class="n">program</span><span class="p">)</span>
+</span><span id="__span-0-14"><a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>
+</span><span id="__span-0-15"><a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a><span class="n">value</span> <span class="o">=</span> <span class="n">program</span><span class="p">(</span><span class="n">x</span><span class="p">)</span>
+</span><span id="__span-0-16"><a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a><span class="n">gradient</span> <span class="o">=</span> <span class="n">gradient_program</span><span class="p">(</span><span class="n">x</span><span class="p">)</span>
+</span><span id="__span-0-17"><a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a><span class="nb">print</span><span class="p">(</span><span class="n">gradient_program</span><span class="o">.</span><span class="n">optimization</span><span class="p">)</span>
+</span></code></pre></div>
+<p><code>gradient_program</code> is itself a <code>StagedProgram</code>. A warm call executes its
+prebound derivative graph; it does not record a dynamic tape or perform a
+reverse sweep. <code>program.graph</code> exposes the optimized nodes — the
+<a href="../../architecture/">architecture page</a> walks them, and the
+playground draws them live.</p>
+<p>For reusable derivative stitching, compile a VJP program. Its cotangent has the
+same pytree, shape, and dtype contract as the primal output:</p>
+<div class="language-python run highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="n">field_program</span> <span class="o">=</span> <span class="n">ad</span><span class="o">.</span><span class="n">stage</span><span class="p">(</span><span class="k">lambda</span> <span class="n">value</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">sin</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">x</span><span class="p">)</span>
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="n">pullback_program</span> <span class="o">=</span> <span class="n">ad</span><span class="o">.</span><span class="n">vjp_program</span><span class="p">(</span><span class="n">field_program</span><span class="p">)</span>
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="n">cotangent</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">linspace</span><span class="p">(</span><span class="mf">1.0</span><span class="p">,</span> <span class="mf">2.0</span><span class="p">,</span> <span class="mi">8</span><span class="p">)</span>
+</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="n">input_cotangent</span> <span class="o">=</span> <span class="n">pullback_program</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">cotangent</span><span class="o">=</span><span class="n">cotangent</span><span class="p">)</span>
+</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="n">np</span><span class="o">.</span><span class="n">testing</span><span class="o">.</span><span class="n">assert_allclose</span><span class="p">(</span><span class="n">input_cotangent</span><span class="p">,</span> <span class="n">cotangent</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">cos</span><span class="p">(</span><span class="n">x</span><span class="p">))</span>
+</span></code></pre></div>
+<p>Unlike the one-shot <code>Pullback</code> returned by dynamic <code>vjp</code>, <code>pullback_program</code>
+contains no invocation-local tape. It is reusable, optimized once, and can be
+serialized directly.</p>
+<p>A positional example supplies its shape, dtype, device, and scalar weakness,
+but its data is not available to the abstract trace. Use
+<code>specs=(ad.ArraySpec(...),)</code> when no representative value is available. A
+different signature is compiled into a different <code>StagedProgram</code>; the program
+object is never also a hidden multi-signature cache.</p>
+<h2 id="serialize-a-staged-derivative">Serialize a staged derivative<a class="headerlink" href="#serialize-a-staged-derivative" title="Permanent link">&para;</a></h2>
+<p>Staged primals, scalar gradients, and VJP programs share the same artifact
+format:</p>
+<div class="language-python run highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">json</span>
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="n">payload</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">gradient_program</span><span class="o">.</span><span class="n">to_dict</span><span class="p">(),</span> <span class="n">sort_keys</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="n">restored</span> <span class="o">=</span> <span class="n">ad</span><span class="o">.</span><span class="n">StagedProgram</span><span class="o">.</span><span class="n">from_dict</span><span class="p">(</span><span class="n">json</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">payload</span><span class="p">))</span>
+</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="n">np</span><span class="o">.</span><span class="n">testing</span><span class="o">.</span><span class="n">assert_allclose</span><span class="p">(</span><span class="n">restored</span><span class="p">(</span><span class="n">x</span><span class="p">),</span> <span class="n">gradient_program</span><span class="p">(</span><span class="n">x</span><span class="p">))</span>
+</span></code></pre></div>
+<p>A loaded program executes its one serialized signature. Any custom primitive
+referenced by the artifact must be linked by name and schema version in the
+loading process. In particular, import
+<code>advect.scipy</code> before calling <code>StagedProgram.from_dict()</code> for an artifact that
+contains an <code>advect.scipy</code> primitive.</p>
+      </div>
+      
+
+      
+      <nav class="seealso" aria-label="Adjacent pages">
+        <span><a href="../control-flow/">← control flow and mutation</a></span>
+        <span class="nn"><a href="../interop/">providers and interop →</a></span>
+      </nav>
+      
+      <p class="prompt">$ <span class="cursor">█</span></p>
+    </div></div>
+  </article>
+</div>
+
+<div class="overlay" id="help" role="dialog" aria-label="Keyboard shortcuts">
+  <h3>Keys</h3>
+  <table>
+    <tr><td class="kk">j k d u g G</td><td>scroll the page</td></tr>
+    <tr><td class="kk">n / p</td><td>next / previous page</td></tr>
+    <tr><td class="kk">e</td><td>toggle the docs tree pane</td></tr>
+    <tr><td class="kk">/</td><td>search the manual</td></tr>
+    <tr><td class="kk">2</td><td>open the playground</td></tr>
+    <tr><td class="kk">t</td><td>lp0 → dark → crt</td></tr>
+    <tr><td class="kk">?</td><td>close this help</td></tr>
+  </table>
+</div>
+
+<div class="overlay search-box" id="search" role="dialog" aria-label="Search">
+  <div class="search-in"><span class="ps">/</span><input id="searchq" spellcheck="false" autocomplete="off" aria-label="Search query" placeholder="search the manual…"></div>
+  <div class="search-hits" id="searchhits"></div>
+</div>
+
+<div class="bar">
+  <a href="../.." class="b" aria-current="true">[1:docs]</a>
+  <a href="../../playground/" class="b" id="wsplay">[2:playground]</a>
+  <span class="path hidesm">$ man advect/tutorials/staging</span>
+  <span class="grow"></span>
+  <button class="tbtn" id="treebtn" aria-label="Toggle documentation tree">[e] tree</button>
+  <button class="tbtn" id="searchbtn" aria-label="Search">[/] search</button>
+  <button class="tbtn hidesm" id="helpbtn" aria-label="Keyboard help">[?] keys</button>
+  <button class="tbtn" id="themeToggle" aria-label="Cycle display mode">[ mode: … ]</button>
+</div>
+
+<script src="../../js/theme.js"></script>
+<script src="../../js/examples.js"></script>
+<script src="../../search/main.js"></script>
+
+</body>
+</html>

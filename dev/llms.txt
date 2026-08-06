@@ -1,0 +1,51 @@
+# Advect
+
+> A small extensible automatic-differentiation core for Python
+
+Advect has two explicit execution lifetimes. Dynamic transforms trace
+one concrete call, while stage() compiles one immutable, serializable
+input signature. Use the public advect namespace and the API reference;
+do not infer support from an underlying NumPy, Array API, or SciPy
+function alone. The compatibility pages state separate dynamic,
+staged, and serialized support claims. Linked Markdown files are
+generated from this same documentation build and include expanded API
+docstrings.
+
+
+## Start here
+
+- [Home](https://yaugenst.github.io/advect/dev/index.md): Project overview, installation, and first gradient
+- [Tutorials](https://yaugenst.github.io/advect/dev/tutorials/index.md): Guided learning path
+- [Architecture](https://yaugenst.github.io/advect/dev/architecture/index.md): Dynamic tracing, staging, and extension boundaries
+- [API Reference](https://yaugenst.github.io/advect/dev/api/index.md): Public API contract and shared semantics
+
+## Tutorials
+
+- [Gradients and Pytrees](https://yaugenst.github.io/advect/dev/tutorials/gradients/index.md)
+- [Control Flow and Mutation](https://yaugenst.github.io/advect/dev/tutorials/control-flow/index.md)
+- [Staging and Serialization](https://yaugenst.github.io/advect/dev/tutorials/staging/index.md)
+- [Providers and Interop](https://yaugenst.github.io/advect/dev/tutorials/interop/index.md)
+- [Custom Primitives](https://yaugenst.github.io/advect/dev/tutorials/primitives/index.md)
+- [Debugging](https://yaugenst.github.io/advect/dev/tutorials/debugging/index.md)
+
+## API reference
+
+- [Transforms](https://yaugenst.github.io/advect/dev/api/transforms/index.md)
+- [Staging](https://yaugenst.github.io/advect/dev/api/staging/index.md)
+- [Primitives](https://yaugenst.github.io/advect/dev/api/primitives/index.md)
+- [Arrays and Structure](https://yaugenst.github.io/advect/dev/api/arrays/index.md)
+- [Errors](https://yaugenst.github.io/advect/dev/api/errors/index.md)
+
+## Compatibility
+
+- [Compatibility](https://yaugenst.github.io/advect/dev/compatibility/index.md)
+- [NumPy](https://yaugenst.github.io/advect/dev/compatibility/numpy/index.md)
+- [Array API](https://yaugenst.github.io/advect/dev/compatibility/array-api/index.md)
+- [CuPy](https://yaugenst.github.io/advect/dev/compatibility/cupy/index.md)
+- [SciPy](https://yaugenst.github.io/advect/dev/compatibility/scipy/index.md)
+- [xarray](https://yaugenst.github.io/advect/dev/compatibility/xarray/index.md)
+
+## Optional
+
+- [Playground](https://yaugenst.github.io/advect/dev/playground/index.md): In-browser expression and derivative-graph explorer
+

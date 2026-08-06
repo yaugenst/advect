@@ -1,0 +1,151 @@
+<!doctype html><html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="A small extensible automatic-differentiation core for Python">
+<link rel="canonical" href="https://yaugenst.github.io/advect/dev/">
+<link rel="alternate" type="text/plain" title="Advect documentation for AI agents" href="llms.txt">
+<title>advect(1) · advect</title>
+<link rel="icon" href="img/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="css/fonts.css">
+<link rel="stylesheet" href="css/theme.css?v=86c97aee1cb2">
+<link rel="stylesheet" href="assets/_mkdocstrings.css">
+<script>
+var base_url = ".";
+/* pre-paint: apply persisted display mode and tree state to avoid a theme
+   flash and the tree pane animating open on every navigation */
+(function () {
+  var m = null, t = null;
+  try {
+    m = localStorage.getItem("advect-mode");
+    t = localStorage.getItem("advect-tree");
+  } catch (e) { /* private mode */ }
+  if (m) document.documentElement.dataset.theme = m;
+  var open = t === null ? window.innerWidth > 1100 : t === "1";
+  if (open) document.documentElement.classList.add("tree-open");
+})();
+</script>
+
+</head>
+<body data-base=".">
+
+<div class="desktop" id="desktop">
+  <aside class="tile treetile" id="treetile" aria-label="Documentation tree" aria-hidden="true">
+    <span class="ptitle"><span class="pn">tree</span> docs/</span>
+    <pre class="tree"><span class="trow">docs/</span><span class="trow" style="--ti:4ch"><span class="dim">├── </span><a href="." class="cur" aria-current="page" title="Home">index</a></span><span class="trow" style="--ti:4ch"><span class="dim">├── </span>tutorials/</span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="tutorials/" title="Tutorials">index</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="tutorials/gradients/" title="Gradients and Pytrees">gradients</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="tutorials/control-flow/" title="Control Flow and Mutation">control-flow</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="tutorials/staging/" title="Staging and Serialization">staging</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="tutorials/interop/" title="Providers and Interop">interop</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="tutorials/primitives/" title="Custom Primitives">primitives</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   └── </span><a href="tutorials/debugging/" title="Debugging">debugging</a></span><span class="trow" style="--ti:4ch"><span class="dim">├── </span><a href="architecture/" title="Architecture">architecture</a></span><span class="trow" style="--ti:4ch"><span class="dim">├── </span>compatibility/</span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="compatibility/" title="Compatibility">index</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="compatibility/numpy/" title="NumPy">numpy</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="compatibility/array-api/" title="Array API">array-api</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="compatibility/cupy/" title="CuPy">cupy</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="compatibility/scipy/" title="SciPy">scipy</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   └── </span><a href="compatibility/xarray/" title="xarray">xarray</a></span><span class="trow" style="--ti:4ch"><span class="dim">└── </span>api-reference/</span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="api/" title="API Reference">index</a></span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="api/interop/" title="Host Autodiff Interop">interop</a></span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="api/transforms/" title="Transforms">transforms</a></span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="api/staging/" title="Staging">staging</a></span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="api/primitives/" title="Primitives">primitives</a></span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="api/arrays/" title="Arrays and Structure">arrays</a></span><span class="trow" style="--ti:8ch"><span class="dim">    └── </span><a href="api/errors/" title="Errors">errors</a></span></pre>
+  </aside>
+
+  <article class="tile manwin" aria-label="Manual page">
+    <span class="ptitle"><span class="pn">man</span> advect</span>
+    <div class="manscroll" id="manscroll"><div class="mancol">
+      <div class="manhead"><span>ADVECT(1)</span><span class="mid">User Commands</span><span>ADVECT(1)</span></div>
+      <div class="rule">────────────────────────────────────────────────────────────────────────────────────────</div>
+
+      
+      <div class="md">
+        
+        <section class="agent-context" aria-label="Machine-readable documentation">
+          <h2>Documentation for AI agents</h2>
+          <p>
+            AI agents: start with <a href="llms.txt">llms.txt</a>
+            and prefer its linked, version-matched Markdown documents over
+            extracting this presentation HTML.
+          </p>
+        </section>
+        
+        <h1 id="advect">Advect<a class="headerlink" href="#advect" title="Permanent link">&para;</a></h1>
+<p>A small, extensible automatic-differentiation core for Python array programs.
+User code stays ordinary NumPy or Array API code; Advect owns differentiation,
+functionalization, and the staged program boundary.</p>
+<div class="admonition warning">
+<p class="admonition-title">Work in Progress</p>
+<p>Advect is under active development. APIs may change.</p>
+</div>
+<h2 id="install">Install<a class="headerlink" href="#install" title="Permanent link">&para;</a></h2>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>python<span class="w"> </span>-m<span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span>advect
+</span></code></pre></div>
+<p>The single distribution installs the core, the differentiation transforms, the
+NumPy frontend, and the required Array API compatibility bridge. SciPy helpers
+and xarray labels are extras: <code>advect[scipy]</code>, <code>advect[xarray]</code>, or
+<code>advect[scientific]</code> for the pair.
+First-order host-autodiff bridges are installed individually with
+<code>advect[torch]</code>, <code>advect[jax]</code>, or <code>advect[autograd]</code>.</p>
+<h2 id="quickstart">Quickstart<a class="headerlink" href="#quickstart" title="Permanent link">&para;</a></h2>
+<p><code>grad</code> differentiates a plain Python function — press <code>[ run ]</code> to execute it
+in your browser:</p>
+<div class="language-python run highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="kn">import</span><span class="w"> </span><span class="nn">advect</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">ad</span>
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>
+</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>
+</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="k">def</span><span class="w"> </span><span class="nf">energy</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+</span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>    <span class="n">centered</span> <span class="o">=</span> <span class="n">x</span> <span class="o">-</span> <span class="n">np</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="n">x</span><span class="p">)</span>
+</span><span id="__span-1-8"><a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>    <span class="k">return</span> <span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">centered</span><span class="o">**</span><span class="mi">2</span><span class="p">)</span>
+</span><span id="__span-1-9"><a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>
+</span><span id="__span-1-10"><a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>
+</span><span id="__span-1-11"><a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="n">x</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">linspace</span><span class="p">(</span><span class="mf">0.0</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">,</span> <span class="mi">5</span><span class="p">)</span>
+</span><span id="__span-1-12"><a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a><span class="nb">print</span><span class="p">(</span><span class="n">ad</span><span class="o">.</span><span class="n">grad</span><span class="p">(</span><span class="n">energy</span><span class="p">)(</span><span class="n">x</span><span class="p">))</span>
+</span></code></pre></div>
+<p>The function is traced with its concrete inputs on every call, so ordinary
+Python control flow just works. When one signature runs repeatedly — or a
+program needs to be saved and loaded elsewhere — <code>stage</code> builds a durable,
+serializable graph from the same code.</p>
+<h2 id="where-next">Where next<a class="headerlink" href="#where-next" title="Permanent link">&para;</a></h2>
+<ul>
+<li><a href="tutorials/">Tutorials</a> — runnable pages from the first gradient to
+  custom primitives</li>
+<li><a href="architecture/">Architecture</a> — how the pieces fit together and why</li>
+<li><a href="api/">API Reference</a> — the public surface, auto-generated from
+  docstrings</li>
+<li>The <a href="playground/">playground</a> — <code>[2:playground]</code> in the bar — traces
+  expressions live and draws their derivative graphs</li>
+</ul>
+      </div>
+      
+
+      
+      <nav class="seealso" aria-label="Adjacent pages">
+        <span></span>
+        <span class="nn"><a href="tutorials/">tutorials →</a></span>
+      </nav>
+      
+      <p class="prompt">$ <span class="cursor">█</span></p>
+    </div></div>
+  </article>
+</div>
+
+<div class="overlay" id="help" role="dialog" aria-label="Keyboard shortcuts">
+  <h3>Keys</h3>
+  <table>
+    <tr><td class="kk">j k d u g G</td><td>scroll the page</td></tr>
+    <tr><td class="kk">n / p</td><td>next / previous page</td></tr>
+    <tr><td class="kk">e</td><td>toggle the docs tree pane</td></tr>
+    <tr><td class="kk">/</td><td>search the manual</td></tr>
+    <tr><td class="kk">2</td><td>open the playground</td></tr>
+    <tr><td class="kk">t</td><td>lp0 → dark → crt</td></tr>
+    <tr><td class="kk">?</td><td>close this help</td></tr>
+  </table>
+</div>
+
+<div class="overlay search-box" id="search" role="dialog" aria-label="Search">
+  <div class="search-in"><span class="ps">/</span><input id="searchq" spellcheck="false" autocomplete="off" aria-label="Search query" placeholder="search the manual…"></div>
+  <div class="search-hits" id="searchhits"></div>
+</div>
+
+<div class="bar">
+  <a href="." class="b" aria-current="true">[1:docs]</a>
+  <a href="playground/" class="b" id="wsplay">[2:playground]</a>
+  <span class="path hidesm">$ man advect</span>
+  <span class="grow"></span>
+  <button class="tbtn" id="treebtn" aria-label="Toggle documentation tree">[e] tree</button>
+  <button class="tbtn" id="searchbtn" aria-label="Search">[/] search</button>
+  <button class="tbtn hidesm" id="helpbtn" aria-label="Keyboard help">[?] keys</button>
+  <button class="tbtn" id="themeToggle" aria-label="Cycle display mode">[ mode: … ]</button>
+</div>
+
+<script src="js/theme.js"></script>
+<script src="js/examples.js"></script>
+<script src="search/main.js"></script>
+
+</body>
+</html>

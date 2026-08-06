@@ -1,0 +1,33 @@
+/* Subset webfonts committed under docs-theme/fonts/ (see scripts/subset_docs_fonts.py).
+   Source Code Pro © Adobe (OFL 1.1); Adwaita Mono © GNOME (OFL 1.1) — license texts
+   ship next to the font files. "Braille Mono" carries only U+2800-28FF for the
+   playground's dot-matrix plots and loads only when those glyphs render. */
+@font-face {
+  font-family: "Source Code Pro";
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  src: url(../fonts/scp-regular.woff2) format("woff2");
+}
+@font-face {
+  font-family: "Source Code Pro";
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+  src: url(../fonts/scp-italic.woff2) format("woff2");
+}
+@font-face {
+  font-family: "Source Code Pro";
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+  src: url(../fonts/scp-bold.woff2) format("woff2");
+}
+@font-face {
+  font-family: "Braille Mono";
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+2800-28FF;
+  src: url(../fonts/braille-mono.woff2) format("woff2");
+}

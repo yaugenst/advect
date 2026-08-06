@@ -1,0 +1,393 @@
+<!doctype html><html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="A small extensible automatic-differentiation core for Python">
+<link rel="canonical" href="https://yaugenst.github.io/advect/dev/api/primitives/">
+<title>primitives(3) · advect</title>
+<link rel="icon" href="../../img/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../css/fonts.css">
+<link rel="stylesheet" href="../../css/theme.css?v=86c97aee1cb2">
+<link rel="stylesheet" href="../../assets/_mkdocstrings.css">
+<script>
+var base_url = "../..";
+/* pre-paint: apply persisted display mode and tree state to avoid a theme
+   flash and the tree pane animating open on every navigation */
+(function () {
+  var m = null, t = null;
+  try {
+    m = localStorage.getItem("advect-mode");
+    t = localStorage.getItem("advect-tree");
+  } catch (e) { /* private mode */ }
+  if (m) document.documentElement.dataset.theme = m;
+  var open = t === null ? window.innerWidth > 1100 : t === "1";
+  if (open) document.documentElement.classList.add("tree-open");
+})();
+</script>
+
+</head>
+<body data-base="../..">
+
+<div class="desktop" id="desktop">
+  <aside class="tile treetile" id="treetile" aria-label="Documentation tree" aria-hidden="true">
+    <span class="ptitle"><span class="pn">tree</span> docs/</span>
+    <pre class="tree"><span class="trow">docs/</span><span class="trow" style="--ti:4ch"><span class="dim">├── </span><a href="../.." title="Home">index</a></span><span class="trow" style="--ti:4ch"><span class="dim">├── </span>tutorials/</span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/" title="Tutorials">index</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/gradients/" title="Gradients and Pytrees">gradients</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/control-flow/" title="Control Flow and Mutation">control-flow</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/staging/" title="Staging and Serialization">staging</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/interop/" title="Providers and Interop">interop</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/primitives/" title="Custom Primitives">primitives</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   └── </span><a href="../../tutorials/debugging/" title="Debugging">debugging</a></span><span class="trow" style="--ti:4ch"><span class="dim">├── </span><a href="../../architecture/" title="Architecture">architecture</a></span><span class="trow" style="--ti:4ch"><span class="dim">├── </span>compatibility/</span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../compatibility/" title="Compatibility">index</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../compatibility/numpy/" title="NumPy">numpy</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../compatibility/array-api/" title="Array API">array-api</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../compatibility/cupy/" title="CuPy">cupy</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../compatibility/scipy/" title="SciPy">scipy</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   └── </span><a href="../../compatibility/xarray/" title="xarray">xarray</a></span><span class="trow" style="--ti:4ch"><span class="dim">└── </span>api-reference/</span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="../" title="API Reference">index</a></span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="../interop/" title="Host Autodiff Interop">interop</a></span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="../transforms/" title="Transforms">transforms</a></span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="../staging/" title="Staging">staging</a></span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="./" class="cur" aria-current="page" title="Primitives">primitives</a></span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="../arrays/" title="Arrays and Structure">arrays</a></span><span class="trow" style="--ti:8ch"><span class="dim">    └── </span><a href="../errors/" title="Errors">errors</a></span></pre>
+  </aside>
+
+  <article class="tile manwin" aria-label="Manual page">
+    <span class="ptitle"><span class="pn">man</span> advect/api/primitives</span>
+    <div class="manscroll" id="manscroll"><div class="mancol">
+      <div class="manhead"><span>PRIMITIVES(3)</span><span class="mid">Library Calls</span><span>PRIMITIVES(3)</span></div>
+      <div class="rule">────────────────────────────────────────────────────────────────────────────────────────</div>
+
+      
+      <div class="md">
+        
+        <h1 id="primitives">Primitives<a class="headerlink" href="#primitives" title="Permanent link">&para;</a></h1>
+<p>Authoring surface for custom operations: one implementation, abstract
+evaluation, a JVP, and an optional explicit transpose. See the
+<a href="https://github.com/yaugenst/advect/blob/main/design/decisions/2026-07-27-primitive-conformance-testing.md">conformance testing ADR</a>
+for the law battery every registered primitive must pass.</p>
+
+
+<div class="doc doc-object doc-function">
+
+
+<h2 id="advect.primitive" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">primitive</span>
+
+
+<a href="#advect.primitive" class="headerlink" title="Permanent link">&para;</a></h2>
+          <div class="doc-overloads">
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">primitive</span><span class="p">(</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    <span class="n">function</span><span class="p">:</span> <span class="n"><span title="collections.abc.Callable">Callable</span></span><span class="p">[</span><span class="n"><span title="advect.core._primitive.primitive[**CallP]">CallP</span></span><span class="p">,</span> <span class="n"><span title="advect.core._primitive.primitive[ResultT]">ResultT</span></span><span class="p">],</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>    <span class="o">/</span><span class="p">,</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>    <span class="o">*</span><span class="p">,</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>    <span class="n">name</span><span class="p">:</span> <span class="n"><span title="str">str</span></span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>    <span class="n">static_argnames</span><span class="p">:</span> <span class="n"><span title="tuple">tuple</span></span><span class="p">[</span><span class="n"><span title="str">str</span></span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">=</span> <span class="p">(),</span>
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>    <span class="n">nondiff_argnames</span><span class="p">:</span> <span class="n"><span title="tuple">tuple</span></span><span class="p">[</span><span class="n"><span title="str">str</span></span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">=</span> <span class="p">(),</span>
+</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>    <span class="n">residual</span><span class="p">:</span> <span class="n"><span title="bool">bool</span></span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="n"><span title="advect.core._primitive.Primitive">Primitive</span></span><span class="p">[</span><span class="n"><span title="advect.core._primitive.primitive[**CallP]">CallP</span></span><span class="p">,</span> <span class="n"><span title="advect.core._primitive.primitive[ResultT]">ResultT</span></span><span class="p">]</span>
+</span></code></pre></div><div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">primitive</span><span class="p">(</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    <span class="n">function</span><span class="p">:</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>    <span class="o">/</span><span class="p">,</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>    <span class="o">*</span><span class="p">,</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>    <span class="n">name</span><span class="p">:</span> <span class="n"><span title="str">str</span></span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>    <span class="n">static_argnames</span><span class="p">:</span> <span class="n"><span title="tuple">tuple</span></span><span class="p">[</span><span class="n"><span title="str">str</span></span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">=</span> <span class="p">(),</span>
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>    <span class="n">nondiff_argnames</span><span class="p">:</span> <span class="n"><span title="tuple">tuple</span></span><span class="p">[</span><span class="n"><span title="str">str</span></span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">=</span> <span class="p">(),</span>
+</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>    <span class="n">residual</span><span class="p">:</span> <span class="n"><span title="bool">bool</span></span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="n"><span title="collections.abc.Callable">Callable</span></span><span class="p">[</span>
+</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>    <span class="p">[</span><span class="n"><span title="collections.abc.Callable">Callable</span></span><span class="p">[</span><span class="n"><span title="advect.core._primitive.primitive[**CallP]">CallP</span></span><span class="p">,</span> <span class="n"><span title="advect.core._primitive.primitive[ResultT]">ResultT</span></span><span class="p">]],</span> <span class="n"><span title="advect.core._primitive.Primitive">Primitive</span></span><span class="p">[</span><span class="n"><span title="advect.core._primitive.primitive[**CallP]">CallP</span></span><span class="p">,</span> <span class="n"><span title="advect.core._primitive.primitive[ResultT]">ResultT</span></span><span class="p">]</span>
+</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="p">]</span>
+</span></code></pre></div>          </div>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">primitive</span><span class="p">(</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    <span class="n">function</span><span class="p">:</span> <span class="n"><span title="collections.abc.Callable">Callable</span></span><span class="p">[</span><span class="n"><span title="advect.core._primitive.primitive[**CallP]">CallP</span></span><span class="p">,</span> <span class="n"><span title="advect.core._primitive.primitive[ResultT]">ResultT</span></span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>    <span class="o">/</span><span class="p">,</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>    <span class="o">*</span><span class="p">,</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>    <span class="n">name</span><span class="p">:</span> <span class="n"><span title="str">str</span></span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>    <span class="n">static_argnames</span><span class="p">:</span> <span class="n"><span title="tuple">tuple</span></span><span class="p">[</span><span class="n"><span title="str">str</span></span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">=</span> <span class="p">(),</span>
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>    <span class="n">nondiff_argnames</span><span class="p">:</span> <span class="n"><span title="tuple">tuple</span></span><span class="p">[</span><span class="n"><span title="str">str</span></span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">=</span> <span class="p">(),</span>
+</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>    <span class="n">residual</span><span class="p">:</span> <span class="n"><span title="bool">bool</span></span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="p">(</span>
+</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>    <span class="n"><span title="advect.core._primitive.Primitive">Primitive</span></span><span class="p">[</span><span class="n"><span title="advect.core._primitive.primitive[**CallP]">CallP</span></span><span class="p">,</span> <span class="n"><span title="advect.core._primitive.primitive[ResultT]">ResultT</span></span><span class="p">]</span>
+</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>    <span class="o">|</span> <span class="n"><span title="collections.abc.Callable">Callable</span></span><span class="p">[</span>
+</span><span id="__span-0-12"><a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>        <span class="p">[</span><span class="n"><span title="collections.abc.Callable">Callable</span></span><span class="p">[</span><span class="n"><span title="advect.core._primitive.primitive[**CallP]">CallP</span></span><span class="p">,</span> <span class="n"><span title="advect.core._primitive.primitive[ResultT]">ResultT</span></span><span class="p">]],</span>
+</span><span id="__span-0-13"><a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>        <span class="n"><span title="advect.core._primitive.Primitive">Primitive</span></span><span class="p">[</span><span class="n"><span title="advect.core._primitive.primitive[**CallP]">CallP</span></span><span class="p">,</span> <span class="n"><span title="advect.core._primitive.primitive[ResultT]">ResultT</span></span><span class="p">],</span>
+</span><span id="__span-0-14"><a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>    <span class="p">]</span>
+</span><span id="__span-0-15"><a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a><span class="p">)</span>
+</span></code></pre></div>
+
+    <div class="doc doc-contents first">
+
+        <p>Define one atomic operation from its concrete implementation.</p>
+<p>Derivative rules are ordinary traceable functions attached to the returned
+primitive handle.</p>
+
+
+<p><span class="doc-section-title">Examples:</span></p>
+    <div class="language-pycon highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="gp">&gt;&gt;&gt; </span><span class="kn">import</span><span class="w"> </span><span class="nn">advect</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">ad</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="gp">&gt;&gt;&gt; </span><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="gp">&gt;&gt;&gt; </span><span class="nd">@ad</span><span class="o">.</span><span class="n">primitive</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="s2">&quot;examples.cube&quot;</span><span class="p">)</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="gp">... </span><span class="k">def</span><span class="w"> </span><span class="nf">cube</span><span class="p">(</span><span class="n">value</span><span class="p">):</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="gp">... </span>    <span class="k">return</span> <span class="n">value</span><span class="o">**</span><span class="mi">3</span>
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="gp">&gt;&gt;&gt; </span><span class="nd">@cube</span><span class="o">.</span><span class="n">def_jvp</span>
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="gp">... </span><span class="k">def</span><span class="w"> </span><span class="nf">cube_jvp</span><span class="p">(</span><span class="n">output</span><span class="p">,</span> <span class="n">primals</span><span class="p">,</span> <span class="n">tangents</span><span class="p">):</span>
+</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="gp">... </span>    <span class="k">del</span> <span class="n">output</span>
+</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="gp">... </span>    <span class="p">(</span><span class="n">value</span><span class="p">,),</span> <span class="p">(</span><span class="n">tangent</span><span class="p">,)</span> <span class="o">=</span> <span class="n">primals</span><span class="p">,</span> <span class="n">tangents</span>
+</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="gp">... </span>    <span class="k">return</span> <span class="mi">3</span> <span class="o">*</span> <span class="n">value</span><span class="o">**</span><span class="mi">2</span> <span class="o">*</span> <span class="n">tangent</span>
+</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="gp">&gt;&gt;&gt; </span><span class="n">ad</span><span class="o">.</span><span class="n">grad</span><span class="p">(</span><span class="k">lambda</span> <span class="n">value</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">cube</span><span class="p">(</span><span class="n">value</span><span class="p">)))(</span><span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="mf">2.0</span><span class="p">]))</span><span class="o">.</span><span class="n">tolist</span><span class="p">()</span>
+</span><span id="__span-0-12"><a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="go">[12.0]</span>
+</span></code></pre></div>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="advect.PrimitiveResult" class="doc doc-heading">
+            <span class="doc doc-object-name doc-class-name">PrimitiveResult</span>
+
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
+  </span>
+
+<a href="#advect.PrimitiveResult" class="headerlink" title="Permanent link">&para;</a></h2>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">PrimitiveResult</span><span class="p">(</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    <span class="n">output</span><span class="p">:</span> <span class="n"><span title="advect.core._residual.PrimitiveResult[R]">R</span></span><span class="p">,</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>    <span class="n">residual</span><span class="p">:</span> <span class="n"><span title="typing.Any">Any</span></span><span class="p">,</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>    <span class="n">release</span><span class="p">:</span> <span class="n"><span title="collections.abc.Callable">Callable</span></span><span class="p">[[</span><span class="n"><span title="typing.Any">Any</span></span><span class="p">],</span> <span class="kc">None</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="p">)</span>
+</span></code></pre></div>
+
+    <div class="doc doc-contents first">
+
+
+
+        <p>A primitive's public output and private same-invocation residual.</p>
+<p><code>output</code> is the only value returned to the caller. Advect retains
+<code>residual</code> for the matching derivative invocation and calls <code>release</code>
+exactly once when that invocation state is discarded. The output must
+remain valid after the residual is released.</p>
+
+
+<p><span class="doc-section-title">Examples:</span></p>
+    <div class="language-pycon highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="gp">&gt;&gt;&gt; </span><span class="kn">import</span><span class="w"> </span><span class="nn">advect</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">ad</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="gp">&gt;&gt;&gt; </span><span class="n">result</span> <span class="o">=</span> <span class="n">ad</span><span class="o">.</span><span class="n">PrimitiveResult</span><span class="p">(</span><span class="n">output</span><span class="o">=</span><span class="mf">3.0</span><span class="p">,</span> <span class="n">residual</span><span class="o">=</span><span class="s2">&quot;cached state&quot;</span><span class="p">)</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="gp">&gt;&gt;&gt; </span><span class="n">result</span><span class="o">.</span><span class="n">output</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="go">3.0</span>
+</span></code></pre></div>
+
+
+
+
+
+
+
+
+
+
+
+  <div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="advect.AbstractValue" class="doc doc-heading">
+            <span class="doc doc-object-name doc-class-name">AbstractValue</span>
+
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
+  </span>
+
+<a href="#advect.AbstractValue" class="headerlink" title="Permanent link">&para;</a></h2>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">AbstractValue</span><span class="p">(</span><span class="n">spec</span><span class="p">:</span> <span class="n"><a class="autorefs autorefs-internal" title="ArraySpec
+
+
+  
+      dataclass
+   (advect.core._abstract_model.ArraySpec)" href="../staging/#advect.ArraySpec">ArraySpec</a></span><span class="p">)</span>
+</span></code></pre></div>
+
+    <div class="doc doc-contents first">
+
+
+
+        <p>A payload-free value passed to custom primitive abstract rules.</p>
+
+
+<p><span class="doc-section-title">Examples:</span></p>
+    <div class="language-pycon highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="gp">&gt;&gt;&gt; </span><span class="kn">import</span><span class="w"> </span><span class="nn">advect</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">ad</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="gp">&gt;&gt;&gt; </span><span class="n">abstract</span> <span class="o">=</span> <span class="n">ad</span><span class="o">.</span><span class="n">AbstractValue</span><span class="p">(</span><span class="n">ad</span><span class="o">.</span><span class="n">ArraySpec</span><span class="p">((</span><span class="mi">4</span><span class="p">,),</span> <span class="s2">&quot;float32&quot;</span><span class="p">))</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="gp">&gt;&gt;&gt; </span><span class="n">abstract</span><span class="o">.</span><span class="n">spec</span><span class="o">.</span><span class="n">shape</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="go">(4,)</span>
+</span></code></pre></div>
+
+
+
+
+
+
+
+
+
+
+
+  <div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h2 id="advect.testing.check_primitive" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">check_primitive</span>
+
+
+<a href="#advect.testing.check_primitive" class="headerlink" title="Permanent link">&para;</a></h2>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">check_primitive</span><span class="p">(</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    <span class="n">primitive</span><span class="p">:</span> <span class="n"><span title="advect.core._primitive.Primitive">Primitive</span></span><span class="p">[</span><span class="n"><span title="typing.Any">Any</span></span><span class="p">,</span> <span class="n"><span title="typing.Any">Any</span></span><span class="p">],</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>    <span class="o">*</span><span class="p">,</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>    <span class="n">primals</span><span class="p">:</span> <span class="n"><span title="tuple">tuple</span></span><span class="p">[</span><span class="n"><span title="typing.Any">Any</span></span><span class="p">,</span> <span class="o">...</span><span class="p">],</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>    <span class="n">static</span><span class="p">:</span> <span class="n"><span title="collections.abc.Mapping">Mapping</span></span><span class="p">[</span><span class="n"><span title="str">str</span></span><span class="p">,</span> <span class="n"><span title="typing.Any">Any</span></span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>    <span class="n">tangents</span><span class="p">:</span> <span class="n"><span title="tuple">tuple</span></span><span class="p">[</span><span class="n"><span title="typing.Any">Any</span></span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>    <span class="n">cotangent</span><span class="p">:</span> <span class="n"><span title="typing.Any">Any</span></span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>    <span class="n">check</span><span class="p">:</span> <span class="n"><span title="tuple">tuple</span></span><span class="p">[</span><span class="n"><span title="str">str</span></span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span>
+</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>        <span class="s2">&quot;abstract&quot;</span><span class="p">,</span>
+</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>        <span class="s2">&quot;jvp&quot;</span><span class="p">,</span>
+</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>        <span class="s2">&quot;transpose&quot;</span><span class="p">,</span>
+</span><span id="__span-0-12"><a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>    <span class="p">),</span>
+</span><span id="__span-0-13"><a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>    <span class="n">epsilon</span><span class="p">:</span> <span class="n"><span title="float">float</span></span> <span class="o">=</span> <span class="mf">0.0001</span><span class="p">,</span>
+</span><span id="__span-0-14"><a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>    <span class="n">atol</span><span class="p">:</span> <span class="n"><span title="float">float</span></span> <span class="o">=</span> <span class="mf">1e-05</span><span class="p">,</span>
+</span><span id="__span-0-15"><a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>    <span class="n">rtol</span><span class="p">:</span> <span class="n"><span title="float">float</span></span> <span class="o">=</span> <span class="mf">0.0001</span><span class="p">,</span>
+</span><span id="__span-0-16"><a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span>
+</span></code></pre></div>
+
+    <div class="doc doc-contents first">
+
+        <p>Run selected author checks for one representative primitive invocation.</p>
+<p>The default <code>("abstract", "jvp", "transpose")</code> is a first-order smoke
+check. Authors of a serializable primitive should normally run
+<code>("abstract", "jvp", "transpose", "nested", "stage")</code> for every
+materially different shape, dtype, and static-argument form. Add
+<code>"complex"</code> in a separate call whose primals are complex when the
+primitive supports complex values.</p>
+<p>The stage check executes both the compiled and serialized program, compares
+output structure, shape, and dtype exactly, and verifies that inputs remain
+unchanged. Repository-wide support still requires the conformance inventory;
+this helper intentionally does not import Hypothesis or claim exhaustive
+coverage from one sample.</p>
+
+
+    </div>
+
+</div><h2 id="composed-functions">Composed functions<a class="headerlink" href="#composed-functions" title="Permanent link">&para;</a></h2>
+<p>Use the whole-function checker first when a finite gradient looks suspicious.
+It performs a directional finite-difference sweep and checks the reverse
+gradient; <code>check_primitive</code> remains the narrower authoring contract for one
+extension.</p>
+
+
+<div class="doc doc-object doc-function">
+
+
+<h2 id="advect.testing.check_gradient" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">check_gradient</span>
+
+
+<a href="#advect.testing.check_gradient" class="headerlink" title="Permanent link">&para;</a></h2>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">check_gradient</span><span class="p">(</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    <span class="n">function</span><span class="p">:</span> <span class="n"><span title="collections.abc.Callable">Callable</span></span><span class="p">[</span><span class="o">...</span><span class="p">,</span> <span class="n"><span title="typing.Any">Any</span></span><span class="p">],</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>    <span class="n">primal</span><span class="p">:</span> <span class="n"><span title="typing.Any">Any</span></span><span class="p">,</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>    <span class="o">*</span><span class="p">,</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>    <span class="n">tangent</span><span class="p">:</span> <span class="n"><span title="typing.Any">Any</span></span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>    <span class="n">epsilons</span><span class="p">:</span> <span class="n"><span title="collections.abc.Sequence">Sequence</span></span><span class="p">[</span><span class="n"><span title="float">float</span></span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span>
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>        <span class="mf">0.01</span><span class="p">,</span>
+</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>        <span class="mf">0.001</span><span class="p">,</span>
+</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>        <span class="mf">0.0001</span><span class="p">,</span>
+</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>        <span class="mf">1e-05</span><span class="p">,</span>
+</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>    <span class="p">),</span>
+</span><span id="__span-0-12"><a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>    <span class="n">atol</span><span class="p">:</span> <span class="n"><span title="float">float</span></span> <span class="o">=</span> <span class="mf">1e-05</span><span class="p">,</span>
+</span><span id="__span-0-13"><a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>    <span class="n">rtol</span><span class="p">:</span> <span class="n"><span title="float">float</span></span> <span class="o">=</span> <span class="mf">0.0001</span><span class="p">,</span>
+</span><span id="__span-0-14"><a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span>
+</span></code></pre></div>
+
+    <div class="doc doc-contents first">
+
+        <p>Check a unary composed function against directional differences.</p>
+<p>The check compares Advect's whole-function JVP with a central finite-
+difference sweep, then checks the reverse gradient against the same
+directional derivative. It checks consistency with the function that
+actually ran, not whether that function encodes the intended mathematics.</p>
+
+
+    </div>
+
+</div>
+      </div>
+      
+
+      
+      <nav class="seealso" aria-label="Adjacent pages">
+        <span><a href="../staging/">← staging</a></span>
+        <span class="nn"><a href="../arrays/">arrays and structure →</a></span>
+      </nav>
+      
+      <p class="prompt">$ <span class="cursor">█</span></p>
+    </div></div>
+  </article>
+</div>
+
+<div class="overlay" id="help" role="dialog" aria-label="Keyboard shortcuts">
+  <h3>Keys</h3>
+  <table>
+    <tr><td class="kk">j k d u g G</td><td>scroll the page</td></tr>
+    <tr><td class="kk">n / p</td><td>next / previous page</td></tr>
+    <tr><td class="kk">e</td><td>toggle the docs tree pane</td></tr>
+    <tr><td class="kk">/</td><td>search the manual</td></tr>
+    <tr><td class="kk">2</td><td>open the playground</td></tr>
+    <tr><td class="kk">t</td><td>lp0 → dark → crt</td></tr>
+    <tr><td class="kk">?</td><td>close this help</td></tr>
+  </table>
+</div>
+
+<div class="overlay search-box" id="search" role="dialog" aria-label="Search">
+  <div class="search-in"><span class="ps">/</span><input id="searchq" spellcheck="false" autocomplete="off" aria-label="Search query" placeholder="search the manual…"></div>
+  <div class="search-hits" id="searchhits"></div>
+</div>
+
+<div class="bar">
+  <a href="../.." class="b" aria-current="true">[1:docs]</a>
+  <a href="../../playground/" class="b" id="wsplay">[2:playground]</a>
+  <span class="path hidesm">$ man advect/api/primitives</span>
+  <span class="grow"></span>
+  <button class="tbtn" id="treebtn" aria-label="Toggle documentation tree">[e] tree</button>
+  <button class="tbtn" id="searchbtn" aria-label="Search">[/] search</button>
+  <button class="tbtn hidesm" id="helpbtn" aria-label="Keyboard help">[?] keys</button>
+  <button class="tbtn" id="themeToggle" aria-label="Cycle display mode">[ mode: … ]</button>
+</div>
+
+<script src="../../js/theme.js"></script>
+<script src="../../js/examples.js"></script>
+<script src="../../search/main.js"></script>
+
+</body>
+</html>

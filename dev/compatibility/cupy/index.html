@@ -1,0 +1,1903 @@
+<!doctype html><html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="A small extensible automatic-differentiation core for Python">
+<link rel="canonical" href="https://yaugenst.github.io/advect/dev/compatibility/cupy/">
+<title>cupy(7) · advect</title>
+<link rel="icon" href="../../img/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../css/fonts.css">
+<link rel="stylesheet" href="../../css/theme.css?v=86c97aee1cb2">
+<link rel="stylesheet" href="../../assets/_mkdocstrings.css">
+<script>
+var base_url = "../..";
+/* pre-paint: apply persisted display mode and tree state to avoid a theme
+   flash and the tree pane animating open on every navigation */
+(function () {
+  var m = null, t = null;
+  try {
+    m = localStorage.getItem("advect-mode");
+    t = localStorage.getItem("advect-tree");
+  } catch (e) { /* private mode */ }
+  if (m) document.documentElement.dataset.theme = m;
+  var open = t === null ? window.innerWidth > 1100 : t === "1";
+  if (open) document.documentElement.classList.add("tree-open");
+})();
+</script>
+
+</head>
+<body data-base="../..">
+
+<div class="desktop" id="desktop">
+  <aside class="tile treetile" id="treetile" aria-label="Documentation tree" aria-hidden="true">
+    <span class="ptitle"><span class="pn">tree</span> docs/</span>
+    <pre class="tree"><span class="trow">docs/</span><span class="trow" style="--ti:4ch"><span class="dim">├── </span><a href="../.." title="Home">index</a></span><span class="trow" style="--ti:4ch"><span class="dim">├── </span>tutorials/</span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/" title="Tutorials">index</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/gradients/" title="Gradients and Pytrees">gradients</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/control-flow/" title="Control Flow and Mutation">control-flow</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/staging/" title="Staging and Serialization">staging</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/interop/" title="Providers and Interop">interop</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/primitives/" title="Custom Primitives">primitives</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   └── </span><a href="../../tutorials/debugging/" title="Debugging">debugging</a></span><span class="trow" style="--ti:4ch"><span class="dim">├── </span><a href="../../architecture/" title="Architecture">architecture</a></span><span class="trow" style="--ti:4ch"><span class="dim">├── </span>compatibility/</span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../" title="Compatibility">index</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../numpy/" title="NumPy">numpy</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../array-api/" title="Array API">array-api</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="./" class="cur" aria-current="page" title="CuPy">cupy</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../scipy/" title="SciPy">scipy</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   └── </span><a href="../xarray/" title="xarray">xarray</a></span><span class="trow" style="--ti:4ch"><span class="dim">└── </span>api-reference/</span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="../../api/" title="API Reference">index</a></span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="../../api/interop/" title="Host Autodiff Interop">interop</a></span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="../../api/transforms/" title="Transforms">transforms</a></span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="../../api/staging/" title="Staging">staging</a></span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="../../api/primitives/" title="Primitives">primitives</a></span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="../../api/arrays/" title="Arrays and Structure">arrays</a></span><span class="trow" style="--ti:8ch"><span class="dim">    └── </span><a href="../../api/errors/" title="Errors">errors</a></span></pre>
+  </aside>
+
+  <article class="tile manwin" aria-label="Manual page">
+    <span class="ptitle"><span class="pn">man</span> advect/compatibility/cupy</span>
+    <div class="manscroll" id="manscroll"><div class="mancol">
+      <div class="manhead"><span>CUPY(7)</span><span class="mid">Miscellanea</span><span>CUPY(7)</span></div>
+      <div class="rule">────────────────────────────────────────────────────────────────────────────────────────</div>
+
+      
+      <div class="md">
+        
+        <h1 id="cupy">CuPy<a class="headerlink" href="#cupy" title="Permanent link">&para;</a></h1>
+<!-- Generated by `uv run python -m scripts.report_extension_support --format markdown --output docs/compatibility`; do not edit by hand. -->
+
+<p>CuPy is Advect's designated single-device GPU provider for the <a href="../array-api/">Array API frontend</a>. Pass CuPy arrays to a transform and write numerical code against the traced array's namespace; the built-in compatibility fallback routes execution through CuPy while derivative seeds, temporaries, and captured constants stay on the device.</p>
+<p>The configurations below are source records. A clean-worktree local run covers all three revisions, but no immutable artifact URL is published, so it does not verify a release CuPy support claim. Run the gate on the final candidate and retain its complete evidence before publishing one.</p>
+<p>This is an Array API provider contract, not interception of arbitrary <code>cupy.*</code> calls. The function spellings below are methods of the namespace returned by a traced array.</p>
+<h2 id="recorded-configurations">Recorded configurations<a class="headerlink" href="#recorded-configurations" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>CuPy</th>
+<th>CUDA package</th>
+<th>CUDA runtime</th>
+<th>NVIDIA driver</th>
+<th>Device</th>
+<th>Recorded revisions</th>
+<th>Evidence status</th>
+<th>Source record</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>14.0.1</code></td>
+<td><code>cupy-cuda13x</code></td>
+<td><code>13.0</code></td>
+<td><code>610.43.03</code></td>
+<td>NVIDIA GeForce RTX 4080 SUPER</td>
+<td><code>2022.12</code>, <code>2023.12</code>, <code>2024.12</code></td>
+<td>unpublished: no immutable artifact URL</td>
+<td><a href="https://github.com/yaugenst/advect/commit/8112c7add918b31e31985a4d60dc653f18990fdb"><code>8112c7add918</code></a></td>
+</tr>
+<tr>
+<td><code>14.1.1</code></td>
+<td><code>cupy-cuda13x</code></td>
+<td><code>13.2</code></td>
+<td><code>610.43.03</code></td>
+<td>NVIDIA GeForce RTX 4080 SUPER</td>
+<td><code>2022.12</code>, <code>2023.12</code>, <code>2024.12</code></td>
+<td>unpublished: no immutable artifact URL</td>
+<td><a href="https://github.com/yaugenst/advect/commit/8112c7add918b31e31985a4d60dc653f18990fdb"><code>8112c7add918</code></a></td>
+</tr>
+</tbody>
+</table>
+<table>
+<thead>
+<tr>
+<th>Array API revision</th>
+<th>CuPy status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>2022.12</code></td>
+<td>unpublished; attach the final-candidate GPU gate</td>
+</tr>
+<tr>
+<td><code>2023.12</code></td>
+<td>unpublished; attach the final-candidate GPU gate</td>
+</tr>
+<tr>
+<td><code>2024.12</code></td>
+<td>unpublished; attach the final-candidate GPU gate</td>
+</tr>
+</tbody>
+</table>
+<p>A verified provider qualification would compose one retained configuration-level artifact with the runtime-derived Array API contract. It does not require a second CuPy-specific callable inventory.</p>
+<p>The GPU gate below is a representative end-to-end workload rather than one GPU case per table row. It checks dynamic value/gradient, JVP, VJP, staged and serialized derivatives, FFT, <code>linalg.solve</code>, captured host constants, copied-field mutation, weak scalars, dtype/device retention, and cross-provider numerical agreement. The separate donation gate checks device-memory savings and runtime acceptance.</p>
+<p>The mode columns are public support claims: <strong>yes</strong> means the callable's declared contract is supported end to end in that execution mode (dynamic tracing, abstract staging, serialized artifacts). Restricted implementation paths may remain internal, but registration alone does not promote an additional upstream spelling into this catalog.</p>
+<p><code>Abstract=yes</code> means that a primitive has a standalone abstract rule. A frontend may still be staged by an explicit method or composite lowering when its displayed primitive does not.</p>
+<h2 id="functions">Functions<a class="headerlink" href="#functions" title="Permanent link">&para;</a></h2>
+<p>The 169 rows below are the Array API namespace surface selected for CuPy qualification. They are not a release provider pass claim until the configuration gate has a published immutable artifact and digest.</p>
+<details class="compat-columns">
+<summary>capability details</summary>
+</details>
+
+<table>
+<thead>
+<tr>
+<th>Function</th>
+<th>Lowers to</th>
+<th style="text-align: center;">Dynamic</th>
+<th style="text-align: center;">Staged</th>
+<th style="text-align: center;">Serialized</th>
+<th style="text-align: center;">JVP</th>
+<th style="text-align: center;">VJP</th>
+<th style="text-align: center;">Abstract</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>abs</code></td>
+<td><code>array.absolute</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>acos</code></td>
+<td><code>array.arccos</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>acosh</code></td>
+<td><code>array.arccosh</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>add</code></td>
+<td><code>array.add</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>all</code></td>
+<td><code>array.all</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>any</code></td>
+<td><code>array.any</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>arange</code></td>
+<td><code>array.arange</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>argmax</code></td>
+<td><code>array.argmax</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>argmin</code></td>
+<td><code>array.argmin</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>argsort</code></td>
+<td><code>array.argsort</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>asarray</code></td>
+<td><code>array.astype</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>asin</code></td>
+<td><code>array.arcsin</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>asinh</code></td>
+<td><code>array.arcsinh</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>astype</code></td>
+<td><code>array.astype</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>atan</code></td>
+<td><code>array.arctan</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>atan2</code></td>
+<td><code>array.arctan2</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>atanh</code></td>
+<td><code>array.arctanh</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>bitwise_and</code></td>
+<td><code>array.bitwise_and</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>bitwise_invert</code></td>
+<td><code>array.invert</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>bitwise_left_shift</code></td>
+<td><code>array.left_shift</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>bitwise_or</code></td>
+<td><code>array.bitwise_or</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>bitwise_right_shift</code></td>
+<td><code>array.right_shift</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>bitwise_xor</code></td>
+<td><code>array.bitwise_xor</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>broadcast_arrays</code></td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>broadcast_to</code></td>
+<td><code>array.broadcast_to</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>can_cast</code></td>
+<td>metadata</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+</tr>
+<tr>
+<td><code>ceil</code></td>
+<td><code>array.ceil</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>clip</code></td>
+<td><code>array.clip</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>concat</code></td>
+<td><code>array.concatenate</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>conj</code></td>
+<td><code>array.conjugate</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>copysign</code></td>
+<td><code>array.copysign</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>cos</code></td>
+<td><code>array.cos</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>cosh</code></td>
+<td><code>array.cosh</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>count_nonzero</code></td>
+<td><code>array.count_nonzero</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>cumulative_prod</code></td>
+<td><code>array.cumprod</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>cumulative_sum</code></td>
+<td><code>array.cumsum</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>diff</code></td>
+<td><code>array.diff</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>divide</code></td>
+<td><code>array.divide</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>empty</code></td>
+<td><code>array.empty</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>empty_like</code></td>
+<td><code>array.empty_like</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>equal</code></td>
+<td><code>array.equal</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>exp</code></td>
+<td><code>array.exp</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>expand_dims</code></td>
+<td><code>array.expand_dims</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>expm1</code></td>
+<td><code>array.expm1</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>eye</code></td>
+<td><code>array.eye</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>fft.fft</code></td>
+<td><code>array_ext.fft.fft</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>fft.fftfreq</code></td>
+<td><code>array_ext.fft.fftfreq</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>fft.fftn</code></td>
+<td><code>array_ext.fft.fftn</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>fft.fftshift</code></td>
+<td><code>array_ext.fft.fftshift</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>fft.hfft</code></td>
+<td><code>array_ext.fft.hfft</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>fft.ifft</code></td>
+<td><code>array_ext.fft.ifft</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>fft.ifftn</code></td>
+<td><code>array_ext.fft.ifftn</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>fft.ifftshift</code></td>
+<td><code>array_ext.fft.ifftshift</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>fft.ihfft</code></td>
+<td><code>array_ext.fft.ihfft</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>fft.irfft</code></td>
+<td><code>array_ext.fft.irfft</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>fft.irfftn</code></td>
+<td><code>array_ext.fft.irfftn</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>fft.rfft</code></td>
+<td><code>array_ext.fft.rfft</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>fft.rfftfreq</code></td>
+<td><code>array_ext.fft.rfftfreq</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>fft.rfftn</code></td>
+<td><code>array_ext.fft.rfftn</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>finfo</code></td>
+<td>metadata</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+</tr>
+<tr>
+<td><code>flip</code></td>
+<td><code>array.flip</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>floor</code></td>
+<td><code>array.floor</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>floor_divide</code></td>
+<td><code>array.floor_divide</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>full</code></td>
+<td><code>array.full</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>full_like</code></td>
+<td><code>array.full_like</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>greater</code></td>
+<td><code>array.greater</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>greater_equal</code></td>
+<td><code>array.greater_equal</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>hypot</code></td>
+<td><code>array.hypot</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>iinfo</code></td>
+<td>metadata</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+</tr>
+<tr>
+<td><code>imag</code></td>
+<td><code>array.imag</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>isdtype</code></td>
+<td>metadata</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+</tr>
+<tr>
+<td><code>isfinite</code></td>
+<td><code>array.isfinite</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>isinf</code></td>
+<td><code>array.isinf</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>isnan</code></td>
+<td><code>array.isnan</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>less</code></td>
+<td><code>array.less</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>less_equal</code></td>
+<td><code>array.less_equal</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>linalg.cholesky</code></td>
+<td><code>array_ext.linalg.cholesky</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>linalg.cross</code></td>
+<td><code>array.cross</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>linalg.det</code></td>
+<td><code>array_ext.linalg.det</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>linalg.diagonal</code></td>
+<td><code>array.diagonal</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>linalg.eigh</code></td>
+<td><code>array_ext.linalg.eigh</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>linalg.eigvalsh</code></td>
+<td><code>array_ext.linalg.eigvalsh</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>linalg.inv</code></td>
+<td><code>array_ext.linalg.inv</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>linalg.matmul</code></td>
+<td><code>array.matmul</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>linalg.matrix_norm</code></td>
+<td><code>array_ext.linalg.matrix_norm</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>linalg.matrix_power</code></td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>linalg.matrix_rank</code></td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>linalg.matrix_transpose</code></td>
+<td><code>array.transpose</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>linalg.outer</code></td>
+<td><code>array.outer</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>linalg.pinv</code></td>
+<td><code>array_ext.linalg.pinv</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>linalg.qr</code></td>
+<td><code>array_ext.linalg.qr</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>linalg.slogdet</code></td>
+<td><code>array_ext.linalg.slogdet</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>linalg.solve</code></td>
+<td><code>array_ext.linalg.solve</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>linalg.svd</code></td>
+<td><code>array_ext.linalg.svd</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>linalg.svdvals</code></td>
+<td><code>array_ext.linalg.svdvals</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>linalg.tensordot</code></td>
+<td><code>array.tensordot</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>linalg.trace</code></td>
+<td><code>array.trace</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>linalg.vecdot</code></td>
+<td><code>array.vecdot</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>linalg.vector_norm</code></td>
+<td><code>array_ext.linalg.vector_norm</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>linspace</code></td>
+<td><code>array.linspace</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>log</code></td>
+<td><code>array.log</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>log10</code></td>
+<td><code>array.log10</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>log1p</code></td>
+<td><code>array.log1p</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>log2</code></td>
+<td><code>array.log2</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>logaddexp</code></td>
+<td><code>array.logaddexp</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>logical_and</code></td>
+<td><code>array.logical_and</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>logical_not</code></td>
+<td><code>array.logical_not</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>logical_or</code></td>
+<td><code>array.logical_or</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>logical_xor</code></td>
+<td><code>array.logical_xor</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>matmul</code></td>
+<td><code>array.matmul</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>matrix_transpose</code></td>
+<td><code>array.transpose</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>max</code></td>
+<td><code>array.max</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>maximum</code></td>
+<td><code>array.maximum</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>mean</code></td>
+<td><code>array.mean</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>meshgrid</code></td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>min</code></td>
+<td><code>array.min</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>minimum</code></td>
+<td><code>array.minimum</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>moveaxis</code></td>
+<td><code>array.moveaxis</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>multiply</code></td>
+<td><code>array.multiply</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>negative</code></td>
+<td><code>array.negative</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>nextafter</code></td>
+<td><code>array.nextafter</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>nonzero</code></td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">no</td>
+</tr>
+<tr>
+<td><code>not_equal</code></td>
+<td><code>array.not_equal</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>ones</code></td>
+<td><code>array.ones</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>ones_like</code></td>
+<td><code>array.ones_like</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>permute_dims</code></td>
+<td><code>array.transpose</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>positive</code></td>
+<td><code>array.positive</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>pow</code></td>
+<td><code>array.power</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>prod</code></td>
+<td><code>array.prod</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>real</code></td>
+<td><code>array.real</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>reciprocal</code></td>
+<td><code>array.reciprocal</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>remainder</code></td>
+<td><code>array.remainder</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>repeat</code></td>
+<td><code>array.repeat</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>reshape</code></td>
+<td><code>array.reshape</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>result_type</code></td>
+<td>metadata</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+</tr>
+<tr>
+<td><code>roll</code></td>
+<td><code>array.roll</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>round</code></td>
+<td><code>array.rint</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>searchsorted</code></td>
+<td><code>array.searchsorted</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>sign</code></td>
+<td><code>array.sign</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>signbit</code></td>
+<td><code>array.signbit</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>sin</code></td>
+<td><code>array.sin</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>sinh</code></td>
+<td><code>array.sinh</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>sort</code></td>
+<td><code>array.sort</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>sqrt</code></td>
+<td><code>array.sqrt</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>square</code></td>
+<td><code>array.square</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>squeeze</code></td>
+<td><code>array.squeeze</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>stack</code></td>
+<td><code>array.stack</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>std</code></td>
+<td><code>array.std</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>subtract</code></td>
+<td><code>array.subtract</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>sum</code></td>
+<td><code>array.sum</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>take</code></td>
+<td><code>array.take</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>take_along_axis</code></td>
+<td><code>array.take_along_axis</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>tan</code></td>
+<td><code>array.tan</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>tanh</code></td>
+<td><code>array.tanh</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>tensordot</code></td>
+<td><code>array.tensordot</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>tile</code></td>
+<td><code>array.tile</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>tril</code></td>
+<td><code>array.tril</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>triu</code></td>
+<td><code>array.triu</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>trunc</code></td>
+<td><code>array.trunc</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>unique_all</code></td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">no</td>
+</tr>
+<tr>
+<td><code>unique_counts</code></td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">no</td>
+</tr>
+<tr>
+<td><code>unique_inverse</code></td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">no</td>
+</tr>
+<tr>
+<td><code>unique_values</code></td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">no</td>
+</tr>
+<tr>
+<td><code>unstack</code></td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>var</code></td>
+<td><code>array.var</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>vecdot</code></td>
+<td><code>array.vecdot</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>where</code></td>
+<td><code>array.where</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>zeros</code></td>
+<td><code>array.zeros</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>zeros_like</code></td>
+<td><code>array.zeros_like</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+</tbody>
+</table>
+<h2 id="install">Install<a class="headerlink" href="#install" title="Permanent link">&para;</a></h2>
+<p>Install the CuPy wheel family matching the CUDA generation available to the host. The configurations above used <code>uv pip install 'cupy-cuda13x[ctk]==&lt;version&gt;'</code>; the <code>ctk</code> extra made the toolkit libraries visible inside each isolated environment. Advect does not select the CUDA package, and no Advect extra or registration import is required.</p>
+<h2 id="qualification-gate">Qualification gate<a class="headerlink" href="#qualification-gate" title="Permanent link">&para;</a></h2>
+<p>NumPy and <code>array-api-strict</code> run in automated CI. CuPy uses the same scientific provider workload on a CUDA host, followed by the staged donation acceptance gate. Run this once in each isolated environment containing the CuPy version being qualified:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">  </span>packages/advect/tests/advect_array_api_compat_tests/test_cupy_qualification.py
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="k">for</span><span class="w"> </span>version<span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="m">2022</span>.12<span class="w"> </span><span class="m">2023</span>.12<span class="w"> </span><span class="m">2024</span>.12<span class="p">;</span><span class="w"> </span><span class="k">do</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="w">  </span>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>-m<span class="w"> </span>scripts.qualify_array_providers<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="w">    </span>--array-api-version<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$version</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="w">    </span>--providers<span class="w"> </span>numpy,array-api-strict,cupy<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="w">    </span>--output<span class="w"> </span><span class="s2">&quot;artifacts/qualification/</span><span class="nv">$version</span><span class="s2">/array-provider-cupy.json&quot;</span>
+</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="k">done</span>
+</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>
+</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="nv">ADVECT_SOURCE_REVISION</span><span class="o">=</span><span class="s2">&quot;</span><span class="k">$(</span>git<span class="w"> </span>rev-parse<span class="w"> </span>HEAD<span class="k">)</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-0-12"><a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>-m<span class="w"> </span>scripts.bench_runtime_memory<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-0-13"><a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="w">  </span>--profile<span class="w"> </span>cupy-donation<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-0-14"><a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a><span class="w">  </span>--acceptance<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-0-15"><a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a><span class="w">  </span>--format<span class="w"> </span>json<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-0-16"><a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a><span class="w">  </span>--output<span class="w"> </span><span class="s2">&quot;artifacts/benchmarks/runtime-memory-cupy-donation.json&quot;</span>
+</span></code></pre></div>
+<p>The complete procedure, including donation evidence, lives in the <a href="https://github.com/yaugenst/advect/blob/main/design/implementation/array-provider-qualification.md">provider qualification record</a>.</p>
+<h2 id="boundaries">Boundaries<a class="headerlink" href="#boundaries" title="Permanent link">&para;</a></h2>
+<ul>
+<li>One process and one device; multi-GPU placement and stream control are not claimed.</li>
+<li>Arrays attached to another autodiff system (<code>requires_grad=True</code>) are rejected instead of composing two derivative tapes.</li>
+<li>Other GPU providers may resolve through the same compatibility path; that behavior is incidental until the provider passes the same gate.</li>
+</ul>
+      </div>
+      
+
+      
+      <nav class="seealso" aria-label="Adjacent pages">
+        <span><a href="../array-api/">← array api</a></span>
+        <span class="nn"><a href="../scipy/">scipy →</a></span>
+      </nav>
+      
+      <p class="prompt">$ <span class="cursor">█</span></p>
+    </div></div>
+  </article>
+</div>
+
+<div class="overlay" id="help" role="dialog" aria-label="Keyboard shortcuts">
+  <h3>Keys</h3>
+  <table>
+    <tr><td class="kk">j k d u g G</td><td>scroll the page</td></tr>
+    <tr><td class="kk">n / p</td><td>next / previous page</td></tr>
+    <tr><td class="kk">e</td><td>toggle the docs tree pane</td></tr>
+    <tr><td class="kk">/</td><td>search the manual</td></tr>
+    <tr><td class="kk">2</td><td>open the playground</td></tr>
+    <tr><td class="kk">t</td><td>lp0 → dark → crt</td></tr>
+    <tr><td class="kk">?</td><td>close this help</td></tr>
+  </table>
+</div>
+
+<div class="overlay search-box" id="search" role="dialog" aria-label="Search">
+  <div class="search-in"><span class="ps">/</span><input id="searchq" spellcheck="false" autocomplete="off" aria-label="Search query" placeholder="search the manual…"></div>
+  <div class="search-hits" id="searchhits"></div>
+</div>
+
+<div class="bar">
+  <a href="../.." class="b" aria-current="true">[1:docs]</a>
+  <a href="../../playground/" class="b" id="wsplay">[2:playground]</a>
+  <span class="path hidesm">$ man advect/compatibility/cupy</span>
+  <span class="grow"></span>
+  <button class="tbtn" id="treebtn" aria-label="Toggle documentation tree">[e] tree</button>
+  <button class="tbtn" id="searchbtn" aria-label="Search">[/] search</button>
+  <button class="tbtn hidesm" id="helpbtn" aria-label="Keyboard help">[?] keys</button>
+  <button class="tbtn" id="themeToggle" aria-label="Cycle display mode">[ mode: … ]</button>
+</div>
+
+<script src="../../js/theme.js"></script>
+<script src="../../js/examples.js"></script>
+<script src="../../search/main.js"></script>
+
+</body>
+</html>

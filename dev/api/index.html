@@ -1,0 +1,268 @@
+<!doctype html><html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="A small extensible automatic-differentiation core for Python">
+<link rel="canonical" href="https://yaugenst.github.io/advect/dev/api/">
+<title>api(3) · advect</title>
+<link rel="icon" href="../img/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../css/fonts.css">
+<link rel="stylesheet" href="../css/theme.css?v=86c97aee1cb2">
+<link rel="stylesheet" href="../assets/_mkdocstrings.css">
+<script>
+var base_url = "..";
+/* pre-paint: apply persisted display mode and tree state to avoid a theme
+   flash and the tree pane animating open on every navigation */
+(function () {
+  var m = null, t = null;
+  try {
+    m = localStorage.getItem("advect-mode");
+    t = localStorage.getItem("advect-tree");
+  } catch (e) { /* private mode */ }
+  if (m) document.documentElement.dataset.theme = m;
+  var open = t === null ? window.innerWidth > 1100 : t === "1";
+  if (open) document.documentElement.classList.add("tree-open");
+})();
+</script>
+
+</head>
+<body data-base="..">
+
+<div class="desktop" id="desktop">
+  <aside class="tile treetile" id="treetile" aria-label="Documentation tree" aria-hidden="true">
+    <span class="ptitle"><span class="pn">tree</span> docs/</span>
+    <pre class="tree"><span class="trow">docs/</span><span class="trow" style="--ti:4ch"><span class="dim">├── </span><a href=".." title="Home">index</a></span><span class="trow" style="--ti:4ch"><span class="dim">├── </span>tutorials/</span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../tutorials/" title="Tutorials">index</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../tutorials/gradients/" title="Gradients and Pytrees">gradients</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../tutorials/control-flow/" title="Control Flow and Mutation">control-flow</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../tutorials/staging/" title="Staging and Serialization">staging</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../tutorials/interop/" title="Providers and Interop">interop</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../tutorials/primitives/" title="Custom Primitives">primitives</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   └── </span><a href="../tutorials/debugging/" title="Debugging">debugging</a></span><span class="trow" style="--ti:4ch"><span class="dim">├── </span><a href="../architecture/" title="Architecture">architecture</a></span><span class="trow" style="--ti:4ch"><span class="dim">├── </span>compatibility/</span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../compatibility/" title="Compatibility">index</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../compatibility/numpy/" title="NumPy">numpy</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../compatibility/array-api/" title="Array API">array-api</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../compatibility/cupy/" title="CuPy">cupy</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../compatibility/scipy/" title="SciPy">scipy</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   └── </span><a href="../compatibility/xarray/" title="xarray">xarray</a></span><span class="trow" style="--ti:4ch"><span class="dim">└── </span>api-reference/</span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="./" class="cur" aria-current="page" title="API Reference">index</a></span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="interop/" title="Host Autodiff Interop">interop</a></span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="transforms/" title="Transforms">transforms</a></span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="staging/" title="Staging">staging</a></span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="primitives/" title="Primitives">primitives</a></span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="arrays/" title="Arrays and Structure">arrays</a></span><span class="trow" style="--ti:8ch"><span class="dim">    └── </span><a href="errors/" title="Errors">errors</a></span></pre>
+  </aside>
+
+  <article class="tile manwin" aria-label="Manual page">
+    <span class="ptitle"><span class="pn">man</span> advect/api</span>
+    <div class="manscroll" id="manscroll"><div class="mancol">
+      <div class="manhead"><span>API(3)</span><span class="mid">Library Calls</span><span>API(3)</span></div>
+      <div class="rule">────────────────────────────────────────────────────────────────────────────────────────</div>
+
+      
+      <div class="md">
+        
+        <h1 id="api-reference">API Reference<a class="headerlink" href="#api-reference" title="Permanent link">&para;</a></h1>
+<p>Advect's public API is intentionally small. The <a href="../tutorials/">tutorials</a>
+show it in use; the normative semantics live in the repository's
+<a href="https://github.com/yaugenst/advect/blob/main/design/target-api.md">target API</a>.
+Reference pages:</p>
+<ul>
+<li><a href="transforms/">transforms(3)</a> — dynamic differentiation entry points</li>
+<li><a href="staging/">staging(3)</a> — the durable-graph boundary</li>
+<li><a href="primitives/">primitives(3)</a> — custom-operation authoring</li>
+<li><a href="arrays/">arrays(3)</a> — construction, introspection, pytrees</li>
+<li><a href="interop/">host interop</a> — first-order PyTorch, JAX, and HIPS Autograd VJP bridges</li>
+<li><a href="errors/">errors(3)</a> — the exception hierarchy</li>
+</ul>
+<h2 id="dynamic-differentiation">Dynamic differentiation<a class="headerlink" href="#dynamic-differentiation" title="Permanent link">&para;</a></h2>
+<ul>
+<li><code>advect.grad</code> and <code>advect.value_and_grad</code></li>
+<li><code>advect.jvp</code>, <code>advect.vjp</code>, and <code>advect.linearize</code></li>
+<li><code>advect.jacobian</code>, <code>advect.hvp</code>, <code>advect.hessian</code>, and <code>advect.hessian_diag</code></li>
+<li><code>advect.checkpoint</code></li>
+<li><code>advect.debug</code></li>
+<li><code>advect.implicit_root</code></li>
+<li><code>advect.Pullback</code> and <code>advect.LinearMap</code></li>
+</ul>
+<p>These transforms trace concrete values per invocation. The <code>Pullback</code> returned
+by <code>vjp</code> is one-shot and releases its invocation payloads when called;
+<code>LinearMap</code> is reusable and explicitly closed.
+<code>grad</code>, <code>value_and_grad</code>, and <code>jacobian</code> support <code>argnums</code> and <code>argnames</code>; the
+remaining dynamic transforms use <code>argnums</code>. <code>checkpoint(f)</code> rematerializes a
+pure callable during dynamic differentiation and is intentionally rejected by
+<code>stage</code>. <code>implicit_root</code> differentiates a converged root through matrix-free
+tangent and real-adjoint solves; the initial guess and opaque solver iterations
+are not differentiated.</p>
+<p>With <code>has_aux=True</code>, the transformed function must return <code>(value, aux)</code>.
+<code>grad(f, has_aux=True)</code> returns <code>(gradient, aux)</code>, while
+<code>value_and_grad(f, has_aux=True)</code> returns <code>(value, gradient, aux)</code>. The
+auxiliary value is a transparent sidecar and is excluded from differentiation.</p>
+<h2 id="staging">Staging<a class="headerlink" href="#staging" title="Permanent link">&para;</a></h2>
+<ul>
+<li><code>advect.ArraySpec</code> and <code>advect.StaticSpec</code></li>
+<li><code>advect.stage</code> and <code>advect.StagedProgram</code></li>
+<li><code>advect.vjp_program</code></li>
+<li><code>advect.ConstantRecord</code>, <code>advect.OptimizationReport</code>, and
+  <code>advect.OptimizationPass</code></li>
+</ul>
+<p><code>stage</code> accepts concrete example arguments or explicit <code>specs=</code> and compiles
+exactly one signature into one immutable graph. It is the only public
+durable-graph boundary. Former manual
+<code>trace</code>/<code>input</code>/<code>output</code>/<code>execute</code> and <code>Graph</code> APIs are not public.
+<code>vjp_program(program)</code> derives an optimized, serializable staged pullback whose
+keyword-only <code>cotangent</code> input matches the primal output pytree.
+An optional <code>array_api_version=</code> target selects Array API 2022.12, 2023.12, or
+2024.12. Example-based staging otherwise negotiates the newest common revision;
+spec-only staging defaults to 2024.12. The selected target is available as
+<code>program.array_api_version</code> and is preserved by derived programs and
+serialization.</p>
+<h2 id="primitive-authoring">Primitive authoring<a class="headerlink" href="#primitive-authoring" title="Permanent link">&para;</a></h2>
+<ul>
+<li><code>advect.primitive</code> and <code>advect.PrimitiveResult</code></li>
+<li><code>advect.testing.check_gradient</code> for ordinary composed functions</li>
+<li><code>advect.testing.check_primitive</code> for atomic extension contracts</li>
+</ul>
+<p>A primitive is defined from one implementation function and may add abstract
+evaluation, a JVP, and an optional explicit transpose. Advect owns graph schema
+revisions; authors may supply an explicit stable name but no schema version or
+provider dispatch table. A residual-bearing implementation returns
+<code>PrimitiveResult(output, residual, release=None)</code>; callers receive only
+<code>output</code>, while Advect owns the residual and optional release callback for the
+matching derivative invocation. A primitive name links an artifact to code; it
+does not make Advect infer semantic compatibility after that code changes.
+The original decorated handle is the authoring surface; Advect does not expose
+a second string-based lookup API or mutable capability record.</p>
+<h2 id="frontends-and-structure">Frontends and structure<a class="headerlink" href="#frontends-and-structure" title="Permanent link">&para;</a></h2>
+<ul>
+<li><code>advect.support_catalog()</code> returns the runtime-derived, machine-readable
+  primitive matrix and separate lists of supported Array API, NumPy, and SciPy
+  extension functions. Dynamic, staged, and serialized are separate support
+  claims; registration alone is not presented as support.</li>
+<li><code>advect.array</code> and <code>advect.asarray</code> explicitly construct provider-preserving
+  arrays from direct tracers or rectangular nested tracer sequences.</li>
+<li>Ordinary NumPy <code>array</code>, <code>asarray</code>, and <code>asanyarray</code> accept a traced <code>like=</code>
+  anchor. This is the preferred constructor path. <code>advect.numpy</code> is a secondary
+  namespace that overrides those constructors and delegates every other
+  attribute directly to NumPy.</li>
+<li><code>advect.is_traced</code> checks one value without reading its payload.</li>
+<li><code>advect.stop_gradient</code> preserves pytree structure while replacing dynamic
+  traced leaves with defensive concrete copies; abstract staging rejects it.</li>
+<li>Traced arrays implement differentiable size-one, flat-index, and tuple-index
+  <code>.item()</code> forms by keeping the result rank zero during tracing.</li>
+<li>Array API code uses the namespace returned by a traced array's
+  <code>__array_namespace__</code> method.</li>
+<li>A private built-in bridge resolves arrays supported by <code>array-api-compat</code>, a
+  base dependency. Its fixed fallback is configured when <code>advect</code> is imported;
+  users do not import or register a provider module. CuPy requires the separate
+  manual GPU qualification for each supported revision.</li>
+<li>NumPy code is intercepted through NumPy's array protocols, including its
+  standard <code>like=</code> creation dispatch.</li>
+<li>Registered single-output NumPy array functions with <code>out=</code> functionalize an
+  owned tracer using the installed supported NumPy minor's own shape and
+  casting validation.
+  <code>add</code>/<code>multiply</code> reductions and accumulations and binary single-output ufunc
+  <code>outer</code> calls are explicit supported method forms; other ufunc methods do
+  not inherit support from the ufunc call.</li>
+<li><code>advect.pytree</code> registers and manipulates structured inputs and outputs.
+  Application model base classes may instead provide inherited
+  <code>__advect_tree_flatten__</code> and <code>__advect_tree_unflatten__</code> hooks.</li>
+<li>The built-in <code>advect.scipy</code> module adds a bounded set of stable special
+  functions and image filters, plus concrete <code>root_solver</code>/<code>gmres_solver</code>
+  callback factories, when <code>advect[scipy]</code> is installed.</li>
+<li>Explicitly importing the built-in <code>advect.xarray</code> module registers floating- or
+  complex-valued <code>DataArray</code> and <code>Dataset</code> objects as dynamic pytrees when
+  <code>advect[xarray]</code> is installed; their labels are static.</li>
+<li>Provider modules may register input handlers explicitly when imported;
+  installed packages are never discovered implicitly.</li>
+<li>Transform entry points lift selected real Python scalars to zero-dimensional
+  <code>float64</code> arrays and return corresponding derivative results as Python
+  scalars. There is no separate scalar-operation namespace.</li>
+</ul>
+<h2 id="errors">Errors<a class="headerlink" href="#errors" title="Permanent link">&para;</a></h2>
+<ul>
+<li><code>advect.AdvectError</code></li>
+<li><code>advect.ImplicitSolveError</code></li>
+<li><code>advect.TracingError</code> and <code>advect.EscapedTracerError</code></li>
+<li><code>advect.MutationError</code> and <code>advect.StaleViewError</code></li>
+<li><code>advect.NoJVPError</code>, <code>advect.NoVJPError</code>, and <code>advect.MissingPrimitiveRuleError</code></li>
+<li><code>advect.NumericsError</code></li>
+</ul>
+<h2 id="scipy-special-functions-scipy-extra">SciPy special functions (<code>scipy</code> extra)<a class="headerlink" href="#scipy-special-functions-scipy-extra" title="Permanent link">&para;</a></h2>
+<p>The built-in <code>advect.scipy.special</code> module exports NumPy-backed primitives when
+SciPy is installed:</p>
+<ul>
+<li><code>gammaln(x)</code></li>
+<li><code>digamma(x)</code></li>
+<li><code>polygamma(n, x)</code></li>
+<li><code>erf(x)</code></li>
+<li><code>erfc(x)</code>, <code>erfcx(x)</code>, and <code>erfinv(x)</code></li>
+<li><code>expit(x)</code></li>
+<li><code>log_expit(x)</code></li>
+<li><code>ndtr(x)</code>, <code>log_ndtr(x)</code>, and <code>ndtri(x)</code></li>
+<li><code>logsumexp(a, axis=None, b=None, keepdims=False, return_sign=False)</code></li>
+<li><code>softmax(x, axis=None)</code> and <code>log_softmax(x, axis=None)</code></li>
+</ul>
+<p>These callables expose SciPy 1.18-compatible functions for the admitted NumPy
+provider. Unary ufuncs accept the standard keyword arguments, including
+functionalized <code>out=</code> on an owned tracer. <code>polygamma</code> broadcasts array-valued
+<code>n</code> and <code>x</code>; <code>logsumexp</code> supports weights and signed results.</p>
+<h2 id="scipy-image-filters-scipy-extra">SciPy image filters (<code>scipy</code> extra)<a class="headerlink" href="#scipy-image-filters-scipy-extra" title="Permanent link">&para;</a></h2>
+<p><code>advect.scipy.ndimage</code> exports the following SciPy 1.18-compatible functions:</p>
+<ul>
+<li>Gaussian and uniform filters: <code>gaussian_filter</code>, <code>gaussian_filter1d</code>,
+  <code>uniform_filter</code>, and <code>uniform_filter1d</code>;</li>
+<li>linear filters: <code>convolve</code>, <code>convolve1d</code>, <code>correlate</code>, <code>correlate1d</code>,
+  <code>laplace</code>, <code>gaussian_laplace</code>, <code>sobel</code>, and <code>prewitt</code>;</li>
+<li>order filters: <code>maximum_filter</code>, <code>maximum_filter1d</code>, <code>minimum_filter</code>,
+  <code>minimum_filter1d</code>, <code>median_filter</code>, <code>rank_filter</code>, and <code>percentile_filter</code>;</li>
+<li>greyscale morphology: <code>grey_dilation</code>, <code>grey_erosion</code>, <code>grey_opening</code>,
+  <code>grey_closing</code>, <code>morphological_gradient</code>, <code>morphological_laplace</code>,
+  <code>white_tophat</code>, and <code>black_tophat</code>.</li>
+</ul>
+<p>All named calls are differentiable and support dynamic execution, staging, and
+serialization. The installed extension and exact lowering mode are inspectable
+through <code>advect.support_catalog()</code>.</p>
+<h2 id="optional-scipy-solver-callbacks">Optional SciPy solver callbacks<a class="headerlink" href="#optional-scipy-solver-callbacks" title="Permanent link">&para;</a></h2>
+<ul>
+<li><code>advect.scipy.optimize.root_solver(*, method=None, options=None)</code></li>
+<li><code>advect.scipy.sparse.linalg.gmres_solver(*, rtol=1e-5, atol=0.0, maxiter=None)</code></li>
+</ul>
+<p>Both factories return shape- and scalar-category-preserving callbacks for
+<code>implicit_root</code>. They accept NumPy arrays, NumPy scalars, and Python numeric
+scalars and are a first-order dynamic boundary.</p>
+<h2 id="xarray-integration-xarray-extra">xarray integration (<code>xarray</code> extra)<a class="headerlink" href="#xarray-integration-xarray-extra" title="Permanent link">&para;</a></h2>
+<p>The built-in <code>advect.xarray</code> module is usable when xarray is installed. Importing
+it registers the supported containers; calling <code>advect.xarray.register()</code>
+explicitly performs the same idempotent registration. Floating- and
+complex-valued data buffers become pytree leaves; labels remain static metadata.</p>
+      </div>
+      
+
+      
+      <nav class="seealso" aria-label="Adjacent pages">
+        <span><a href="../compatibility/xarray/">← xarray</a></span>
+        <span class="nn"><a href="interop/">host autodiff interop →</a></span>
+      </nav>
+      
+      <p class="prompt">$ <span class="cursor">█</span></p>
+    </div></div>
+  </article>
+</div>
+
+<div class="overlay" id="help" role="dialog" aria-label="Keyboard shortcuts">
+  <h3>Keys</h3>
+  <table>
+    <tr><td class="kk">j k d u g G</td><td>scroll the page</td></tr>
+    <tr><td class="kk">n / p</td><td>next / previous page</td></tr>
+    <tr><td class="kk">e</td><td>toggle the docs tree pane</td></tr>
+    <tr><td class="kk">/</td><td>search the manual</td></tr>
+    <tr><td class="kk">2</td><td>open the playground</td></tr>
+    <tr><td class="kk">t</td><td>lp0 → dark → crt</td></tr>
+    <tr><td class="kk">?</td><td>close this help</td></tr>
+  </table>
+</div>
+
+<div class="overlay search-box" id="search" role="dialog" aria-label="Search">
+  <div class="search-in"><span class="ps">/</span><input id="searchq" spellcheck="false" autocomplete="off" aria-label="Search query" placeholder="search the manual…"></div>
+  <div class="search-hits" id="searchhits"></div>
+</div>
+
+<div class="bar">
+  <a href=".." class="b" aria-current="true">[1:docs]</a>
+  <a href="../playground/" class="b" id="wsplay">[2:playground]</a>
+  <span class="path hidesm">$ man advect/api</span>
+  <span class="grow"></span>
+  <button class="tbtn" id="treebtn" aria-label="Toggle documentation tree">[e] tree</button>
+  <button class="tbtn" id="searchbtn" aria-label="Search">[/] search</button>
+  <button class="tbtn hidesm" id="helpbtn" aria-label="Keyboard help">[?] keys</button>
+  <button class="tbtn" id="themeToggle" aria-label="Cycle display mode">[ mode: … ]</button>
+</div>
+
+<script src="../js/theme.js"></script>
+<script src="../js/examples.js"></script>
+<script src="../search/main.js"></script>
+
+</body>
+</html>

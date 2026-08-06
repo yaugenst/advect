@@ -1,0 +1,177 @@
+<!doctype html><html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="A small extensible automatic-differentiation core for Python">
+<link rel="canonical" href="https://yaugenst.github.io/advect/dev/tutorials/debugging/">
+<title>debugging(1) · advect</title>
+<link rel="icon" href="../../img/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../css/fonts.css">
+<link rel="stylesheet" href="../../css/theme.css?v=86c97aee1cb2">
+<link rel="stylesheet" href="../../assets/_mkdocstrings.css">
+<script>
+var base_url = "../..";
+/* pre-paint: apply persisted display mode and tree state to avoid a theme
+   flash and the tree pane animating open on every navigation */
+(function () {
+  var m = null, t = null;
+  try {
+    m = localStorage.getItem("advect-mode");
+    t = localStorage.getItem("advect-tree");
+  } catch (e) { /* private mode */ }
+  if (m) document.documentElement.dataset.theme = m;
+  var open = t === null ? window.innerWidth > 1100 : t === "1";
+  if (open) document.documentElement.classList.add("tree-open");
+})();
+</script>
+
+</head>
+<body data-base="../..">
+
+<div class="desktop" id="desktop">
+  <aside class="tile treetile" id="treetile" aria-label="Documentation tree" aria-hidden="true">
+    <span class="ptitle"><span class="pn">tree</span> docs/</span>
+    <pre class="tree"><span class="trow">docs/</span><span class="trow" style="--ti:4ch"><span class="dim">├── </span><a href="../.." title="Home">index</a></span><span class="trow" style="--ti:4ch"><span class="dim">├── </span>tutorials/</span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../" title="Tutorials">index</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../gradients/" title="Gradients and Pytrees">gradients</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../control-flow/" title="Control Flow and Mutation">control-flow</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../staging/" title="Staging and Serialization">staging</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../interop/" title="Providers and Interop">interop</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../primitives/" title="Custom Primitives">primitives</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   └── </span><a href="./" class="cur" aria-current="page" title="Debugging">debugging</a></span><span class="trow" style="--ti:4ch"><span class="dim">├── </span><a href="../../architecture/" title="Architecture">architecture</a></span><span class="trow" style="--ti:4ch"><span class="dim">├── </span>compatibility/</span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../compatibility/" title="Compatibility">index</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../compatibility/numpy/" title="NumPy">numpy</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../compatibility/array-api/" title="Array API">array-api</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../compatibility/cupy/" title="CuPy">cupy</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../compatibility/scipy/" title="SciPy">scipy</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   └── </span><a href="../../compatibility/xarray/" title="xarray">xarray</a></span><span class="trow" style="--ti:4ch"><span class="dim">└── </span>api-reference/</span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="../../api/" title="API Reference">index</a></span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="../../api/interop/" title="Host Autodiff Interop">interop</a></span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="../../api/transforms/" title="Transforms">transforms</a></span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="../../api/staging/" title="Staging">staging</a></span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="../../api/primitives/" title="Primitives">primitives</a></span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="../../api/arrays/" title="Arrays and Structure">arrays</a></span><span class="trow" style="--ti:8ch"><span class="dim">    └── </span><a href="../../api/errors/" title="Errors">errors</a></span></pre>
+  </aside>
+
+  <article class="tile manwin" aria-label="Manual page">
+    <span class="ptitle"><span class="pn">man</span> advect/tutorials/debugging</span>
+    <div class="manscroll" id="manscroll"><div class="mancol">
+      <div class="manhead"><span>DEBUGGING(1)</span><span class="mid">User Commands</span><span>DEBUGGING(1)</span></div>
+      <div class="rule">────────────────────────────────────────────────────────────────────────────────────────</div>
+
+      
+      <div class="md">
+        
+        <h1 id="debugging">Debugging<a class="headerlink" href="#debugging" title="Permanent link">&para;</a></h1>
+<p>Start with the exception. Advect errors name the rejected behavior and usually
+give the safe rewrite. If that is not enough, rerun the same call in one scoped
+debug mode:</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">advect</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">ad</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="k">with</span> <span class="n">ad</span><span class="o">.</span><span class="n">debug</span><span class="p">():</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>    <span class="n">gradient</span> <span class="o">=</span> <span class="n">ad</span><span class="o">.</span><span class="n">grad</span><span class="p">(</span><span class="n">loss</span><span class="p">)(</span><span class="n">x</span><span class="p">)</span>
+</span></code></pre></div>
+<p>The scope adds user source locations and bounded live-tracer values. Keep it
+around the transform call; for staging, keep it around <code>ad.stage(...)</code> so the
+program retains those locations.</p>
+<h2 id="i-got-an-exception">I got an exception<a class="headerlink" href="#i-got-an-exception" title="Permanent link">&para;</a></h2>
+<p>Common rewrites are:</p>
+<ul>
+<li><strong>Input mutation:</strong> copy first with <code>owned = x.copy()</code>.</li>
+<li><strong>Stale view:</strong> consume or copy the view before updating its base.</li>
+<li><strong>Unsupported conversion:</strong> use a traced <code>like=</code> anchor, <code>ad.asarray</code>, or
+  <code>ad.array</code>; move unsupported library calls outside the transform or wrap the
+  numerical behavior with <code>@ad.primitive</code>.</li>
+<li><strong>Staged Python branch:</strong> use array operations, make the decision static, or
+  leave the function dynamic.</li>
+<li><strong>Ambient staged randomness:</strong> pass explicit state or data as an input.</li>
+<li><strong>Complex output from <code>grad</code>:</strong> use <code>linearize</code>, <code>jvp</code>, or <code>vjp</code>.</li>
+</ul>
+<p>Missing derivative errors suggest the exact <code>with ad.debug():</code> retry. Staged
+provider errors retain their original type and traceback and append the failing
+operation, up to three inputs, and a source location when available.</p>
+<h2 id="i-need-to-see-a-live-value">I need to see a live value<a class="headerlink" href="#i-need-to-see-a-live-value" title="Permanent link">&para;</a></h2>
+<p>Use ordinary <code>print(x)</code> or debugger inspection. Normal mode shows trace
+identity, shape, and dtype. Debug mode adds a bounded preview and finite count:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>TracedArray(node=%2, shape=(4,), dtype=float64,
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>            finite=4/4, values=array([...]))
+</span></code></pre></div>
+<p>This is display-only; tracer payloads remain private. <code>ad.stop_gradient</code> is the
+explicit concrete dynamic boundary, while staging has no payload to detach.</p>
+<h2 id="i-got-a-nan-or-infinity">I got a NaN or infinity<a class="headerlink" href="#i-got-a-nan-or-infinity" title="Permanent link">&para;</a></h2>
+<p>Ask Advect to locate the first non-finite dynamic value:</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="k">with</span> <span class="n">ad</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="n">numerics</span><span class="o">=</span><span class="kc">True</span><span class="p">):</span>
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>    <span class="n">gradient</span> <span class="o">=</span> <span class="n">ad</span><span class="o">.</span><span class="n">grad</span><span class="p">(</span><span class="n">loss</span><span class="p">)(</span><span class="n">x</span><span class="p">)</span>
+</span></code></pre></div>
+<p><code>NumericsError</code> reports the primal, JVP, or VJP phase, operation, source,
+shape/dtype, finite count, and bounded preview. This mode adds provider work
+and synchronization, so it is intentionally scoped.</p>
+<h2 id="the-gradient-is-finite-but-looks-wrong">The gradient is finite but looks wrong<a class="headerlink" href="#the-gradient-is-finite-but-looks-wrong" title="Permanent link">&para;</a></h2>
+<p>Check the composed function against numerical behavior:</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">advect.testing</span><span class="w"> </span><span class="kn">import</span> <span class="n">check_gradient</span>
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="n">check_gradient</span><span class="p">(</span><span class="n">loss</span><span class="p">,</span> <span class="n">x</span><span class="p">,</span> <span class="n">tangent</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">ones_like</span><span class="p">(</span><span class="n">x</span><span class="p">))</span>
+</span></code></pre></div>
+<p>The unary argument may itself be a pytree. <code>check_gradient</code> compares the
+whole-function JVP with central differences over an epsilon sweep and checks
+the reverse gradient against that direction. It reevaluates the function, so
+use deterministic inputs and keep effects outside it.</p>
+<p>This does not duplicate <code>check_primitive</code>: the function check covers the
+actual composition a user ran; the primitive check validates one extension's
+concrete/abstract contract, JVP, transpose, complex behavior, nesting, and
+staging. On a mismatch, <code>check_gradient</code> names custom primitives on that path
+and directs their authors to <code>check_primitive</code>.</p>
+<p>Passing only establishes consistency with the function that ran. It cannot
+prove the intended mathematics, and finite differences remain unreliable near
+discontinuities or badly scaled regions.</p>
+<h2 id="dynamic-execution-works-but-staging-fails">Dynamic execution works but staging fails<a class="headerlink" href="#dynamic-execution-works-but-staging-fails" title="Permanent link">&para;</a></h2>
+<p>Dynamic transforms follow concrete Python control flow. <code>stage</code> must instead
+produce one reusable graph for one shape/dtype signature, so data-dependent
+Python branches, output shapes, ambient state, or unsupported staged operations
+can work dynamically and correctly fail during staging.</p>
+<p>Inspect the compiled result directly:</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="k">with</span> <span class="n">ad</span><span class="o">.</span><span class="n">debug</span><span class="p">():</span>
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>    <span class="n">program</span> <span class="o">=</span> <span class="n">ad</span><span class="o">.</span><span class="n">stage</span><span class="p">(</span><span class="n">function</span><span class="p">,</span> <span class="n">example</span><span class="p">)</span>
+</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>
+</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="nb">print</span><span class="p">(</span><span class="n">program</span><span class="p">)</span>        <span class="c1"># bounded optimized operation sequence</span>
+</span><span id="__span-4-5"><a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="nb">print</span><span class="p">(</span><span class="n">program</span><span class="o">.</span><span class="n">graph</span><span class="p">)</span>  <span class="c1"># immutable graph summary</span>
+</span><span id="__span-4-6"><a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="nb">print</span><span class="p">(</span><span class="n">program</span><span class="o">.</span><span class="n">optimization</span><span class="p">)</span>
+</span></code></pre></div>
+<p><code>program.trace</code> contains the in-process pre-optimization trace and ID mapping;
+it is absent from loaded artifacts. There is no separate <code>explain()</code> step.</p>
+<h2 id="tracers-and-views">Tracers and views<a class="headerlink" href="#tracers-and-views" title="Permanent link">&para;</a></h2>
+<p>A tracer retained after its transform raises <code>EscapedTracerError</code>; return an
+ordinary result instead. Views use conservative whole-cell epochs, so a view
+is stale after any update to its root. Rewrite <code>x[i][j] += value</code> as one update
+such as <code>x[i, j] += value</code>, or copy the view first.</p>
+      </div>
+      
+
+      
+      <nav class="seealso" aria-label="Adjacent pages">
+        <span><a href="../primitives/">← custom primitives</a></span>
+        <span class="nn"><a href="../../architecture/">architecture →</a></span>
+      </nav>
+      
+      <p class="prompt">$ <span class="cursor">█</span></p>
+    </div></div>
+  </article>
+</div>
+
+<div class="overlay" id="help" role="dialog" aria-label="Keyboard shortcuts">
+  <h3>Keys</h3>
+  <table>
+    <tr><td class="kk">j k d u g G</td><td>scroll the page</td></tr>
+    <tr><td class="kk">n / p</td><td>next / previous page</td></tr>
+    <tr><td class="kk">e</td><td>toggle the docs tree pane</td></tr>
+    <tr><td class="kk">/</td><td>search the manual</td></tr>
+    <tr><td class="kk">2</td><td>open the playground</td></tr>
+    <tr><td class="kk">t</td><td>lp0 → dark → crt</td></tr>
+    <tr><td class="kk">?</td><td>close this help</td></tr>
+  </table>
+</div>
+
+<div class="overlay search-box" id="search" role="dialog" aria-label="Search">
+  <div class="search-in"><span class="ps">/</span><input id="searchq" spellcheck="false" autocomplete="off" aria-label="Search query" placeholder="search the manual…"></div>
+  <div class="search-hits" id="searchhits"></div>
+</div>
+
+<div class="bar">
+  <a href="../.." class="b" aria-current="true">[1:docs]</a>
+  <a href="../../playground/" class="b" id="wsplay">[2:playground]</a>
+  <span class="path hidesm">$ man advect/tutorials/debugging</span>
+  <span class="grow"></span>
+  <button class="tbtn" id="treebtn" aria-label="Toggle documentation tree">[e] tree</button>
+  <button class="tbtn" id="searchbtn" aria-label="Search">[/] search</button>
+  <button class="tbtn hidesm" id="helpbtn" aria-label="Keyboard help">[?] keys</button>
+  <button class="tbtn" id="themeToggle" aria-label="Cycle display mode">[ mode: … ]</button>
+</div>
+
+<script src="../../js/theme.js"></script>
+<script src="../../js/examples.js"></script>
+<script src="../../search/main.js"></script>
+
+</body>
+</html>

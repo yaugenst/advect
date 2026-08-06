@@ -1,0 +1,4519 @@
+<!doctype html><html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="A small extensible automatic-differentiation core for Python">
+<link rel="canonical" href="https://yaugenst.github.io/advect/dev/compatibility/numpy/">
+<title>numpy(7) · advect</title>
+<link rel="icon" href="../../img/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../css/fonts.css">
+<link rel="stylesheet" href="../../css/theme.css?v=86c97aee1cb2">
+<link rel="stylesheet" href="../../assets/_mkdocstrings.css">
+<script>
+var base_url = "../..";
+/* pre-paint: apply persisted display mode and tree state to avoid a theme
+   flash and the tree pane animating open on every navigation */
+(function () {
+  var m = null, t = null;
+  try {
+    m = localStorage.getItem("advect-mode");
+    t = localStorage.getItem("advect-tree");
+  } catch (e) { /* private mode */ }
+  if (m) document.documentElement.dataset.theme = m;
+  var open = t === null ? window.innerWidth > 1100 : t === "1";
+  if (open) document.documentElement.classList.add("tree-open");
+})();
+</script>
+
+</head>
+<body data-base="../..">
+
+<div class="desktop" id="desktop">
+  <aside class="tile treetile" id="treetile" aria-label="Documentation tree" aria-hidden="true">
+    <span class="ptitle"><span class="pn">tree</span> docs/</span>
+    <pre class="tree"><span class="trow">docs/</span><span class="trow" style="--ti:4ch"><span class="dim">├── </span><a href="../.." title="Home">index</a></span><span class="trow" style="--ti:4ch"><span class="dim">├── </span>tutorials/</span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/" title="Tutorials">index</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/gradients/" title="Gradients and Pytrees">gradients</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/control-flow/" title="Control Flow and Mutation">control-flow</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/staging/" title="Staging and Serialization">staging</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/interop/" title="Providers and Interop">interop</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/primitives/" title="Custom Primitives">primitives</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   └── </span><a href="../../tutorials/debugging/" title="Debugging">debugging</a></span><span class="trow" style="--ti:4ch"><span class="dim">├── </span><a href="../../architecture/" title="Architecture">architecture</a></span><span class="trow" style="--ti:4ch"><span class="dim">├── </span>compatibility/</span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../" title="Compatibility">index</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="./" class="cur" aria-current="page" title="NumPy">numpy</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../array-api/" title="Array API">array-api</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../cupy/" title="CuPy">cupy</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../scipy/" title="SciPy">scipy</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   └── </span><a href="../xarray/" title="xarray">xarray</a></span><span class="trow" style="--ti:4ch"><span class="dim">└── </span>api-reference/</span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="../../api/" title="API Reference">index</a></span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="../../api/interop/" title="Host Autodiff Interop">interop</a></span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="../../api/transforms/" title="Transforms">transforms</a></span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="../../api/staging/" title="Staging">staging</a></span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="../../api/primitives/" title="Primitives">primitives</a></span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="../../api/arrays/" title="Arrays and Structure">arrays</a></span><span class="trow" style="--ti:8ch"><span class="dim">    └── </span><a href="../../api/errors/" title="Errors">errors</a></span></pre>
+  </aside>
+
+  <article class="tile manwin" aria-label="Manual page">
+    <span class="ptitle"><span class="pn">man</span> advect/compatibility/numpy</span>
+    <div class="manscroll" id="manscroll"><div class="mancol">
+      <div class="manhead"><span>NUMPY(7)</span><span class="mid">Miscellanea</span><span>NUMPY(7)</span></div>
+      <div class="rule">────────────────────────────────────────────────────────────────────────────────────────</div>
+
+      
+      <div class="md">
+        
+        <h1 id="numpy">NumPy<a class="headerlink" href="#numpy" title="Permanent link">&para;</a></h1>
+<!-- Generated by `uv run python -m scripts.report_extension_support --format markdown --output docs/compatibility`; do not edit by hand. -->
+
+<p>NumPy is Advect's first-class frontend, intercepted through NumPy's own protocols (<code>__array_ufunc__</code>, <code>__array_function__</code>, and constructor <code>like=</code> dispatch). The qualified range is NumPy 2.0 to 2.4. NumPy declares the Array API revision implemented by the installed release:</p>
+<ul>
+<li>installed NumPy 2.4.6: Array API 2024.12</li>
+</ul>
+<p>The mode columns are public support claims: <strong>yes</strong> means the callable's declared contract is supported end to end in that execution mode (dynamic tracing, abstract staging, serialized artifacts). Restricted implementation paths may remain internal, but registration alone does not promote an additional upstream spelling into this catalog.</p>
+<p><code>Abstract=yes</code> means that a primitive has a standalone abstract rule. A frontend may still be staged by an explicit method or composite lowering when its displayed primitive does not.</p>
+<p>Rows marked <strong>Array API</strong> (163 of 393) reuse the same canonical primitive as an Array API binding. They inherit primitive semantics and derivative rules, not the Array API frontend signature.</p>
+<p>Only supported ufunc methods are listed; 383 other method forms are unqualified. Every row is backed by an executable NumPy case for each marked lifetime. Reachable handlers without that evidence are omitted. The nine <code>numpy.lib.scimath</code> rows are dynamic-only because their result dtype can depend on values.</p>
+<h2 id="restricted-staged-forms">Restricted staged forms<a class="headerlink" href="#restricted-staged-forms" title="Permanent link">&para;</a></h2>
+<p>Callable rows are conservative across their executable variants. <code>numpy.round</code> supports staging and serialization when <code>decimals</code> is omitted or zero; nonzero <code>decimals</code> is dynamic-only. <code>numpy.linalg.eig</code> and <code>numpy.linalg.eigvals</code> support all three lifetimes for complex input dtypes, while real input dtypes are dynamic-only.</p>
+<p><code>numpy.linspace</code> is dynamic-only when its endpoints are traced, including the two-output <code>retstep=True</code> form. NumPy accepts array-valued endpoints, whereas the shared Array API primitive has static scalar endpoint attributes, so those NumPy calls cannot be serialized. A constant-only call may be captured as a graph constant; that is not staged <code>numpy.linspace</code> support.</p>
+<h2 id="functions">Functions<a class="headerlink" href="#functions" title="Permanent link">&para;</a></h2>
+<details class="compat-columns compat-has-backing">
+<summary>capability details</summary>
+</details>
+
+<table>
+<thead>
+<tr>
+<th>Function</th>
+<th>Lowers to</th>
+<th>Backed by</th>
+<th style="text-align: center;">Dynamic</th>
+<th style="text-align: center;">Staged</th>
+<th style="text-align: center;">Serialized</th>
+<th style="text-align: center;">JVP</th>
+<th style="text-align: center;">VJP</th>
+<th style="text-align: center;">Abstract</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>numpy.all</code></td>
+<td><code>array.all</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.allclose</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.amax</code></td>
+<td><code>array_ext.amax</code></td>
+<td>NumPy extension</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">no</td>
+</tr>
+<tr>
+<td><code>numpy.amin</code></td>
+<td><code>array_ext.amin</code></td>
+<td>NumPy extension</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">no</td>
+</tr>
+<tr>
+<td><code>numpy.angle</code></td>
+<td><code>array_ext.angle</code></td>
+<td>NumPy extension</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.any</code></td>
+<td><code>array.any</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.append</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.apply_along_axis</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.apply_over_axes</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.arange</code></td>
+<td><code>array.arange</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.argmax</code></td>
+<td><code>array.argmax</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.argmin</code></td>
+<td><code>array.argmin</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.argpartition</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.argsort</code></td>
+<td><code>array.argsort</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.argwhere</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.around</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.array</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.array_equal</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.array_equiv</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.array_split</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.asanyarray</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.asarray</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.astype</code></td>
+<td><code>array.astype</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.atleast_1d</code></td>
+<td><code>array.atleast_1d</code></td>
+<td>NumPy extension</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">no</td>
+</tr>
+<tr>
+<td><code>numpy.atleast_2d</code></td>
+<td><code>array.atleast_2d</code></td>
+<td>NumPy extension</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">no</td>
+</tr>
+<tr>
+<td><code>numpy.atleast_3d</code></td>
+<td><code>array.atleast_3d</code></td>
+<td>NumPy extension</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">no</td>
+</tr>
+<tr>
+<td><code>numpy.average</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.bincount</code></td>
+<td><code>array_ext.bincount</code></td>
+<td>NumPy extension</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">no</td>
+</tr>
+<tr>
+<td><code>numpy.block</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.broadcast_arrays</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.broadcast_to</code></td>
+<td><code>array.broadcast_to</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.can_cast</code></td>
+<td>metadata</td>
+<td>metadata</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+</tr>
+<tr>
+<td><code>numpy.choose</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.clip</code></td>
+<td><code>array.clip</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.column_stack</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.common_type</code></td>
+<td>metadata</td>
+<td>metadata</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+</tr>
+<tr>
+<td><code>numpy.compress</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.concatenate</code></td>
+<td><code>array.concatenate</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.convolve</code></td>
+<td><code>array_ext.convolve</code></td>
+<td>NumPy extension</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.copy</code></td>
+<td><code>advect.copy</code></td>
+<td>Advect core</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.copyto</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.corrcoef</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.correlate</code></td>
+<td><code>array_ext.correlate</code></td>
+<td>NumPy extension</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.count_nonzero</code></td>
+<td><code>array.count_nonzero</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.cov</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.cross</code></td>
+<td><code>array.cross</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.cumprod</code></td>
+<td><code>array.cumprod</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.cumsum</code></td>
+<td><code>array.cumsum</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.cumulative_prod</code></td>
+<td><code>array.cumprod</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.cumulative_sum</code></td>
+<td><code>array.cumsum</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.delete</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.diag</code></td>
+<td><code>array_ext.diag</code></td>
+<td>NumPy extension</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">no</td>
+</tr>
+<tr>
+<td><code>numpy.diag_indices_from</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.diagflat</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.diagonal</code></td>
+<td><code>array.diagonal</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.diff</code></td>
+<td><code>array.diff</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.digitize</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.dot</code></td>
+<td><code>array_ext.dot</code></td>
+<td>NumPy extension</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.dsplit</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.dstack</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.ediff1d</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.einsum</code></td>
+<td><code>array_ext.einsum</code></td>
+<td>NumPy extension</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">no</td>
+</tr>
+<tr>
+<td><code>numpy.empty</code></td>
+<td><code>array.empty</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.empty_like</code></td>
+<td><code>array.empty_like</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.expand_dims</code></td>
+<td><code>array.expand_dims</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.extract</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.eye</code></td>
+<td><code>array.eye</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.fft.fft</code></td>
+<td><code>array_ext.fft.fft</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.fft.fft2</code></td>
+<td><code>array_ext.fft.fft2</code></td>
+<td>NumPy extension</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.fft.fftn</code></td>
+<td><code>array_ext.fft.fftn</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.fft.fftshift</code></td>
+<td><code>array_ext.fft.fftshift</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.fft.hfft</code></td>
+<td><code>array_ext.fft.hfft</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.fft.ifft</code></td>
+<td><code>array_ext.fft.ifft</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.fft.ifft2</code></td>
+<td><code>array_ext.fft.ifft2</code></td>
+<td>NumPy extension</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.fft.ifftn</code></td>
+<td><code>array_ext.fft.ifftn</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.fft.ifftshift</code></td>
+<td><code>array_ext.fft.ifftshift</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.fft.ihfft</code></td>
+<td><code>array_ext.fft.ihfft</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.fft.irfft</code></td>
+<td><code>array_ext.fft.irfft</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.fft.irfft2</code></td>
+<td><code>array_ext.fft.irfft2</code></td>
+<td>NumPy extension</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.fft.irfftn</code></td>
+<td><code>array_ext.fft.irfftn</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.fft.rfft</code></td>
+<td><code>array_ext.fft.rfft</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.fft.rfft2</code></td>
+<td><code>array_ext.fft.rfft2</code></td>
+<td>NumPy extension</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.fft.rfftn</code></td>
+<td><code>array_ext.fft.rfftn</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.fill_diagonal</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.fix</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.flatnonzero</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.flip</code></td>
+<td><code>array.flip</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.fliplr</code></td>
+<td><code>array_ext.fliplr</code></td>
+<td>NumPy extension</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">no</td>
+</tr>
+<tr>
+<td><code>numpy.flipud</code></td>
+<td><code>array_ext.flipud</code></td>
+<td>NumPy extension</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">no</td>
+</tr>
+<tr>
+<td><code>numpy.full</code></td>
+<td><code>array.full</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.full_like</code></td>
+<td><code>array.full_like</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.geomspace</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.gradient</code></td>
+<td><code>array_ext.gradient</code></td>
+<td>NumPy extension</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">no</td>
+</tr>
+<tr>
+<td><code>numpy.histogram</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.histogram2d</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.histogram_bin_edges</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.histogramdd</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.hsplit</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.hstack</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.i0</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.identity</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.imag</code></td>
+<td><code>array.imag</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.inner</code></td>
+<td><code>array_ext.inner</code></td>
+<td>NumPy extension</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">no</td>
+</tr>
+<tr>
+<td><code>numpy.insert</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.interp</code></td>
+<td><code>array_ext.interp</code></td>
+<td>NumPy extension</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">no</td>
+</tr>
+<tr>
+<td><code>numpy.intersect1d</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.isclose</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.iscomplex</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.iscomplexobj</code></td>
+<td>metadata</td>
+<td>metadata</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+</tr>
+<tr>
+<td><code>numpy.isin</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.isneginf</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.isposinf</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.isreal</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.isrealobj</code></td>
+<td>metadata</td>
+<td>metadata</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+</tr>
+<tr>
+<td><code>numpy.ix_</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.kron</code></td>
+<td><code>array_ext.kron</code></td>
+<td>NumPy extension</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">no</td>
+</tr>
+<tr>
+<td><code>numpy.lexsort</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.lib.scimath.arccos</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.lib.scimath.arcsin</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.lib.scimath.arctanh</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.lib.scimath.log</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.lib.scimath.log10</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.lib.scimath.log2</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.lib.scimath.logn</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.lib.scimath.power</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.lib.scimath.sqrt</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.lib.stride_tricks.sliding_window_view</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.linalg.cholesky</code></td>
+<td><code>array_ext.linalg.cholesky</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.linalg.cond</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.linalg.cross</code></td>
+<td><code>array.cross</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.linalg.det</code></td>
+<td><code>array_ext.linalg.det</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.linalg.diagonal</code></td>
+<td><code>array.diagonal</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.linalg.eig</code></td>
+<td><code>array_ext.linalg.eig</code></td>
+<td>NumPy extension</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.linalg.eigh</code></td>
+<td><code>array_ext.linalg.eigh</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.linalg.eigvals</code></td>
+<td><code>array_ext.linalg.eigvals</code></td>
+<td>NumPy extension</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.linalg.eigvalsh</code></td>
+<td><code>array_ext.linalg.eigvalsh</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.linalg.inv</code></td>
+<td><code>array_ext.linalg.inv</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.linalg.lstsq</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.linalg.matmul</code></td>
+<td><code>array.matmul</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.linalg.matrix_norm</code></td>
+<td><code>array_ext.linalg.matrix_norm</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.linalg.matrix_power</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.linalg.matrix_rank</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.linalg.matrix_transpose</code></td>
+<td><code>array.transpose</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.linalg.multi_dot</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.linalg.norm</code></td>
+<td><code>array_ext.linalg.norm</code></td>
+<td>NumPy extension</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.linalg.outer</code></td>
+<td><code>array.outer</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.linalg.pinv</code></td>
+<td><code>array_ext.linalg.pinv</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.linalg.qr</code></td>
+<td><code>array_ext.linalg.qr</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.linalg.slogdet</code></td>
+<td><code>array_ext.linalg.slogdet</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.linalg.solve</code></td>
+<td><code>array_ext.linalg.solve</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.linalg.svd</code></td>
+<td><code>array_ext.linalg.svd</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.linalg.svdvals</code></td>
+<td><code>array_ext.linalg.svdvals</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.linalg.tensordot</code></td>
+<td><code>array.tensordot</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.linalg.tensorinv</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.linalg.tensorsolve</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.linalg.trace</code></td>
+<td><code>array.trace</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.linalg.vecdot</code></td>
+<td><code>array.vecdot</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.linalg.vector_norm</code></td>
+<td><code>array_ext.linalg.vector_norm</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.linspace</code></td>
+<td><code>array.linspace</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.logspace</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.matrix_transpose</code></td>
+<td><code>array.transpose</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.max</code></td>
+<td><code>array.max</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.mean</code></td>
+<td><code>array.mean</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.median</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.meshgrid</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.min</code></td>
+<td><code>array.min</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.moveaxis</code></td>
+<td><code>array.moveaxis</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.nan_to_num</code></td>
+<td><code>array_ext.nan_to_num</code></td>
+<td>NumPy extension</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">no</td>
+</tr>
+<tr>
+<td><code>numpy.nanargmax</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.nanargmin</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.nancumprod</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.nancumsum</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.nanmax</code></td>
+<td><code>array_ext.nanmax</code></td>
+<td>NumPy extension</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.nanmean</code></td>
+<td><code>array_ext.nanmean</code></td>
+<td>NumPy extension</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.nanmedian</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.nanmin</code></td>
+<td><code>array_ext.nanmin</code></td>
+<td>NumPy extension</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.nanpercentile</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.nanprod</code></td>
+<td><code>array_ext.nanprod</code></td>
+<td>NumPy extension</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.nanquantile</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.nanstd</code></td>
+<td><code>array_ext.nanstd</code></td>
+<td>NumPy extension</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.nansum</code></td>
+<td><code>array_ext.nansum</code></td>
+<td>NumPy extension</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.nanvar</code></td>
+<td><code>array_ext.nanvar</code></td>
+<td>NumPy extension</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.ndim</code></td>
+<td>metadata</td>
+<td>metadata</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+</tr>
+<tr>
+<td><code>numpy.nonzero</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.ones</code></td>
+<td><code>array.ones</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.ones_like</code></td>
+<td><code>array.ones_like</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.outer</code></td>
+<td><code>array.outer</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.pad</code></td>
+<td><code>array_ext.pad</code></td>
+<td>NumPy extension</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">no</td>
+</tr>
+<tr>
+<td><code>numpy.partition</code></td>
+<td><code>array_ext.partition</code></td>
+<td>NumPy extension</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">no</td>
+</tr>
+<tr>
+<td><code>numpy.percentile</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.piecewise</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.place</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.poly</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.polyadd</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.polyder</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.polydiv</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.polyfit</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.polyint</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.polymul</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.polysub</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.polyval</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.prod</code></td>
+<td><code>array.prod</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.ptp</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.put</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.put_along_axis</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.putmask</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.quantile</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.ravel</code></td>
+<td><code>array_ext.ravel</code></td>
+<td>NumPy extension</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">no</td>
+</tr>
+<tr>
+<td><code>numpy.ravel_multi_index</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.real</code></td>
+<td><code>array.real</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.real_if_close</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.repeat</code></td>
+<td><code>array.repeat</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.reshape</code></td>
+<td><code>array.reshape</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.resize</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.result_type</code></td>
+<td>metadata</td>
+<td>metadata</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+</tr>
+<tr>
+<td><code>numpy.roll</code></td>
+<td><code>array.roll</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.rollaxis</code></td>
+<td><code>array_ext.rollaxis</code></td>
+<td>NumPy extension</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">no</td>
+</tr>
+<tr>
+<td><code>numpy.roots</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.rot90</code></td>
+<td><code>array_ext.rot90</code></td>
+<td>NumPy extension</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">no</td>
+</tr>
+<tr>
+<td><code>numpy.round</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.row_stack</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.searchsorted</code></td>
+<td><code>array.searchsorted</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.select</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.setdiff1d</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.setxor1d</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.shape</code></td>
+<td>metadata</td>
+<td>metadata</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+</tr>
+<tr>
+<td><code>numpy.sinc</code></td>
+<td><code>array_ext.sinc</code></td>
+<td>NumPy extension</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">no</td>
+</tr>
+<tr>
+<td><code>numpy.size</code></td>
+<td>metadata</td>
+<td>metadata</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+</tr>
+<tr>
+<td><code>numpy.sort</code></td>
+<td><code>array.sort</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.sort_complex</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.split</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.squeeze</code></td>
+<td><code>array.squeeze</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.stack</code></td>
+<td><code>array.stack</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.std</code></td>
+<td><code>array.std</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.sum</code></td>
+<td><code>array.sum</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.swapaxes</code></td>
+<td><code>array.swapaxes</code></td>
+<td>NumPy extension</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">no</td>
+</tr>
+<tr>
+<td><code>numpy.take</code></td>
+<td><code>array.take</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.take_along_axis</code></td>
+<td><code>array.take_along_axis</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.tensordot</code></td>
+<td><code>array.tensordot</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.tile</code></td>
+<td><code>array.tile</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.trace</code></td>
+<td><code>array.trace</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.transpose</code></td>
+<td><code>array.transpose</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.trapezoid</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.tri</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.tril</code></td>
+<td><code>array.tril</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.tril_indices_from</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.trim_zeros</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.triu</code></td>
+<td><code>array.triu</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.triu_indices_from</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.union1d</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.unique</code></td>
+<td><code>array_ext.unique</code></td>
+<td>NumPy extension</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">no</td>
+</tr>
+<tr>
+<td><code>numpy.unique_all</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.unique_counts</code></td>
+<td><code>array.unique_counts</code></td>
+<td>NumPy extension</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">no</td>
+</tr>
+<tr>
+<td><code>numpy.unique_inverse</code></td>
+<td><code>array.unique_inverse</code></td>
+<td>NumPy extension</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">no</td>
+</tr>
+<tr>
+<td><code>numpy.unique_values</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.unravel_index</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.unstack</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.unwrap</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.vander</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.var</code></td>
+<td><code>array.var</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.vdot</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.vsplit</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.vstack</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.where</code></td>
+<td><code>array.where</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.zeros</code></td>
+<td><code>array.zeros</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.zeros_like</code></td>
+<td><code>array.zeros_like</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+</tbody>
+</table>
+<h2 id="ufunc-calls">Ufunc calls<a class="headerlink" href="#ufunc-calls" title="Permanent link">&para;</a></h2>
+<details class="compat-columns compat-has-backing">
+<summary>capability details</summary>
+</details>
+
+<table>
+<thead>
+<tr>
+<th>Function</th>
+<th>Lowers to</th>
+<th>Backed by</th>
+<th style="text-align: center;">Dynamic</th>
+<th style="text-align: center;">Staged</th>
+<th style="text-align: center;">Serialized</th>
+<th style="text-align: center;">JVP</th>
+<th style="text-align: center;">VJP</th>
+<th style="text-align: center;">Abstract</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>numpy.absolute</code></td>
+<td><code>array.absolute</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.add</code></td>
+<td><code>array.add</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.arccos</code></td>
+<td><code>array.arccos</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.arccosh</code></td>
+<td><code>array.arccosh</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.arcsin</code></td>
+<td><code>array.arcsin</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.arcsinh</code></td>
+<td><code>array.arcsinh</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.arctan</code></td>
+<td><code>array.arctan</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.arctan2</code></td>
+<td><code>array.arctan2</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.arctanh</code></td>
+<td><code>array.arctanh</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.bitwise_and</code></td>
+<td><code>array.bitwise_and</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.bitwise_or</code></td>
+<td><code>array.bitwise_or</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.bitwise_xor</code></td>
+<td><code>array.bitwise_xor</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.cbrt</code></td>
+<td><code>array_ext.cbrt</code></td>
+<td>NumPy extension</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">no</td>
+</tr>
+<tr>
+<td><code>numpy.ceil</code></td>
+<td><code>array.ceil</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.conjugate</code></td>
+<td><code>array.conjugate</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.copysign</code></td>
+<td><code>array.copysign</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.cos</code></td>
+<td><code>array.cos</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.cosh</code></td>
+<td><code>array.cosh</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.deg2rad</code></td>
+<td><code>array_ext.deg2rad</code></td>
+<td>NumPy extension</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">no</td>
+</tr>
+<tr>
+<td><code>numpy.degrees</code></td>
+<td><code>array_ext.degrees</code></td>
+<td>NumPy extension</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">no</td>
+</tr>
+<tr>
+<td><code>numpy.divide</code></td>
+<td><code>array.divide</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.divmod</code></td>
+<td><code>array_ext.divmod</code></td>
+<td>NumPy extension</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">no</td>
+</tr>
+<tr>
+<td><code>numpy.equal</code></td>
+<td><code>array.equal</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.exp</code></td>
+<td><code>array.exp</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.exp2</code></td>
+<td><code>array_ext.exp2</code></td>
+<td>NumPy extension</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">no</td>
+</tr>
+<tr>
+<td><code>numpy.expm1</code></td>
+<td><code>array.expm1</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.fabs</code></td>
+<td><code>array_ext.fabs</code></td>
+<td>NumPy extension</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">no</td>
+</tr>
+<tr>
+<td><code>numpy.float_power</code></td>
+<td><code>array_ext.float_power</code></td>
+<td>NumPy extension</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">no</td>
+</tr>
+<tr>
+<td><code>numpy.floor</code></td>
+<td><code>array.floor</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.floor_divide</code></td>
+<td><code>array.floor_divide</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.fmax</code></td>
+<td><code>array_ext.fmax</code></td>
+<td>NumPy extension</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">no</td>
+</tr>
+<tr>
+<td><code>numpy.fmin</code></td>
+<td><code>array_ext.fmin</code></td>
+<td>NumPy extension</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">no</td>
+</tr>
+<tr>
+<td><code>numpy.fmod</code></td>
+<td><code>array_ext.fmod</code></td>
+<td>NumPy extension</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">no</td>
+</tr>
+<tr>
+<td><code>numpy.frexp</code></td>
+<td><code>array_ext.frexp</code></td>
+<td>NumPy extension</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">no</td>
+</tr>
+<tr>
+<td><code>numpy.greater</code></td>
+<td><code>array.greater</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.greater_equal</code></td>
+<td><code>array.greater_equal</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.heaviside</code></td>
+<td><code>array_ext.heaviside</code></td>
+<td>NumPy extension</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.hypot</code></td>
+<td><code>array.hypot</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.invert</code></td>
+<td><code>array.invert</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.isfinite</code></td>
+<td><code>array.isfinite</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.isinf</code></td>
+<td><code>array.isinf</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.isnan</code></td>
+<td><code>array.isnan</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.ldexp</code></td>
+<td><code>array_ext.ldexp</code></td>
+<td>NumPy extension</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.less</code></td>
+<td><code>array.less</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.less_equal</code></td>
+<td><code>array.less_equal</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.log</code></td>
+<td><code>array.log</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.log10</code></td>
+<td><code>array.log10</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.log1p</code></td>
+<td><code>array.log1p</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.log2</code></td>
+<td><code>array.log2</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.logaddexp</code></td>
+<td><code>array.logaddexp</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.logaddexp2</code></td>
+<td><code>array_ext.logaddexp2</code></td>
+<td>NumPy extension</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">no</td>
+</tr>
+<tr>
+<td><code>numpy.logical_and</code></td>
+<td><code>array.logical_and</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.logical_not</code></td>
+<td><code>array.logical_not</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.logical_or</code></td>
+<td><code>array.logical_or</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.logical_xor</code></td>
+<td><code>array.logical_xor</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.matmul</code></td>
+<td><code>array.matmul</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.matvec</code></td>
+<td><code>array_ext.matvec</code></td>
+<td>NumPy extension</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.maximum</code></td>
+<td><code>array.maximum</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.minimum</code></td>
+<td><code>array.minimum</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.modf</code></td>
+<td><code>array_ext.modf</code></td>
+<td>NumPy extension</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">no</td>
+</tr>
+<tr>
+<td><code>numpy.multiply</code></td>
+<td><code>array.multiply</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.negative</code></td>
+<td><code>array.negative</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.nextafter</code></td>
+<td><code>array.nextafter</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.not_equal</code></td>
+<td><code>array.not_equal</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.positive</code></td>
+<td><code>array.positive</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.power</code></td>
+<td><code>array.power</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.rad2deg</code></td>
+<td><code>array_ext.rad2deg</code></td>
+<td>NumPy extension</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">no</td>
+</tr>
+<tr>
+<td><code>numpy.radians</code></td>
+<td><code>array_ext.radians</code></td>
+<td>NumPy extension</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">no</td>
+</tr>
+<tr>
+<td><code>numpy.reciprocal</code></td>
+<td><code>array.reciprocal</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.remainder</code></td>
+<td><code>array.remainder</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.rint</code></td>
+<td><code>array.rint</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.sign</code></td>
+<td><code>array.sign</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.signbit</code></td>
+<td><code>array.signbit</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.sin</code></td>
+<td><code>array.sin</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.sinh</code></td>
+<td><code>array.sinh</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.spacing</code></td>
+<td><code>array_ext.spacing</code></td>
+<td>NumPy extension</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.sqrt</code></td>
+<td><code>array.sqrt</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.square</code></td>
+<td><code>array.square</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.subtract</code></td>
+<td><code>array.subtract</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.tan</code></td>
+<td><code>array.tan</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.tanh</code></td>
+<td><code>array.tanh</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.trunc</code></td>
+<td><code>array.trunc</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.vecdot</code></td>
+<td><code>array.vecdot</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.vecmat</code></td>
+<td><code>array_ext.vecmat</code></td>
+<td>NumPy extension</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+</tbody>
+</table>
+<h2 id="supported-ufunc-methods">Supported ufunc methods<a class="headerlink" href="#supported-ufunc-methods" title="Permanent link">&para;</a></h2>
+<details class="compat-columns compat-has-backing">
+<summary>capability details</summary>
+</details>
+
+<table>
+<thead>
+<tr>
+<th>Function</th>
+<th>Lowers to</th>
+<th>Backed by</th>
+<th style="text-align: center;">Dynamic</th>
+<th style="text-align: center;">Staged</th>
+<th style="text-align: center;">Serialized</th>
+<th style="text-align: center;">JVP</th>
+<th style="text-align: center;">VJP</th>
+<th style="text-align: center;">Abstract</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>numpy.add.accumulate</code></td>
+<td><code>array.cumsum</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.add.outer</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.add.reduce</code></td>
+<td><code>array.sum</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.arctan2.outer</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.bitwise_and.outer</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.bitwise_or.outer</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.bitwise_xor.outer</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.copysign.outer</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.divide.outer</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.equal.outer</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.float_power.outer</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.floor_divide.outer</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.fmax.outer</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.fmin.outer</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.fmod.outer</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.greater.outer</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.greater_equal.outer</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.heaviside.outer</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.hypot.outer</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.ldexp.outer</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.less.outer</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.less_equal.outer</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.logaddexp.outer</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.logaddexp2.outer</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.logical_and.outer</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.logical_or.outer</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.logical_xor.outer</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.maximum.outer</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.minimum.outer</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.multiply.accumulate</code></td>
+<td><code>array.cumprod</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.multiply.outer</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.multiply.reduce</code></td>
+<td><code>array.prod</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">from JVP</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.nextafter.outer</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.not_equal.outer</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.power.outer</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.remainder.outer</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.subtract.outer</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+</tbody>
+</table>
+<h2 id="ndarray-methods">ndarray methods<a class="headerlink" href="#ndarray-methods" title="Permanent link">&para;</a></h2>
+<details class="compat-columns compat-has-backing">
+<summary>capability details</summary>
+</details>
+
+<table>
+<thead>
+<tr>
+<th>Function</th>
+<th>Lowers to</th>
+<th>Backed by</th>
+<th style="text-align: center;">Dynamic</th>
+<th style="text-align: center;">Staged</th>
+<th style="text-align: center;">Serialized</th>
+<th style="text-align: center;">JVP</th>
+<th style="text-align: center;">VJP</th>
+<th style="text-align: center;">Abstract</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>numpy.ndarray.astype</code></td>
+<td><code>array.astype</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.ndarray.copy</code></td>
+<td><code>advect.copy</code></td>
+<td>Advect core</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.ndarray.item</code></td>
+<td>composite</td>
+<td>composite</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+<td style="text-align: center;">composite</td>
+</tr>
+<tr>
+<td><code>numpy.ndarray.reshape</code></td>
+<td><code>array.reshape</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.ndarray.sum</code></td>
+<td><code>array.sum</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.ndarray.transpose</code></td>
+<td><code>array.transpose</code></td>
+<td>Array API</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">no</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">direct</td>
+<td style="text-align: center;">yes</td>
+</tr>
+</tbody>
+</table>
+      </div>
+      
+
+      
+      <nav class="seealso" aria-label="Adjacent pages">
+        <span><a href="../">← compatibility</a></span>
+        <span class="nn"><a href="../array-api/">array api →</a></span>
+      </nav>
+      
+      <p class="prompt">$ <span class="cursor">█</span></p>
+    </div></div>
+  </article>
+</div>
+
+<div class="overlay" id="help" role="dialog" aria-label="Keyboard shortcuts">
+  <h3>Keys</h3>
+  <table>
+    <tr><td class="kk">j k d u g G</td><td>scroll the page</td></tr>
+    <tr><td class="kk">n / p</td><td>next / previous page</td></tr>
+    <tr><td class="kk">e</td><td>toggle the docs tree pane</td></tr>
+    <tr><td class="kk">/</td><td>search the manual</td></tr>
+    <tr><td class="kk">2</td><td>open the playground</td></tr>
+    <tr><td class="kk">t</td><td>lp0 → dark → crt</td></tr>
+    <tr><td class="kk">?</td><td>close this help</td></tr>
+  </table>
+</div>
+
+<div class="overlay search-box" id="search" role="dialog" aria-label="Search">
+  <div class="search-in"><span class="ps">/</span><input id="searchq" spellcheck="false" autocomplete="off" aria-label="Search query" placeholder="search the manual…"></div>
+  <div class="search-hits" id="searchhits"></div>
+</div>
+
+<div class="bar">
+  <a href="../.." class="b" aria-current="true">[1:docs]</a>
+  <a href="../../playground/" class="b" id="wsplay">[2:playground]</a>
+  <span class="path hidesm">$ man advect/compatibility/numpy</span>
+  <span class="grow"></span>
+  <button class="tbtn" id="treebtn" aria-label="Toggle documentation tree">[e] tree</button>
+  <button class="tbtn" id="searchbtn" aria-label="Search">[/] search</button>
+  <button class="tbtn hidesm" id="helpbtn" aria-label="Keyboard help">[?] keys</button>
+  <button class="tbtn" id="themeToggle" aria-label="Cycle display mode">[ mode: … ]</button>
+</div>
+
+<script src="../../js/theme.js"></script>
+<script src="../../js/examples.js"></script>
+<script src="../../search/main.js"></script>
+
+</body>
+</html>

@@ -1,0 +1,241 @@
+<!doctype html><html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="A small extensible automatic-differentiation core for Python">
+<link rel="canonical" href="https://yaugenst.github.io/advect/dev/architecture/">
+<title>architecture(7) · advect</title>
+<link rel="icon" href="../img/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../css/fonts.css">
+<link rel="stylesheet" href="../css/theme.css?v=86c97aee1cb2">
+<link rel="stylesheet" href="../assets/_mkdocstrings.css">
+<script>
+var base_url = "..";
+/* pre-paint: apply persisted display mode and tree state to avoid a theme
+   flash and the tree pane animating open on every navigation */
+(function () {
+  var m = null, t = null;
+  try {
+    m = localStorage.getItem("advect-mode");
+    t = localStorage.getItem("advect-tree");
+  } catch (e) { /* private mode */ }
+  if (m) document.documentElement.dataset.theme = m;
+  var open = t === null ? window.innerWidth > 1100 : t === "1";
+  if (open) document.documentElement.classList.add("tree-open");
+})();
+</script>
+
+</head>
+<body data-base="..">
+
+<div class="desktop" id="desktop">
+  <aside class="tile treetile" id="treetile" aria-label="Documentation tree" aria-hidden="true">
+    <span class="ptitle"><span class="pn">tree</span> docs/</span>
+    <pre class="tree"><span class="trow">docs/</span><span class="trow" style="--ti:4ch"><span class="dim">├── </span><a href=".." title="Home">index</a></span><span class="trow" style="--ti:4ch"><span class="dim">├── </span>tutorials/</span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../tutorials/" title="Tutorials">index</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../tutorials/gradients/" title="Gradients and Pytrees">gradients</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../tutorials/control-flow/" title="Control Flow and Mutation">control-flow</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../tutorials/staging/" title="Staging and Serialization">staging</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../tutorials/interop/" title="Providers and Interop">interop</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../tutorials/primitives/" title="Custom Primitives">primitives</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   └── </span><a href="../tutorials/debugging/" title="Debugging">debugging</a></span><span class="trow" style="--ti:4ch"><span class="dim">├── </span><a href="./" class="cur" aria-current="page" title="Architecture">architecture</a></span><span class="trow" style="--ti:4ch"><span class="dim">├── </span>compatibility/</span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../compatibility/" title="Compatibility">index</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../compatibility/numpy/" title="NumPy">numpy</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../compatibility/array-api/" title="Array API">array-api</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../compatibility/cupy/" title="CuPy">cupy</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../compatibility/scipy/" title="SciPy">scipy</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   └── </span><a href="../compatibility/xarray/" title="xarray">xarray</a></span><span class="trow" style="--ti:4ch"><span class="dim">└── </span>api-reference/</span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="../api/" title="API Reference">index</a></span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="../api/interop/" title="Host Autodiff Interop">interop</a></span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="../api/transforms/" title="Transforms">transforms</a></span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="../api/staging/" title="Staging">staging</a></span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="../api/primitives/" title="Primitives">primitives</a></span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="../api/arrays/" title="Arrays and Structure">arrays</a></span><span class="trow" style="--ti:8ch"><span class="dim">    └── </span><a href="../api/errors/" title="Errors">errors</a></span></pre>
+  </aside>
+
+  <article class="tile manwin" aria-label="Manual page">
+    <span class="ptitle"><span class="pn">man</span> advect/architecture</span>
+    <div class="manscroll" id="manscroll"><div class="mancol">
+      <div class="manhead"><span>ARCHITECTURE(7)</span><span class="mid">Miscellanea</span><span>ARCHITECTURE(7)</span></div>
+      <div class="rule">────────────────────────────────────────────────────────────────────────────────────────</div>
+
+      
+      <div class="md">
+        
+        <h1 id="architecture">Architecture<a class="headerlink" href="#architecture" title="Permanent link">&para;</a></h1>
+<p>Advect is an autodiff core, not an array library. NumPy — or another Array API
+provider — keeps doing the numerics; Advect's job is to record what a function
+does to its arrays, differentiate that record, and, when asked, turn it into a
+durable program. Everything in the design follows from keeping that job small.</p>
+<h2 id="two-frontends-one-semantic-core">Two frontends, one semantic core<a class="headerlink" href="#two-frontends-one-semantic-core" title="Permanent link">&para;</a></h2>
+<p>NumPy and the Array API are separate calling contracts. The concrete NumPy
+frontend owns <code>numpy.*</code> signatures, ufunc methods, aliases, <code>out=</code>, and
+functionalized mutation. The provider-neutral Array API frontend owns the
+versioned namespace returned by <code>x.__array_namespace__()</code>. They share code only
+after each frontend has bound its foreign call to a canonical operation.</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>flowchart LR
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    NP[&quot;numpy.*&quot;] --&gt; NF[&quot;Concrete NumPy frontend&quot;]
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>    XP[&quot;x.__array_namespace__()&quot;] --&gt; AF[&quot;Array API frontend&quot;]
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>    CU[&quot;CuPy provider&quot;] --&gt; AF
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>    NU[&quot;NumPy provider&quot;] --&gt; AF
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>    NF --&gt; OP[&quot;Canonical operation and complete OpDef&quot;]
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>    AF --&gt; OP
+</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>    OP --&gt; DY[&quot;Dynamic tape&quot;]
+</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>    OP --&gt; ST[&quot;Staged graph&quot;]
+</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>    OP --&gt; AD[&quot;JVP and transpose rules&quot;]
+</span></code></pre></div>
+<p>CuPy reaches Advect through the designated Array API provider path; Advect does
+not maintain a speculative direct <code>cupy.*</code> frontend. Its historical GPU record
+is source-only until a retained report and digest verify the current gate. A
+future direct frontend would bind its own calling convention and join at the
+same canonical-operation boundary.</p>
+<h2 id="one-core-two-lifetimes">One core, two lifetimes<a class="headerlink" href="#one-core-two-lifetimes" title="Permanent link">&para;</a></h2>
+<p>Every operation Advect understands is a <strong>primitive</strong> with four faces: a
+concrete evaluation, an abstract evaluation over shapes and dtypes, a JVP
+(directional-derivative) rule, and a transpose derived from the JVP. The
+transforms you call — <code>grad</code>, <code>jvp</code>, <code>vjp</code>, <code>jacobian</code>, <code>stage</code> — are all
+built from those four faces. Adding an operation means supplying the faces,
+never touching the transforms.</p>
+<p>What differs between the two execution modes is not the math but the
+<em>lifetime</em> of the record:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>              ┌─────────────────────────────────────┐
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>              │ User code                           │
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>              │   z = np.sin(x) + y                 │
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>              └──────────────────┬──────────────────┘
+</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>                                 │
+</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>              ┌──────────────────▼──────────────────┐
+</span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>              │ Primitive semantics                 │
+</span><span id="__span-1-8"><a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>              │   concrete · abstract · JVP ·       │
+</span><span id="__span-1-9"><a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>              │   transpose                         │
+</span><span id="__span-1-10"><a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>              └────────┬───────────────────┬────────┘
+</span><span id="__span-1-11"><a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>                       │                   │
+</span><span id="__span-1-12"><a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>    ┌──────────────────▼────────┐ ┌────────▼──────────────────┐
+</span><span id="__span-1-13"><a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a>    │ Dynamic lifetime          │ │ Staged lifetime           │
+</span><span id="__span-1-14"><a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a>    │   concrete SSA tape       │ │   abstract trace →        │
+</span><span id="__span-1-15"><a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a>    │   → pullback              │ │   durable optimized graph │
+</span><span id="__span-1-16"><a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a>    └───────────────────────────┘ └───────────────────────────┘
+</span></code></pre></div>
+<h2 id="the-dynamic-path">The dynamic path<a class="headerlink" href="#the-dynamic-path" title="Permanent link">&para;</a></h2>
+<p><code>grad(f)(x)</code> runs <code>f</code> with the real values, wrapped in tracers that record
+each primitive onto an invocation-local SSA tape. Because the trace happens
+inside an ordinary call, Python control flow needs no special forms: loops
+unroll to the iterations that actually ran, branches take the branch the data
+took. The reverse sweep walks that tape backwards through the transpose rules
+and then releases it — nothing is cached between calls, and no graph outlives
+the invocation.</p>
+<p>That per-call freshness is the point of the dynamic mode: a new trace can have
+new shapes, new branches, even a different number of loop iterations. The cost
+is that tracing work is repeated on every call.</p>
+<h2 id="the-staged-path">The staged path<a class="headerlink" href="#the-staged-path" title="Permanent link">&para;</a></h2>
+<p><code>stage(f, example)</code> runs the same trace once with <em>abstract</em> values — shape
+and dtype, no data — and keeps the result. The recorded graph is validated,
+then run through a fixed optimization pipeline (dead-code elimination,
+simplification, common-subexpression elimination) into an immutable program:</p>
+<div class="language-python run highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="kn">import</span><span class="w"> </span><span class="nn">advect</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">ad</span>
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>
+</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>
+</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="k">def</span><span class="w"> </span><span class="nf">loss</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>    <span class="k">return</span> <span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">sin</span><span class="p">(</span><span class="n">x</span><span class="p">)</span> <span class="o">**</span> <span class="mi">2</span><span class="p">)</span>
+</span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>
+</span><span id="__span-2-9"><a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>
+</span><span id="__span-2-10"><a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="n">gradient_program</span> <span class="o">=</span> <span class="n">ad</span><span class="o">.</span><span class="n">grad</span><span class="p">(</span><span class="n">ad</span><span class="o">.</span><span class="n">stage</span><span class="p">(</span><span class="n">loss</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">linspace</span><span class="p">(</span><span class="mf">0.0</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">,</span> <span class="mi">4</span><span class="p">)))</span>
+</span><span id="__span-2-11"><a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="k">for</span> <span class="n">node_id</span> <span class="ow">in</span> <span class="n">gradient_program</span><span class="o">.</span><span class="n">graph</span><span class="o">.</span><span class="n">node_ids</span><span class="p">():</span>
+</span><span id="__span-2-12"><a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a>    <span class="n">node</span> <span class="o">=</span> <span class="n">gradient_program</span><span class="o">.</span><span class="n">graph</span><span class="o">.</span><span class="n">get_node</span><span class="p">(</span><span class="n">node_id</span><span class="p">)</span>
+</span><span id="__span-2-13"><a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a>    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;%</span><span class="si">{</span><span class="n">node_id</span><span class="si">}</span><span class="s2"> = </span><span class="si">{</span><span class="n">node</span><span class="o">.</span><span class="n">op</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">node</span><span class="o">.</span><span class="n">inputs</span><span class="si">}</span><span class="s2">  # </span><span class="si">{</span><span class="n">node</span><span class="o">.</span><span class="n">shape</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">node</span><span class="o">.</span><span class="n">dtype</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+</span></code></pre></div>
+<p>A <code>StagedProgram</code> is compiled for exactly one shape/dtype signature — it is
+never a hidden multi-signature cache. Derivatives of programs are programs:
+<code>grad(program)</code> and <code>vjp_program(program)</code> compile the derivative graph once,
+and warm calls execute it with no tape and no reverse sweep. Programs
+serialize to a versioned JSON artifact and load anywhere the referenced
+primitives are importable.</p>
+<p>Because the staged trace has no data, it is also stricter: Python truth tests
+on traced values, ambient randomness, and data-dependent shapes are rejected
+at trace time rather than silently frozen. The <a href="../tutorials/debugging/">debugging
+tutorial</a> maps those errors to their rewrites.</p>
+<h2 id="derivatives-are-jvp-first">Derivatives are JVP-first<a class="headerlink" href="#derivatives-are-jvp-first" title="Permanent link">&para;</a></h2>
+<p>A primitive author writes one derivative rule — the JVP — as ordinary
+traceable code. Reverse mode is obtained by transposing that rule, and Advect
+validates the required real-linearity instead of trusting it. Derivatives are
+real-linear throughout, which gives complex and non-holomorphic functions one
+consistent convention, and a missing rule is a named error — Advect never
+substitutes a numeric approximation silently.</p>
+<h2 id="mutation-is-functionalized">Mutation is functionalized<a class="headerlink" href="#mutation-is-functionalized" title="Permanent link">&para;</a></h2>
+<p>Traced arrays are not writable in place. Supported mutation syntax — indexed
+updates, augmented assignment through basic slices — is rewritten at the
+tracer boundary into immutable SSA updates, and everything else raises with a
+suggested rewrite. Inputs are never implicitly writable: copy first, then
+update the owned copy. This keeps the recorded graph a pure dataflow program,
+which is what makes transposition, optimization, and serialization tractable.</p>
+<h2 id="the-native-layer">The native layer<a class="headerlink" href="#the-native-layer" title="Permanent link">&para;</a></h2>
+<p>Advect ships as one Python distribution with a required native extension, in
+three pieces:</p>
+<ul>
+<li><strong><code>advect</code></strong> (Python) owns all semantics: the tracer frontends, the
+  primitive registry, derivative rules, pytrees, and the user API.</li>
+<li><strong><code>advect-runtime</code></strong> (pure Rust, no Python bindings) owns structure and
+  lifetime: the SSA arena, the dynamic tape, the durable graph store, the
+  optimization passes, and the execution planner.</li>
+<li><strong><code>advect-native</code></strong> (PyO3) is the thin adapter between the two.</li>
+</ul>
+<p>The split is deliberate: Python never mirrors the graph with per-node objects,
+and Rust never interprets what an operation means. Array computation itself
+stays with the provider — Advect contains no kernel compiler, no code
+generation, and no fusion; a staged program's speed comes from tracing once,
+optimizing once, and executing with native traversal over provider
+operations.</p>
+<h2 id="deliberate-boundaries">Deliberate boundaries<a class="headerlink" href="#deliberate-boundaries" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>No dispatch patching.</strong> NumPy is intercepted through its own protocols
+  (<code>__array_ufunc__</code>, <code>__array_function__</code>, <code>like=</code>); integrations register
+  explicitly on import, never through entry-point discovery. The sole
+  process-visible patch is a lock-protected, depth-counted guard around NumPy's
+  ambient RNG entry points during abstract staging. Non-staging callers reach
+  the originals, and the last staging scope restores the original attributes.</li>
+<li><strong>Deterministic frontend hooks.</strong> Core's private dependency-inversion seam is
+  populated at import time. A hook name is single-assignment: registering the
+  same callable again is harmless, while a different callable is rejected;
+  there is no unregister or reset path.</li>
+<li><strong>No compiler ambitions.</strong> Kernel compilation, backend lowering, and
+  automatic checkpoint placement are out of scope; the staged optimizer's
+  pass list is fixed and raw graph rewriting is not a user API.</li>
+<li><strong>No hidden fallbacks.</strong> Unsupported behavior fails with a rewrite
+  suggestion rather than detaching gradients or degrading precision.</li>
+<li><strong>No orchestration.</strong> Workflow scheduling, artifact storage, and remote
+  execution are independent layers above the serialized program.</li>
+</ul>
+<p>The contributor-level specifications behind this page — requirements, data
+structures, and the architecture decision records — live in the repository's
+<a href="https://github.com/yaugenst/advect/tree/main/design"><code>design/</code> directory</a>.</p>
+      </div>
+      
+
+      
+      <nav class="seealso" aria-label="Adjacent pages">
+        <span><a href="../tutorials/debugging/">← debugging</a></span>
+        <span class="nn"><a href="../compatibility/">compatibility →</a></span>
+      </nav>
+      
+      <p class="prompt">$ <span class="cursor">█</span></p>
+    </div></div>
+  </article>
+</div>
+
+<div class="overlay" id="help" role="dialog" aria-label="Keyboard shortcuts">
+  <h3>Keys</h3>
+  <table>
+    <tr><td class="kk">j k d u g G</td><td>scroll the page</td></tr>
+    <tr><td class="kk">n / p</td><td>next / previous page</td></tr>
+    <tr><td class="kk">e</td><td>toggle the docs tree pane</td></tr>
+    <tr><td class="kk">/</td><td>search the manual</td></tr>
+    <tr><td class="kk">2</td><td>open the playground</td></tr>
+    <tr><td class="kk">t</td><td>lp0 → dark → crt</td></tr>
+    <tr><td class="kk">?</td><td>close this help</td></tr>
+  </table>
+</div>
+
+<div class="overlay search-box" id="search" role="dialog" aria-label="Search">
+  <div class="search-in"><span class="ps">/</span><input id="searchq" spellcheck="false" autocomplete="off" aria-label="Search query" placeholder="search the manual…"></div>
+  <div class="search-hits" id="searchhits"></div>
+</div>
+
+<div class="bar">
+  <a href=".." class="b" aria-current="true">[1:docs]</a>
+  <a href="../playground/" class="b" id="wsplay">[2:playground]</a>
+  <span class="path hidesm">$ man advect/architecture</span>
+  <span class="grow"></span>
+  <button class="tbtn" id="treebtn" aria-label="Toggle documentation tree">[e] tree</button>
+  <button class="tbtn" id="searchbtn" aria-label="Search">[/] search</button>
+  <button class="tbtn hidesm" id="helpbtn" aria-label="Keyboard help">[?] keys</button>
+  <button class="tbtn" id="themeToggle" aria-label="Cycle display mode">[ mode: … ]</button>
+</div>
+
+<script src="../js/theme.js"></script>
+<script src="../js/examples.js"></script>
+<script src="../search/main.js"></script>
+
+</body>
+</html>
