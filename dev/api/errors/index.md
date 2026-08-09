@@ -89,11 +89,9 @@ Error raised when forward-mode autodiff encounters an op without a JVP rule.
 
 Parameters:
 
-| Name              | Type  | Description                   | Default                                                        |
-| ----------------- | ----- | ----------------------------- | -------------------------------------------------------------- |
-| `message`         | `str` | Human-readable error message. | *required*                                                     |
-| `op`              | \`str | None\`                        | Name of the operation missing a JVP rule.                      |
-| `source_location` | \`str | None\`                        | Source location where the operation was traced (if available). |
+- **`message`** (`str`) – Human-readable error message.
+- **`op`** (`str | None`, default: `None` ) – Name of the operation missing a JVP rule.
+- **`source_location`** (`str | None`, default: `None` ) – Source location where the operation was traced (if available).
 
 ## NoVJPError
 
@@ -116,13 +114,11 @@ For a custom primitive, the error points to the public `@primitive` authoring su
 
 Parameters:
 
-| Name                 | Type   | Description                                                       | Default                                                           |
-| -------------------- | ------ | ----------------------------------------------------------------- | ----------------------------------------------------------------- |
-| `message`            | `str`  | Human-readable error message.                                     | *required*                                                        |
-| `op`                 | \`str  | None\`                                                            | Name of the operation missing a VJP rule.                         |
-| `source_location`    | \`str  | None\`                                                            | Source location where the operation was traced (if available).    |
-| `non_differentiable` | `bool` | Whether the operation is explicitly marked as non-differentiable. | `False`                                                           |
-| `grad_reason`        | \`str  | None\`                                                            | Human-readable explanation for non-differentiable classification. |
+- **`message`** (`str`) – Human-readable error message.
+- **`op`** (`str | None`, default: `None` ) – Name of the operation missing a VJP rule.
+- **`source_location`** (`str | None`, default: `None` ) – Source location where the operation was traced (if available).
+- **`non_differentiable`** (`bool`, default: `False` ) – Whether the operation is explicitly marked as non-differentiable.
+- **`grad_reason`** (`str | None`, default: `None` ) – Human-readable explanation for non-differentiable classification.
 
 Examples:
 

@@ -1,6 +1,12 @@
 # Primitives
 
-Authoring surface for custom operations: one implementation, abstract evaluation, a JVP, and an optional explicit transpose. See the [conformance testing ADR](https://github.com/yaugenst/advect/blob/main/design/decisions/2026-07-27-primitive-conformance-testing.md) for the law battery every registered primitive must pass.
+A primitive makes one closed implementation atomic to Advect. The decorator returns the callable authoring handle; that same handle owns abstract staging, an optional JVP, and any explicit transpose. There is no separately imported or constructed primitive class. A JVP is the preferred derivative rule because it supports forward mode and structural transposition. An explicit transpose may instead supply reverse mode without a JVP; a traceable non-residual rule can participate in reverse-over-reverse differentiation. Residual-bearing transposes are the first-order-only boundary.
+
+Concrete and abstract calls retain the implementation's named parameters and pytrees. JVP and transpose rules operate on the dynamic array/scalar leaves in one stable flattened order. Static arguments remain named configuration; nondifferentiable arguments remain dynamic values but have no derivative contribution.
+
+Use the [testing utilities](https://yaugenst.github.io/advect/dev/api/testing/index.md) to validate a custom primitive and a representative composition. The [custom primitive tutorial](https://yaugenst.github.io/advect/dev/tutorials/primitives/index.md) shows the complete public authoring workflow.
+
+## Define the operation
 
 ## primitive
 
@@ -50,7 +56,23 @@ primitive(
 
 Define one atomic operation from its concrete implementation.
 
-Derivative rules are ordinary traceable functions attached to the returned primitive handle.
+The implementation must have fixed named parameters: positional-or-keyword and keyword-only parameters are supported, while positional-only parameters, `*args`, and `**kwargs` are rejected. Calls still follow the implementation's normal Python signature.
+
+`static_argnames` removes complete named arguments from tracing and stores them as operation attributes. `nondiff_argnames` keeps complete arguments as dynamic operands but supplies `None` tangents and suppresses their transpose contributions. The two sets must be disjoint. Derivative rules receive all remaining dynamic array/scalar leaves flattened in implementation-parameter and pytree order.
+
+With `residual=True`, the implementation must return `advect.PrimitiveResult`; callers still receive only its `output`. Rules are attached to the returned handle.
+
+Parameters:
+
+- **`function`** (`Callable[CallP, ResultT] | None`, default: `None` ) – Concrete implementation, when the decorator is applied directly.
+- **`name`** (`str | None`, default: `None` ) – Operation identity without the internal custom. prefix. By default Advect uses the implementation's module and qualified name. Use a stable explicit name for serialized artifacts.
+- **`static_argnames`** (`tuple[str, ...]`, default: `()` ) – Complete implementation arguments treated as concrete configuration.
+- **`nondiff_argnames`** (`tuple[str, ...]`, default: `()` ) – Complete dynamic arguments excluded from differentiation.
+- **`residual`** (`bool`, default: `False` ) – Whether the implementation returns an invocation-local PrimitiveResult for an exact transpose.
+
+Returns:
+
+- `Primitive or callable` – A callable authoring handle, or a decorator that creates one.
 
 Examples:
 
@@ -69,6 +91,50 @@ Examples:
 [12.0]
 ```
 
+## Attach rules to the returned handle
+
+The following methods are used on the object returned by `advect.primitive`; their source location is private so application code has only one public authoring entry point.
+
+## def_abstract
+
+```python
+def_abstract(fn: Callable[..., Any]) -> Callable[..., Any]
+```
+
+Attach the primitive's abstract staging rule.
+
+The rule has the implementation's fixed named parameters. Advect preserves each dynamic argument's pytree while replacing its array/scalar leaves with `advect.AbstractValue`; declared static arguments arrive unchanged. Return the concrete output pytree with `advect.ArraySpec` or `AbstractValue` leaves.
+
+The function is returned unchanged so this method can be used as a decorator.
+
+## def_jvp
+
+```python
+def_jvp(fn: Callable[..., Any]) -> Callable[..., Any]
+```
+
+Attach `fn(output, primals, tangents, **static_attrs)` as the JVP.
+
+`output` has the implementation's public output pytree. `primals` and `tangents` are flat tuples with one entry per dynamic array/scalar leaf, in implementation-parameter and pytree order. Tangents may be `None` for inactive leaves and are always `None` for leaves of a declared nondifferentiable argument. Static arguments are passed by name. Return a tangent with the output pytree.
+
+Write the rule as traceable, real-linear code so Advect can transpose it structurally and differentiate it again. The function is returned unchanged for decorator use.
+
+## def_transpose
+
+```python
+def_transpose(fn: Callable[..., Any]) -> Callable[..., Any]
+```
+
+Attach an ordinary or exact-residual transpose rule.
+
+Ordinary primitives receive `(cotangent, primals, output, **static_attrs)`. A primitive declared with `residual=True` receives `(cotangent, primals, output, residual, **static_attrs)`. `cotangent` and `output` have the public output pytree; `primals` is the same flattened dynamic-leaf tuple used by the JVP. Return a flat tuple with one contribution per dynamic leaf in that order. Advect suppresses contributions for declared nondifferentiable arguments.
+
+A rule may accept the optional keyword-only `active_input_indices=None` and return `None` for inactive contributions to avoid unnecessary work. Add an explicit transpose only when structural transposition cannot express the correct real adjoint, when an exact residual is required, or when measurement justifies a direct rule. The function is returned unchanged for decorator use.
+
+## Exact residuals
+
+Set `residual=True` only when reverse mode needs opaque data from the exact forward invocation. A direct call, JVP, or plain staged replay releases it before returning; a reusable linear map retains it until the map is closed. Residual primitives require an explicit transpose and are first-order boundaries: their primal can be staged, but a staged or higher-order derivative cannot retain the opaque residual. They may omit a JVP when only reverse mode is supported.
+
 ## PrimitiveResult
 
 ```python
@@ -81,7 +147,13 @@ PrimitiveResult(
 
 A primitive's public output and private same-invocation residual.
 
-`output` is the only value returned to the caller. Advect retains `residual` for the matching derivative invocation and calls `release` exactly once when that invocation state is discarded. The output must remain valid after the residual is released.
+`output` is the only value returned to the caller. Advect retains `residual` for the matching derivative invocation and calls `release` exactly once when that invocation state is discarded. The output must remain valid after the residual is released. A JVP never receives the residual; an explicit transpose on a primitive declared with `residual=True` receives it after `output`. A plain call or plain staged replay releases before returning. A one-shot reverse trace releases after consumption; a reusable linear map retains the residual until the map is closed.
+
+Parameters:
+
+- **`output`** (`R`) – Public primitive result returned to the caller.
+- **`residual`** (`Any`) – Opaque invocation-local data retained for reverse mode.
+- **`release`** (`Callable[[Any], None] | None`, default: `None` ) – Optional cleanup callback invoked exactly once with residual when Advect releases the invocation state.
 
 Examples:
 
@@ -91,6 +163,8 @@ Examples:
 >>> result.output
 3.0
 ```
+
+## Abstract values
 
 ## AbstractValue
 
@@ -108,57 +182,3 @@ Examples:
 >>> abstract.spec.shape
 (4,)
 ```
-
-## check_primitive
-
-```python
-check_primitive(
-    primitive: Primitive[Any, Any],
-    *,
-    primals: tuple[Any, ...],
-    static: Mapping[str, Any] | None = None,
-    tangents: tuple[Any, ...] | None = None,
-    cotangent: Any | None = None,
-    check: tuple[str, ...] = (
-        "abstract",
-        "jvp",
-        "transpose",
-    ),
-    epsilon: float = 0.0001,
-    atol: float = 1e-05,
-    rtol: float = 0.0001,
-) -> None
-```
-
-Run selected author checks for one representative primitive invocation.
-
-The default `("abstract", "jvp", "transpose")` is a first-order smoke check. Authors of a serializable primitive should normally run `("abstract", "jvp", "transpose", "nested", "stage")` for every materially different shape, dtype, and static-argument form. Add `"complex"` in a separate call whose primals are complex when the primitive supports complex values.
-
-The stage check executes both the compiled and serialized program, compares output structure, shape, and dtype exactly, and verifies that inputs remain unchanged. Repository-wide support still requires the conformance inventory; this helper intentionally does not import Hypothesis or claim exhaustive coverage from one sample.
-
-## Composed functions
-
-Use the whole-function checker first when a finite gradient looks suspicious. It performs a directional finite-difference sweep and checks the reverse gradient; `check_primitive` remains the narrower authoring contract for one extension.
-
-## check_gradient
-
-```python
-check_gradient(
-    function: Callable[..., Any],
-    primal: Any,
-    *,
-    tangent: Any | None = None,
-    epsilons: Sequence[float] = (
-        0.01,
-        0.001,
-        0.0001,
-        1e-05,
-    ),
-    atol: float = 1e-05,
-    rtol: float = 0.0001,
-) -> None
-```
-
-Check a unary composed function against directional differences.
-
-The check compares Advect's whole-function JVP with a central finite- difference sweep, then checks the reverse gradient against the same directional derivative. It checks consistency with the function that actually ran, not whether that function encodes the intended mathematics.

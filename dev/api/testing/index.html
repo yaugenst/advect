@@ -1,0 +1,491 @@
+<!doctype html><html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="A small extensible automatic-differentiation core for Python">
+<link rel="canonical" href="https://yaugenst.github.io/advect/dev/api/testing/">
+<title>testing(3) · advect</title>
+<link rel="icon" href="../../img/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../css/fonts.css">
+<link rel="stylesheet" href="../../css/theme.css?v=86c97aee1cb2">
+<link rel="stylesheet" href="../../assets/_mkdocstrings.css">
+<script>
+var base_url = "../..";
+/* pre-paint: apply persisted display mode and tree state to avoid a theme
+   flash and the tree pane animating open on every navigation */
+(function () {
+  var m = null, t = null;
+  try {
+    m = localStorage.getItem("advect-mode");
+    t = localStorage.getItem("advect-tree");
+  } catch (e) { /* private mode */ }
+  if (m) document.documentElement.dataset.theme = m;
+  var open = t === null ? window.innerWidth > 1100 : t === "1";
+  if (open) document.documentElement.classList.add("tree-open");
+})();
+</script>
+
+</head>
+<body data-base="../..">
+
+<div class="desktop" id="desktop">
+  <aside class="tile treetile" id="treetile" aria-label="Documentation tree" aria-hidden="true">
+    <span class="ptitle"><span class="pn">tree</span> docs/</span>
+    <pre class="tree"><span class="trow">docs/</span><span class="trow" style="--ti:4ch"><span class="dim">├── </span><a href="../.." title="Home">index</a></span><span class="trow" style="--ti:4ch"><span class="dim">├── </span>tutorials/</span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/" title="Tutorials">index</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/gradients/" title="Gradients and Pytrees">gradients</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/control-flow/" title="Control Flow and Mutation">control-flow</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/staging/" title="Staging and Serialization">staging</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/interop/" title="Providers and Interop">interop</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/primitives/" title="Custom Primitives">primitives</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   └── </span><a href="../../tutorials/debugging/" title="Debugging">debugging</a></span><span class="trow" style="--ti:4ch"><span class="dim">├── </span><a href="../../architecture/" title="Architecture">architecture</a></span><span class="trow" style="--ti:4ch"><span class="dim">├── </span>compatibility/</span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../compatibility/" title="Compatibility">index</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../compatibility/numpy/" title="NumPy">numpy</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../compatibility/array-api/" title="Array API">array-api</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../compatibility/cupy/" title="CuPy">cupy</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../compatibility/scipy/" title="SciPy">scipy</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   └── </span><a href="../../compatibility/xarray/" title="xarray">xarray</a></span><span class="trow" style="--ti:4ch"><span class="dim">├── </span>api-reference/</span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../" title="Overview">index</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span>core-api/</span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="../transforms/" title="Transforms">transforms</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="../staging/" title="Staging">staging</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="../primitives/" title="Primitives">primitives</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="../arrays/" title="Arrays">arrays</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="../pytree/" title="Pytrees">pytree</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="./" class="cur" aria-current="page" title="Testing Utilities">testing</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="../support/" title="Support Catalog">support</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   └── </span><a href="../errors/" title="Errors">errors</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   └── </span>public-modules/</span><span class="trow" style="--ti:12ch"><span class="dim">│       ├── </span><a href="../numpy/" title="NumPy Frontend">numpy</a></span><span class="trow" style="--ti:12ch"><span class="dim">│       ├── </span>scipy/</span><span class="trow" style="--ti:16ch"><span class="dim">│       │   ├── </span><a href="../scipy/" title="SciPy Overview">index</a></span><span class="trow" style="--ti:16ch"><span class="dim">│       │   ├── </span><a href="../scipy/special/" title="Special Functions">special</a></span><span class="trow" style="--ti:16ch"><span class="dim">│       │   ├── </span><a href="../scipy/ndimage/" title="Image Filters">ndimage</a></span><span class="trow" style="--ti:16ch"><span class="dim">│       │   └── </span><a href="../scipy/solvers/" title="Solver Callbacks">solvers</a></span><span class="trow" style="--ti:12ch"><span class="dim">│       ├── </span><a href="../xarray/" title="xarray">xarray</a></span><span class="trow" style="--ti:12ch"><span class="dim">│       └── </span>host-autodiff-interop/</span><span class="trow" style="--ti:16ch"><span class="dim">│           ├── </span><a href="../interop/" title="Host Interop Overview">index</a></span><span class="trow" style="--ti:16ch"><span class="dim">│           ├── </span><a href="../interop/torch/" title="PyTorch">torch</a></span><span class="trow" style="--ti:16ch"><span class="dim">│           ├── </span><a href="../interop/jax/" title="JAX">jax</a></span><span class="trow" style="--ti:16ch"><span class="dim">│           └── </span><a href="../interop/autograd/" title="HIPS Autograd">autograd</a></span><span class="trow" style="--ti:4ch"><span class="dim">└── </span>developer-guide/</span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="../../development/" title="Overview">index</a></span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="../../development/codebase/" title="Codebase Map">codebase</a></span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="../../development/adding-operations/" title="Adding Operations">adding-operations</a></span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="../../development/testing/" title="Testing">testing</a></span><span class="trow" style="--ti:8ch"><span class="dim">    └── </span><a href="../../development/documentation/" title="Documentation">documentation</a></span></pre>
+  </aside>
+
+  <article class="tile manwin" aria-label="Manual page">
+    <span class="ptitle"><span class="pn">man</span> advect/api/testing</span>
+    <div class="manscroll" id="manscroll"><div class="mancol">
+      <div class="manhead"><span>TESTING(3)</span><span class="mid">Library Calls</span><span>TESTING(3)</span></div>
+      <div class="rule">────────────────────────────────────────────────────────────────────────────────────────</div>
+
+      
+      <div class="md">
+        
+        <h1 id="testing-utilities">Testing Utilities<a class="headerlink" href="#testing-utilities" title="Permanent link">&para;</a></h1>
+<p><code>check_gradient</code> checks an ordinary unary composition against directional
+finite differences and reverse-mode consistency. <code>check_primitive</code> validates
+the narrower rule contract of one custom primitive authoring handle.</p>
+<p>The primitive check defaults to <code>abstract</code>, <code>jvp</code>, and <code>transpose</code>: a useful
+first-order smoke test, but not a staging or mutation claim. Request <code>stage</code>
+explicitly to compile and restore the program, validate output metadata, and
+check input preservation during both staged executions. Request <code>nested</code> and a
+separate complex-valued <code>complex</code> case when those capabilities are supported.
+Choose a check tuple that matches the rules the primitive promises. A
+transpose-only primitive can request <code>transpose</code> without a JVP; the checker
+compares its explicit transpose with a central finite difference. Forward-mode
+<code>jvp</code>, <code>complex</code>, and <code>nested</code> checks require a JVP.</p>
+<p>These utilities help extension authors; they do not replace application tests
+or prove that the implemented function represents the intended mathematics.</p>
+
+
+<div class="doc doc-object doc-module">
+
+
+
+<h2 id="advect.testing" class="doc doc-heading">
+            <span class="doc doc-object-name doc-module-name">testing</span>
+
+
+<a href="#advect.testing" class="headerlink" title="Permanent link">&para;</a></h2>
+
+    <div class="doc doc-contents first">
+
+        <p>Numerical validation for composed functions and custom primitives.</p>
+
+
+
+
+
+
+
+
+
+
+  <div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="advect.testing.check_gradient" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">check_gradient</span>
+
+
+<a href="#advect.testing.check_gradient" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">check_gradient</span><span class="p">(</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    <span class="n">function</span><span class="p">:</span> <span class="n"><span title="collections.abc.Callable">Callable</span></span><span class="p">[</span><span class="o">...</span><span class="p">,</span> <span class="n"><span title="typing.Any">Any</span></span><span class="p">],</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>    <span class="n">primal</span><span class="p">:</span> <span class="n"><span title="typing.Any">Any</span></span><span class="p">,</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>    <span class="o">*</span><span class="p">,</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>    <span class="n">tangent</span><span class="p">:</span> <span class="n"><span title="typing.Any">Any</span></span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>    <span class="n">epsilons</span><span class="p">:</span> <span class="n"><span title="collections.abc.Sequence">Sequence</span></span><span class="p">[</span><span class="n"><span title="float">float</span></span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span>
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>        <span class="mf">0.01</span><span class="p">,</span>
+</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>        <span class="mf">0.001</span><span class="p">,</span>
+</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>        <span class="mf">0.0001</span><span class="p">,</span>
+</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>        <span class="mf">1e-05</span><span class="p">,</span>
+</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>    <span class="p">),</span>
+</span><span id="__span-0-12"><a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>    <span class="n">atol</span><span class="p">:</span> <span class="n"><span title="float">float</span></span> <span class="o">=</span> <span class="mf">1e-05</span><span class="p">,</span>
+</span><span id="__span-0-13"><a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>    <span class="n">rtol</span><span class="p">:</span> <span class="n"><span title="float">float</span></span> <span class="o">=</span> <span class="mf">0.0001</span><span class="p">,</span>
+</span><span id="__span-0-14"><a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span>
+</span></code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Check a unary composed function against directional differences.</p>
+<p>The check compares Advect's whole-function JVP with a central finite-
+difference sweep, then checks the reverse gradient against the same
+directional derivative. It checks consistency with the function that
+actually ran, not whether that function encodes the intended mathematics.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+            <b><code>function</code></b>
+              (<code><span title="collections.abc.Callable">Callable</span>[..., <span title="typing.Any">Any</span>]</code>)
+          –
+          <div class="doc-md-description">
+            <p>Unary function with a real scalar output. This may be a composition of
+built-in operations and public custom primitives.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>primal</code></b>
+              (<code><span title="typing.Any">Any</span></code>)
+          –
+          <div class="doc-md-description">
+            <p>Representative input value or pytree at which to check <code>function</code>.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>tangent</code></b>
+              (<code><span title="typing.Any">Any</span> | None</code>, default:
+                  <code>None</code>
+)
+          –
+          <div class="doc-md-description">
+            <p>Direction pytree matching <code>primal</code>. When omitted, every numeric leaf
+receives an all-ones direction.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>epsilons</code></b>
+              (<code><span title="collections.abc.Sequence">Sequence</span>[<span title="float">float</span>]</code>, default:
+                  <code>(0.01, 0.001, 0.0001, 1e-05)</code>
+)
+          –
+          <div class="doc-md-description">
+            <p>Non-empty sequence of finite positive central-difference steps. The
+JVP comparison passes when at least one step agrees within tolerance.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>atol</code></b>
+              (<code><span title="float">float</span></code>, default:
+                  <code>1e-05</code>
+)
+          –
+          <div class="doc-md-description">
+            <p>Absolute tolerance for the finite-difference and real-adjoint checks.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>rtol</code></b>
+              (<code><span title="float">float</span></code>, default:
+                  <code>0.0001</code>
+)
+          –
+          <div class="doc-md-description">
+            <p>Relative tolerance for the finite-difference and real-adjoint checks.</p>
+          </div>
+        </li>
+    </ul>
+
+
+<p><span class="doc-section-title">Returns:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+              <code>None</code>
+          –
+          <div class="doc-md-description">
+            <p>The check returns only when both comparisons pass.</p>
+          </div>
+        </li>
+    </ul>
+
+
+<p><span class="doc-section-title">Raises:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+              <code><span title="ValueError">ValueError</span></code>
+            –
+          <div class="doc-md-description">
+            <p>If <code>epsilons</code> is empty or contains a non-finite or non-positive step,
+or if the tangent, input, or scalar-output structure is invalid.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+              <code><span title="TypeError">TypeError</span></code>
+            –
+          <div class="doc-md-description">
+            <p>If a selected input or tangent leaf is unsupported by the active array
+provider.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+              <code><a class="autorefs autorefs-internal" title="NoJVPError (advect.core.NoJVPError)" href="../errors/#advect.NoJVPError">NoJVPError</a></code>
+            –
+          <div class="doc-md-description">
+            <p>If an operation on the checked path has no forward-mode rule.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+              <code><a class="autorefs autorefs-internal" title="NoVJPError (advect.core.NoVJPError)" href="../errors/#advect.NoVJPError">NoVJPError</a></code>
+            –
+          <div class="doc-md-description">
+            <p>If an operation on the checked path has no reverse-mode rule.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+              <code><span title="AssertionError">AssertionError</span></code>
+            –
+          <div class="doc-md-description">
+            <p>If the JVP disagrees with every finite-difference step or the reverse
+gradient violates the JVP's real-adjoint identity. The error names any
+custom primitives observed on the failing path.</p>
+          </div>
+        </li>
+    </ul>
+
+
+<details class="note" open>
+  <summary>Notes</summary>
+  <p>This is a representative author check, not exhaustive conformance
+evidence. Run it on a composed public path in addition to testing each
+custom primitive with <code>check_primitive</code>.</p>
+</details>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="advect.testing.check_primitive" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">check_primitive</span>
+
+
+<a href="#advect.testing.check_primitive" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">check_primitive</span><span class="p">(</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    <span class="n">primitive</span><span class="p">:</span> <span class="n"><span title="advect.core._primitive.Primitive">Primitive</span></span><span class="p">[</span><span class="n"><span title="typing.Any">Any</span></span><span class="p">,</span> <span class="n"><span title="typing.Any">Any</span></span><span class="p">],</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>    <span class="o">*</span><span class="p">,</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>    <span class="n">primals</span><span class="p">:</span> <span class="n"><span title="tuple">tuple</span></span><span class="p">[</span><span class="n"><span title="typing.Any">Any</span></span><span class="p">,</span> <span class="o">...</span><span class="p">],</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>    <span class="n">static</span><span class="p">:</span> <span class="n"><span title="collections.abc.Mapping">Mapping</span></span><span class="p">[</span><span class="n"><span title="str">str</span></span><span class="p">,</span> <span class="n"><span title="typing.Any">Any</span></span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>    <span class="n">tangents</span><span class="p">:</span> <span class="n"><span title="tuple">tuple</span></span><span class="p">[</span><span class="n"><span title="typing.Any">Any</span></span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>    <span class="n">cotangent</span><span class="p">:</span> <span class="n"><span title="typing.Any">Any</span></span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>    <span class="n">check</span><span class="p">:</span> <span class="n"><span title="tuple">tuple</span></span><span class="p">[</span><span class="n"><span title="str">str</span></span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span>
+</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>        <span class="s2">&quot;abstract&quot;</span><span class="p">,</span>
+</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>        <span class="s2">&quot;jvp&quot;</span><span class="p">,</span>
+</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>        <span class="s2">&quot;transpose&quot;</span><span class="p">,</span>
+</span><span id="__span-0-12"><a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>    <span class="p">),</span>
+</span><span id="__span-0-13"><a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>    <span class="n">epsilon</span><span class="p">:</span> <span class="n"><span title="float">float</span></span> <span class="o">=</span> <span class="mf">0.0001</span><span class="p">,</span>
+</span><span id="__span-0-14"><a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>    <span class="n">atol</span><span class="p">:</span> <span class="n"><span title="float">float</span></span> <span class="o">=</span> <span class="mf">1e-05</span><span class="p">,</span>
+</span><span id="__span-0-15"><a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>    <span class="n">rtol</span><span class="p">:</span> <span class="n"><span title="float">float</span></span> <span class="o">=</span> <span class="mf">0.0001</span><span class="p">,</span>
+</span><span id="__span-0-16"><a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span>
+</span></code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Run selected author checks for one representative primitive invocation.</p>
+<p>The default <code>("abstract", "jvp", "transpose")</code> is a first-order smoke
+check. It does not stage the primitive or check input preservation. Authors
+of a serializable non-residual primitive should normally run
+<code>("abstract", "jvp", "transpose", "nested", "stage")</code> for every
+materially different shape, dtype, and static-argument form. Add
+<code>"complex"</code> in a separate call whose primals are complex when the
+primitive supports complex values. Residual primitives are first-order
+boundaries and therefore omit <code>"nested"</code>. A transpose-only primitive may
+request just <code>"transpose"</code>; the check then compares its explicit rule
+with a central finite difference. The <code>"jvp"</code>, <code>"complex"</code>, and
+<code>"nested"</code> checks require a JVP.</p>
+<p>The stage check executes both the compiled and serialized program, compares
+output structure, shape, and dtype exactly, and verifies that inputs remain
+unchanged. Repository-wide support still requires the conformance inventory;
+this helper intentionally does not import Hypothesis or claim exhaustive
+coverage from one sample.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+            <b><code>primitive</code></b>
+              (<code><span title="advect.core._primitive.Primitive">Primitive</span>[<span title="typing.Any">Any</span>, <span title="typing.Any">Any</span>]</code>)
+          –
+          <div class="doc-md-description">
+            <p>Authoring handle returned by <code>advect.primitive</code>.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>primals</code></b>
+              (<code><span title="tuple">tuple</span>[<span title="typing.Any">Any</span>, ...]</code>)
+          –
+          <div class="doc-md-description">
+            <p>One representative value for each non-static implementation argument,
+in implementation-parameter order. Nested pytrees are preserved.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>static</code></b>
+              (<code><span title="collections.abc.Mapping">Mapping</span>[<span title="str">str</span>, <span title="typing.Any">Any</span>] | None</code>, default:
+                  <code>None</code>
+)
+          –
+          <div class="doc-md-description">
+            <p>Values for declared static arguments that do not use their
+implementation defaults.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>tangents</code></b>
+              (<code><span title="tuple">tuple</span>[<span title="typing.Any">Any</span>, ...] | None</code>, default:
+                  <code>None</code>
+)
+          –
+          <div class="doc-md-description">
+            <p>Optional tangent pytree matching <code>primals</code>. Ones are used by
+default; leaves of nondifferentiable arguments are ignored.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>cotangent</code></b>
+              (<code><span title="typing.Any">Any</span> | None</code>, default:
+                  <code>None</code>
+)
+          –
+          <div class="doc-md-description">
+            <p>Optional pytree matching the primitive output. Ones are used by
+default.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>check</code></b>
+              (<code><span title="tuple">tuple</span>[<span title="str">str</span>, ...]</code>, default:
+                  <code>(&#39;abstract&#39;, &#39;jvp&#39;, &#39;transpose&#39;)</code>
+)
+          –
+          <div class="doc-md-description">
+            <p>Any of <code>"abstract"</code>, <code>"jvp"</code>, <code>"transpose"</code>, <code>"complex"</code>,
+<code>"nested"</code>, and <code>"stage"</code>. Only <code>"stage"</code> compiles and restores
+a program and checks that those executions preserve their inputs.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>epsilon</code></b>
+              (<code><span title="float">float</span></code>, default:
+                  <code>0.0001</code>
+)
+          –
+          <div class="doc-md-description">
+            <p>Central finite-difference step.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>atol</code></b>
+              (<code><span title="float">float</span></code>, default:
+                  <code>1e-05</code>
+)
+          –
+          <div class="doc-md-description">
+            <p>Absolute numerical tolerance.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>rtol</code></b>
+              (<code><span title="float">float</span></code>, default:
+                  <code>0.0001</code>
+)
+          –
+          <div class="doc-md-description">
+            <p>Relative numerical tolerance.</p>
+          </div>
+        </li>
+    </ul>
+
+
+<p><span class="doc-section-title">Raises:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+              <code><span title="ValueError">ValueError</span></code>
+            –
+          <div class="doc-md-description">
+            <p>If the requested checks or representative inputs are invalid.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+              <code><a class="autorefs autorefs-internal" title="MissingPrimitiveRuleError (advect.core._primitive.MissingPrimitiveRuleError)" href="../errors/#advect.MissingPrimitiveRuleError">MissingPrimitiveRuleError</a></code>
+            –
+          <div class="doc-md-description">
+            <p>If a requested capability has no required author rule.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+              <code><span title="AssertionError">AssertionError</span></code>
+            –
+          <div class="doc-md-description">
+            <p>If an installed rule, staged execution, or numerical identity fails
+its check.</p>
+          </div>
+        </li>
+    </ul>
+
+
+    </div>
+
+</div>
+
+
+
+  </div>
+
+    </div>
+
+</div>
+      </div>
+      
+
+      
+      <nav class="seealso" aria-label="Adjacent pages">
+        <span><a href="../pytree/">← pytrees</a></span>
+        <span class="nn"><a href="../support/">support catalog →</a></span>
+      </nav>
+      
+      <p class="prompt">$ <span class="cursor">█</span></p>
+    </div></div>
+  </article>
+</div>
+
+<div class="overlay" id="help" role="dialog" aria-label="Keyboard shortcuts">
+  <h3>Keys</h3>
+  <table>
+    <tr><td class="kk">j k d u g G</td><td>scroll the page</td></tr>
+    <tr><td class="kk">n / p</td><td>next / previous page</td></tr>
+    <tr><td class="kk">e</td><td>toggle the docs tree pane</td></tr>
+    <tr><td class="kk">/</td><td>search the manual</td></tr>
+    <tr><td class="kk">2</td><td>open the playground</td></tr>
+    <tr><td class="kk">t</td><td>lp0 → dark → crt</td></tr>
+    <tr><td class="kk">?</td><td>close this help</td></tr>
+  </table>
+</div>
+
+<div class="overlay search-box" id="search" role="dialog" aria-label="Search">
+  <div class="search-in"><span class="ps">/</span><input id="searchq" spellcheck="false" autocomplete="off" aria-label="Search query" placeholder="search the manual…"></div>
+  <div class="search-hits" id="searchhits"></div>
+</div>
+
+<div class="bar">
+  <a href="../.." class="b" aria-current="true">[1:docs]</a>
+  <a href="../../playground/" class="b" id="wsplay">[2:playground]</a>
+  <span class="path hidesm">$ man advect/api/testing</span>
+  <span class="grow"></span>
+  <button class="tbtn" id="treebtn" aria-label="Toggle documentation tree">[e] tree</button>
+  <button class="tbtn" id="searchbtn" aria-label="Search">[/] search</button>
+  <button class="tbtn hidesm" id="helpbtn" aria-label="Keyboard help">[?] keys</button>
+  <button class="tbtn" id="themeToggle" aria-label="Cycle display mode">[ mode: … ]</button>
+</div>
+
+<script src="../../js/theme.js"></script>
+<script src="../../js/examples.js"></script>
+<script src="../../search/main.js"></script>
+
+</body>
+</html>

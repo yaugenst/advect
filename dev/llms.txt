@@ -17,7 +17,7 @@ docstrings.
 - [Home](https://yaugenst.github.io/advect/dev/index.md): Project overview, installation, and first gradient
 - [Tutorials](https://yaugenst.github.io/advect/dev/tutorials/index.md): Guided learning path
 - [Architecture](https://yaugenst.github.io/advect/dev/architecture/index.md): Dynamic tracing, staging, and extension boundaries
-- [API Reference](https://yaugenst.github.io/advect/dev/api/index.md): Public API contract and shared semantics
+- [Overview](https://yaugenst.github.io/advect/dev/api/index.md): Public API contract and shared semantics
 
 ## Tutorials
 
@@ -30,11 +30,24 @@ docstrings.
 
 ## API reference
 
-- [Transforms](https://yaugenst.github.io/advect/dev/api/transforms/index.md)
-- [Staging](https://yaugenst.github.io/advect/dev/api/staging/index.md)
-- [Primitives](https://yaugenst.github.io/advect/dev/api/primitives/index.md)
-- [Arrays and Structure](https://yaugenst.github.io/advect/dev/api/arrays/index.md)
-- [Errors](https://yaugenst.github.io/advect/dev/api/errors/index.md)
+- [Transforms](https://yaugenst.github.io/advect/dev/api/transforms/index.md): Dynamic differentiation transforms
+- [Staging](https://yaugenst.github.io/advect/dev/api/staging/index.md): Immutable programs and serialization
+- [Primitives](https://yaugenst.github.io/advect/dev/api/primitives/index.md): Public custom-operation authoring
+- [Arrays](https://yaugenst.github.io/advect/dev/api/arrays/index.md): Provider-preserving array boundaries
+- [Pytrees](https://yaugenst.github.io/advect/dev/api/pytree/index.md): Structured inputs and custom nodes
+- [Testing Utilities](https://yaugenst.github.io/advect/dev/api/testing/index.md): Numerical checks for extension authors
+- [Support Catalog](https://yaugenst.github.io/advect/dev/api/support/index.md): Machine-readable support and lifetime claims
+- [Errors](https://yaugenst.github.io/advect/dev/api/errors/index.md): Public diagnostics and exceptions
+- [NumPy Frontend](https://yaugenst.github.io/advect/dev/api/numpy/index.md): NumPy frontend and explicit constructors
+- [SciPy Overview](https://yaugenst.github.io/advect/dev/api/scipy/index.md): SciPy frontend boundaries and module routing
+- [Special Functions](https://yaugenst.github.io/advect/dev/api/scipy/special/index.md): Differentiable scipy.special counterparts
+- [Image Filters](https://yaugenst.github.io/advect/dev/api/scipy/ndimage/index.md): Differentiable scipy.ndimage filters
+- [Solver Callbacks](https://yaugenst.github.io/advect/dev/api/scipy/solvers/index.md): Root and GMRES callbacks for implicit differentiation
+- [xarray](https://yaugenst.github.io/advect/dev/api/xarray/index.md): Optional labeled-container pytrees
+- [Host Interop Overview](https://yaugenst.github.io/advect/dev/api/interop/index.md): Shared host-autodiff bridge contract
+- [PyTorch](https://yaugenst.github.io/advect/dev/api/interop/torch/index.md): PyTorch reverse-mode bridge
+- [JAX](https://yaugenst.github.io/advect/dev/api/interop/jax/index.md): JAX eager and callback bridge
+- [HIPS Autograd](https://yaugenst.github.io/advect/dev/api/interop/autograd/index.md): HIPS Autograd reverse-mode bridge
 
 ## Compatibility
 
@@ -48,4 +61,12 @@ docstrings.
 ## Optional
 
 - [Playground](https://yaugenst.github.io/advect/dev/playground/index.md): In-browser expression and derivative-graph explorer
+
+## Development
+
+- [Overview](https://yaugenst.github.io/advect/dev/development/index.md): Contributor entry point and task routing
+- [Codebase Map](https://yaugenst.github.io/advect/dev/development/codebase/index.md): Module ownership and dependency direction
+- [Adding Operations](https://yaugenst.github.io/advect/dev/development/adding-operations/index.md): Built-in operations and frontend forms
+- [Testing](https://yaugenst.github.io/advect/dev/development/testing/index.md): Test-suite ownership and direct gates
+- [Documentation](https://yaugenst.github.io/advect/dev/development/documentation/index.md): Public docs, docstrings, and repository guidance
 

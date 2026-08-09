@@ -64,11 +64,36 @@ stage(
 )
 ```
 
-Compile one inferred or explicitly declared signature into a staged program.
+Compile one callable signature into an immutable staged program.
 
-Pass concrete examples positionally to infer shape and dtype, or pass an explicit `specs=` tree. The result accepts exactly that one signature.
+Use the direct form with a callable, or omit `function` to create a decorator. Applying the decorator compiles the function and replaces it with a `StagedProgram`. Compilation traces the Python callable once with abstract values; later calls execute the graph without running or retracing the Python callable.
+
+Declare the positional signature in exactly one of two ways: pass concrete `examples` to infer its array leaves, or pass `specs` containing `ArraySpec` and `StaticSpec` leaves. Keyword arguments have no example form and are declared with `kw_specs` in either case.
+
+Parameters:
+
+- **`function`** (`Callable[..., Any] | None`, default: `None` ) – Callable to compile. If omitted, return a decorator that compiles the callable it receives.
+- **`*examples`** (`Any`, default: `()` ) – Concrete positional arguments whose pytree structure, shapes, dtypes, devices, and Python-scalar categories define the compiled signature. Wrap a non-array compile-time leaf in StaticSpec. Mutually exclusive with specs.
+- **`specs`** (`tuple[Any, ...] | None`, default: `None` ) – Positional argument specification tree. Every leaf must be an ArraySpec or StaticSpec. Mutually exclusive with examples.
+- **`kw_specs`** (`dict[str, Any] | None`, default: `None` ) – Mapping from keyword argument names to specification trees whose leaves are ArraySpec or StaticSpec. The mapping is combined with the positional signature declared by examples or specs.
+- **`array_api_version`** (`str | None`, default: `None` ) – Array API revision to compile and store in the graph. With concrete examples and no explicit revision, Advect selects the newest supported revision served by their common array provider. With specs alone, it selects Advect's latest supported revision. An explicit revision must be supported by Advect and by the provider of every array example.
+
+Returns:
+
+- `StagedProgram or callable` – A fully compiled, single-signature StagedProgram when function is supplied; otherwise, a decorator that returns such a program. The program snapshots static inputs and captured constants, can be serialized, and never grows a polymorphic cache or retraces.
+
+Raises:
+
+- `TypeError` – If neither examples nor specs is supplied, if both are supplied, if an example is neither array-like nor a supported Python scalar nor wrapped in StaticSpec, if a specification contains another leaf type, or if the concrete array examples cannot use one common provider at the selected Array API revision.
+- `ValueError` – If array_api_version is not a supported revision, or if abstract tracing finds incompatible shapes, dtypes, or operation semantics.
+
+Notes
+
+A returned program accepts only its compiled call pytree and leaf contract. At execution time, a changed call structure, non-array leaf, or static value raises `TypeError`; an incompatible array shape, dtype, device, or Python-scalar category raises `ValueError`.
 
 Examples:
+
+Infer a direct-call signature from a concrete array:
 
 ```pycon
 >>> import advect as ad
@@ -76,6 +101,22 @@ Examples:
 >>> program = ad.stage(lambda x: x + 1, np.array([1.0, 2.0]))
 >>> program(np.array([3.0, 4.0])).tolist()
 [4.0, 5.0]
+```
+
+The decorator form uses explicit positional and keyword specifications:
+
+```pycon
+>>> @ad.stage(
+...     specs=(ad.ArraySpec((2,), "float32"),),
+...     kw_specs={"scale": ad.ArraySpec((), "float32")},
+... )
+... def scale(x, *, scale):
+...     return x * scale
+>>> scale(
+...     np.array([1.0, 2.0], dtype=np.float32),
+...     scale=np.asarray(2.0, dtype=np.float32),
+... ).tolist()
+[2.0, 4.0]
 ```
 
 ## StagedProgram
@@ -92,7 +133,7 @@ StagedProgram(
 
 One callable input signature compiled into one immutable durable graph.
 
-Use :func:`stage` to create a program. Its dictionary representation does not contain Python code and can be loaded after required primitives link.
+Use `stage` to create a program. Its dictionary representation does not contain Python code and can be loaded after required primitives link.
 
 Examples:
 
@@ -206,7 +247,24 @@ vjp_program(
 ) -> StagedProgram
 ```
 
-Compile a reusable staged pullback with a keyword-only `cotangent=` input.
+Compile a reusable staged pullback program.
+
+Parameters:
+
+- **`f`** (`StagedProgram`) – Primal StagedProgram to transpose. Ordinary callables are not accepted; use vjp for a concrete dynamic pullback.
+- **`argnums`** (`int | tuple[int, ...] | None`, default: `None` ) – Positional inputs to differentiate. An integer returns that input's gradient pytree directly, while a tuple returns a tuple in the given order. None selects input zero unless argnames is provided, in which case it selects no positional inputs. Negative indices are resolved against the program's positional signature.
+- **`argnames`** (`tuple[str, ...] | None`, default: `None` ) – Keyword inputs from the staged signature to differentiate. Their gradients are returned in a dictionary keyed by name. When positional and named inputs are both selected, the result is (positional_gradients, named_gradients); the positional part follows the integer-versus-tuple rule above.
+
+Returns:
+
+- `StagedProgram` – An immutable, serializable program with the primal call signature plus a reserved keyword-only cotangent input. The cotangent has the primal output's pytree and leaf specifications. The program preserves the primal program's Array API revision.
+
+Raises:
+
+- `IndexError` – If a positional selection is out of range for the staged signature.
+- `TypeError` – If f is not a StagedProgram, or a selected weak scalar signature is not real floating-point.
+- `ValueError` – If positional selections are duplicated, a selected input is absent from the staged signature, or the primal signature already reserves the cotangent keyword.
+- `NoVJPError` – If an operation on the differentiated path has no reverse-mode rule.
 
 Examples:
 
@@ -236,6 +294,17 @@ ConstantRecord(
 
 Inspectable provenance for one concrete value captured while staging.
 
+Attributes:
+
+- **`value_id`** (`int`) – Identifier of the constant-producing node. Records on a StagedProgram use optimized graph numbering; records on a StagedTrace use pre-optimization tape numbering.
+- **`origin`** (`str`) – Capture category: "closure", "global", or "created".
+- **`location`** (`str | None`) – Source location associated with the capture, when available.
+- **`shape`** (`tuple[int, ...]`) – Captured array shape.
+- **`dtype`** (`str`) – Canonical dtype name stored in the durable artifact.
+- **`bytes`** (`int`) – Number of bytes in the captured value payload.
+- **`digest`** (`str`) – Content digest used to identify the captured value.
+- **`name`** (`str | None`) – Source-level name associated with the capture, when available.
+
 ## OptimizationReport
 
 ```python
@@ -248,6 +317,13 @@ OptimizationReport(
 ```
 
 Inspectable result of the fixed staged optimization pipeline.
+
+Attributes:
+
+- **`nodes_before`** (`int`) – Graph node count before the first required pass.
+- **`nodes_after`** (`int`) – Graph node count after the final required pass.
+- **`rewritten_nodes`** (`int`) – Total number of nodes rewritten across all passes.
+- **`passes`** (`tuple[OptimizationPass, ...]`) – Ordered diagnostics for each required optimization pass.
 
 ## OptimizationPass
 
@@ -262,6 +338,14 @@ OptimizationPass(
 ```
 
 Diagnostics for one required pass in the staged compiler.
+
+Attributes:
+
+- **`name`** (`str`) – Stable pass name.
+- **`nodes_before`** (`int`) – Graph node count before the pass.
+- **`nodes_after`** (`int`) – Graph node count after the pass.
+- **`removed_nodes`** (`int`) – Number of input nodes that have no output representative.
+- **`rewritten_nodes`** (`int`) – Number of input nodes removed or mapped to a different node.
 
 ## StagedTrace
 
@@ -289,3 +373,10 @@ TracedNode(
 ```
 
 One pre-optimization tape entry captured while staging.
+
+Attributes:
+
+- **`id`** (`int`) – Position of the value-producing entry in the staging tape.
+- **`op`** (`str`) – Canonical registered operation identifier.
+- **`inputs`** (`tuple[int, ...]`) – Tape identifiers consumed by the operation.
+- **`name`** (`str | None`) – Source-level input or constant name, when available.
