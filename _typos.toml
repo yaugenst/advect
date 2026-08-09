@@ -1,0 +1,15 @@
+[files]
+extend-exclude = [
+  "docs-theme/fonts/LICENSE-source-code-pro.md",
+  "uv.lock",
+]
+
+[default.extend-words]
+ND = "ND"
+NDArrayOperatorsMixin = "NDArrayOperatorsMixin"
+arange = "arange"
+nin = "nin"
+uncatalogued = "uncatalogued"
+
+[default.extend-identifiers]
+pn = "pn"

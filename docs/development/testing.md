@@ -29,7 +29,21 @@ Set up the locked development environment with Python 3.12 or newer:
 ```bash
 uv sync --all-groups
 uv lock --check
+uv run pre-commit install --install-hooks
 ```
+
+Hook installation is per clone. Before review, verify the complete repository
+hygiene configuration independently of the files staged in the current commit:
+
+```bash
+uv run pre-commit run --all-files
+```
+
+The installed `pre-commit` hook may fix files and require restaging. The
+`commit-msg` hook enforces Conventional Commits. An intentional direct commit
+to `main` may skip only the branch guard with
+`SKIP=no-commit-to-branch git commit`; avoid `--no-verify`, which bypasses all
+checks.
 
 The canonical static and test gates are:
 
