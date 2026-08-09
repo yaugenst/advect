@@ -41,7 +41,7 @@ Advect has two current array frontends:
 
 1. a concrete NumPy frontend under `advect.numpy` for programs written with
    `numpy.*`;
-1. a provider-neutral Array API frontend for programs written through
+2. a provider-neutral Array API frontend for programs written through
    `x.__array_namespace__()`.
 
 Each frontend owns its foreign calling convention and binds arguments before
@@ -245,12 +245,12 @@ layout.
 The migration order is:
 
 1. make NumPy support evidence fail closed and complete staged conformance;
-1. capture an exact reference Advect artifact and regression evidence;
-1. move NumPy foreign-contract code under `advect.numpy` mechanically;
-1. replace adapter access with direct NumPy ownership;
-1. delete configuration, factories, speculative branches, and adapter-only
+2. capture an exact reference Advect artifact and regression evidence;
+3. move NumPy foreign-contract code under `advect.numpy` mechanically;
+4. replace adapter access with direct NumPy ownership;
+5. delete configuration, factories, speculative branches, and adapter-only
    tests;
-1. consolidate helpers only after behavior remains qualified.
+6. consolidate helpers only after behavior remains qualified.
 
 Acceptance requires:
 

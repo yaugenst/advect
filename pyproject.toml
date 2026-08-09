@@ -54,6 +54,7 @@ dev = [
   "array-api-strict==2.4.1",
   "autograd>=1.9,<1.10",
   "hypothesis[numpy]>=6.148.3",
+  "pre-commit>=4.5,<5",
   "pyrefly==1.1.1",
   "pytest>=9.0.1",
   "ruff>=0.14.6",
@@ -291,21 +292,14 @@ search-path = [
 
 [tool.pytest.ini_options]
 testpaths = [ "packages/advect/src/advect", "packages/advect/tests" ]
-addopts = [ "--doctest-modules", "--ignore=packages/advect/src/advect/interop", "-ra", "--strict-markers", "--strict-config", "-v", "--tb=short" ]
+addopts = [
+  "--doctest-modules",
+  "--ignore=packages/advect/src/advect/interop",
+  "-ra",
+  "--strict-markers",
+  "--strict-config",
+  "-v",
+  "--tb=short",
+]
 filterwarnings = [ "error", "ignore::DeprecationWarning:hypothesis.*" ]
 xfail_strict = true
-
-# ==============================================================================
-# Typos Configuration
-# ==============================================================================
-
-[tool.typos.files]
-extend-exclude = [ "uv.lock" ]
-
-[tool.typos.default.extend-words]
-NDArrayOperatorsMixin = "NDArrayOperatorsMixin"
-ND = "ND"
-nin = "nin"                                     # numpy ufunc attribute (number of inputs)
-
-[tool.typos.default.extend-identifiers]
-arange = "arange"

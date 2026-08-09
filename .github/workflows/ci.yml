@@ -40,11 +40,10 @@ jobs:
       - name: Install dependencies
         run: uv sync --all-groups --frozen
 
-      - name: Check formatting
-        run: uv run ruff format --check .
-
-      - name: Lint
-        run: uv run ruff check .
+      - name: Run repository hooks
+        env:
+          SKIP: no-commit-to-branch
+        run: uv run pre-commit run --all-files --show-diff-on-failure
 
       - name: Check types
         run: >-

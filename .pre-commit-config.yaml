@@ -3,7 +3,8 @@
 default_language_version:
   python: python3.12
 
-default_install_hook_types: [pre-commit, pre-push, commit-msg]
+minimum_pre_commit_version: "4.5.0"
+default_install_hook_types: [pre-commit, commit-msg]
 
 repos:
   # ==========================================================================
@@ -26,6 +27,7 @@ repos:
       - id: detect-private-key
       - id: mixed-line-ending
         args: [--fix=lf]
+        exclude: ^docs-theme/fonts/LICENSE-source-code-pro\.md$
       - id: no-commit-to-branch
         args: [--branch=main]
 
@@ -48,7 +50,7 @@ repos:
     rev: v0.19.1
     hooks:
       - id: markdownlint-cli2
-        args: [--fix]
+        args: [--fix, --no-globs]
 
   # ==========================================================================
   # Git commit message linting (Conventional Commits)

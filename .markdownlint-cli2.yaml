@@ -1,9 +1,6 @@
 # markdownlint-cli2 configuration
 # See: https://github.com/DavidAnson/markdownlint/blob/main/doc/Rules.md
 
-# Apply fixes automatically
-fix: true
-
 # Configuration for markdownlint rules
 config:
   # Default state for all rules
@@ -104,15 +101,8 @@ config:
     level: 1
     front_matter_title: ""
 
-  # MD044/proper-names - Proper names should have the correct capitalization
-  MD044:
-    names:
-      - Advect
-      - NumPy
-      - Python
-      - GitHub
-    code_blocks: false
-    html_elements: false
+  # MD044/proper-names - Unsafe for import paths in mkdocstrings directives
+  MD044: false
 
   # MD046/code-block-style - Code block style
   # Disabled - MkDocs admonitions use indentation that looks like code blocks
@@ -146,7 +136,4 @@ ignores:
   - "dist/**"
   - "site/**"
   - "reference/**"
-
-# Glob patterns for files to lint (if not specified, all .md files)
-globs:
-  - "**/*.md"
+  - "docs-theme/fonts/LICENSE-source-code-pro.md"
