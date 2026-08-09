@@ -132,7 +132,7 @@ def wrap(
     JIT compilation and abstract shape evaluation require
     ``result_shape_dtypes``, a JAX pytree of objects with ``shape`` and
     ``dtype`` attributes, normally
-    :class:`jax.ShapeDtypeStruct` objects. Reverse mode replays ``function`` to
+    ``jax.ShapeDtypeStruct`` objects. Reverse mode replays ``function`` to
     build and consume an Advect pullback, so it must be pure and deterministic.
     """
     result_treedef = (

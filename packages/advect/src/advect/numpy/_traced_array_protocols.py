@@ -16,8 +16,8 @@ from advect.core._context import (
     is_debug,
 )
 from advect.core._errors import TraceLevelError, TracingError
+from advect.numpy._array_function.registry import ARRAY_FUNCTION_RUNTIME
 from advect.numpy._op_bindings import canonicalize_numpy_op
-from advect.numpy._protocol_array_function import ARRAY_FUNCTION_RUNTIME
 from advect.numpy._protocol_runtime import NUMPY_PROTOCOL_RUNTIME
 from advect.numpy._protocol_ufunc import UFUNC_RUNTIME
 from advect.numpy._traced_array_checks import require_active_trace

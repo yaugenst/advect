@@ -8,7 +8,7 @@ from collections.abc import Callable, Iterable
 from typing import TYPE_CHECKING, Any, cast
 
 from advect.core._abstract_helpers import accumulation_dtype, dtype_name
-from advect.core._array_namespace import (
+from advect.core._array_api.providers import (
     _array_namespace_can_donate,
     _get_array_namespace,
     _get_backend_key_from_namespace,

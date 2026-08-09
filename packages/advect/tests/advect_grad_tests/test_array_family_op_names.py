@@ -3,20 +3,20 @@
 from __future__ import annotations
 
 from advect._builtin_ops import _output_arities
-from advect.autodiff.rules.array_family._impl.jvp.registry import jvp_rule_items
-from advect.autodiff.rules.array_family._impl.vjp.registry import (
+from advect.autodiff.rules.array_family.jvp.registry import jvp_rule_items
+from advect.autodiff.rules.array_family.vjp.registry import (
     non_differentiable_items,
     vjp_rule_items,
 )
 from advect.core._abstract_domains import operation_semantics
-from advect.core._array_api import (
+from advect.core._array_api.frontend import (
     _ARRAY_API_COMPOSITES,
     _ARRAY_API_META_FUNCTIONS,
     _FUNCTION_SPECS,
 )
 from advect.core._registry import get_registry
+from advect.numpy._array_function.registry import ARRAY_FUNCTION_RUNTIME
 from advect.numpy._op_bindings import canonicalize_numpy_op
-from advect.numpy._protocol_array_function import ARRAY_FUNCTION_RUNTIME
 from advect.numpy._protocol_eval import NUMPY_EVAL_RUNTIME
 from advect_conformance_tests._builtin_cases import BUILTIN_INVOCATIONS
 from advect_conformance_tests._raw_rule_cases import RAW_RULE_OPS

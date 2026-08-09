@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from advect.autodiff.api._scalar_boundary import _coerce_scalar_tangent_like
-from advect.core._array_namespace import _get_array_namespace
+from advect.core._array_api.providers import _get_array_namespace
 from advect.core._pytree import tree_flatten
 
 

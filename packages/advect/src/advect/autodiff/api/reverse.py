@@ -1,4 +1,13 @@
-"""Concrete dynamic reverse-mode transforms."""
+"""Reverse-mode transform API across dynamic calls and staged programs.
+
+This module owns input selection and result contracts for `grad`,
+`value_and_grad`, `vjp`, and `vjp_program`. Ordinary calls consume the
+invocation-local tape and linear-map machinery; staged calls ask
+`StagedProgram` to compile the same reverse transform into a durable graph.
+Keeping lifetime dispatch here lets both paths share public semantics while
+Python core retains the outer program envelope and `advect-runtime` retains
+the graph format, validation, and scheduling.
+"""
 
 from __future__ import annotations
 
@@ -41,7 +50,7 @@ _CACHE_MISS = object()
 
 
 class Pullback:
-    """One-shot reverse linearization returned by :func:`vjp`.
+    """One-shot reverse linearization returned by `vjp`.
 
     Examples
     --------
@@ -296,7 +305,52 @@ def vjp(
     f: Callable[..., Any],
     argnums: int | tuple[int, ...] = 0,
 ) -> Callable[..., tuple[Any, Pullback]]:
-    """Return a concrete value and a one-shot, tape-owning pullback.
+    """Return a concrete value and a one-shot reverse pullback.
+
+    `vjp` is always a dynamic transform. Each call traces the selected concrete
+    inputs and returns a `Pullback` that owns that invocation's tape, retained
+    provider values, and primitive residuals. This remains true when `f` is a
+    `StagedProgram`; use `vjp_program` to compile a reusable staged pullback.
+
+    Parameters
+    ----------
+    f
+        Callable to linearize. Its output may be any supported array or pytree.
+    argnums
+        Positional arguments to differentiate. An integer makes the pullback
+        return that argument's gradient pytree directly; a tuple makes it
+        return a tuple in the given order. Negative indices are resolved for
+        each call.
+
+    Returns
+    -------
+    Callable
+        A concrete-tracing function returning `(value, pullback)`. `value`
+        preserves the callable's output pytree. Call `pullback(cotangent)` with
+        a cotangent matching that pytree to obtain the selected input
+        gradients.
+
+    Raises
+    ------
+    IndexError
+        If a positional selection is out of range for the transformed call.
+    TypeError
+        If a selected input is an unsupported Python complex scalar, or a
+        cotangent leaf has an invalid numeric category.
+    ValueError
+        If positional selections are duplicated or the cotangent pytree or
+        leaf shape does not match the output.
+    NoVJPError
+        If an operation on the differentiated path has no reverse-mode rule.
+    RuntimeError
+        If the pullback is applied after it has already been consumed or
+        closed.
+
+    Notes
+    -----
+    Applying the pullback consumes it and releases its retained trace. Call
+    `close()` to release it without applying it, or use it as a context manager
+    when deterministic cleanup matters.
 
     Examples
     --------
@@ -334,7 +388,47 @@ def vjp_program(
     *,
     argnames: tuple[str, ...] | None = None,
 ) -> StagedProgram:
-    """Compile a reusable staged pullback with a keyword-only ``cotangent=`` input.
+    """Compile a reusable staged pullback program.
+
+    Parameters
+    ----------
+    f
+        Primal `StagedProgram` to transpose. Ordinary callables are not
+        accepted; use `vjp` for a concrete dynamic pullback.
+    argnums
+        Positional inputs to differentiate. An integer returns that input's
+        gradient pytree directly, while a tuple returns a tuple in the given
+        order. `None` selects input zero unless `argnames` is provided, in
+        which case it selects no positional inputs. Negative indices are
+        resolved against the program's positional signature.
+    argnames
+        Keyword inputs from the staged signature to differentiate. Their
+        gradients are returned in a dictionary keyed by name. When positional
+        and named inputs are both selected, the result is
+        `(positional_gradients, named_gradients)`; the positional part follows
+        the integer-versus-tuple rule above.
+
+    Returns
+    -------
+    StagedProgram
+        An immutable, serializable program with the primal call signature plus
+        a reserved keyword-only `cotangent` input. The cotangent has the
+        primal output's pytree and leaf specifications. The program preserves
+        the primal program's Array API revision.
+
+    Raises
+    ------
+    IndexError
+        If a positional selection is out of range for the staged signature.
+    TypeError
+        If `f` is not a `StagedProgram`, or a selected weak scalar signature is
+        not real floating-point.
+    ValueError
+        If positional selections are duplicated, a selected input is absent
+        from the staged signature, or the primal signature already reserves
+        the `cotangent` keyword.
+    NoVJPError
+        If an operation on the differentiated path has no reverse-mode rule.
 
     Examples
     --------
@@ -544,8 +638,60 @@ def grad(
 ) -> Callable[..., Any]:
     """Differentiate a scalar-valued function with reverse mode.
 
-    A normal callable is traced from its concrete inputs on every invocation.
-    Passing a :class:`StagedProgram` instead returns another staged program.
+    An ordinary callable is traced from concrete inputs on every invocation;
+    no trace or graph is cached between calls. Passing a `StagedProgram`
+    instead compiles and returns another immutable staged program. Warm calls
+    to that program execute its prebuilt graph without a dynamic tape or
+    reverse sweep.
+
+    Parameters
+    ----------
+    f
+        Callable whose differentiated value is a real scalar or a one-leaf
+        pytree containing a real scalar. With `has_aux=True`, it instead
+        returns `(value, auxiliary)`, where only `value` is differentiated.
+        A `StagedProgram` is also accepted.
+    argnums
+        Positional arguments to differentiate. An integer returns that
+        argument's gradient pytree directly, while a tuple returns a tuple in
+        the given order. `None` selects argument zero unless `argnames` is
+        provided, in which case it selects no positional arguments. Negative
+        indices are resolved for each call.
+    argnames
+        Named arguments to differentiate. Their gradients are returned in a
+        dictionary keyed by name. For an ordinary callable, a selected name
+        may be passed positionally or by keyword; staged named inputs must be
+        passed by keyword. When positional and named inputs are both selected,
+        the result is `(positional_gradients, named_gradients)`, with the
+        positional part following the integer-versus-tuple rule above.
+    has_aux
+        Whether `f` returns `(value, auxiliary)`. The auxiliary value is
+        excluded from differentiation. A dynamic call materializes it as a
+        concrete sidecar; a staged transform records it as an ordinary staged
+        output.
+
+    Returns
+    -------
+    Callable or StagedProgram
+        For an ordinary callable, a concrete-tracing gradient function. For a
+        staged input, an immutable, serializable derivative program with the
+        same input signature and Array API revision. Its result has the
+        gradient structure selected by `argnums` and `argnames`; when
+        `has_aux=True`, it returns `(gradient, auxiliary)`.
+
+    Raises
+    ------
+    IndexError
+        If a positional selection is out of range for the transformed call.
+    TypeError
+        If a selected input is an unsupported Python complex scalar, or a
+        selected staged weak-scalar signature is not real floating-point.
+    ValueError
+        If positional selections are duplicated, an ordinary callable
+        argument is selected both positionally and by name, a selected name is
+        unavailable, or the differentiated output is not a real scalar.
+    NoVJPError
+        If an operation on the differentiated path has no reverse-mode rule.
 
     Examples
     --------
@@ -588,6 +734,61 @@ def value_and_grad(
     has_aux: bool = False,
 ) -> Callable[..., tuple[Any, ...]]:
     """Compute a scalar value and its reverse-mode gradient together.
+
+    An ordinary callable is traced from concrete inputs on every invocation;
+    no trace or graph is cached between calls. Passing a `StagedProgram`
+    instead compiles and returns another immutable staged program. Warm calls
+    to that program execute its prebuilt graph without a dynamic tape or
+    reverse sweep.
+
+    Parameters
+    ----------
+    f
+        Callable whose differentiated value is a real scalar or a one-leaf
+        pytree containing a real scalar. With `has_aux=True`, it instead
+        returns `(value, auxiliary)`, where only `value` is differentiated.
+        A `StagedProgram` is also accepted.
+    argnums
+        Positional arguments to differentiate. An integer returns that
+        argument's gradient pytree directly, while a tuple returns a tuple in
+        the given order. `None` selects argument zero unless `argnames` is
+        provided, in which case it selects no positional arguments. Negative
+        indices are resolved for each call.
+    argnames
+        Named arguments to differentiate. Their gradients are returned in a
+        dictionary keyed by name. For an ordinary callable, a selected name
+        may be passed positionally or by keyword; staged named inputs must be
+        passed by keyword. When positional and named inputs are both selected,
+        the gradient is `(positional_gradients, named_gradients)`, with the
+        positional part following the integer-versus-tuple rule above.
+    has_aux
+        Whether `f` returns `(value, auxiliary)`. The auxiliary value is
+        excluded from differentiation. A dynamic call materializes it as a
+        concrete sidecar; a staged transform records it as an ordinary staged
+        output.
+
+    Returns
+    -------
+    Callable or StagedProgram
+        For an ordinary callable, a concrete-tracing function returning
+        `(value, gradient)`. For a staged input, an immutable, serializable
+        program with the same input signature and Array API revision returning
+        the same structure. With `has_aux=True`, either lifetime returns
+        `(value, gradient, auxiliary)`.
+
+    Raises
+    ------
+    IndexError
+        If a positional selection is out of range for the transformed call.
+    TypeError
+        If a selected input is an unsupported Python complex scalar, or a
+        selected staged weak-scalar signature is not real floating-point.
+    ValueError
+        If positional selections are duplicated, an ordinary callable
+        argument is selected both positionally and by name, a selected name is
+        unavailable, or the differentiated output is not a real scalar.
+    NoVJPError
+        If an operation on the differentiated path has no reverse-mode rule.
 
     Examples
     --------

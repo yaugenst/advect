@@ -8,8 +8,8 @@ from numpy.testing import assert_allclose
 
 import advect as ad
 from advect.autodiff._ephemeral import trace_call
+from advect.numpy._array_function.registry import ARRAY_FUNCTION_RUNTIME
 from advect.numpy._profiles import numpy_minor
-from advect.numpy._protocol_array_function import ARRAY_FUNCTION_RUNTIME
 from advect.numpy._support_contract import numpy_support_declarations
 
 _UPSTREAM_REMOVED_IN_NUMPY_24 = ("in1d", "trapz")

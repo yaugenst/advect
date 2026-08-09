@@ -12,20 +12,20 @@ from typing import TYPE_CHECKING, cast, get_origin
 
 import array_api_strict
 
-from advect.core._array_api import (
+from advect.core._array_api.evidence import operation_cases
+from advect.core._array_api.frontend import (
     _ARRAY_API_COMPOSITES,
     _ARRAY_API_META_FUNCTIONS,
     _FUNCTION_SPECS,
     _NONDIFFERENTIABLE_ARRAY_API_COMPOSITES,
     _STAGED_ARRAY_API_COMPOSITES,
 )
-from advect.core._array_api_evidence import operation_cases
-from advect.core._array_api_profiles import (
+from advect.core._array_api.profiles import (
     LATEST_ARRAY_API_VERSION,
     SUPPORTED_ARRAY_API_VERSIONS,
     materialize_array_api_profile,
 )
-from advect.core._array_api_signatures import official_signatures
+from advect.core._array_api.signatures import official_signatures
 from advect.core._primitive_classification import STRUCTURAL_OPS
 from advect.core._registry import get_registry
 from scripts._support.evidence import evidence_report_header
@@ -33,7 +33,7 @@ from scripts._support.evidence import evidence_report_header
 if TYPE_CHECKING:
     from types import ModuleType
 
-    from advect.core._array_api_evidence import OperationCase
+    from advect.core._array_api.evidence import OperationCase
 
 _STRICT_HELPER_MODULES = frozenset(
     {

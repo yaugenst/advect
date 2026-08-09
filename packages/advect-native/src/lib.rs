@@ -1,19 +1,14 @@
-//! Canonical storage for staged graphs.
+//! Required `PyO3` adapter for Advect's native runtime.
 
-mod deserialization;
 mod dynamic_tape;
-mod graph_builder;
-mod graph_store;
-mod node;
-mod staged_execution;
+mod staged;
 
-use deserialization::deserialize_graph_json;
 use dynamic_tape::{DynamicTape, dynamic_jvp, dynamic_jvp_many, dynamic_vjp, dynamic_vjp_many};
-use graph_builder::GraphBuilder;
-use graph_store::GraphStore;
-use node::GraphNode;
 use pyo3::prelude::*;
-use staged_execution::{GraphExecutionPlan, build_graph_execution_plan, execute_graph};
+use staged::{
+    GraphBuilder, GraphExecutionPlan, GraphNode, GraphStore, build_graph_execution_plan,
+    deserialize_graph_json, execute_graph,
+};
 
 #[pymodule]
 fn _native_core(m: &Bound<'_, PyModule>) -> PyResult<()> {

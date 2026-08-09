@@ -1,5 +1,13 @@
 # ruff: noqa: ANN401, E501, EM101, EM102, PLR2004, SLF001, TC001, TRY003
-"""Explicit abstract staging into Advect's durable graph store."""
+"""Orchestrate Python staging across abstract tracing and the durable runtime.
+
+This module owns call-signature validation, snapshots static inputs, drives an
+abstract trace, and exposes the resulting program and compilation diagnostics.
+It consumes provider-neutral semantics from :mod:`advect.core._abstract` and
+hands graph construction, optimization, storage, and execution to the native
+Rust boundary. Primitive definitions and derivative rules remain outside this
+module, and Python does not maintain a parallel durable graph model here.
+"""
 
 from __future__ import annotations
 
@@ -22,11 +30,11 @@ from advect.core._abstract import (
     _lift,
     _new_abstract_array,
 )
-from advect.core._array_api_profiles import (
+from advect.core._array_api.profiles import (
     LATEST_ARRAY_API_VERSION,
     materialize_array_api_profile,
 )
-from advect.core._array_namespace import (
+from advect.core._array_api.providers import (
     ResolvedArrayNamespace,
     _get_array_namespace,
     _get_backend_key_from_namespace,
@@ -97,7 +105,29 @@ class StaticSpec:
 
 @dataclass(frozen=True, slots=True)
 class ConstantRecord:
-    """Inspectable provenance for one concrete value captured while staging."""
+    """Inspectable provenance for one concrete value captured while staging.
+
+    Attributes
+    ----------
+    value_id
+        Identifier of the constant-producing node. Records on a
+        ``StagedProgram`` use optimized graph numbering; records on a
+        ``StagedTrace`` use pre-optimization tape numbering.
+    origin
+        Capture category: ``"closure"``, ``"global"``, or ``"created"``.
+    location
+        Source location associated with the capture, when available.
+    shape
+        Captured array shape.
+    dtype
+        Canonical dtype name stored in the durable artifact.
+    bytes
+        Number of bytes in the captured value payload.
+    digest
+        Content digest used to identify the captured value.
+    name
+        Source-level name associated with the capture, when available.
+    """
 
     value_id: int
     origin: str
@@ -120,7 +150,21 @@ class _MaterializedConstants:
 
 @dataclass(frozen=True, slots=True)
 class OptimizationPass:
-    """Diagnostics for one required pass in the staged compiler."""
+    """Diagnostics for one required pass in the staged compiler.
+
+    Attributes
+    ----------
+    name
+        Stable pass name.
+    nodes_before
+        Graph node count before the pass.
+    nodes_after
+        Graph node count after the pass.
+    removed_nodes
+        Number of input nodes that have no output representative.
+    rewritten_nodes
+        Number of input nodes removed or mapped to a different node.
+    """
 
     name: str
     nodes_before: int
@@ -131,7 +175,19 @@ class OptimizationPass:
 
 @dataclass(frozen=True, slots=True)
 class OptimizationReport:
-    """Inspectable result of the fixed staged optimization pipeline."""
+    """Inspectable result of the fixed staged optimization pipeline.
+
+    Attributes
+    ----------
+    nodes_before
+        Graph node count before the first required pass.
+    nodes_after
+        Graph node count after the final required pass.
+    rewritten_nodes
+        Total number of nodes rewritten across all passes.
+    passes
+        Ordered diagnostics for each required optimization pass.
+    """
 
     nodes_before: int
     nodes_after: int
@@ -141,7 +197,19 @@ class OptimizationReport:
 
 @dataclass(frozen=True, slots=True)
 class TracedNode:
-    """One pre-optimization tape entry captured while staging."""
+    """One pre-optimization tape entry captured while staging.
+
+    Attributes
+    ----------
+    id
+        Position of the value-producing entry in the staging tape.
+    op
+        Canonical registered operation identifier.
+    inputs
+        Tape identifiers consumed by the operation.
+    name
+        Source-level input or constant name, when available.
+    """
 
     id: int
     op: str
@@ -1337,7 +1405,7 @@ def _execute_staged(
 class StagedProgram:
     """One callable input signature compiled into one immutable durable graph.
 
-    Use :func:`stage` to create a program. Its dictionary representation does
+    Use ``stage`` to create a program. Its dictionary representation does
     not contain Python code and can be loaded after required primitives link.
 
     Examples
@@ -1587,18 +1655,93 @@ def stage(
     kw_specs: dict[str, Any] | None = None,
     array_api_version: str | None = None,
 ) -> StagedProgram | Callable[[Callable[..., Any]], StagedProgram]:
-    """Compile one inferred or explicitly declared signature into a staged program.
+    """Compile one callable signature into an immutable staged program.
 
-    Pass concrete examples positionally to infer shape and dtype, or pass an
-    explicit ``specs=`` tree. The result accepts exactly that one signature.
+    Use the direct form with a callable, or omit ``function`` to create a
+    decorator. Applying the decorator compiles the function and replaces it
+    with a ``StagedProgram``. Compilation traces the Python callable once with
+    abstract values; later calls execute the graph without running or
+    retracing the Python callable.
+
+    Declare the positional signature in exactly one of two ways: pass concrete
+    ``examples`` to infer its array leaves, or pass ``specs`` containing
+    ``ArraySpec`` and ``StaticSpec`` leaves. Keyword arguments have no example
+    form and are declared with ``kw_specs`` in either case.
+
+    Parameters
+    ----------
+    function
+        Callable to compile. If omitted, return a decorator that compiles the
+        callable it receives.
+    *examples
+        Concrete positional arguments whose pytree structure, shapes, dtypes,
+        devices, and Python-scalar categories define the compiled signature.
+        Wrap a non-array compile-time leaf in ``StaticSpec``. Mutually
+        exclusive with ``specs``.
+    specs
+        Positional argument specification tree. Every leaf must be an
+        ``ArraySpec`` or ``StaticSpec``. Mutually exclusive with ``examples``.
+    kw_specs
+        Mapping from keyword argument names to specification trees whose
+        leaves are ``ArraySpec`` or ``StaticSpec``. The mapping is combined
+        with the positional signature declared by ``examples`` or ``specs``.
+    array_api_version
+        Array API revision to compile and store in the graph. With concrete
+        examples and no explicit revision, Advect selects the newest supported
+        revision served by their common array provider. With ``specs`` alone,
+        it selects Advect's latest supported revision. An explicit revision
+        must be supported by Advect and by the provider of every array example.
+
+    Returns
+    -------
+    StagedProgram or callable
+        A fully compiled, single-signature ``StagedProgram`` when ``function``
+        is supplied; otherwise, a decorator that returns such a program. The
+        program snapshots static inputs and captured constants, can be
+        serialized, and never grows a polymorphic cache or retraces.
+
+    Raises
+    ------
+    TypeError
+        If neither ``examples`` nor ``specs`` is supplied, if both are
+        supplied, if an example is neither array-like nor a supported Python
+        scalar nor wrapped in ``StaticSpec``, if a specification contains
+        another leaf type, or if the concrete array examples cannot use one
+        common provider at the selected Array API revision.
+    ValueError
+        If ``array_api_version`` is not a supported revision, or if abstract
+        tracing finds incompatible shapes, dtypes, or operation semantics.
+
+    Notes
+    -----
+    A returned program accepts only its compiled call pytree and leaf
+    contract. At execution time, a changed call structure, non-array leaf, or
+    static value raises ``TypeError``; an incompatible array shape, dtype,
+    device, or Python-scalar category raises ``ValueError``.
 
     Examples
     --------
+    Infer a direct-call signature from a concrete array:
+
     >>> import advect as ad
     >>> import numpy as np
     >>> program = ad.stage(lambda x: x + 1, np.array([1.0, 2.0]))
     >>> program(np.array([3.0, 4.0])).tolist()
     [4.0, 5.0]
+
+    The decorator form uses explicit positional and keyword specifications:
+
+    >>> @ad.stage(
+    ...     specs=(ad.ArraySpec((2,), "float32"),),
+    ...     kw_specs={"scale": ad.ArraySpec((), "float32")},
+    ... )
+    ... def scale(x, *, scale):
+    ...     return x * scale
+    >>> scale(
+    ...     np.array([1.0, 2.0], dtype=np.float32),
+    ...     scale=np.asarray(2.0, dtype=np.float32),
+    ... ).tolist()
+    [2.0, 4.0]
     """
     if examples:
         if specs is not None:

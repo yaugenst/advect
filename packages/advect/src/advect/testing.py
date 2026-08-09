@@ -7,7 +7,7 @@ import math
 from typing import TYPE_CHECKING, Any, NoReturn, cast
 
 from advect.core._abstract import AbstractValue, ArraySpec
-from advect.core._array_namespace import _get_array_namespace
+from advect.core._array_api.providers import _get_array_namespace
 from advect.core._primitive import MissingPrimitiveRuleError
 from advect.core._primitive_call import _infer_namespace, _normalize_output_pytree
 from advect.core._pytree import tree_flatten, tree_map, tree_unflatten
@@ -225,6 +225,52 @@ def check_gradient(
     difference sweep, then checks the reverse gradient against the same
     directional derivative. It checks consistency with the function that
     actually ran, not whether that function encodes the intended mathematics.
+
+    Parameters
+    ----------
+    function
+        Unary function with a real scalar output. This may be a composition of
+        built-in operations and public custom primitives.
+    primal
+        Representative input value or pytree at which to check `function`.
+    tangent
+        Direction pytree matching `primal`. When omitted, every numeric leaf
+        receives an all-ones direction.
+    epsilons
+        Non-empty sequence of finite positive central-difference steps. The
+        JVP comparison passes when at least one step agrees within tolerance.
+    atol
+        Absolute tolerance for the finite-difference and real-adjoint checks.
+    rtol
+        Relative tolerance for the finite-difference and real-adjoint checks.
+
+    Returns
+    -------
+    None
+        The check returns only when both comparisons pass.
+
+    Raises
+    ------
+    ValueError
+        If `epsilons` is empty or contains a non-finite or non-positive step,
+        or if the tangent, input, or scalar-output structure is invalid.
+    TypeError
+        If a selected input or tangent leaf is unsupported by the active array
+        provider.
+    NoJVPError
+        If an operation on the checked path has no forward-mode rule.
+    NoVJPError
+        If an operation on the checked path has no reverse-mode rule.
+    AssertionError
+        If the JVP disagrees with every finite-difference step or the reverse
+        gradient violates the JVP's real-adjoint identity. The error names any
+        custom primitives observed on the failing path.
+
+    Notes
+    -----
+    This is a representative author check, not exhaustive conformance
+    evidence. Run it on a composed public path in addition to testing each
+    custom primitive with `check_primitive`.
     """
     steps = tuple(float(epsilon) for epsilon in epsilons)
     if not steps or any(not math.isfinite(step) or step <= 0 for step in steps):
@@ -303,17 +349,59 @@ def check_primitive(  # noqa: C901, PLR0912, PLR0913, PLR0915
     """Run selected author checks for one representative primitive invocation.
 
     The default ``("abstract", "jvp", "transpose")`` is a first-order smoke
-    check. Authors of a serializable primitive should normally run
+    check. It does not stage the primitive or check input preservation. Authors
+    of a serializable non-residual primitive should normally run
     ``("abstract", "jvp", "transpose", "nested", "stage")`` for every
     materially different shape, dtype, and static-argument form. Add
     ``"complex"`` in a separate call whose primals are complex when the
-    primitive supports complex values.
+    primitive supports complex values. Residual primitives are first-order
+    boundaries and therefore omit ``"nested"``. A transpose-only primitive may
+    request just ``"transpose"``; the check then compares its explicit rule
+    with a central finite difference. The ``"jvp"``, ``"complex"``, and
+    ``"nested"`` checks require a JVP.
 
     The stage check executes both the compiled and serialized program, compares
     output structure, shape, and dtype exactly, and verifies that inputs remain
     unchanged. Repository-wide support still requires the conformance inventory;
     this helper intentionally does not import Hypothesis or claim exhaustive
     coverage from one sample.
+
+    Parameters
+    ----------
+    primitive
+        Authoring handle returned by ``advect.primitive``.
+    primals
+        One representative value for each non-static implementation argument,
+        in implementation-parameter order. Nested pytrees are preserved.
+    static
+        Values for declared static arguments that do not use their
+        implementation defaults.
+    tangents
+        Optional tangent pytree matching ``primals``. Ones are used by
+        default; leaves of nondifferentiable arguments are ignored.
+    cotangent
+        Optional pytree matching the primitive output. Ones are used by
+        default.
+    check
+        Any of ``"abstract"``, ``"jvp"``, ``"transpose"``, ``"complex"``,
+        ``"nested"``, and ``"stage"``. Only ``"stage"`` compiles and restores
+        a program and checks that those executions preserve their inputs.
+    epsilon
+        Central finite-difference step.
+    atol
+        Absolute numerical tolerance.
+    rtol
+        Relative numerical tolerance.
+
+    Raises
+    ------
+    ValueError
+        If the requested checks or representative inputs are invalid.
+    MissingPrimitiveRuleError
+        If a requested capability has no required author rule.
+    AssertionError
+        If an installed rule, staged execution, or numerical identity fails
+        its check.
     """
     requested = tuple(check)
     supported = {"abstract", "jvp", "transpose", "complex", "nested", "stage"}
@@ -395,7 +483,8 @@ def check_primitive(  # noqa: C901, PLR0912, PLR0913, PLR0915
         return
 
     jvp_rule = primitive._jvp_rule  # noqa: SLF001
-    if jvp_rule is None:
+    requires_jvp = bool({"jvp", "complex", "nested"}.intersection(requested))
+    if requires_jvp and jvp_rule is None:
         _missing_rule(primitive, "jvp", "@primitive.def_jvp")
 
     nondiff_top_level = set(primitive.nondiff_argnames)
@@ -423,14 +512,8 @@ def check_primitive(  # noqa: C901, PLR0912, PLR0913, PLR0915
         None if nondiff else tangent
         for nondiff, tangent in zip(nondiff_mask, tangent_leaves, strict=True)
     )
-    jvp_result = jvp_rule(
-        rule_concrete,
-        tuple(primal_leaves),
-        active_tangents,
-        **static_arguments,
-    )
 
-    if {"jvp", "complex"}.intersection(requested):
+    def finite_difference_directional() -> Any:
         positive_leaves = [
             primal if tangent is None else primal + epsilon * tangent
             for primal, tangent in zip(primal_leaves, active_tangents, strict=True)
@@ -441,7 +524,21 @@ def check_primitive(  # noqa: C901, PLR0912, PLR0913, PLR0915
         ]
         positive = invoke(cast("tuple[Any, ...]", tree_unflatten(primal_treedef, positive_leaves)))
         negative = invoke(cast("tuple[Any, ...]", tree_unflatten(primal_treedef, negative_leaves)))
-        finite_difference = _tree_difference(positive, negative, 2 * epsilon)
+        return _tree_difference(positive, negative, 2 * epsilon)
+
+    jvp_result = (
+        jvp_rule(
+            rule_concrete,
+            tuple(primal_leaves),
+            active_tangents,
+            **static_arguments,
+        )
+        if jvp_rule is not None
+        else None
+    )
+
+    if {"jvp", "complex"}.intersection(requested):
+        finite_difference = finite_difference_directional()
         if not _tree_allclose(jvp_result, finite_difference, atol=atol, rtol=rtol):
             msg = f"Primitive '{primitive.name}' JVP disagrees with directional finite differences"
             raise AssertionError(msg)
@@ -460,11 +557,6 @@ def check_primitive(  # noqa: C901, PLR0912, PLR0913, PLR0915
         if output_cotangent_treedef != output_treedef:
             msg = "Primitive-check cotangent must match the output pytree"
             raise ValueError(msg)
-        jvp_leaves, jvp_treedef = tree_flatten(jvp_result)
-        if jvp_treedef != output_treedef:
-            msg = f"Primitive '{primitive.name}' JVP output structure differs from concrete output"
-            raise AssertionError(msg)
-
         transpose_rule = primitive._transpose_rule  # noqa: SLF001
         if transpose_rule is not None:
             if primitive.has_residual:
@@ -500,6 +592,8 @@ def check_primitive(  # noqa: C901, PLR0912, PLR0913, PLR0915
                 )
             ]
         else:
+            if jvp_rule is None:
+                _missing_rule(primitive, "transpose", "@primitive.def_transpose")
             if primitive.has_residual:
                 msg = (
                     f"Primitive '{primitive.name}' uses an opaque residual and requires "
@@ -513,7 +607,17 @@ def check_primitive(  # noqa: C901, PLR0912, PLR0913, PLR0915
             contributions = pullback(output_cotangent)
             contribution_leaves, _contribution_treedef = tree_flatten(contributions)
 
-        left = _real_inner_product(output_cotangent_leaves, jvp_leaves)
+        directional = jvp_result if jvp_rule is not None else finite_difference_directional()
+        directional_leaves, directional_treedef = tree_flatten(directional)
+        if directional_treedef != output_treedef:
+            source = "JVP" if jvp_rule is not None else "finite-difference directional"
+            msg = (
+                f"Primitive '{primitive.name}' {source} output structure differs "
+                "from concrete output"
+            )
+            raise AssertionError(msg)
+
+        left = _real_inner_product(output_cotangent_leaves, directional_leaves)
         right = _real_inner_product(contribution_leaves, tangent_leaves)
         if abs(left - right) > atol + rtol * abs(left):
             msg = (

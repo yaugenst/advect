@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from advect.core._array_api import _FUNCTION_SPECS
-from advect.core._array_api_evidence import operation_cases
+from advect.core._array_api.evidence import operation_cases
+from advect.core._array_api.frontend import _FUNCTION_SPECS
 from advect.core._primitive_classification import STRUCTURAL_OPS as _STRUCTURAL_OPS
 from advect.core._registry import OpRegistry, _register_builtin_ops, get_registry
 from advect_conformance_tests._builtin_cases import (
@@ -32,6 +32,11 @@ _UNBOUND_OPS: dict[str, str] = {
 # have conformance cases but no native abstract result rule of their own.
 _ABSTRACT_COMPOSITES = frozenset({"array_ext.gradient"})
 
+# This namespace is reserved for direct SciPy primitives shipped by Advect.
+# Other ``custom.*`` records are application or test extensions and do not
+# belong to the product conformance inventory.
+_BUNDLED_SCIPY_PREFIX = "custom.scipy."
+
 
 def _expected_builtin_registry() -> OpRegistry:
     """Build the product registry without observing process-local test plugins."""
@@ -44,14 +49,13 @@ def _expected_definitions() -> dict[str, OpDef]:
     registry = _expected_builtin_registry()
     definitions = dict(registry._ops)
     # Bundled SciPy primitives are ordinary custom primitives and therefore
-    # cannot be installed into an isolated registry. Their declarations are
-    # the authoritative bounded list; fetch only those names from the process
-    # registry and ignore unrelated custom primitives registered by other tests.
-    process_registry = get_registry()
-    custom_ops = {case.op for case in (*BUILTIN_INVOCATIONS, *STAGED_ONLY_INVOCATIONS)}
-    for op in custom_ops:
-        if op.startswith("custom."):
-            definitions[op] = process_registry.get(op)
+    # cannot be installed into an isolated registry. Importing the invocation
+    # cases has already loaded ``advect.scipy``; the reserved live namespace is
+    # therefore the authoritative product inventory. Do not derive it from the
+    # cases whose completeness this module is meant to check.
+    for definition in get_registry().definitions():
+        if definition.name.startswith(_BUNDLED_SCIPY_PREFIX):
+            definitions[definition.name] = definition
     return definitions
 
 
@@ -59,6 +63,13 @@ def test_declarations_name_known_operations() -> None:
     expected = set(_expected_definitions())
     unknown = sorted({case.op for case in BUILTIN_INVOCATIONS} - expected)
     assert not unknown, f"conformance declarations name unknown operations: {unknown}"
+
+
+def test_every_bundled_scipy_primitive_has_an_invocation() -> None:
+    expected = {name for name in _expected_definitions() if name.startswith(_BUNDLED_SCIPY_PREFIX)}
+    covered = {case.op for case in (*BUILTIN_INVOCATIONS, *STAGED_ONLY_INVOCATIONS)}
+    missing = sorted(expected - covered)
+    assert not missing, f"bundled SciPy primitives lack invocation coverage: {missing}"
 
 
 def test_operation_classification_is_a_complete_partition() -> None:

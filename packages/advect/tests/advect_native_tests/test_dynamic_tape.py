@@ -1,3 +1,5 @@
+"""Tests for native dynamic-tape ownership and derivative execution."""
+
 from __future__ import annotations
 
 import gc

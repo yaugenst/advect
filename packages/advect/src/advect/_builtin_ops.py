@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from advect.autodiff.rules.array_family._impl.jvp.registry import jvp_rule_items
-from advect.autodiff.rules.array_family._impl.vjp.registry import (
+from advect.autodiff.rules.array_family.jvp.registry import jvp_rule_items
+from advect.autodiff.rules.array_family.vjp.registry import (
     non_differentiable_items,
     vjp_rule_items,
 )

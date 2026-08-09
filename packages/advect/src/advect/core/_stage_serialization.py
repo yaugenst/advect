@@ -7,7 +7,7 @@ import math
 from collections.abc import Mapping
 from typing import Any, cast
 
-from advect.core._array_api_results import (
+from advect.core._array_api.results import (
     _RESULT_TYPE_TAGS,
     _SERIALIZED_RESULT_TYPES,
 )

@@ -30,17 +30,22 @@ the graph schema revision attached to that identity. A custom primitive
 declares:
 
 - one concrete implementation;
-- abstract output evaluation;
+- abstract output evaluation when it supports staging;
 - static and nondifferentiable arguments;
-- a traceable JVP rule that receives the already-computed primal output;
-- an optional transpose rule when it cannot be derived safely;
+- a traceable JVP rule that receives the already-computed primal output when
+  the primitive supports forward mode or structural transposition;
+- an explicit transpose when it cannot be derived safely, including
+  transpose-only reverse mode without a JVP;
 - whether its implementation returns an invocation-local residual.
 
 Transforms use the installed rules directly. Missing-rule errors name the
 primitive and required rule. Structural transposition validates a JVP's
 real-linearity when it is used, and higher-order differentiation requires rule
-bodies that themselves trace. Author checks report contract failures but do not
-mutate runtime capability state.
+bodies that themselves trace. A transpose-only primitive has no forward-mode
+capability, but a traceable non-residual transpose may compose under reverse
+mode. Residual primitives require an explicit transpose and are first-order
+boundaries. Author checks report contract failures but do not mutate runtime
+capability state.
 
 A residual-capable implementation returns
 `PrimitiveResult(output, residual, release=None)`. Advect passes the exact

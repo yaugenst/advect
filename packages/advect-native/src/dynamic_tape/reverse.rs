@@ -4,9 +4,11 @@ use pyo3::exceptions::{PyAttributeError, PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::PyTuple;
 
-use super::{
-    DynamicTape, MAX_MULTI_SEEDS, OperandSnapshot, ReverseNeeds, TraversalKind,
-    clone_required_slot, close_and_drop_reverse_payloads, finish_traversal, snapshot_operands,
+use super::MAX_MULTI_SEEDS;
+use super::layout::OperandSnapshot;
+use super::lifecycle::{
+    DynamicTape, ReverseNeeds, TraversalKind, clone_required_slot, close_and_drop_reverse_payloads,
+    finish_traversal, snapshot_operands,
 };
 use advect_runtime::{NodeCore, NodeId};
 

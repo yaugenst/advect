@@ -24,7 +24,7 @@ from advect.core._errors import (
     _array_conversion_error,
 )
 from advect.core._protocols import _snapshot_traced
-from advect.numpy._array_function_mutation import (
+from advect.numpy._array_function.mutation import (
     NOT_FUNCTIONALIZED,
     functionalize_array_function_mutation,
 )

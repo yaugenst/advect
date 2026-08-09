@@ -91,19 +91,19 @@ def _function_row(
 
 
 def _array_api_extension() -> dict[str, object]:
-    from advect.core._array_api import (  # noqa: PLC0415
+    from advect.core._array_api.frontend import (  # noqa: PLC0415
         _ARRAY_API_COMPOSITES,
         _ARRAY_API_META_FUNCTIONS,
         _FUNCTION_SPECS,
         _NONDIFFERENTIABLE_ARRAY_API_COMPOSITES,
         _STAGED_ARRAY_API_COMPOSITES,
     )
-    from advect.core._array_api_profiles import (  # noqa: PLC0415
+    from advect.core._array_api.profiles import (  # noqa: PLC0415
         LATEST_ARRAY_API_VERSION,
         SUPPORTED_ARRAY_API_VERSIONS,
         materialize_array_api_profile,
     )
-    from advect.core._array_api_support import build_support_profile  # noqa: PLC0415
+    from advect.core._array_api.support import build_support_profile  # noqa: PLC0415
 
     selected_profile = materialize_array_api_profile(LATEST_ARRAY_API_VERSION)
 
@@ -197,8 +197,8 @@ def _resolve_numpy_function(path: str) -> object:
 def _numpy_frontend_functions() -> frozenset[object]:
     import numpy as np  # noqa: PLC0415
 
-    from advect.numpy._array_function_mutation import _FUNCTIONALIZERS  # noqa: PLC0415
-    from advect.numpy._protocol_array_function import (  # noqa: PLC0415
+    from advect.numpy._array_function.mutation import _FUNCTIONALIZERS  # noqa: PLC0415
+    from advect.numpy._array_function.registry import (  # noqa: PLC0415
         _STATIC_ARRAY_FUNCTIONS,
         ARRAY_FUNCTION_RUNTIME,
     )
@@ -217,7 +217,7 @@ def _numpy_frontend_functions() -> frozenset[object]:
 def _numpy_metadata_functions() -> frozenset[object]:
     import numpy as np  # noqa: PLC0415
 
-    from advect.numpy._protocol_array_function import _STATIC_ARRAY_FUNCTIONS  # noqa: PLC0415
+    from advect.numpy._array_function.registry import _STATIC_ARRAY_FUNCTIONS  # noqa: PLC0415
 
     return frozenset(
         {
@@ -230,10 +230,10 @@ def _numpy_metadata_functions() -> frozenset[object]:
 
 def _numpy_lowering(path: str, function: object) -> str:
     from advect.core._registry import get_registry  # noqa: PLC0415
-    from advect.numpy._op_bindings import canonicalize_numpy_op  # noqa: PLC0415
-    from advect.numpy._protocol_array_function import (  # noqa: PLC0415
+    from advect.numpy._array_function.registry import (  # noqa: PLC0415
         ARRAY_FUNCTION_RUNTIME,
     )
+    from advect.numpy._op_bindings import canonicalize_numpy_op  # noqa: PLC0415
 
     if function in _numpy_metadata_functions():
         return "metadata"
@@ -435,7 +435,7 @@ def _numpy_array_method_rows(array_api_ops: frozenset[str]) -> list[dict[str, ob
 
 def _validate_numpy_bindings() -> None:
     from advect.core._registry import get_registry  # noqa: PLC0415
-    from advect.numpy._protocol_array_function import (  # noqa: PLC0415
+    from advect.numpy._array_function.registry import (  # noqa: PLC0415
         ARRAY_FUNCTION_RUNTIME,
     )
     from advect.numpy._traced_array import TracedArray  # noqa: PLC0415
@@ -607,7 +607,7 @@ def support_catalog() -> dict[str, object]:
     >>> sorted(catalog["extensions"])
     ['array_api', 'numpy', 'scipy']
     """
-    from advect.core._array_api import _FUNCTION_SPECS  # noqa: PLC0415
+    from advect.core._array_api.frontend import _FUNCTION_SPECS  # noqa: PLC0415
 
     scipy = _scipy_extension()
     array_api_ops = frozenset(spec.op for spec in _FUNCTION_SPECS.values())

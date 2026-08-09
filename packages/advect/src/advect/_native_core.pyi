@@ -1,3 +1,5 @@
+"""Typed Python surface of the native tape and staged-runtime adapter."""
+
 from collections.abc import Callable, Sequence
 from typing import Any, Literal, Self, final
 

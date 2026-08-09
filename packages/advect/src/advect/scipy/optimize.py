@@ -49,7 +49,36 @@ def root_solver(
     method: str | None = None,
     options: Mapping[str, object] | None = None,
 ) -> RootSolver:
-    """Build a shape- and scalar-category-preserving SciPy root callback."""
+    """Build a SciPy nonlinear solver for ``advect.implicit_root``.
+
+    Parameters
+    ----------
+    method
+        Solver method forwarded to ``scipy.optimize.root``. ``None`` uses
+        SciPy's default.
+    options
+        Method-specific options forwarded to SciPy. The mapping is copied when
+        this solver is created.
+
+    Returns
+    -------
+    RootSolver
+        A callback accepting ``(residual, initial)``. It preserves the shape
+        and scalar container category of ``initial`` and supports real and
+        complex NumPy values.
+
+    Raises
+    ------
+    ImplicitSolveError
+        Raised by the returned callback when its values cross the concrete
+        NumPy boundary incorrectly, the residual changes shape, or SciPy does
+        not converge.
+
+    Notes
+    -----
+    This is an opaque, first-order dynamic callback. Stage explicit traceable
+    iterations or a closed custom primitive when a durable program is needed.
+    """
     captured_options = None if options is None else dict(options)
 
     def solve(residual: ResidualFunction, initial: object) -> object:

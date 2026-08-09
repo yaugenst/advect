@@ -9,7 +9,7 @@ import numpy as _numpy  # noqa: ICN001 - concrete namespace with dynamic protoco
 from advect.core._context import _select_deepest_active_recorder
 from advect.core._errors import TraceLevelError, TracingError
 from advect.core._protocols import _snapshot_traced
-from advect.numpy._protocol_array_function_runtime import _ArrayFunctionProtocolMixin
+from advect.numpy._array_function.runtime import _ArrayFunctionProtocolMixin
 from advect.numpy._protocol_ufunc import UFUNC_RUNTIME
 from advect.numpy._traced_array_checks import require_active_trace
 

@@ -157,7 +157,7 @@ Linear-algebra mode selection also remains local to the two lifetime owners.
 Modes such as `qr(mode="r")` and `svd(compute_uv=False)` select a different
 operation and output arity. Canonical output arity is already owned by `OpDef`,
 and field-bearing containers are restored by
-`advect.core._array_api_results.restore_array_api_result`; neither is duplicate
+`advect.core._array_api.results.restore_array_api_result`; neither is duplicate
 frontend policy. Extracting only the mode discriminator would require an
 operation/mode descriptor plus lifetime branches, recreating the generic
 adapter or operation-description language this decision removes. A pure family

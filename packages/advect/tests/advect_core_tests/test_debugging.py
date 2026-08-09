@@ -1,3 +1,5 @@
+"""Tests for scoped debugging and user-facing trace diagnostics."""
+
 from __future__ import annotations
 
 from typing import Any

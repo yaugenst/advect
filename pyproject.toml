@@ -137,8 +137,6 @@ ignore = [
   "ISC002", # multi-line-implicit-string-concatenation
 
   # Opinionated rules we disagree with
-  "D100",   # undocumented-public-module (we document in __init__.py)
-  "D104",   # undocumented-public-package
   "D107",   # undocumented-public-init (we document in class docstring)
   "TD002",  # missing-todo-author
   "TD003",  # missing-todo-link
@@ -152,7 +150,11 @@ unfixable = [  ]
 dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
 
 [tool.ruff.lint.per-file-ignores]
-# Tests can use magic values, assertions, and don't need full documentation
+"packages/advect/src/advect/_native_core.pyi" = [
+  "PYI021", # module docstring is required by the recursive documentation contract
+]
+
+# Tests can use magic values, assertions, and don't need object-level documentation
 "packages/**/tests/**/*.py" = [
   "S101",    # assert
   "PLR2004", # magic-value-comparison
@@ -173,7 +175,6 @@ dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
 
 # Configuration files
 "conftest.py" = [
-  "D100", # undocumented-public-module
   "D103", # undocumented-public-function
 ]
 
@@ -183,13 +184,13 @@ dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
   "EXE001", # shebang (run via uv run python, not directly)
 ]
 
-"packages/advect/src/advect/autodiff/rules/array_family/_impl/jvp/*.py" = [
+"packages/advect/src/advect/autodiff/rules/array_family/jvp/*.py" = [
   "ANN401", # JVP rule signatures intentionally track runtime op contracts
   "ARG001", # many signatures mirror traced op contracts
   "D103",   # internal rule helpers are intentionally minimal-doc
   "TC001",  # typed alias imports are intentionally runtime-local
 ]
-"packages/advect/src/advect/autodiff/rules/array_family/_impl/vjp/**/*.py" = [
+"packages/advect/src/advect/autodiff/rules/array_family/vjp/**/*.py" = [
   "ANN401", # VJP rule signatures intentionally mirror runtime op contracts
   "ARG001", # many signatures mirror traced op contracts
   "D103",   # internal rule helpers are intentionally minimal-doc

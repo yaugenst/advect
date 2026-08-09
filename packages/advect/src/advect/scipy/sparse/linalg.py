@@ -50,7 +50,40 @@ def gmres_solver(
     atol: float = 0.0,
     maxiter: int | None = None,
 ) -> LinearSolver:
-    """Build a shape- and scalar-category-preserving SciPy GMRES callback."""
+    """Build a SciPy GMRES solver for implicit differentiation.
+
+    Parameters
+    ----------
+    rtol
+        Relative convergence tolerance forwarded to
+        ``scipy.sparse.linalg.gmres``.
+    atol
+        Absolute convergence tolerance forwarded to SciPy.
+    maxiter
+        Maximum iteration count. ``None`` uses SciPy's default.
+
+    Returns
+    -------
+    LinearSolver
+        A callback accepting ``(operator, rhs)``. It preserves the shape and
+        scalar container category of ``rhs`` and realifies complex
+        real-linear operators before calling SciPy.
+
+    Raises
+    ------
+    ValueError
+        If either tolerance is negative or ``maxiter`` is not positive.
+    ImplicitSolveError
+        Raised by the returned callback when its values cross the concrete
+        NumPy boundary incorrectly, the operator changes shape, or SciPy does
+        not converge.
+
+    Notes
+    -----
+    This is an opaque, first-order dynamic callback. It restores an inexact
+    right-hand-side dtype after solving. Stage explicit traceable iterations
+    or a closed custom primitive when a durable program is needed.
+    """
     if rtol < 0 or atol < 0:
         msg = "GMRES tolerances must be non-negative"
         raise ValueError(msg)

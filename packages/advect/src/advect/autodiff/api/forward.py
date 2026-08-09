@@ -18,7 +18,7 @@ from advect.autodiff.api._pullback_values import (
 )
 from advect.autodiff.api._scalar_boundary import _unlift_scalar_array
 from advect.autodiff.api.inputs import _normalize_argnums_spec
-from advect.core._array_namespace import _get_array_namespace
+from advect.core._array_api.providers import _get_array_namespace
 from advect.core._context import _use_array_api_version
 from advect.core._pytree import tree_flatten, tree_unflatten
 from advect.core._registry import get_registry
@@ -35,8 +35,63 @@ def linearize(
 ) -> tuple[Any, LinearMap]:
     """Linearize one concrete call and return its reusable real-linear map.
 
-    Close the returned map, or use it as a context manager, to release the
-    concrete values retained by its trace.
+    The call is traced immediately from ``primals`` and ``kwargs``. The
+    returned ``LinearMap`` owns that invocation's tape, retained provider
+    values, and primitive residuals; it is not a cached or durable program.
+
+    Parameters
+    ----------
+    f
+        Callable to linearize. Its output may be any supported array or
+        pytree. A ``StagedProgram`` is accepted, but the surrounding
+        linearization is still concrete and invocation-local.
+    *primals
+        Positional arguments for this call. Only the arguments selected by
+        ``argnums`` are tangent inputs; the others remain primal
+        coefficients.
+    argnums
+        Positional arguments to differentiate. An integer makes
+        ``linear(tangents)`` accept that argument's tangent pytree directly; a
+        tuple makes it accept a tuple of tangent pytrees in the given order.
+        Negative indices are resolved against ``primals``.
+    **kwargs
+        Keyword arguments forwarded to ``f``. ``linearize`` does not select
+        keyword arguments for differentiation.
+
+    Returns
+    -------
+    value
+        The concrete output of ``f``, with its pytree structure preserved.
+    linear
+        A reusable ``LinearMap``. Calling ``linear(tangents)`` applies the JVP
+        and returns a tangent with the output pytree. Calling
+        ``linear.pullback(cotangent)`` or ``linear.transpose()(cotangent)``
+        applies the real adjoint and returns the selected input structure.
+
+    Raises
+    ------
+    IndexError
+        If a positional selection is out of range.
+    TypeError
+        If a selected input contains an unsupported Python complex scalar, or
+        a tangent has an invalid structure or numeric category.
+    ValueError
+        If positional selections are duplicated, or a tangent pytree or leaf
+        shape does not match its selected primal.
+    NoJVPError
+        If the returned map is applied forward through an operation without a
+        JVP rule.
+    NoVJPError
+        If the returned map is transposed through an operation without an
+        explicit or structurally derivable transpose rule.
+    RuntimeError
+        If the map is applied after it has been closed.
+
+    Notes
+    -----
+    The map remains reusable until ``close()``. Close it explicitly, or use it
+    as a context manager, to release retained concrete values and residuals
+    deterministically.
 
     Examples
     --------
@@ -67,8 +122,45 @@ def jvp(
 ) -> Callable[..., tuple[Any, Any]]:
     """Return a concrete-tracing Jacobian-vector product transform.
 
-    Call the returned function with the primal arguments and a keyword-only
-    ``tangents=`` pytree matching the arguments selected by ``argnums``.
+    Parameters
+    ----------
+    f
+        Callable to differentiate. Its output may be any supported array or
+        pytree. Passing a ``StagedProgram`` executes it inside a concrete
+        trace; this transform does not compile a new staged program.
+    argnums
+        Positional arguments to differentiate. An integer expects one tangent
+        pytree directly. A tuple expects a tuple of tangent pytrees in the
+        given order, including for a one-element tuple. Negative indices are
+        resolved for each transformed call.
+
+    Returns
+    -------
+    Callable
+        A function called as ``transformed(*args, tangents=..., **kwargs)``.
+        ``tangents`` must match the selected primal pytree or pytrees. The
+        result is ``(value, output_tangent)``; both entries preserve ``f``'s
+        output pytree, and disconnected output leaves receive zero tangents.
+
+    Raises
+    ------
+    IndexError
+        If a positional selection is out of range for the transformed call.
+    TypeError
+        If a selected input is an unsupported Python complex scalar, multiple
+        selected arguments are not given a tuple of tangents, or a tangent is
+        supplied for a static or untraceable leaf.
+    ValueError
+        If positional selections are duplicated, or the tangent arity,
+        pytree, or leaf shape does not match the selected primals.
+    NoJVPError
+        If an operation on the differentiated path has no JVP rule.
+
+    Notes
+    -----
+    Each invocation traces the concrete values once, applies the JVP once, and
+    releases the temporary ``LinearMap`` and any retained primitive residuals
+    before returning. No trace is cached between calls.
 
     Examples
     --------
@@ -531,9 +623,66 @@ def jacobian(
 ) -> Callable[..., Any]:
     """Return a shape-preserving dense Jacobian for real pytree inputs and outputs.
 
-    A general real-linear complex map needs two complex blocks (or one real
-    ``2m x 2n`` block), so a single complex matrix would be ambiguous.  Complex
-    callers use :func:`linearize` instead.
+    Parameters
+    ----------
+    f
+        Callable to differentiate. Its selected inputs and output may be
+        pytrees of real arrays or real Python scalars. A ``StagedProgram`` is
+        accepted, but each call still uses a concrete, invocation-local
+        linearization.
+    argnums
+        Positional arguments to differentiate. An integer represents that
+        input directly in every output block; a tuple represents the selected
+        inputs as a tuple in the given order. ``None`` selects argument zero
+        unless ``argnames`` is provided, in which case it selects no
+        positional arguments. Negative indices are resolved for each call.
+    argnames
+        Named arguments to differentiate. Each output leaf contains their
+        derivative blocks in a dictionary keyed by name. For an ordinary
+        callable, a selected name may be passed positionally or by keyword;
+        staged named inputs must be passed by keyword. With both positional
+        and named selections, each output leaf contains
+        ``(positional_blocks, named_blocks)``.
+
+    Returns
+    -------
+    Callable
+        A concrete-tracing function returning an output-shaped pytree of
+        input-shaped derivative blocks. For each output leaf and selected
+        input leaf, the dense block shape is
+        ``output_leaf.shape + input_leaf.shape``; neither side is flattened.
+        Static or untraceable selected input leaves have ``None`` blocks.
+
+    Raises
+    ------
+    IndexError
+        If a positional selection is out of range for the transformed call.
+    TypeError
+        If a selected input contains an unsupported Python complex scalar.
+    ValueError
+        If positional selections are duplicated, an argument is selected both
+        positionally and by name, a selected name is unavailable, or an input
+        or output leaf is complex.
+    NoJVPError
+        If forward assembly is required through an operation without a JVP
+        rule.
+    NoVJPError
+        If reverse assembly is required through an operation without an
+        explicit or structurally derivable transpose rule.
+    RuntimeError
+        If the provider cannot assemble a dense block or a derivative rule
+        changes the expected pytree structure between basis seeds.
+
+    Notes
+    -----
+    Advect chooses forward or reverse assembly from the traced coordinate
+    counts and available rule direction. The temporary ``LinearMap`` is always
+    closed before the call returns or raises, releasing retained values and
+    primitive residuals.
+
+    A general real-linear complex map needs two complex blocks, or one real
+    ``2m x 2n`` block, so a single complex matrix would be ambiguous. Complex
+    callers should use ``linearize`` instead.
 
     Examples
     --------

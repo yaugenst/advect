@@ -12,22 +12,22 @@ from scripts._support import qualify_array_api_operations as qualifier
 
 import advect as ad
 from advect.autodiff._ephemeral import trace_call
-from advect.core import _array_api_support as support
-from advect.core._array_api import (
-    _ARRAY_API_META_FUNCTIONS,
-    _DYNAMIC_ARRAY_API_COMPOSITES,
-)
-from advect.core._array_api_evidence import (
+from advect.core._array_api import support
+from advect.core._array_api.evidence import (
     case_parameter_values,
     input_indices,
     metadata_cases,
     operation_evidence_cases,
 )
-from advect.core._array_api_profiles import (
+from advect.core._array_api.frontend import (
+    _ARRAY_API_META_FUNCTIONS,
+    _DYNAMIC_ARRAY_API_COMPOSITES,
+)
+from advect.core._array_api.profiles import (
     LATEST_ARRAY_API_VERSION,
     SUPPORTED_ARRAY_API_VERSIONS,
 )
-from advect.core._array_api_support import (
+from advect.core._array_api.support import (
     _evidence_gaps,
     _static_parameters,
     build_support_profile,

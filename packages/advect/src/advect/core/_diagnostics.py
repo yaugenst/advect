@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 from typing import TYPE_CHECKING, Any, cast
 
-from advect.core._array_namespace import _get_array_namespace
+from advect.core._array_api.providers import _get_array_namespace
 from advect.core._context import _get_numerics_context
 from advect.core._errors import NumericsError
 from advect.core._pytree import format_path, tree_flatten_with_paths

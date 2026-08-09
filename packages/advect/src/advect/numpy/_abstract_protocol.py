@@ -8,8 +8,8 @@ from typing import TYPE_CHECKING, Any, Protocol, cast, override
 from advect.core._abstract import AbstractArray, _lift, _record_abstract_op
 from advect.core._errors import TracingError
 from advect.numpy._abstract_calls import _empty_out, _numpy_array, apply_numpy
+from advect.numpy._array_function.registry import ARRAY_FUNCTION_RUNTIME
 from advect.numpy._constructors import construct_abstract
-from advect.numpy._protocol_array_function import ARRAY_FUNCTION_RUNTIME
 from advect.numpy._signature import normalize_required_positionals
 from advect.numpy._stage_lifecycle import stage_context
 
