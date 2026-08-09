@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 import advect as ad
-from advect.core._array_api_profiles import SUPPORTED_ARRAY_API_VERSIONS
+from advect.core._array_api.profiles import SUPPORTED_ARRAY_API_VERSIONS
 
 cp = pytest.importorskip("cupy")
 

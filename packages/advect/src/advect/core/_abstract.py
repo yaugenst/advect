@@ -22,15 +22,15 @@ from advect.core._abstract_helpers import (
     shape_tuple as _shape_tuple,
 )
 from advect.core._abstract_model import AbstractValue, ArraySpec
-from advect.core._array_api import (
+from advect.core._array_api.frontend import (
     _FUNCTION_SPECS,
     _INTERNAL_FUNCTION_SPECS,
     _STAGED_ARRAY_API_COMPOSITES,
     _staged_array_api_composite,
     bind_array_api_call,
 )
-from advect.core._array_api_profiles import materialize_array_api_profile
-from advect.core._array_api_results import restore_array_api_result
+from advect.core._array_api.profiles import materialize_array_api_profile
+from advect.core._array_api.results import restore_array_api_result
 from advect.core._array_protocol_helpers import normalize_item_index
 from advect.core._basic_index import encode_basic_index
 from advect.core._context import (
@@ -53,7 +53,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
     from contextlib import AbstractContextManager
 
-    from advect.core._array_api_profiles import ArrayAPIProfile
+    from advect.core._array_api.profiles import ArrayAPIProfile
     from advect.core._native import GraphBuilder
 
 

@@ -15,17 +15,17 @@ import time
 from collections import Counter
 from pathlib import Path
 
-from advect.core._array_api import (
+from advect.core._array_api.frontend import (
     _ARRAY_API_COMPOSITES,
     _ARRAY_API_META_FUNCTIONS,
     _FUNCTION_SPECS,
 )
-from advect.core._array_api_profiles import (
+from advect.core._array_api.profiles import (
     LATEST_ARRAY_API_VERSION,
     SUPPORTED_ARRAY_API_VERSIONS,
 )
-from advect.core._array_api_signatures import official_signatures
-from advect.core._array_api_support import build_support_profile
+from advect.core._array_api.signatures import official_signatures
+from advect.core._array_api.support import build_support_profile
 from scripts._support.evidence import evidence_report_header
 
 _PINNED_SUITE_REVISION = "5d0b701b0c4ab6ec98794068cf7af393a8a51c61"

@@ -18,6 +18,52 @@ if TYPE_CHECKING:
 
 _ROOT = Path(__file__).parent.parent
 _MARKDOWN_LINK = re.compile(r"\[[^\]]+\]\((https?://[^)\s]+\.md)\)")
+_RAW_MKDOCSTRINGS_DIRECTIVE = re.compile(r"^:::\s+advect(?:[.\s]|$)", re.MULTILINE)
+_RAW_SPHINX_ROLE = re.compile(r":(?:attr|class|data|exc|func|meth|mod):")
+_MARKDOWN_TABLE_ROW = re.compile(r"^\s*\|.*\|\s*$")
+_MARKDOWN_TABLE_SEPARATOR = re.compile(r"^\s*\|(?:\s*:?-{3,}:?\s*\|)+\s*$")
+
+
+def _unescaped_pipe_count(line: str) -> int:
+    """Count Markdown table separators, excluding escaped literal pipes."""
+    return sum(
+        character == "|" and (index == 0 or line[index - 1] != "\\")
+        for index, character in enumerate(line)
+    )
+
+
+def _malformed_markdown_table_lines(markdown: str) -> tuple[int, ...]:
+    """Return rows whose cell count disagrees with their Markdown table header."""
+    lines = markdown.splitlines()
+    malformed: list[int] = []
+    for index, line in enumerate(lines[:-1]):
+        if not (
+            _MARKDOWN_TABLE_ROW.fullmatch(line)
+            and _MARKDOWN_TABLE_SEPARATOR.fullmatch(lines[index + 1])
+        ):
+            continue
+        expected_pipes = _unescaped_pipe_count(line)
+        for row_index in range(index + 2, len(lines)):
+            row = lines[row_index]
+            if not _MARKDOWN_TABLE_ROW.fullmatch(row):
+                break
+            if _unescaped_pipe_count(row) != expected_pipes:
+                malformed.append(row_index + 1)
+    return tuple(malformed)
+
+
+def _api_rendering_errors(page: str, markdown: str) -> tuple[str, ...]:
+    """Describe unrendered or structurally invalid generated API markup."""
+    errors: list[str] = []
+    if _RAW_MKDOCSTRINGS_DIRECTIVE.search(markdown):
+        errors.append(f"{page}: unexpanded mkdocstrings directive")
+    if _RAW_SPHINX_ROLE.search(markdown):
+        errors.append(f"{page}: raw Sphinx role")
+    malformed_rows = _malformed_markdown_table_lines(markdown)
+    if malformed_rows:
+        rendered_rows = ", ".join(str(line) for line in malformed_rows)
+        errors.append(f"{page}: malformed Markdown table rows {rendered_rows}")
+    return tuple(errors)
 
 
 def _package_version() -> str:
@@ -105,7 +151,52 @@ def on_post_build(config: MkDocsConfig) -> None:
         message = "llms.txt advertises files outside this version or build:\n" + "\n".join(missing)
         raise RuntimeError(message)
 
-    api_text = (site_dir / "api" / "transforms" / "index.md").read_text(encoding="utf-8")
-    if "## grad" not in api_text or "Examples:" not in api_text or "::: advect" in api_text:
-        message = "generated API Markdown does not contain expanded docstrings and examples"
+    api_markdown: dict[str, str] = {}
+    for url in markdown_urls:
+        relative = Path(unquote(url.removeprefix(site_url)))
+        if relative.parts[:1] != ("api",):
+            continue
+        page = relative.parent.relative_to("api").as_posix()
+        if page == ".":
+            page = "index"
+        api_markdown[page] = (site_dir / relative).read_text(encoding="utf-8")
+    if not api_markdown:
+        message = "llms.txt does not advertise any generated API Markdown"
         raise RuntimeError(message)
+
+    rendering_errors: list[str] = []
+    for page, api_text in api_markdown.items():
+        rendering_errors.extend(_api_rendering_errors(page, api_text))
+    if rendering_errors:
+        message = "generated API Markdown contains rendering artifacts:\n" + "\n".join(
+            rendering_errors
+        )
+        raise RuntimeError(message)
+
+    api_contracts = {
+        "arrays": ("## array", "## asarray", "## stop_gradient"),
+        "errors": ("## AdvectError", "## ImplicitSolveError"),
+        "primitives": ("## def_abstract", "## def_jvp", "## def_transpose"),
+        "staging": ("## stage", "## StagedProgram", "## vjp_program"),
+        "transforms": ("## grad", "Examples:"),
+        "numpy": ("### array", "### asanyarray", "### asarray"),
+        "pytree": ("### register_pytree_node", "### tree_flatten"),
+        "testing": ("### check_gradient", "### check_primitive"),
+        "support": ("## support_catalog",),
+        "scipy": ("Special functions", "Image filters", "Solver callbacks"),
+        "scipy/special": ("### gammaln", "### log_softmax"),
+        "scipy/ndimage": ("### gaussian_filter", "### black_tophat"),
+        "scipy/solvers": ("### root_solver", "### gmres_solver"),
+        "xarray": ("### register",),
+        "interop": ("All three bridges are first-order reverse-mode boundaries",),
+        "interop/torch": ("first-order PyTorch operation",),
+        "interop/jax": ("first-order JAX operation",),
+        "interop/autograd": ("first-order HIPS Autograd primitive",),
+    }
+    for page, markers in api_contracts.items():
+        api_text = api_markdown.get(page, "")
+        if not all(marker in api_text for marker in markers):
+            message = (
+                f"generated {page!r} API Markdown does not contain its expanded public docstrings"
+            )
+            raise RuntimeError(message)

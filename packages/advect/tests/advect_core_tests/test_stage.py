@@ -1,3 +1,5 @@
+"""Tests for staged-program tracing, execution, and immutable metadata."""
+
 from __future__ import annotations
 
 from copy import deepcopy

@@ -1,6 +1,6 @@
 # ruff: noqa: A002, EM101, PLR0913, TRY003
 # SciPy-compatible names/signatures intentionally trigger these rules.
-"""Traceable counterparts to frequently used :mod:`scipy.ndimage` operations."""
+"""Traceable counterparts to frequently used ``scipy.ndimage`` operations."""
 
 from __future__ import annotations
 
@@ -11,23 +11,9 @@ import numpy as np
 from scipy import ndimage as _scipy_ndimage
 
 from advect.core._context import is_tracing
-from advect.scipy._ndimage import (
+from advect.scipy._ndimage.common import (
     _call_primitive,
-    _convolve1d_primitive,
-    _convolve_primitive,
-    _correlate1d_primitive,
-    _correlate_primitive,
-    _correlation_call,
     _finish_output,
-    _gaussian_filter1d_primitive,
-    _gaussian_filter_primitive,
-    _grey_dilation_primitive,
-    _grey_erosion_primitive,
-    _maximum_filter1d_primitive,
-    _maximum_filter_primitive,
-    _median_filter_primitive,
-    _minimum_filter1d_primitive,
-    _minimum_filter_primitive,
     _ndim_of,
     _normalize_axes,
     _normalize_axis,
@@ -37,15 +23,33 @@ from advect.scipy._ndimage import (
     _normalize_sequence,
     _operand_dtype,
     _output_dtype,
-    _percentile_filter_primitive,
-    _rank_filter_primitive,
     _require_numpy_values,
-    _selection_call,
     _static_scalar,
     _traceable_astype,
+    _validate_ufunc_output_cast,
+)
+from advect.scipy._ndimage.filters import (
+    _convolve1d_primitive,
+    _convolve_primitive,
+    _correlate1d_primitive,
+    _correlate_primitive,
+    _correlation_call,
+    _gaussian_filter1d_primitive,
+    _gaussian_filter_primitive,
     _uniform_filter1d_primitive,
     _uniform_filter_primitive,
-    _validate_ufunc_output_cast,
+)
+from advect.scipy._ndimage.morphology import (
+    _grey_dilation_primitive,
+    _grey_erosion_primitive,
+    _maximum_filter1d_primitive,
+    _maximum_filter_primitive,
+    _median_filter_primitive,
+    _minimum_filter1d_primitive,
+    _minimum_filter_primitive,
+    _percentile_filter_primitive,
+    _rank_filter_primitive,
+    _selection_call,
 )
 
 

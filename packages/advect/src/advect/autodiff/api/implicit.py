@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from advect.autodiff.api.forward import linearize
-from advect.core._array_namespace import (
+from advect.core._array_api.providers import (
     _get_array_namespace,
     _get_backend_key_from_namespace,
 )
@@ -385,16 +385,76 @@ def implicit_root(
     linear_solve: LinearSolver,
     transpose_solve: LinearSolver | None = None,
 ) -> Callable[..., Any]:
-    """Differentiate a converged solution of ``residual(solution, params) == 0``.
+    """Build a dynamic transform for a converged implicit solution.
 
-    ``solve(residual_at_params, initial)`` performs the nonlinear solve without
-    tracing its iterations. ``linear_solve(operator, rhs)`` solves the
-    matrix-free tangent system. ``transpose_solve`` solves its real adjoint and
-    defaults to ``linear_solve``.
+    The returned callable solves ``residual(solution, params) == 0`` and
+    differentiates the defining equation without recording the nonlinear
+    solver's iterations on the surrounding tape.
 
-    A successful callback return certifies convergence. Nonlinear and linear
-    solver adapters must raise :class:`ImplicitSolveError` when they fail.
-    ``initial`` selects a root but is explicitly nondifferentiable.
+    Parameters
+    ----------
+    residual
+        Trace-compatible callable with signature ``residual(solution, params)``.
+        Its result must have the same pytree structure and leaf shape, dtype,
+        array provider, and device as ``solution``.
+    solve
+        Nonlinear callback with signature
+        ``solve(residual_at_params, initial) -> solution``. Advect supplies
+        ``residual_at_params(candidate)`` with ``params`` fixed. Returning
+        certifies convergence. The solution must match ``initial`` in pytree
+        structure, leaf shape, provider, and device; its dtype may be promoted.
+    linear_solve
+        Matrix-free callback with signature
+        ``linear_solve(operator, rhs) -> solution_tangent``. For a JVP,
+        ``operator(direction)`` applies the residual's state Jacobian and
+        ``rhs`` is the negative parameter-forcing tangent. The returned value
+        must match the solved solution's pytree and leaf specifications.
+    transpose_solve
+        Matrix-free callback with signature
+        ``transpose_solve(operator, rhs) -> residual_cotangent``. In reverse
+        mode, ``operator`` applies the real adjoint of the residual's state
+        Jacobian and ``rhs`` is the solution cotangent. The result must match
+        the residual value's pytree and leaf specifications. ``None`` reuses
+        ``linear_solve`` with this adjoint operator.
+
+    Returns
+    -------
+    Callable
+        A callable with signature ``root(params, *, initial) -> solution``.
+        ``params`` and ``initial`` may be pytrees. ``initial`` selects a root
+        but is excluded from the implicit derivative, so an enclosing
+        derivative with respect to it is zero. A Python scalar solution is
+        moved to the parameter array provider when one is available.
+
+    Raises
+    ------
+    TypeError
+        If a callback is not callable, or if a nonlinear solution, residual,
+        tangent solve, or transpose solve violates its required pytree or leaf
+        specification.
+    TracingError
+        If abstract staging reaches the returned root. Opaque Python solver
+        callbacks have no durable staged representation.
+    ImplicitSolveError
+        Propagated when a nonlinear or linear callback uses this exception to
+        report failure. A callback return is otherwise treated as a successful
+        solve; Advect does not independently test convergence.
+
+    Notes
+    -----
+    This is a concrete dynamic boundary. `stage` rejects the root before
+    calling ``solve``; stage explicit solver iterations or define a custom
+    primitive with a closed abstract rule when a durable program is required.
+    Higher-order dynamic derivatives require ``residual`` and every solver
+    callback reached by the nested transform to accept nested traced values.
+    Concrete adapters such as the bundled SciPy callbacks intentionally form a
+    first-order boundary.
+
+    A derivative application creates one joint linearization of ``residual``
+    at the solved value and closes it before returning, including on callback
+    failure. The root wrapper retains the four callbacks for its lifetime but
+    creates no user-managed resource. A `Pullback` or `LinearMap` returned by
+    an enclosing transform still follows that transform's documented lifetime.
 
     Examples
     --------

@@ -9,12 +9,12 @@ import pytest
 
 import advect as ad
 from advect.autodiff._ephemeral import trace_call
-from advect.core._array_api_profiles import (
+from advect.core._array_api.profiles import (
     SUPPORTED_ARRAY_API_VERSIONS,
     materialize_array_api_profile,
     minimum_array_api_version,
 )
-from advect.core._array_namespace import _negotiate_array_namespace_for_call
+from advect.core._array_api.providers import _negotiate_array_namespace_for_call
 from advect.core._context import _get_active_array_api_version
 
 

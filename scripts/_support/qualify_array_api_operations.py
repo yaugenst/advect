@@ -15,25 +15,25 @@ from numpy.testing import assert_allclose
 
 import advect as ad
 from advect.autodiff._ephemeral import trace_call
-from advect.core._array_api_evidence import (
+from advect.core._array_api.evidence import (
     Device,
     DType,
     Input,
     operation_evidence_cases,
 )
-from advect.core._array_api_profiles import (
+from advect.core._array_api.profiles import (
     LATEST_ARRAY_API_VERSION,
     SUPPORTED_ARRAY_API_VERSIONS,
 )
-from advect.core._array_api_support import _static_parameters
-from advect.core._array_namespace import _clear_array_namespace_caches
+from advect.core._array_api.providers import _clear_array_namespace_caches
+from advect.core._array_api.support import _static_parameters
 from scripts._support.evidence import evidence_report_header
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator, Sequence
     from typing import Protocol
 
-    from advect.core._array_api_evidence import OperationCase
+    from advect.core._array_api.evidence import OperationCase
 
     class _ArrayLike(Protocol):
         shape: Sequence[int]

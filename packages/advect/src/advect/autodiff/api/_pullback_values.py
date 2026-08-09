@@ -9,7 +9,7 @@ from advect.autodiff.api._scalar_boundary import (
     _is_complex_numeric,
     _unlift_scalar_array,
 )
-from advect.core._array_namespace import _get_array_namespace
+from advect.core._array_api.providers import _get_array_namespace
 from advect.core._pytree import tree_flatten, tree_unflatten
 
 if TYPE_CHECKING:

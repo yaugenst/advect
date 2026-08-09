@@ -12,8 +12,8 @@ from advect.core._array_protocol_helpers import (
 )
 from advect.core._context import _is_recorder_in_active_trace_stack, get_source_location
 from advect.core._protocols import ArrayLike, _snapshot_traced_in_active_trace
+from advect.numpy._array_function.emission import _result_shape_and_dtype
 from advect.numpy._op_bindings import canonicalize_numpy_op
-from advect.numpy._protocol_array_function_common import _result_shape_and_dtype
 from advect.numpy._supported_ufuncs import _SUPPORTED_UFUNCS
 
 if TYPE_CHECKING:

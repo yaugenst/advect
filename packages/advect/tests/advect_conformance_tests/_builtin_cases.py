@@ -1929,7 +1929,13 @@ _OTHER_FRONTEND_INVOCATIONS: tuple[InvocationCase, ...] = (
 def _scipy_cases() -> tuple[InvocationCase, ...]:
     try:
         import advect.scipy  # noqa: F401, PLC0415 - registers the primitives
-        from advect.scipy import _ndimage, ndimage, special  # noqa: PLC0415
+        from advect.scipy import ndimage, special  # noqa: PLC0415
+        from advect.scipy._ndimage.selection import (  # noqa: PLC0415
+            _selection_transpose_primitive,
+        )
+        from advect.scipy._ndimage.stencil import (  # noqa: PLC0415
+            _stencil_input_transpose_primitive,
+        )
     except ImportError:  # pragma: no cover - exercised only without the extra
         return ()
 
@@ -2116,7 +2122,7 @@ def _scipy_cases() -> tuple[InvocationCase, ...]:
         ),
         InvocationCase(
             op="custom.scipy.ndimage._stencil_input_transpose",
-            call=lambda x: _ndimage._stencil_input_transpose_primitive(
+            call=lambda x: _stencil_input_transpose_primitive(
                 x,
                 np.array([0.2, 0.6, 0.2]),
                 axes=(0,),
@@ -2128,7 +2134,7 @@ def _scipy_cases() -> tuple[InvocationCase, ...]:
         ),
         InvocationCase(
             op="custom.scipy.ndimage._selection_transpose",
-            call=lambda x: _ndimage._selection_transpose_primitive(
+            call=lambda x: _selection_transpose_primitive(
                 x,
                 np.array([0.2, -0.7, 1.3]),
                 np.zeros(()),

@@ -414,6 +414,76 @@ def test_jvp_only_primitive_transposes_structurally_and_nests() -> None:
     )
 
 
+def test_check_primitive_accepts_a_transpose_only_residual_boundary() -> None:
+    released: list[object] = []
+    transposed: list[object] = []
+
+    @ad.primitive(
+        name="tests.unified.transpose_only_residual_check",
+        nondiff_argnames=("offset",),
+        residual=True,
+    )
+    def primitive(x: np.ndarray, offset: np.ndarray) -> ad.PrimitiveResult[np.ndarray]:
+        residual = 2 * x.copy()
+        return ad.PrimitiveResult(x * x + offset, residual, release=released.append)
+
+    @primitive.def_transpose
+    def transpose_rule(
+        cotangent: np.ndarray,
+        primals: tuple[np.ndarray, ...],
+        output: np.ndarray,
+        residual: object,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        del primals, output
+        transposed.append(residual)
+        return cotangent * cast("np.ndarray", residual), 999 * cotangent
+
+    x = np.array([0.5, 1.5])
+    offset = np.array([4.0, -2.0])
+    direction = np.array([0.25, -0.75])
+    cotangent = np.array([1.5, -0.5])
+
+    check_primitive(
+        primitive,
+        primals=(x, offset),
+        tangents=(direction, np.full_like(offset, 123.0)),
+        cotangent=cotangent,
+        check=("transpose",),
+    )
+
+    assert len(released) == 4
+    assert len(transposed) == 1
+    assert any(value is transposed[0] for value in released)
+
+
+def test_check_primitive_rejects_a_wrong_transpose_without_a_jvp() -> None:
+    released: list[object] = []
+
+    @ad.primitive(name="tests.unified.wrong_transpose_only_check", residual=True)
+    def primitive(x: np.ndarray) -> ad.PrimitiveResult[np.ndarray]:
+        residual = 2 * x.copy()
+        return ad.PrimitiveResult(x * x, residual, release=released.append)
+
+    @primitive.def_transpose
+    def transpose_rule(
+        cotangent: np.ndarray,
+        primals: tuple[np.ndarray, ...],
+        output: np.ndarray,
+        residual: object,
+    ) -> tuple[np.ndarray]:
+        del primals, output, residual
+        return (np.zeros_like(cotangent),)
+
+    with pytest.raises(AssertionError, match="transpose violates the real-adjoint identity"):
+        check_primitive(
+            primitive,
+            primals=(np.array([0.5, 1.5]),),
+            check=("transpose",),
+        )
+
+    assert len(released) == 4
+
+
 def test_nested_transforms_keep_opaque_implementation_calls_atomic() -> None:
     implementation_calls: list[np.ndarray] = []
 

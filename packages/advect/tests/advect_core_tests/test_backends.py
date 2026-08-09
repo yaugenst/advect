@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 import pytest
 
-from advect.core._array_api import ArrayAPITracer, _accepts_array_api
+from advect.core._array_api.frontend import ArrayAPITracer, _accepts_array_api
 from advect.core._backend_hooks import resolve_backend_hooks
 from advect.core._backends import (
     dispatch_input,

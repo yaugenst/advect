@@ -6,7 +6,7 @@ import functools
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
-from advect.core._array_namespace import _get_array_namespace
+from advect.core._array_api.providers import _get_array_namespace
 from advect.core._context import (
     _get_active_trace_kind,
     _rematerialization_region,
@@ -151,11 +151,49 @@ _checkpoint_operation = _build_checkpoint_primitive()
 
 
 def checkpoint(function: Callable[..., Any]) -> Callable[..., Any]:
-    """Recompute ``function`` during reverse mode instead of saving its interior.
+    """Return a dynamic rematerialization wrapper for ``function``.
 
-    The initial transform is dynamic-only. The function must be pure and
-    deterministic from explicit array/scalar inputs. Opaque residual primitives
-    are barriers.
+    An ordinary call invokes ``function`` directly. During concrete autodiff,
+    Advect records the whole call as one operation on the outer tape and
+    recomputes its body when applying a JVP or transpose instead of retaining
+    the body's interior trace.
+
+    Parameters
+    ----------
+    function
+        Pure callable to rematerialize. Its positional arguments, keyword
+        arguments, and result may be pytrees. Replaying the same explicit
+        inputs must produce the same result; observed mutable state and side
+        effects are therefore outside the contract.
+
+    Returns
+    -------
+    Callable
+        A wrapper with the apparent signature and metadata of ``function``.
+        Calling it as ``wrapped(*args, **kwargs)`` returns the same output
+        pytree as ``function(*args, **kwargs)``.
+
+    Raises
+    ------
+    TypeError
+        If ``function`` is not callable, or if a traced invocation changes its
+        input pytree structure while the rematerialized region is executing.
+    TracingError
+        If abstract staging reaches the wrapper, or if recomputation reaches a
+        residual-bearing primitive whose opaque residual cannot cross the
+        checkpoint boundary.
+
+    Notes
+    -----
+    Checkpointing is a concrete dynamic transform; it does not create a
+    durable staged region, and `stage` rejects a checkpointed call. Nested
+    dynamic derivatives are supported when the recomputed callable and all
+    derivative rules on its path remain traceable at the nested level.
+
+    The returned wrapper retains ``function`` and its closure for the
+    wrapper's lifetime. Each JVP or transpose application owns and releases
+    its temporary inner trace before returning; checkpointing exposes no
+    additional resource handle to close.
 
     Examples
     --------

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from types import ModuleType
 from typing import Any, Protocol, cast, runtime_checkable
 
-from advect.core._array_namespace import (
+from advect.core._array_api.providers import (
     _get_backend_key_from_namespace,
     _negotiate_array_namespace_for_call,
 )

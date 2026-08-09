@@ -1,3 +1,5 @@
+"""Tests for native graph building, validation, and durable storage."""
+
 from __future__ import annotations
 
 import json

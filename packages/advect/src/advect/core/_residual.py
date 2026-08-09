@@ -16,7 +16,22 @@ class PrimitiveResult[R]:
     ``output`` is the only value returned to the caller. Advect retains
     ``residual`` for the matching derivative invocation and calls ``release``
     exactly once when that invocation state is discarded. The output must
-    remain valid after the residual is released.
+    remain valid after the residual is released. A JVP never receives the
+    residual; an explicit transpose on a primitive declared with
+    ``residual=True`` receives it after ``output``. A plain call or plain
+    staged replay releases before returning. A one-shot reverse trace releases
+    after consumption; a reusable linear map retains the residual until the
+    map is closed.
+
+    Parameters
+    ----------
+    output
+        Public primitive result returned to the caller.
+    residual
+        Opaque invocation-local data retained for reverse mode.
+    release
+        Optional cleanup callback invoked exactly once with ``residual`` when
+        Advect releases the invocation state.
 
     Examples
     --------

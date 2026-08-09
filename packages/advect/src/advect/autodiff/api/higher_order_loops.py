@@ -75,6 +75,7 @@ def _hessian_reverse_loop(
     return _reshape_hessian_blocks(
         hessian_blocks_flat=hess_blocks_flat,
         primal_shapes=context.primal_shapes,
+        single_argnum=context.single_argnum,
     )
 
 

@@ -1,13 +1,13 @@
 # Contributing to Advect
 
-Advect is deliberately small: changes should preserve one core tracing model,
-one canonical operation registry, and one source of truth for each public
-support claim. A focused issue or draft pull request is the best place to align
-on a user-visible change before implementing a broad extension.
+Advect is deliberately small: preserve one semantic core, one canonical
+operation registry, and one source of truth for every public support claim. A
+focused issue or draft pull request is the best place to align on a broad or
+user-visible extension before implementing it.
 
-## Set up the repository
+## Start here
 
-Advect requires Python 3.12 or newer and Rust 1.94 or newer.
+Advect requires Python 3.12 or newer and Rust 1.94 or newer:
 
 ```bash
 uv sync --all-groups
@@ -15,73 +15,32 @@ uv lock --check
 rustup toolchain install stable --component clippy rustfmt
 ```
 
-The repository has no wrapper around its validation commands. The complete
-local gates are:
+The [developer guide](docs/development/index.md) is the contributor authority:
 
-```bash
-uv run ruff format --check .
-uv run ruff check .
-uv run pyrefly check --config pyproject.toml --preset strict packages/advect/src
-uv run pytest
-uv run pytest packages/advect/tests/advect_conformance_tests --hypothesis-profile=thorough
-cargo fmt --all --check
-cargo clippy --workspace --all-targets --all-features -- -D warnings
-cargo test --workspace --all-targets
-cargo deny check -W unmaintained
-uv run mkdocs build --strict
-```
+- [codebase map](docs/development/codebase.md) — responsibility and dependency boundaries;
+- [adding operations](docs/development/adding-operations.md) — custom and built-in
+  primitives, NumPy and SciPy forms, providers, the Python staged-program
+  envelope, the Rust graph artifact, and the native adapter and dynamic tape;
+- [testing](docs/development/testing.md) — suite ownership and complete local gates;
+- [documentation](docs/development/documentation.md) — public pages, docstrings,
+  generated compatibility reports, and runnable examples.
 
-Run the checks that own the changed contract while iterating, then run every
-required gate before requesting review. A GPU or browser qualification that is
-not available locally should be named as an unverified lane rather than
-inferred from CPU or native results.
+Read the relevant design decision only when a change touches its contract. The
+[`design/` index](design/README.md) routes requirements, decisions,
+implementation status, and performance evidence.
 
-## Put evidence at its owning boundary
-
-- Core tracing, pytrees, staging, serialization, and registry behavior belongs
-  in `advect_core_tests`.
-- Canonical operation laws and raw derivative rules belong in
-  `advect_conformance_tests`.
-- NumPy signatures, protocols, aliases, mutation, and executable support claims
-  belong in `advect_numpy_tests`.
-- Array API provider behavior and CuPy qualification belong in
-  `advect_array_api_compat_tests`.
-- Public SciPy, xarray, and host-autodiff behavior belongs in its corresponding
-  optional suite.
-- Python-to-Rust graph, artifact, ownership, and execution contracts belong in
-  `advect_native_tests`.
-
-Do not repeat one happy path across several suites. The full ownership table
-and the primitive-authoring workflow are in
-[`AGENTS.md`](https://github.com/yaugenst/advect/blob/main/AGENTS.md).
-
-## Change a public operation
-
-A registered primitive needs its binding or tracing handler, abstract
-semantics, and JVP rule. Add an explicit VJP only when structural transposition
-cannot express the correct real adjoint or measurement justifies a direct
-implementation. Every registered operation must also have a conformance case;
-the registry-coverage test enforces that accounting.
-
-A new NumPy spelling or materially different signature needs one executable
-support case for each claimed lifetime. A new SciPy entry point needs upstream
-value, dtype, and signature parity; a derivative contract; and staged
-serialize/load coverage whenever the support catalog claims those modes.
-Regenerate the compatibility pages after any public-surface change:
-
-```bash
-uv run python -m scripts.report_extension_support \
-  --format markdown \
-  --output docs/compatibility
-```
-
-## Submit the change
+## Submit a change
 
 Work on a feature branch and keep the pull request to one coherent problem.
-Explain the user-visible contract, the evidence run, and any hardware or remote
-CI lane that remains outstanding. Do not add compatibility aliases, duplicated
-registries, or speculative fallbacks to make a narrow change appear broader.
+Run the focused checks while iterating, then every applicable gate in the
+[testing guide](docs/development/testing.md). In the pull request, state the
+user-visible contract, what was verified, and any unavailable hardware or
+remote-CI lane.
 
-Contributions accepted into this repository are distributed under its MIT
-license. Report suspected vulnerabilities through the repository's private
-security-advisory form rather than a public issue.
+Do not add compatibility aliases, duplicated registries, or speculative
+fallbacks to make a narrow change appear broader. Contributions accepted into
+this repository are distributed under the MIT license.
+
+Report suspected vulnerabilities through the repository's
+[private security-advisory form](https://github.com/yaugenst/advect/security/advisories/new),
+not a public issue.

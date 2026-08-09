@@ -18,7 +18,7 @@ from advect.autodiff.rules.array_family.providers import (
     register_array_family_backend_provider,
     resolve_array_family_backend_provider,
 )
-from advect.core._array_namespace import ResolvedArrayNamespace
+from advect.core._array_api.providers import ResolvedArrayNamespace
 from advect.core._errors import HigherOrderNotSupportedError
 from advect.core._eval_dispatch import bind_node_evaluator, evaluate_node_value
 from advect_grad_tests._backend_contract_helpers import (

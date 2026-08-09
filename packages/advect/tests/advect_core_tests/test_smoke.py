@@ -1,3 +1,5 @@
+"""Smoke tests for package imports and the public export inventory."""
+
 from __future__ import annotations
 
 import subprocess

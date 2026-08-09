@@ -6,7 +6,8 @@ use pyo3::basic::CompareOp;
 use pyo3::exceptions::{PyAttributeError, PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 
-use super::{DynamicTape, OperandLayout, snapshot_layout};
+use super::layout::{self, OperandLayout};
+use super::lifecycle::DynamicTape;
 use advect_runtime::NodeId;
 
 const WHERE_ARITY: usize = 3;
@@ -171,7 +172,12 @@ fn operand_linearity(
     parents: &[NodeId],
     states: &[Linearity],
 ) -> PyResult<Vec<Linearity>> {
-    let (parent_positions, literal_range) = snapshot_layout(tape, current_index, parents.len())?;
+    let (parent_positions, literal_range) = layout::snapshot_layout(
+        &tape.operand_layouts,
+        &tape.operand_positions,
+        current_index,
+        parents.len(),
+    )?;
     let operand_count = match *tape.operand_layouts.get(current_index).ok_or_else(|| {
         PyRuntimeError::new_err("dynamic tape operand layout arena is inconsistent")
     })? {

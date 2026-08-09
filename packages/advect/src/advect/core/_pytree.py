@@ -147,7 +147,7 @@ class Static[T]:
 def static[T](value: T) -> Static[T]:
     """Wrap ``value`` as a static pytree node.
 
-    Static nodes have no leaves: they are preserved by :func:`tree_map` and
+    Static nodes have no leaves: they are preserved by ``tree_map`` and
     passed through tracing/autodiff as untraceable metadata.
 
     Examples
@@ -326,7 +326,7 @@ def tree_flatten_with_paths(tree: Any) -> tuple[list[TreePath], list[Any], TreeD
     """Flatten a pytree into (paths, leaves, treedef).
 
     Paths are tuples of typed path entries describing the location of each leaf.
-    Dict nodes use :class:`DictKey`, and sequence-like nodes use :class:`SequenceKey`.
+    Dict nodes use ``DictKey``, and sequence-like nodes use ``SequenceKey``.
 
     Examples
     --------

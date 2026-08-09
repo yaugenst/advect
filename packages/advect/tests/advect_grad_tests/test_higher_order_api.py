@@ -66,6 +66,46 @@ def test_hessian_diag_matches_expected_vector() -> None:
     assert_allclose(diag, expected, atol=2e-4, rtol=2e-4)
 
 
+def test_higher_order_singleton_tuple_argnums_preserve_selection_structure() -> None:
+    x = np.array([[0.5], [-1.2]], dtype=np.float64)
+    vector = np.array([[1.0], [-0.25]], dtype=np.float64)
+
+    _value, bare_product = ad.hvp(_cubic_loss, argnums=0)(x, vectors=vector)
+    _value, tuple_product = ad.hvp(_cubic_loss, argnums=(0,))(x, vectors=(vector,))
+    bare_hessian = ad.hessian(_cubic_loss, argnums=0)(x)
+    tuple_hessian = ad.hessian(_cubic_loss, argnums=(0,))(x)
+    bare_diagonal = ad.hessian_diag(_cubic_loss, argnums=0)(x)
+    tuple_diagonal = ad.hessian_diag(_cubic_loss, argnums=(0,))(x)
+
+    assert isinstance(tuple_product, tuple)
+    assert len(tuple_product) == 1
+    assert_allclose(tuple_product[0], bare_product, atol=2e-4, rtol=2e-4)
+
+    assert isinstance(tuple_hessian, tuple)
+    assert len(tuple_hessian) == 1
+    assert isinstance(tuple_hessian[0], tuple)
+    assert len(tuple_hessian[0]) == 1
+    assert tuple_hessian[0][0].shape == x.shape + x.shape
+    assert_allclose(tuple_hessian[0][0], bare_hessian, atol=2e-4, rtol=2e-4)
+
+    assert isinstance(tuple_diagonal, tuple)
+    assert len(tuple_diagonal) == 1
+    assert tuple_diagonal[0].shape == x.shape
+    assert_allclose(tuple_diagonal[0], bare_diagonal, atol=2e-4, rtol=2e-4)
+
+
+def test_higher_order_rejects_empty_argnums_consistently() -> None:
+    x = np.array([0.5, -1.2], dtype=np.float64)
+    expected = r"Higher-order APIs require at least one selected argument\."
+
+    with pytest.raises(ValueError, match=expected):
+        ad.hvp(_cubic_loss, argnums=())(x, vectors=())
+    with pytest.raises(ValueError, match=expected):
+        ad.hessian(_cubic_loss, argnums=())(x)
+    with pytest.raises(ValueError, match=expected):
+        ad.hessian_diag(_cubic_loss, argnums=())(x)
+
+
 def test_higher_order_exports_available_on_top_level() -> None:
     assert hasattr(ad, "hvp")
     assert hasattr(ad, "hessian")

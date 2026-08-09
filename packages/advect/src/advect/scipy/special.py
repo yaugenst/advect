@@ -1,5 +1,5 @@
 # ruff: noqa: ANN401  # Primitive rules are intentionally array-provider generic.
-"""Traceable high-value counterparts to :mod:`scipy.special`."""
+"""Traceable high-value counterparts to ``scipy.special``."""
 
 from __future__ import annotations
 
@@ -85,7 +85,7 @@ def digamma(x: object, /, out: object = None, **kwargs: object) -> object:
 
 
 def polygamma(n: object, x: object) -> object:
-    """Compute the ``n``-th derivative of :func:`digamma` with SciPy broadcasting."""
+    """Compute the ``n``-th derivative of ``digamma`` with SciPy broadcasting."""
     if not is_tracing():
         _require_numpy_values("polygamma", n, x)
         return _scipy_special.polygamma(n, x)
