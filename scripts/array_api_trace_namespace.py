@@ -19,8 +19,8 @@ import array_api_strict as _provider
 
 import advect as _ad
 from advect.autodiff._ephemeral import trace_call as _trace_call
-from advect.core._array_api import _ARRAY_API_COMPOSITES, _FUNCTION_SPECS
-from advect.core._array_api_profiles import (
+from advect.core._array_api.frontend import _ARRAY_API_COMPOSITES, _FUNCTION_SPECS
+from advect.core._array_api.profiles import (
     LATEST_ARRAY_API_VERSION as _LATEST_ARRAY_API_VERSION,
     materialize_array_api_profile as _materialize_array_api_profile,
 )

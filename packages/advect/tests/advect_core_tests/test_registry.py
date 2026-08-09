@@ -6,7 +6,7 @@ from typing import Any, cast
 
 import pytest
 
-from advect.core._array_api import _FUNCTION_SPECS
+from advect.core._array_api.frontend import _FUNCTION_SPECS
 from advect.core._registry import OpRegistry, get_registry
 from advect.core._registry_types import OpDef
 

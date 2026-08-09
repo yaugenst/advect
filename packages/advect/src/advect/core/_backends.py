@@ -175,7 +175,7 @@ def _ensure_core_input_handlers() -> None:
     if _state.core_handlers_loaded:
         return
 
-    from advect.core import _array_api  # noqa: PLC0415
+    from advect.core._array_api import frontend as _array_api  # noqa: PLC0415
 
     register_input_handler(_array_api._accepts_array_api, _array_api._handle_array_api_input)
     register_hook("advect.array_api.wrap_traced", _array_api._wrap_traced)

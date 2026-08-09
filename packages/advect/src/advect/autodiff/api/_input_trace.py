@@ -10,8 +10,8 @@ from advect.autodiff.api._scalar_boundary import (
     _lift_scalar_to_array,
 )
 from advect.autodiff.api.trace import _wrap_input
-from advect.core._array_api_profiles import LATEST_ARRAY_API_VERSION
-from advect.core._array_namespace import _get_array_namespace
+from advect.core._array_api.profiles import LATEST_ARRAY_API_VERSION
+from advect.core._array_api.providers import _get_array_namespace
 from advect.core._context import _get_active_array_api_version
 from advect.core._pytree import TreeDef, _get_node_impl
 

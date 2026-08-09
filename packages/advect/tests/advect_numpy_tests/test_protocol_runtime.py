@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-import advect.numpy._protocol_array_function_runtime as array_function_runtime_module
+import advect.numpy._array_function.runtime as array_function_runtime_module
 from advect.core._errors import TracingError
 from advect.numpy._protocol_runtime import NUMPY_PROTOCOL_RUNTIME
 

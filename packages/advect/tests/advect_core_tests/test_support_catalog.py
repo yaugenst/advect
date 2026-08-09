@@ -9,7 +9,7 @@ import numpy as np
 from scripts._support.report_extension_support import render_pages
 
 import advect as ad
-from advect.core._array_api import (
+from advect.core._array_api.frontend import (
     _ARRAY_API_COMPOSITES,
     _ARRAY_API_META_FUNCTIONS,
     _FUNCTION_SPECS,

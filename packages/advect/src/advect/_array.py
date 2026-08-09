@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from typing import Any, cast
 
-from advect.core._array_namespace import _get_array_namespace
+from advect.core._array_api.providers import _get_array_namespace
 from advect.core._errors import TracingError
 from advect.core._pytree import tree_flatten, tree_unflatten
 

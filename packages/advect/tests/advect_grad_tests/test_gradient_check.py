@@ -1,3 +1,5 @@
+"""Tests for author-facing composed-gradient validation."""
+
 from __future__ import annotations
 
 from typing import Any

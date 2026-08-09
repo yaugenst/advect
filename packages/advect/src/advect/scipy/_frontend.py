@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, cast
 
 import numpy as np
 
-from advect.core._array_namespace import _get_array_namespace
+from advect.core._array_api.providers import _get_array_namespace
 
 if TYPE_CHECKING:
     from collections.abc import Callable

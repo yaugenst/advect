@@ -6,7 +6,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
-from advect.core._array_namespace import (
+from advect.core._array_api.providers import (
     _get_array_namespace,
     _get_backend_key_from_namespace,
 )

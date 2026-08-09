@@ -15,7 +15,7 @@ from advect.core._abstract_helpers import (
     shape_tuple,
 )
 from advect.core._abstract_model import ArraySpec
-from advect.core._array_api_results import restore_array_api_result
+from advect.core._array_api.results import restore_array_api_result
 from advect.core._errors import MutationError, TracingError
 from advect.core._registry import get_registry
 from advect.numpy._gradient_lowering import lower_gradient_axis, operand_ndim

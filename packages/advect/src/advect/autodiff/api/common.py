@@ -143,6 +143,7 @@ def _reshape_hessian_blocks(
     *,
     hessian_blocks_flat: list[list[Any]],
     primal_shapes: list[tuple[int, ...]],
+    single_argnum: bool,
 ) -> Any:
     hess_blocks = tuple(
         tuple(
@@ -151,7 +152,7 @@ def _reshape_hessian_blocks(
         )
         for row in range(len(primal_shapes))
     )
-    if len(primal_shapes) == 1:
+    if single_argnum:
         return hess_blocks[0][0]
     return hess_blocks
 

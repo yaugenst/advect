@@ -110,7 +110,13 @@ def _contains_tracer(value: Any) -> bool:
 
 
 class Primitive(Generic[P, R]):
-    """Authoring and call handle for one canonical ``custom.*`` operation."""
+    """Callable authoring handle returned by ``advect.primitive``.
+
+    The handle preserves the implementation's signature and exposes
+    :meth:`def_abstract`, :meth:`def_jvp`, and :meth:`def_transpose` for
+    attaching rules to the same canonical ``custom.*`` operation. It is not a
+    separately constructed or registered public type.
+    """
 
     def __init__(
         self,
@@ -398,7 +404,17 @@ class Primitive(Generic[P, R]):
         )
 
     def def_abstract(self, fn: Callable[..., Any]) -> Callable[..., Any]:
-        """Register abstract output evaluation with the implementation signature."""
+        """Attach the primitive's abstract staging rule.
+
+        The rule has the implementation's fixed named parameters. Advect
+        preserves each dynamic argument's pytree while replacing its
+        array/scalar leaves with ``advect.AbstractValue``; declared static
+        arguments arrive unchanged. Return the concrete output pytree with
+        ``advect.ArraySpec`` or ``AbstractValue`` leaves.
+
+        The function is returned unchanged so this method can be used as a
+        decorator.
+        """
         if self._abstract_rule is not None:
             msg = f"Primitive '{self.name}' already has abstract evaluation"
             raise ValueError(msg)
@@ -411,7 +427,19 @@ class Primitive(Generic[P, R]):
         return meta, {name: node_attrs[name] for name in self.static_argnames}
 
     def def_jvp(self, fn: Callable[..., Any]) -> Callable[..., Any]:
-        """Register ``fn(output, primals, tangents, **static_attrs)``."""
+        """Attach ``fn(output, primals, tangents, **static_attrs)`` as the JVP.
+
+        ``output`` has the implementation's public output pytree. ``primals``
+        and ``tangents`` are flat tuples with one entry per dynamic
+        array/scalar leaf, in implementation-parameter and pytree order.
+        Tangents may be ``None`` for inactive leaves and are always ``None``
+        for leaves of a declared nondifferentiable argument. Static arguments
+        are passed by name. Return a tangent with the output pytree.
+
+        Write the rule as traceable, real-linear code so Advect can transpose
+        it structurally and differentiate it again. The function is returned
+        unchanged for decorator use.
+        """
         if self._jvp_rule is not None:
             msg = f"Primitive '{self.name}' already has a JVP rule"
             raise ValueError(msg)
@@ -451,14 +479,24 @@ class Primitive(Generic[P, R]):
         return fn
 
     def def_transpose(self, fn: Callable[..., Any]) -> Callable[..., Any]:
-        """Register an ordinary or exact-residual transpose rule.
+        """Attach an ordinary or exact-residual transpose rule.
 
         Ordinary primitives receive
         ``(cotangent, primals, output, **static_attrs)``.
         A primitive declared with ``residual=True`` receives
         ``(cotangent, primals, output, residual, **static_attrs)``.
+        ``cotangent`` and ``output`` have the public output pytree; ``primals``
+        is the same flattened dynamic-leaf tuple used by the JVP. Return a flat
+        tuple with one contribution per dynamic leaf in that order. Advect
+        suppresses contributions for declared nondifferentiable arguments.
+
         A rule may accept the optional keyword-only
-        ``active_input_indices=None`` to avoid computing unused contributions.
+        ``active_input_indices=None`` and return ``None`` for inactive
+        contributions to avoid unnecessary work. Add an explicit transpose
+        only when structural transposition cannot express the correct real
+        adjoint, when an exact residual is required, or when measurement
+        justifies a direct rule. The function is returned unchanged for
+        decorator use.
         """
         if self._transpose_rule is not None:
             msg = f"Primitive '{self.name}' already has a transpose rule"
@@ -620,8 +658,42 @@ def primitive[**CallP, ResultT](
 ) -> Primitive[CallP, ResultT] | Callable[[Callable[CallP, ResultT]], Primitive[CallP, ResultT]]:
     """Define one atomic operation from its concrete implementation.
 
-    Derivative rules are ordinary traceable functions attached to the returned
-    primitive handle.
+    The implementation must have fixed named parameters: positional-or-keyword
+    and keyword-only parameters are supported, while positional-only
+    parameters, ``*args``, and ``**kwargs`` are rejected. Calls still follow
+    the implementation's normal Python signature.
+
+    ``static_argnames`` removes complete named arguments from tracing and
+    stores them as operation attributes. ``nondiff_argnames`` keeps complete
+    arguments as dynamic operands but supplies ``None`` tangents and suppresses
+    their transpose contributions. The two sets must be disjoint. Derivative
+    rules receive all remaining dynamic array/scalar leaves flattened in
+    implementation-parameter and pytree order.
+
+    With ``residual=True``, the implementation must return
+    ``advect.PrimitiveResult``; callers still receive only its ``output``.
+    Rules are attached to the returned handle.
+
+    Parameters
+    ----------
+    function
+        Concrete implementation, when the decorator is applied directly.
+    name
+        Operation identity without the internal ``custom.`` prefix. By
+        default Advect uses the implementation's module and qualified name.
+        Use a stable explicit name for serialized artifacts.
+    static_argnames
+        Complete implementation arguments treated as concrete configuration.
+    nondiff_argnames
+        Complete dynamic arguments excluded from differentiation.
+    residual
+        Whether the implementation returns an invocation-local
+        ``PrimitiveResult`` for an exact transpose.
+
+    Returns
+    -------
+    Primitive or callable
+        A callable authoring handle, or a decorator that creates one.
 
     Examples
     --------

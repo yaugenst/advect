@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 from hypothesis import given, strategies as st
 
-from advect.core import _array_namespace as namespace_helpers
+from advect.core._array_api import providers as namespace_helpers
 from advect.core._pytree import register_pytree_node
 
 

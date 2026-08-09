@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import tomllib
 from pathlib import Path
 
 
@@ -59,18 +60,34 @@ class _BackendImportVisitor(ast.NodeVisitor):
 
 def test_core_does_not_runtime_import_provider_frontends() -> None:
     core_dir = Path(__file__).resolve().parents[2] / "src" / "advect" / "core"
-    protocol_files = sorted(core_dir.glob("_array_protocol_*.py"))
-    assert [path.name for path in protocol_files] == ["_array_protocol_helpers.py"]
+    protocol_files = sorted(core_dir.rglob("_array_protocol_*.py"))
+    assert [path.relative_to(core_dir).as_posix() for path in protocol_files] == [
+        "_array_protocol_helpers.py"
+    ]
 
     offenders: list[str] = []
-    for path in sorted(core_dir.glob("*.py")):
+    for path in sorted(core_dir.rglob("*.py")):
         tree = ast.parse(path.read_text())
         visitor = _BackendImportVisitor()
         visitor.visit(tree)
         for lineno, module in visitor.offenders:
-            offenders.append(f"{path.name}:{lineno}: {module}")
+            relative_path = path.relative_to(core_dir).as_posix()
+            offenders.append(f"{relative_path}:{lineno}: {module}")
 
     assert offenders == []
+
+
+def test_rust_runtime_manifest_has_no_python_adapter_dependency() -> None:
+    repository = Path(__file__).resolve().parents[4]
+    manifest_path = repository / "packages" / "advect-runtime" / "Cargo.toml"
+    manifest = tomllib.loads(manifest_path.read_text(encoding="utf-8"))
+    dependency_sections = (
+        manifest.get("dependencies", {}),
+        manifest.get("build-dependencies", {}),
+        manifest.get("dev-dependencies", {}),
+    )
+
+    assert all("pyo3" not in dependencies for dependencies in dependency_sections)
 
 
 def test_core_stage_delegates_frontend_lifecycle_policy() -> None:
@@ -157,7 +174,7 @@ def test_core_abstract_does_not_own_numpy_call_binding() -> None:
 
 def test_array_api_tracer_delegates_nested_foreign_protocols() -> None:
     core_dir = Path(__file__).resolve().parents[2] / "src" / "advect" / "core"
-    source = (core_dir / "_array_api.py").read_text()
+    source = (core_dir / "_array_api" / "frontend.py").read_text()
     tree = ast.parse(source)
     methods = {
         node.name
@@ -173,7 +190,35 @@ def test_array_api_tracer_delegates_nested_foreign_protocols() -> None:
 
 def test_provider_revision_discovery_has_no_frontend_profile_hook() -> None:
     core_dir = Path(__file__).resolve().parents[2] / "src" / "advect" / "core"
-    source = (core_dir / "_array_namespace.py").read_text()
+    source = (core_dir / "_array_api" / "providers.py").read_text()
 
     assert ".array_api_version" not in source
     assert "__array_api_version__" in source
+
+
+def test_array_api_runtime_does_not_import_qualification_modules() -> None:
+    core_dir = Path(__file__).resolve().parents[2] / "src" / "advect" / "core"
+    array_api_dir = core_dir / "_array_api"
+    banned_absolute_modules = {
+        "advect.core._array_api.evidence",
+        "advect.core._array_api.support",
+    }
+
+    for filename in (
+        "frontend.py",
+        "profiles.py",
+        "providers.py",
+        "results.py",
+        "signatures.py",
+    ):
+        tree = ast.parse((array_api_dir / filename).read_text())
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                assert banned_absolute_modules.isdisjoint(alias.name for alias in node.names)
+            elif isinstance(node, ast.ImportFrom):
+                if node.level == 0:
+                    assert node.module not in banned_absolute_modules
+                elif node.module is None:
+                    assert {"evidence", "support"}.isdisjoint(alias.name for alias in node.names)
+                else:
+                    assert node.module not in {"evidence", "support"}

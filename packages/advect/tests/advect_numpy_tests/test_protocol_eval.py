@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 
 import advect.numpy._protocol_eval as eval_module
-from advect.core import _array_namespace
+from advect.core._array_api import providers as array_api_providers
 from advect.core._eval_dispatch import _can_donate_array, bind_native_node_evaluator
 from advect.numpy._protocol_eval import ArrayProtocolEvalRuntime
 
@@ -24,7 +24,7 @@ def test_donation_uses_provider_capability_when_writability_flag_is_absent(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        _array_namespace,
+        array_api_providers,
         "_ARRAY_NAMESPACE_DONATION_CHECKER",
         lambda value: isinstance(value, _OwnedArrayWithoutWritableFlag),
     )
@@ -40,7 +40,7 @@ def test_donation_rejects_views_before_consulting_provider_capability(
         raise AssertionError(message)
 
     monkeypatch.setattr(
-        _array_namespace,
+        array_api_providers,
         "_ARRAY_NAMESPACE_DONATION_CHECKER",
         unexpected_call,
     )

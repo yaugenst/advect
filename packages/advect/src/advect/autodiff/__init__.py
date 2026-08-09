@@ -1,4 +1,7 @@
-"""Concrete define-by-run automatic differentiation for Advect."""
+"""Lazy autodiff API for dynamic and staged transforms.
+
+Staged reverse transforms include `grad`, `value_and_grad`, and `vjp_program`.
+"""
 
 from __future__ import annotations
 

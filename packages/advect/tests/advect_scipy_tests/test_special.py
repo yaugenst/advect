@@ -15,7 +15,7 @@ from numpy.testing import assert_allclose
 from scipy import special as scipy_special
 
 import advect as ad
-from advect.core import _array_namespace
+from advect.core._array_api import providers as array_api_providers
 from advect.scipy import special
 
 if TYPE_CHECKING:
@@ -1231,7 +1231,7 @@ def test_provider_errors_use_advects_resolver_for_arrays_without_object_protocol
         del api_version
         return ResolverOnlyNamespace() if isinstance(value, ResolverOnlyArray) else None
 
-    monkeypatch.setattr(_array_namespace, "_ARRAY_NAMESPACE_FALLBACK", resolve)
+    monkeypatch.setattr(array_api_providers, "_ARRAY_NAMESPACE_FALLBACK", resolve)
 
     with pytest.raises(TypeError, match=r"supports NumPy arrays only.*resolver_only"):
         function(ResolverOnlyArray())

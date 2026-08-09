@@ -9,13 +9,13 @@ from typing import TYPE_CHECKING
 import pytest
 from scripts._support import report_array_api_support, run_array_api_conformance
 
-from advect.core._array_api import _ARRAY_API_META_FUNCTIONS
-from advect.core._array_api_profiles import (
+from advect.core._array_api.frontend import _ARRAY_API_META_FUNCTIONS
+from advect.core._array_api.profiles import (
     LATEST_ARRAY_API_VERSION,
     materialize_array_api_profile,
 )
-from advect.core._array_api_signatures import OFFICIAL_SIGNATURES, official_parameter_names
-from advect.core._array_api_support import build_support_profile
+from advect.core._array_api.signatures import OFFICIAL_SIGNATURES, official_parameter_names
+from advect.core._array_api.support import build_support_profile
 
 if TYPE_CHECKING:
     from types import ModuleType

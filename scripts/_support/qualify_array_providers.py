@@ -17,7 +17,7 @@ from numpy.testing import assert_allclose
 
 import advect as ad
 import advect.numpy  # Register the first-class NumPy frontend.
-from advect.core._array_api_profiles import (
+from advect.core._array_api.profiles import (
     LATEST_ARRAY_API_VERSION,
     SUPPORTED_ARRAY_API_VERSIONS,
 )

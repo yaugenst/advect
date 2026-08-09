@@ -1,6 +1,9 @@
+//! Dynamic tape layout and lifecycle unit tests.
+
 use pyo3::Python;
 
-use super::{DynamicTape, LayoutPlan, validate_operand_layout};
+use super::layout::{LayoutPlan, validate_operand_layout};
+use super::lifecycle::DynamicTape;
 
 #[test]
 fn tape_without_outputs_can_freeze() {

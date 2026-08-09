@@ -36,8 +36,8 @@ from advect.autodiff.rules.array_family._backend_runtime import (
 from advect.autodiff.rules.array_family.providers import (
     try_resolve_array_family_backend_provider,
 )
-from advect.core._array_api_profiles import LATEST_ARRAY_API_VERSION
-from advect.core._array_namespace import (
+from advect.core._array_api.profiles import LATEST_ARRAY_API_VERSION
+from advect.core._array_api.providers import (
     _get_array_namespace,
     _negotiate_array_namespace_for_call,
 )

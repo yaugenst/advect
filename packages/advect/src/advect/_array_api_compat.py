@@ -6,8 +6,8 @@ import warnings
 
 import array_api_compat
 
-from advect.core._array_api_profiles import SUPPORTED_ARRAY_API_VERSIONS
-from advect.core._array_namespace import _configure_array_namespace_fallback
+from advect.core._array_api.profiles import SUPPORTED_ARRAY_API_VERSIONS
+from advect.core._array_api.providers import _configure_array_namespace_fallback
 
 
 def _resolve_namespace(value: object, *, api_version: str | None) -> object | None:

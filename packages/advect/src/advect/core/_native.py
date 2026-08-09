@@ -1,4 +1,4 @@
-"""Required bindings for Advect's native staged graph store."""
+"""Required bindings for Advect's native dynamic tape and staged graph."""
 
 from __future__ import annotations
 

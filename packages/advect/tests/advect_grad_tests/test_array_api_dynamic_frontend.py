@@ -13,7 +13,7 @@ from advect.autodiff._ephemeral import trace_call
 from advect.autodiff.rules.array_family.providers import (
     resolve_array_family_backend_provider,
 )
-from advect.core._array_api import bind_array_api_call
+from advect.core._array_api.frontend import bind_array_api_call
 from advect.core._errors import TracingError
 
 xp = pytest.importorskip("array_api_strict")

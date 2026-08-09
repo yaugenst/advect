@@ -11,8 +11,8 @@ import numpy as np
 import pytest
 
 import advect._array_api_compat as provider
-from advect.core._array_api import ArrayAPINamespace
-from advect.core._array_namespace import _get_array_namespace
+from advect.core._array_api.frontend import ArrayAPINamespace
+from advect.core._array_api.providers import _get_array_namespace
 from advect.core._eval_dispatch import _can_donate_array
 from advect_core_tests._backend_state import isolated_backend_state
 

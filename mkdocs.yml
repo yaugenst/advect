@@ -42,11 +42,24 @@ plugins:
           - tutorials/primitives.md
           - tutorials/debugging.md
         API reference:
-          - api/transforms.md
-          - api/staging.md
-          - api/primitives.md
-          - api/arrays.md
-          - api/errors.md
+          - api/transforms.md: Dynamic differentiation transforms
+          - api/staging.md: Immutable programs and serialization
+          - api/primitives.md: Public custom-operation authoring
+          - api/arrays.md: Provider-preserving array boundaries
+          - api/pytree.md: Structured inputs and custom nodes
+          - api/testing.md: Numerical checks for extension authors
+          - api/support.md: Machine-readable support and lifetime claims
+          - api/errors.md: Public diagnostics and exceptions
+          - api/numpy.md: NumPy frontend and explicit constructors
+          - api/scipy/index.md: SciPy frontend boundaries and module routing
+          - api/scipy/special.md: Differentiable scipy.special counterparts
+          - api/scipy/ndimage.md: Differentiable scipy.ndimage filters
+          - api/scipy/solvers.md: Root and GMRES callbacks for implicit differentiation
+          - api/xarray.md: Optional labeled-container pytrees
+          - api/interop/index.md: Shared host-autodiff bridge contract
+          - api/interop/torch.md: PyTorch reverse-mode bridge
+          - api/interop/jax.md: JAX eager and callback bridge
+          - api/interop/autograd.md: HIPS Autograd reverse-mode bridge
         Compatibility:
           - compatibility/index.md
           - compatibility/numpy.md
@@ -56,6 +69,12 @@ plugins:
           - compatibility/xarray.md
         Optional:
           - playground.md: In-browser expression and derivative-graph explorer
+        Development:
+          - development/index.md: Contributor entry point and task routing
+          - development/codebase.md: Module ownership and dependency direction
+          - development/adding-operations.md: Built-in operations and frontend forms
+          - development/testing.md: Test-suite ownership and direct gates
+          - development/documentation.md: Public docs, docstrings, and repository guidance
   - mkdocstrings:
       default_handler: python
       handlers:
@@ -68,6 +87,10 @@ plugins:
             # static analysis cannot see; the extension mirrors that mapping.
             extensions:
               - scripts/griffe_lazy_exports.py
+            # List sections remain valid Markdown when annotations contain
+            # unions such as ``str | None``. Table sections let the union pipe
+            # become an extra cell in the generated LLM Markdown.
+            docstring_section_style: list
             show_source: false
             show_root_heading: true
             show_root_full_path: false
@@ -135,10 +158,32 @@ nav:
       - SciPy: compatibility/scipy.md
       - xarray: compatibility/xarray.md
   - API Reference:
-      - api/index.md
-      - Host Autodiff Interop: api/interop.md
-      - Transforms: api/transforms.md
-      - Staging: api/staging.md
-      - Primitives: api/primitives.md
-      - Arrays and Structure: api/arrays.md
-      - Errors: api/errors.md
+      - Overview: api/index.md
+      - Core API:
+          - Transforms: api/transforms.md
+          - Staging: api/staging.md
+          - Primitives: api/primitives.md
+          - Arrays: api/arrays.md
+          - Pytrees: api/pytree.md
+          - Testing Utilities: api/testing.md
+          - Support Catalog: api/support.md
+          - Errors: api/errors.md
+      - Public Modules:
+          - NumPy Frontend: api/numpy.md
+          - SciPy:
+              - SciPy Overview: api/scipy/index.md
+              - Special Functions: api/scipy/special.md
+              - Image Filters: api/scipy/ndimage.md
+              - Solver Callbacks: api/scipy/solvers.md
+          - xarray: api/xarray.md
+          - Host Autodiff Interop:
+              - Host Interop Overview: api/interop/index.md
+              - PyTorch: api/interop/torch.md
+              - JAX: api/interop/jax.md
+              - HIPS Autograd: api/interop/autograd.md
+  - Developer Guide:
+      - Overview: development/index.md
+      - Codebase Map: development/codebase.md
+      - Adding Operations: development/adding-operations.md
+      - Testing: development/testing.md
+      - Documentation: development/documentation.md

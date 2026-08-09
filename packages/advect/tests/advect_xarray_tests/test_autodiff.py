@@ -1,3 +1,5 @@
+"""Tests for dynamic differentiation across the xarray pytree boundary."""
+
 from __future__ import annotations
 
 import numpy as np

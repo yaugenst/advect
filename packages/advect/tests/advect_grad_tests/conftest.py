@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from advect.autodiff.rules.array_family import providers as provider_module
-from advect.core import _array_namespace as array_namespace_module
+from advect.core._array_api import providers as array_namespace_module
 
 
 @pytest.fixture()
