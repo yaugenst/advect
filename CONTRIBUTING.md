@@ -12,8 +12,16 @@ Advect requires Python 3.12 or newer and Rust 1.94 or newer:
 ```bash
 uv sync --all-groups
 uv lock --check
+uv run pre-commit install --install-hooks
 rustup toolchain install stable --component clippy rustfmt
 ```
+
+Hook installation is per clone. It installs the file-quality checks used by CI
+and the Conventional Commit message check. Run the complete hook set after
+setup with `uv run pre-commit run --all-files`. For a deliberate direct commit
+to `main`, bypass only the branch guard with
+`SKIP=no-commit-to-branch git commit`; do not disable every hook with
+`--no-verify`.
 
 The [developer guide](docs/development/index.md) is the contributor authority:
 
