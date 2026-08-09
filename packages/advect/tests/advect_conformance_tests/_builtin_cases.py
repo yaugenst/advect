@@ -255,6 +255,20 @@ _PRODUCT_COMPLEX_REDUCTION_VARIANTS = (
     replace(_COMPLEX_REDUCTION_VARIANTS[0], tolerance=_PRODUCT_COMPLEX64_TOLERANCE),
     _COMPLEX_REDUCTION_VARIANTS[1],
 )
+# A six-factor float32 product can accumulate a few ulps of association
+# difference between its scalar JVP pairing and elementwise pullback pairing.
+# Keep that observed bound local to product reductions; float64 retains the
+# strict default gate.
+_PRODUCT_FLOAT32_TOLERANCE = replace(
+    _FLOAT32_TOLERANCE,
+    adjoint_rtol=2e-6,
+    adjoint_atol=2e-6,
+)
+_PRODUCT_REDUCTION_VARIANTS = (
+    _REDUCTION_VARIANTS[0],
+    replace(_REDUCTION_VARIANTS[1], tolerance=_PRODUCT_FLOAT32_TOLERANCE),
+    _REDUCTION_VARIANTS[2],
+)
 _FIXED_REAL_DTYPE_VARIANTS = (
     InputVariant("float64", dtypes={"x": "float64"}),
     InputVariant(
@@ -790,6 +804,7 @@ _REDUCTIONS: tuple[InvocationCase, ...] = (
         "array.prod",
         np.prod,
         Nonzero(),
+        variants=_PRODUCT_REDUCTION_VARIANTS,
         numerical_reference=NumericalReference.COMPLEX_STEP,
     ),
     _reduction("array.cumsum", lambda x: np.cumsum(x, axis=-1), Real()),

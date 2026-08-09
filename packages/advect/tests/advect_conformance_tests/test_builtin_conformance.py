@@ -81,6 +81,24 @@ def test_nanprod_matrix_float32_adjoint_regression() -> None:
     check_law(case, Law.ADJOINT, values, variant=variant)
 
 
+def test_prod_matrix_float32_adjoint_regression() -> None:
+    """Keep the thorough-search product example inside its local ulp bound."""
+    case = INVOCATIONS_BY_ID["array.prod[numpy]"]
+    variant = case.variant_ids.index("matrix-float32")
+    values = (
+        np.array(
+            [[-2.0, -3.0, -2.5], [2.125, 2.0, -2.0]],
+            dtype=np.float32,
+        ),
+    )
+
+    resolved = case.resolve_variant(variant)
+    assert resolved.tolerance.adjoint_atol + resolved.tolerance.adjoint_rtol == pytest.approx(
+        4e-6,
+    )
+    check_law(case, Law.ADJOINT, values, variant=variant)
+
+
 @pytest.mark.parametrize(
     "identifier",
     ["array.prod[numpy]#1", "array_ext.nanprod[numpy]#1"],
