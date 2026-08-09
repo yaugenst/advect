@@ -46,7 +46,7 @@ scientific = [
   "scipy>=1.18,<1.19",
   "xarray>=2026.7,<2026.8",
 ]
-torch = [ "torch>=2.10,<2.11" ]
+torch = [ "torch>=2.13.0,<2.14" ]
 xarray = [ "xarray>=2026.7,<2026.8" ]
 
 [dependency-groups]
