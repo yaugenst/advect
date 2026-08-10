@@ -17,10 +17,12 @@ Advect supports Python 3.12 through 3.14:
 python -m pip install advect
 ```
 
-[SciPy](api/scipy/index.md) and [xarray](api/xarray.md) integrations are
-available with `.[scientific]`. [JAX](api/interop/jax.md),
-[PyTorch](api/interop/torch.md), and
-[HIPS Autograd](api/interop/autograd.md) bridges have separate extras.
+The wheel includes every integration module. Extras install the corresponding
+third-party dependencies: [SciPy](api/scipy/index.md) with `advect[scipy]`,
+[xarray](api/xarray.md) with `advect[xarray]`, or both with
+`advect[scipy,xarray]`. [JAX](api/interop/jax.md),
+[PyTorch](api/interop/torch.md), and [HIPS Autograd](api/interop/autograd.md)
+use their own matching extras.
 
 ## Your first gradient
 

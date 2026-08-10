@@ -89,23 +89,20 @@ def _validate_inputs(values: tuple[Any, ...]) -> None:
 
 
 def _numpy_tree(value: Any) -> Any:
-    return jax.tree_util.tree_map(np.asarray, value)
-
-
-def _shape_dtype_struct(value: Any) -> Any:
-    return jax.ShapeDtypeStruct(value.shape, value.dtype)
-
-
-def _require_result_specs_when_staged(value: Any) -> None:
-    leaves = jax.tree_util.tree_leaves(value)
-    if any(isinstance(leaf, jax.core.Tracer) for leaf in leaves):
+    try:
+        return jax.tree_util.tree_map(np.asarray, value)
+    except jax.errors.TracerArrayConversionError as error:
         message = (
             "JAX result_shape_dtypes is required when an Advect bridge is staged; "
             "eager execution and reverse mode work without it. Pass "
             "result_shape_dtypes=... to advect.interop.jax.wrap for jax.jit or "
             "jax.eval_shape."
         )
-        raise TypeError(message)
+        raise TypeError(message) from error
+
+
+def _shape_dtype_struct(value: Any) -> Any:
+    return jax.ShapeDtypeStruct(value.shape, value.dtype)
 
 
 def _gradient_payloads(gradients: Any, primals: tuple[Any, ...]) -> tuple[Any, ...]:
@@ -179,7 +176,6 @@ def wrap(
     def call(*values: Any) -> Any:
         _validate_inputs(values)
         if result_shape_dtypes is None:
-            _require_result_specs_when_staged(values)
             return jax.device_put(forward_callback(*values))
         return jax.pure_callback(
             forward_callback,
@@ -196,7 +192,6 @@ def wrap(
 
     def backward_rule(values: tuple[Any, ...], cotangents: Any) -> tuple[Any, ...]:
         if result_shape_dtypes is None:
-            _require_result_specs_when_staged((values, cotangents))
             return tuple(jax.device_put(backward_callback(values, cotangents)))
         input_specs = jax.tree_util.tree_map(_shape_dtype_struct, values)
         gradients = jax.pure_callback(

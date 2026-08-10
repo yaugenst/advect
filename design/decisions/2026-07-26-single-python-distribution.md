@@ -34,9 +34,9 @@ third-party dependencies:
 
 - `advect[scipy]` adds SciPy;
 - `advect[xarray]` adds xarray;
-- `advect[scientific]` adds SciPy and xarray;
+- `advect[scipy,xarray]` combines those two extras;
 - `advect[torch]`, `advect[jax]`, and `advect[autograd]` add one host autodiff
-  framework each. There is no aggregate host-framework extra.
+  framework each. There is no aggregate integration extra.
 
 Every Advect wheel contains the built-in integration modules regardless of which
 extras were selected. An extra controls whether its third-party dependency is

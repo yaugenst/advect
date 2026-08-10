@@ -207,9 +207,37 @@ jobs:
           .venv/bin/python -m pytest
           packages/advect/tests/advect_xarray_tests
 
-  host-autodiff-interop:
-    name: Host Autodiff Interop
+  optional-dependency-compatibility:
+    name: ${{ matrix.label }}
     runs-on: ubuntu-latest
+    env:
+      PYTHON_VERSION: ${{ matrix.python-version }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: SciPy 1.18
+            python-version: "3.12"
+            suite: scipy
+            numpy-requirement: numpy==2.4.*
+            scipy-requirement: scipy==1.18.0
+          - label: SciPy latest 1.x
+            python-version: "3.14"
+            suite: scipy
+            numpy-requirement: numpy>=2.0,<2.6
+            scipy-requirement: scipy>=1.18,<2
+          - label: Host autodiff lower bounds
+            python-version: "3.12"
+            suite: interop
+            autograd-requirement: autograd==1.9.1
+            jax-requirement: jax==0.4.38
+            torch-requirement: torch==2.3.1
+          - label: Host autodiff latest
+            python-version: "3.14"
+            suite: interop
+            autograd-requirement: autograd>=1.9.1,<2
+            jax-requirement: jax>=0.4.38,<0.12
+            torch-requirement: torch>=2.3.1,<3
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -224,20 +252,47 @@ jobs:
           enable-cache: true
 
       - name: Set up Python
-        run: uv python install 3.12
+        run: uv python install "$PYTHON_VERSION"
 
-      - name: Install Advect, JAX, and HIPS Autograd
-        run: uv sync --all-groups --extra jax --frozen
+      - name: Install locked environment
+        run: uv sync --all-groups --frozen --python "$PYTHON_VERSION"
 
-      - name: Install the qualified CPU PyTorch build
+      - name: Select optional dependencies
+        env:
+          AUTOGRAD_REQUIREMENT: ${{ matrix.autograd-requirement }}
+          JAX_REQUIREMENT: ${{ matrix.jax-requirement }}
+          NUMPY_REQUIREMENT: ${{ matrix.numpy-requirement }}
+          SCIPY_REQUIREMENT: ${{ matrix.scipy-requirement }}
+          TORCH_REQUIREMENT: ${{ matrix.torch-requirement }}
+        run: |
+          dependencies=('numpy>=2.0,<2.6')
+          for requirement in \
+            "$AUTOGRAD_REQUIREMENT" \
+            "$JAX_REQUIREMENT" \
+            "$NUMPY_REQUIREMENT" \
+            "$SCIPY_REQUIREMENT"; do
+            if [[ -n "$requirement" ]]; then
+              dependencies+=("$requirement")
+            fi
+          done
+          uv pip install --python .venv/bin/python --upgrade "${dependencies[@]}"
+          if [[ -n "$TORCH_REQUIREMENT" ]]; then
+            uv pip install \
+              --python .venv/bin/python \
+              --upgrade "$TORCH_REQUIREMENT" \
+              --index https://download.pytorch.org/whl/cpu
+          fi
+
+      - name: Test SciPy
+        if: matrix.suite == 'scipy'
         run: >-
-          uv pip install --python .venv/bin/python
-          'torch>=2.13,<2.14'
-          --index https://download.pytorch.org/whl/cpu
+          .venv/bin/python -m pytest
+          packages/advect/tests/advect_scipy_tests
 
-      - name: Test every host-autodiff bridge
+      - name: Test host autodiff
+        if: matrix.suite == 'interop'
         run: >-
-          uv run --no-sync pytest
+          .venv/bin/python -m pytest
           packages/advect/tests/advect_interop_tests
 
   pyodide:
@@ -403,7 +458,7 @@ jobs:
       - numpy-compatibility
       - array-api-compatibility
       - xarray-compatibility
-      - host-autodiff-interop
+      - optional-dependency-compatibility
       - pyodide
       - docs
       - rust
@@ -418,7 +473,7 @@ jobs:
           NUMPY_RESULT: ${{ needs.numpy-compatibility.result }}
           ARRAY_API_COMPAT_RESULT: ${{ needs.array-api-compatibility.result }}
           XARRAY_RESULT: ${{ needs.xarray-compatibility.result }}
-          HOST_INTEROP_RESULT: ${{ needs.host-autodiff-interop.result }}
+          OPTIONAL_DEPENDENCIES_RESULT: ${{ needs.optional-dependency-compatibility.result }}
           PYODIDE_RESULT: ${{ needs.pyodide.result }}
           DOCS_RESULT: ${{ needs.docs.result }}
           RUST_RESULT: ${{ needs.rust.result }}
@@ -430,7 +485,7 @@ jobs:
             "$NUMPY_RESULT" \
             "$ARRAY_API_COMPAT_RESULT" \
             "$XARRAY_RESULT" \
-            "$HOST_INTEROP_RESULT" \
+            "$OPTIONAL_DEPENDENCIES_RESULT" \
             "$PYODIDE_RESULT" \
             "$DOCS_RESULT" \
             "$RUST_RESULT" \

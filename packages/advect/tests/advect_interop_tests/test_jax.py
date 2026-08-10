@@ -7,6 +7,7 @@ import pytest
 
 jax = pytest.importorskip("jax")
 jnp = pytest.importorskip("jax.numpy")
+_enable_x64 = jax.enable_x64 if hasattr(jax, "enable_x64") else jax.experimental.enable_x64
 
 from advect.interop.jax import wrap  # noqa: E402 - dependency skip precedes adapter import
 
@@ -136,7 +137,7 @@ def test_jax_bridge_runs_value_and_grad_eagerly_and_under_jit() -> None:
 def test_jax_bridge_preserves_pytree_arguments_and_outputs(
     result_shape_dtypes,
 ) -> None:
-    with jax.enable_x64(True):  # noqa: FBT003 - JAX exposes a positional context API
+    with _enable_x64(True):  # noqa: FBT003 - JAX exposes a positional context API
         bridged = wrap(
             lambda parameters, scale: {"field": parameters["field"] * scale},
             result_shape_dtypes=result_shape_dtypes,
@@ -160,7 +161,7 @@ def test_jax_bridge_preserves_pytree_arguments_and_outputs(
 
 
 def test_jax_bridge_translates_the_complex_adjoint_convention() -> None:
-    with jax.enable_x64(True):  # noqa: FBT003 - JAX exposes a positional context API
+    with _enable_x64(True):  # noqa: FBT003 - JAX exposes a positional context API
         coefficient = 2.0 + 3.0j
         bridged = wrap(lambda value: coefficient * value)
         sample = jnp.asarray(1.5 + 2.0j, dtype=jnp.complex128)
@@ -177,7 +178,7 @@ def test_jax_bridge_translates_the_complex_adjoint_convention() -> None:
 
 
 def test_jax_bridge_matches_nonholomorphic_complex_outputs() -> None:
-    with jax.enable_x64(True):  # noqa: FBT003 - JAX exposes a positional context API
+    with _enable_x64(True):  # noqa: FBT003 - JAX exposes a positional context API
         bridged = wrap(
             lambda value: (
                 np.conjugate(value),
@@ -219,7 +220,7 @@ def test_jax_bridge_matches_nonholomorphic_complex_outputs() -> None:
 def test_jax_reverse_mode_replays_the_pure_advect_function_once(
     result_shape_dtypes,
 ) -> None:
-    with jax.enable_x64(True):  # noqa: FBT003 - JAX exposes a positional context API
+    with _enable_x64(True):  # noqa: FBT003 - JAX exposes a positional context API
         calls = 0
 
         def operation(value):

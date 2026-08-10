@@ -179,8 +179,8 @@ jobs:
             if [[ "$profile" == "array-api" ]]; then
               dependencies+=(array-api-strict==2.4.1)
             elif [[ "$profile" == "scientific" ]]; then
-              dependencies+=('scipy>=1.18,<1.19' 'xarray>=2024.6')
-              requirement='advect[scientific]'
+              dependencies+=('scipy>=1.18,<2' 'xarray>=2024.6')
+              requirement='advect[scipy,xarray]'
             fi
             uv pip install --python "$smoke_python" "${dependencies[@]}"
             uv pip install \

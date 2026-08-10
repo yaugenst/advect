@@ -39,7 +39,7 @@ def test_framework_dependencies_use_only_individual_extras() -> None:
     package_metadata = metadata("advect")
     extras = set(package_metadata.get_all("Provides-Extra") or ())
     assert set(_FRAMEWORKS) <= extras
-    assert "interop" not in extras
+    assert not {"interop", "scientific"} & extras
 
     requirements = package_metadata.get_all("Requires-Dist") or ()
     for framework in _FRAMEWORKS:

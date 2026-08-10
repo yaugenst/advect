@@ -150,9 +150,12 @@ still owns NumPy keyword spelling, mutation controls, and calling conventions.
 |---|---|---|
 | NumPy | `>=2.0,<2.6` | Required first-class protocol frontend |
 | Python Array API | 2022.12, 2023.12, 2024.12 | Provider-neutral namespace profiles |
-| SciPy | `>=1.18,<1.19` | Optional explicit `advect.scipy` extension |
+| SciPy | `>=1.18,<2` | Optional explicit `advect.scipy` extension |
 | `array-api-compat` | `>=1.11.2,<2` | Required provider-discovery fallback |
 | xarray | `>=2024.6` | Dynamic pytree containers |
+| HIPS Autograd | `>=1.9.1,<2` | Optional first-order host VJP bridge |
+| JAX | `>=0.4.38,<0.12` | Optional first-order host VJP bridge |
+| PyTorch | `>=2.3.1,<3` | Optional first-order host VJP bridge |
 | `array-api-strict` | 2.4.1 | Reference Array API qualification provider |
 | CuPy | separately installed | Manual single-device GPU qualification |
 
