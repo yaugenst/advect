@@ -1,8 +1,9 @@
 # Staging and Serialization
 
-Dynamic transforms trace each concrete call. `stage` instead compiles one exact
-input signature, optimizes the graph once, and returns an immutable program for
-repeated execution.
+Dynamic transforms trace each concrete call.
+[`stage`](../api/staging.md#advect.stage) instead compiles one exact input
+signature, optimizes the graph once, and returns an immutable
+[`StagedProgram`](../api/staging.md#advect.StagedProgram) for repeated execution.
 
 ## Stage once, call many times
 
@@ -35,9 +36,12 @@ calls.
 
 ## Declare a signature without example data
 
-Use `ArraySpec` when no representative value is available. `kw_specs` declares
-keyword inputs, and `StaticSpec` snapshots a compile-time Python value. Static
-values can control Python branches because they are known while staging:
+Use [`ArraySpec`](../api/staging.md#advect.ArraySpec) when no representative
+value is available. The [`kw_specs`](../api/staging.md#advect.stage) argument
+declares keyword inputs, and
+[`StaticSpec`](../api/staging.md#advect.StaticSpec) snapshots a compile-time
+Python value. Static values can control Python branches because they are known
+while staging:
 
 ```{.python .run}
 @ad.stage(
@@ -68,9 +72,11 @@ dynamic-only because an abstract staged value has no data to test.
 
 ## Differentiate the program once
 
-`grad` and `value_and_grad` accept a staged program and return another staged
-program. `vjp_program` adds an explicit cotangent input for a reusable
-pullback:
+[`grad`](../api/transforms.md#advect.grad) and
+[`value_and_grad`](../api/transforms.md#advect.value_and_grad) accept a staged
+program and return another staged program.
+[`vjp_program`](../api/staging.md#advect.vjp_program) adds an explicit cotangent
+input for a reusable pullback:
 
 ```{.python .run}
 value_and_gradient = ad.value_and_grad(program)
@@ -89,7 +95,8 @@ print("reusable pullback:", input_cotangent)
 
 Warm derivative calls execute their prebuilt graphs. They do not create a
 dynamic tape or run a reverse sweep. This is the reusable counterpart to the
-one-shot pullback returned by dynamic `vjp`.
+one-shot pullback returned by dynamic
+[`vjp`](../api/transforms.md#advect.vjp).
 
 ## Save and restore the program
 
@@ -107,12 +114,14 @@ print("serialized bytes:", len(payload.encode()))
 
 The artifact contains the graph and its exact call contract, not Python code.
 Captured arrays and static values are snapshotted at compile time. A custom
-primitive referenced by the graph must be imported or registered under the
-same stable name before loading, with an implementation that matches the saved
-program.
+[primitive](../api/primitives.md) referenced by the graph must be imported or
+registered under the same stable name before loading, with an implementation
+that matches the saved program.
 
 Provider-neutral functions written through `x.__array_namespace__()` can be
-staged against an explicit Array API revision and replayed by a compatible
-provider. NumPy-authored functions retain the separate NumPy frontend contract.
+staged against an explicit
+[Array API revision](../compatibility/array-api.md) and replayed by a compatible
+provider. NumPy-authored functions retain the separate
+[NumPy frontend](../api/numpy.md) contract.
 Serialized formats may change before 1.0, so matching Advect versions are the
 safest choice for saved programs.

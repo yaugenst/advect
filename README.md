@@ -46,10 +46,18 @@ print(f"restored loss: {restored(x):.6f}")
 # restored loss: 0.937922
 ```
 
-The core API also covers JVPs, VJPs, Jacobians, higher-order derivatives,
-checkpointing, implicit differentiation, and custom primitives. Optional
-integrations add SciPy functions, xarray-aware gradients, and first-order
-bridges into JAX, PyTorch, and HIPS Autograd.
+The [core API](https://yaugenst.github.io/advect/latest/api/) also covers JVPs,
+VJPs, Jacobians, higher-order derivatives, checkpointing, implicit
+differentiation, and custom primitives. Optional integrations add
+[SciPy and xarray workflows](https://yaugenst.github.io/advect/latest/tutorials/scientific-python/)
+and first-order [host-framework bridges](https://yaugenst.github.io/advect/latest/tutorials/host-frameworks/).
+
+## Related projects
+
+Advect is inspired by [HIPS Autograd](https://github.com/HIPS/autograd) and
+offers optional [bridges](https://yaugenst.github.io/advect/latest/api/interop/)
+to [JAX](https://docs.jax.dev/en/latest/quickstart.html) and
+[PyTorch](https://docs.pytorch.org/docs/stable/).
 
 ## Learn and contribute
 

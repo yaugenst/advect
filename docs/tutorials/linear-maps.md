@@ -1,9 +1,10 @@
 # JVPs, VJPs, and Linear Maps
 
 A gradient is one special view of a derivative. For a general function, the
-derivative at a point is a linear map: a JVP applies it to an input direction,
-while a VJP applies its transpose to an output cotangent. Advect exposes both
-without first building a dense Jacobian.
+derivative at a point is a linear map: a
+[JVP](../api/transforms.md#advect.jvp) applies it to an input direction, while a
+[VJP](../api/transforms.md#advect.vjp) applies its transpose to an output
+cotangent. Advect exposes both without first building a dense Jacobian.
 
 ## Push a direction forward
 
@@ -37,7 +38,8 @@ needed.
 
 ## Pull a cotangent backward
 
-`vjp` evaluates the function and returns a one-shot pullback. Applying the
+[`vjp`](../api/transforms.md#advect.vjp) evaluates the function and returns a
+one-shot [`Pullback`](../api/transforms.md#advect.Pullback). Applying the
 pullback computes `J.T @ cotangent`:
 
 ```{.python .run}
@@ -54,7 +56,8 @@ it.
 
 ## Reuse one local linear model
 
-`linearize` captures the derivative once and returns a reusable `LinearMap`.
+[`linearize`](../api/transforms.md#advect.linearize) captures the derivative
+once and returns a reusable [`LinearMap`](../api/transforms.md#advect.LinearMap).
 It can apply the map or its transpose until it is closed:
 
 ```{.python .run}
@@ -68,14 +71,15 @@ print("basis directions:", along_x, along_y)
 print("pullback of ones:", pulled_back)
 ```
 
-The map belongs to one concrete call; it is reusable, but it is not a staged
-program or a cache across input points.
+The map belongs to one concrete call; it is reusable, but it is not a
+[`StagedProgram`](../api/staging.md#advect.StagedProgram) or a cache across input
+points.
 
 ## Materialize the Jacobian only when useful
 
-`jacobian` assembles the dense matrix and preserves array or pytree block
-shapes. The products above and the matrix are three views of the same local
-derivative:
+[`jacobian`](../api/transforms.md#advect.jacobian) assembles the dense matrix and
+preserves array or pytree block shapes. The products above and the matrix are
+three views of the same local derivative:
 
 ```{.python .run}
 jacobian = ad.jacobian(response)(point)
@@ -105,6 +109,8 @@ print("gradient of |z|²:", gradient)
 print("D conj(z)[i]:", conjugate_tangent)
 ```
 
-Complex-output `grad` and a single dense complex Jacobian would be ambiguous;
-use `jvp`, `vjp`, or `linearize` for those real-linear maps. Dense Jacobians
-and Hessians are limited to real inputs and outputs.
+Complex-output [`grad`](../api/transforms.md#advect.grad) and a single dense
+complex Jacobian would be ambiguous; use the product transforms above for those
+real-linear maps. Dense Jacobians and
+[Hessians](advanced-differentiation.md#use-curvature-without-always-building-a-matrix)
+are limited to real inputs and outputs.

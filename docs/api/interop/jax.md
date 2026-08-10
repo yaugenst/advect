@@ -1,5 +1,9 @@
 # JAX
 
+The [shared bridge contract](index.md#shared-contract) and
+[host-framework tutorial](../../tutorials/host-frameworks.md) explain what
+crosses this boundary.
+
 ::: advect.interop.jax.wrap
 
 Without a result specification, the adapter executes eagerly and observes the
@@ -23,8 +27,10 @@ value, gradient = jax.value_and_grad(energy)(x)
 print(value, gradient)
 ```
 
-For auxiliary outputs, pass `has_aux=True` to both the bridge and the JAX
-transformation. Only the first result participates in the Advect VJP:
+For auxiliary outputs, pass `has_aux=True` to both the bridge and the
+[`jax.value_and_grad`](https://docs.jax.dev/en/latest/_autosummary/jax.value_and_grad.html)
+transformation. Only the first result participates in the Advect
+[VJP](../transforms.md#advect.vjp):
 
 ```python
 def energy_and_metrics(value):
@@ -44,7 +50,9 @@ arrays and scalars. They remain nondifferentiable even when floating. Opaque
 Python objects such as strings cannot cross this JAX operation boundary.
 
 JAX needs output shapes and dtypes during JIT compilation and abstract shape
-evaluation. Supply that contract to use `jax.jit` or `jax.eval_shape`:
+evaluation. Supply that contract to use
+[`jax.jit`](https://docs.jax.dev/en/latest/_autosummary/jax.jit.html) or
+[`jax.eval_shape`](https://docs.jax.dev/en/latest/_autosummary/jax.eval_shape.html):
 
 ```python
 compiled_energy = wrap(
@@ -65,8 +73,10 @@ If staging starts without `result_shape_dtypes`, the bridge raises a `TypeError`
 that explains how to enable the callback path. It does not cache a contract
 from an earlier eager call. A supplied specification must match the callable's
 output structure, shapes, and dtypes exactly; the bridge does not cast callback
-results. The callback path uses a pure host callback, so the callable must be
-deterministic and free of externally visible effects. Reverse mode replays it
-once at the saved primal values to construct and immediately consume an Advect
-pullback. `jax.vmap` remains unsupported; an output specification does not add
-batching semantics.
+results. The callback path uses a
+[pure host callback](https://docs.jax.dev/en/latest/external-callbacks.html), so
+the callable must be deterministic and free of externally visible effects.
+Reverse mode replays it once at the saved primal values to construct and
+immediately consume an Advect pullback.
+[`jax.vmap`](https://docs.jax.dev/en/latest/_autosummary/jax.vmap.html) remains
+unsupported; an output specification does not add batching semantics.

@@ -1,8 +1,9 @@
 # Dynamic Control Flow and Mutation
 
-Dynamic transforms are *define by run*: every call executes the Python function
-with its current inputs and differentiates the path that actually ran. There is
-no special API for conditions, loops, or helper functions.
+[Dynamic transforms](../api/transforms.md) are *define by run*: every call
+executes the Python function with its current inputs and differentiates the
+path that actually ran. There is no special API for conditions, loops, or
+helper functions.
 
 ## Follow data-dependent branches
 
@@ -32,9 +33,9 @@ decision itself, so the derivative may jump where the branch changes.
 
 ## Let loops run for the current input
 
-Iteration counts can also depend on traced values. Auxiliary outputs are handy
-when the function should report what happened without differentiating the
-report:
+Iteration counts can also depend on traced values.
+[`has_aux=True`](../api/transforms.md#advect.grad) is handy when the function
+should report what happened without differentiating the report:
 
 ```{.python .run}
 def settle_loss(x):
@@ -85,7 +86,8 @@ print("edge and center gradients:", gradient[[0, len(gradient) // 2, -1]])
 Basic indexed updates and direct named basic-slice views are supported.
 Mutating an input, updating through advanced indexing, or mutating through an
 ambiguous transformed view raises at the offending operation with a suggested
-rewrite.
+rewrite. [Troubleshooting](debugging.md#common-rewrites) collects the common
+fixes.
 
 Dynamic tracing is the right model when the executed path is part of the
 computation. If iterations only search for a converged state, use

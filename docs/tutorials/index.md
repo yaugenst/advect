@@ -9,12 +9,12 @@ so pressing `[ run ]` also runs any earlier runnable blocks on that page.
 
 | Step | Tutorial | What it teaches |
 | ---: | --- | --- |
-| 1 | [Gradients and pytrees](gradients.md) | `grad`, `value_and_grad`, auxiliary results, argument selection, and structured parameters |
+| 1 | [Gradients and pytrees](gradients.md) | [`grad`](../api/transforms.md#advect.grad), [`value_and_grad`](../api/transforms.md#advect.value_and_grad), auxiliary results, argument selection, and structured parameters |
 | 2 | [Dynamic control flow and mutation](control-flow.md) | Data-dependent branches and loops, helper functions, and owned local updates |
-| 3 | [JVPs, VJPs, and linear maps](linear-maps.md) | Forward and reverse products, reusable linearization, Jacobians, and complex derivatives |
-| 4 | [Higher-order differentiation](advanced-differentiation.md) | Nested derivatives, HVPs, Hessians, and checkpointing |
-| 5 | [Implicit differentiation](implicit-differentiation.md) | Differentiate a converged equation instead of solver iterations |
-| 6 | [Staging and serialization](staging.md) | Exact signatures, reusable derivative programs, and saved artifacts |
+| 3 | [JVPs, VJPs, and linear maps](linear-maps.md) | [`jvp`](../api/transforms.md#advect.jvp), [`vjp`](../api/transforms.md#advect.vjp), reusable [`LinearMap`](../api/transforms.md#advect.LinearMap) objects, Jacobians, and complex derivatives |
+| 4 | [Higher-order differentiation](advanced-differentiation.md) | Nested derivatives, [`hvp`](../api/transforms.md#advect.hvp), Hessians, and [`checkpoint`](../api/transforms.md#advect.checkpoint) |
+| 5 | [Implicit differentiation](implicit-differentiation.md) | Differentiate a converged equation with [`implicit_root`](../api/transforms.md#advect.implicit_root) |
+| 6 | [Staging and serialization](staging.md) | Exact signatures, reusable derivative programs, and [`StagedProgram`](../api/staging.md#advect.StagedProgram) artifacts |
 
 ## Connect and extend
 

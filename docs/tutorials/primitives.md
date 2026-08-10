@@ -1,8 +1,9 @@
 # Custom Primitives
 
-Create a primitive when a numerical operation is opaque to Advect or needs one
-stable atomic identity in a staged program. Ordinary traceable array code does
-not need a wrapper; Advect can already see and differentiate its operations.
+Create a [primitive](../api/primitives.md#advect.primitive) when a numerical
+operation is opaque to Advect or needs one stable atomic identity in a
+[staged program](../api/staging.md). Ordinary traceable array code does not need
+a wrapper; Advect can already see and differentiate its operations.
 
 The cube below is intentionally simple so the authoring contract stays visible.
 A primitive starts with its concrete implementation, then adds only the rules
@@ -36,10 +37,12 @@ def cube_jvp(output, primals, tangents):
 print("cube:", cube(np.array([1.0, 2.0, 3.0])))
 ```
 
-The implementation handles ordinary calls. The abstract rule describes output
-shape and dtype for staging. The JVP is ordinary traceable code, so Advect can
-use it for forward mode, derive its transpose for reverse mode, and compose it
-under higher-order transforms.
+The implementation handles ordinary calls. The
+[abstract rule](../api/primitives.md#attach-rules-to-the-returned-handle)
+describes output shape and dtype for staging. The
+[JVP](linear-maps.md#push-a-direction-forward) is ordinary traceable code, so
+Advect can use it for forward mode, derive its transpose for reverse mode, and
+compose it under higher-order transforms.
 
 ## Check the promised capabilities
 
@@ -58,10 +61,13 @@ np.testing.assert_allclose(gradient, 3 * sample**2)
 print("gradient:", gradient)
 ```
 
-The default checker covers the first-order abstract, JVP, and transpose paths.
+The default [`check_primitive`](../api/testing.md#advect.testing.check_primitive)
+covers the first-order abstract, JVP, and transpose paths.
 Request only the extra capabilities the primitive claims, and run materially
 different shape, dtype, static-argument, and complex cases separately. Follow
-the primitive check with `check_gradient` on a representative composition.
+the primitive check with
+[`check_gradient`](../api/testing.md#advect.testing.check_gradient) on a
+representative composition.
 
 The operation name defaults to the function's module and qualified name. Give
 it an explicit name such as `example.cube` only when saved programs need an

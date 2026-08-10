@@ -1,8 +1,8 @@
 # Gradients and Pytrees
 
 Advect transforms ordinary Python callables. Start with a function that returns
-one real scalar, then call `grad` with the same inputs you would pass to the
-original function.
+one real scalar, then call [`grad`](../api/transforms.md#advect.grad) with the
+same inputs you would pass to the original function.
 
 ## Differentiate a NumPy function
 
@@ -27,8 +27,8 @@ The transform traces the concrete call, runs reverse mode, and releases the
 trace before returning. A later call can take different branches, shapes, or
 loop counts; [Dynamic control flow](control-flow.md) develops that model.
 
-Use `value_and_grad` when an optimizer needs the objective and gradient from
-the same evaluation:
+Use [`value_and_grad`](../api/transforms.md#advect.value_and_grad) when an
+optimizer needs the objective and gradient from the same evaluation:
 
 ```{.python .run}
 value, gradient = ad.value_and_grad(loss)(x)
@@ -38,8 +38,9 @@ print(f"loss: {value:.6f}")
 print(f"loss after one step: {loss(updated):.6f}")
 ```
 
-If the function also returns diagnostics, set `has_aux=True`. The auxiliary
-value follows the call but is not differentiated:
+If the function also returns diagnostics, set
+[`has_aux=True`](../api/transforms.md#advect.value_and_grad). The auxiliary value
+follows the call but is not differentiated:
 
 ```{.python .run}
 def loss_with_metrics(x):
@@ -56,8 +57,10 @@ print(f"loss: {value:.6f}; metrics: {metrics}")
 
 ## Select arguments and preserve structure
 
-Lists, tuples, dictionaries, and registered pytree nodes keep their structure.
-`argnums` selects positional arguments; `argnames` selects named arguments.
+[Pytrees](../api/pytree.md) keep the structure of lists, tuples, dictionaries,
+and registered application nodes. The
+[`argnums` and `argnames`](../api/transforms.md#advect.grad) parameters select
+positional and named arguments.
 
 ```{.python .run}
 parameters = {
@@ -85,13 +88,15 @@ print("scale gradient:", named["scale"])
 
 The gradient tree mirrors the selected input tree. Real Python scalars are
 accepted at the boundary and return Python-scalar derivatives; numerical work
-inside the function still follows the active array provider.
+inside the function still follows the
+[active array provider](scientific-python.md#write-provider-neutral-array-code).
 
 ## Stop one dependency explicitly
 
-`stop_gradient` keeps a concrete dynamic value in the computation while
-removing its derivative contribution. Here the normalization scale is measured
-from the input but treated as fixed during differentiation:
+[`stop_gradient`](../api/arrays.md#advect.stop_gradient) keeps a concrete
+dynamic value in the computation while removing its derivative contribution.
+Here the normalization scale is measured from the input but treated as fixed
+during differentiation:
 
 ```{.python .run}
 def normalized_loss(x):
@@ -105,8 +110,8 @@ print("gradient with fixed scale:", gradient)
 ```
 
 Stopping a gradient is an explicit modeling choice, not a way to hide an
-unsupported operation. It is available only for dynamic calls because a staged
-trace has no concrete value to detach.
+unsupported operation. It is available only for dynamic calls because a
+[staged trace](staging.md) has no concrete value to detach.
 
 Next, see how the same transform handles [branches, loops, and local
 mutation](control-flow.md).

@@ -183,7 +183,7 @@ def on_post_build(config: MkDocsConfig) -> None:
         "pytree": ("### register_pytree_node", "### tree_flatten"),
         "testing": ("### check_gradient", "### check_primitive"),
         "support": ("## support_catalog",),
-        "scipy": ("Special functions", "Image filters", "Solver callbacks"),
+        "scipy": ("Special functions", "Image processing", "Solver callbacks"),
         "scipy/special": ("### gammaln", "### log_softmax"),
         "scipy/ndimage": ("### gaussian_filter", "### black_tophat"),
         "scipy/solvers": ("### root_solver", "### gmres_solver"),

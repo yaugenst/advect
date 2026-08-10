@@ -2,14 +2,16 @@
 
 Some algorithms iterate only to find a state that satisfies an equation. In
 that case, differentiating every solver step makes the derivative depend on the
-implementation of the solver. `implicit_root` differentiates the converged
-equation instead.
+implementation of the solver.
+[`implicit_root`](../api/transforms.md#advect.implicit_root) differentiates the
+converged equation instead.
 
 ## Differentiate the equation, not the iterations
 
 Suppose `solution**2 - parameters == 0`. The nonlinear callback finds a root;
-the linear callback solves with the state Jacobian needed by the implicit
-derivative.
+the linear callback solves with the
+[state Jacobian](linear-maps.md#materialize-the-jacobian-only-when-useful)
+needed by the implicit derivative.
 
 ```{.python .run}
 import numpy as np
@@ -48,16 +50,21 @@ print("gradient:", gradient)
 
 The iteration count does not appear on the outer trace. `initial` selects a
 root but is nondifferentiable; the solution and parameters may be built-in
-pytrees. Advect trusts a successful solver return as convergence, so a callback
-must raise `ImplicitSolveError` when it fails.
+[pytrees](../api/pytree.md). Advect trusts a successful solver return as
+convergence, so a callback must raise
+[`ImplicitSolveError`](../api/errors.md#advect.ImplicitSolveError) when it fails.
 
 Reverse mode applies the real adjoint of the state Jacobian. Pass a separate
-`transpose_solve` when the same linear solver cannot handle that adjoint;
-otherwise Advect reuses `linear_solve` with the adjoint operator.
+[`transpose_solve`](../api/transforms.md#advect.implicit_root) when the same
+linear solver cannot handle that adjoint; otherwise Advect reuses
+`linear_solve` with the adjoint operator.
 
 ## Use the SciPy callbacks
 
-The `advect[scipy]` extra provides ready-made NumPy root and GMRES callbacks:
+The `advect[scipy]` extra provides ready-made NumPy
+[`root_solver`](../api/scipy/solvers.md#advect.scipy.optimize.root_solver) and
+[`gmres_solver`](../api/scipy/solvers.md#advect.scipy.sparse.linalg.gmres_solver)
+callbacks:
 
 ```python
 import numpy as np
@@ -89,4 +96,5 @@ derivatives when every operation it executes is itself traceable.
 `implicit_root` is dynamic because opaque Python solver callbacks have no
 serializable graph form. If the iterations themselves are the computation,
 trace them normally; if a solver must be staged, write its iterations as
-stageable array code or package the closed behavior as a custom primitive.
+[stageable array code](staging.md) or package the closed behavior as a
+[custom primitive](primitives.md).

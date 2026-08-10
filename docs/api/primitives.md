@@ -1,10 +1,11 @@
 # Primitives
 
-A primitive makes one closed implementation atomic to Advect. The decorator
-returns a callable authoring handle that owns its abstract, JVP, and optional
-transpose rules. Prefer a JVP because it supports forward mode and structural
-transposition. An explicit transpose can instead provide reverse mode when no
-JVP is available.
+[primitive](primitives.md#advect.primitive) makes one closed implementation
+atomic to Advect. The decorator returns a callable authoring handle that owns
+its abstract, JVP, and optional transpose rules. Prefer a
+[JVP](transforms.md#advect.jvp) because it supports forward mode and structural
+transposition. An explicit transpose can instead provide
+[reverse mode](transforms.md#advect.vjp) when no JVP is available.
 
 Concrete and abstract calls retain the implementation's named parameters and
 pytrees. JVP and transpose rules operate on the dynamic array/scalar leaves in
@@ -13,8 +14,10 @@ nondifferentiable arguments remain dynamic values but have no derivative
 contribution.
 
 The [custom primitive tutorial](../tutorials/primitives.md) shows the common
-JVP-first workflow. Use the [testing utilities](testing.md) to validate both the
-primitive and a representative composition.
+JVP-first workflow. Use
+[`check_primitive`](testing.md#advect.testing.check_primitive) and
+[`check_gradient`](testing.md#advect.testing.check_gradient) to validate both
+the primitive and a representative composition.
 
 ## Define the operation
 

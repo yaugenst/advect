@@ -18,13 +18,16 @@ it from a checkout:
 python -m pip install .
 ```
 
-SciPy and xarray integrations are available with `.[scientific]`. JAX,
-PyTorch, and HIPS Autograd bridges have separate extras.
+[SciPy](api/scipy/index.md) and [xarray](api/xarray.md) integrations are
+available with `.[scientific]`. [JAX](api/interop/jax.md),
+[PyTorch](api/interop/torch.md), and
+[HIPS Autograd](api/interop/autograd.md) bridges have separate extras.
 
 ## Your first gradient
 
-`value_and_grad` evaluates a scalar function and differentiates it in one
-call. Press `[ run ]` to execute the example in your browser:
+[`value_and_grad`](api/transforms.md#advect.value_and_grad) evaluates a scalar
+function and differentiates it in one call. Press `[ run ]` to execute the
+example in your browser:
 
 ```{.python .run}
 import numpy as np
@@ -42,8 +45,9 @@ print(f"loss: {value:.6f}")
 print("gradient:", np.round(gradient, 6))
 ```
 
-Each call traces the path its concrete inputs take, so Python branches, loops,
-helper functions, and supported local mutation keep their normal meaning.
+Each call traces the path its concrete inputs take, so
+[Python branches, loops, helper functions, and supported local mutation](tutorials/control-flow.md)
+keep their normal meaning.
 
 ## Keep going
 

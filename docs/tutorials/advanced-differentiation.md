@@ -6,8 +6,8 @@ large reverse traces, checkpointing trades extra computation for lower memory.
 
 ## Compose transforms
 
-Nesting `grad` gives successive scalar derivatives without a separate
-higher-order tracing mode:
+Nesting [`grad`](../api/transforms.md#advect.grad) gives successive scalar
+derivatives without a separate higher-order tracing mode:
 
 ```{.python .run}
 import numpy as np
@@ -28,14 +28,16 @@ print(
 ```
 
 Every operation on the nested path needs traceable derivative rules. A
-first-order primitive raises at that boundary instead of silently falling back
-to a numerical derivative.
+[first-order primitive](../api/primitives.md#exact-residuals) raises at that
+boundary instead of silently falling back to a numerical derivative.
 
 ## Use curvature without always building a matrix
 
-`hvp` applies the Hessian to a direction without materializing the dense
-matrix. This is usually what a second-order optimizer needs. `hessian` builds
-the full matrix for small inputs, while `hessian_diag` computes its exact
+[`hvp`](../api/transforms.md#advect.hvp) applies the Hessian to a direction
+without materializing the dense matrix. This is usually what a second-order
+optimizer needs. [`hessian`](../api/transforms.md#advect.hessian) builds the full
+matrix for small inputs, while
+[`hessian_diag`](../api/transforms.md#advect.hessian_diag) computes its exact
 diagonal without building the full matrix first.
 
 ```{.python .run}
@@ -65,9 +67,9 @@ few directions.
 ## Checkpoint large pure blocks
 
 Reverse mode normally retains forward intermediates until the backward pass
-uses them. `checkpoint` makes a pure function atomic on the outer dynamic tape:
-Advect keeps the boundary values and recomputes the body while taking
-derivatives.
+uses them. [`checkpoint`](../api/transforms.md#advect.checkpoint) makes a pure
+function atomic on the outer dynamic tape: Advect keeps the boundary values and
+recomputes the body while taking derivatives.
 
 ```{.python .run}
 @ad.checkpoint
@@ -93,7 +95,8 @@ print("checkpointed H @ 1:", curvature)
 
 Checkpoint placement is manual. Put it around large deterministic blocks whose
 saved intermediates cost more than replaying the block. Mutable state and side
-effects are outside the contract, and `stage` rejects checkpointed calls.
+effects are outside the contract, and
+[`stage`](../api/staging.md#advect.stage) rejects checkpointed calls.
 
 For a different kind of advanced derivative—one defined by a converged
 equation rather than an executed algorithm—continue with [Implicit

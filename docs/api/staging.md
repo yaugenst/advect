@@ -1,9 +1,12 @@
 # Staging
 
 Compile one signature into one immutable, optimized, serializable program.
+The [staging tutorial](../tutorials/staging.md) develops the complete workflow
+from a first call through differentiation and serialization.
 
-Advect stages against one explicit Array API contract. The supported targets
-are `2022.12`, `2023.12`, and `2024.12`:
+Advect stages against one explicit
+[Array API contract](https://data-apis.org/array-api/latest/). The supported
+targets are `2022.12`, `2023.12`, and `2024.12`:
 
 ```{.python .run}
 import numpy as np
@@ -21,13 +24,16 @@ print(program.array_api_version)
 # 2023.12
 ```
 
-When examples are supplied without a target, `stage` selects the newest
-revision every example provider can serve. With `specs=` and no concrete
-provider, it defaults to `2024.12`. The selected target is stored in the graph,
-preserved by `grad` and `vjp_program`, and enforced before runtime graph
-evaluation. Choosing an older target is the deliberate way to build a more
-portable artifact; Advect does not infer a minimum revision from the operations
-used by the function.
+When examples are supplied without a target,
+[`stage`](staging.md#advect.stage) selects the newest revision every example
+provider can serve. With [`specs=`](staging.md#advect.stage) and no concrete
+provider, it defaults to `2024.12`.
+The selected target is stored in the graph, preserved by
+[`grad`](transforms.md#advect.grad) and
+[`vjp_program`](staging.md#advect.vjp_program), and enforced before runtime
+graph evaluation. Choosing an older target is the deliberate way to build a
+more portable artifact; Advect does not infer a minimum revision from the
+operations used by the function.
 
 ::: advect.ArraySpec
 
