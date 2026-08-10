@@ -38,6 +38,10 @@ np: Any = _numpy
 # (for example ``histogramdd`` and NumPy's ``unique_*`` named tuples).  The
 # value tree and node-id tree have the same shape; leaves are arrays and ints.
 ArrayFunctionResult = tuple[Any, Any]
+type ArrayFunctionHandler = Callable[
+    [DynamicTape, type[TracedArrayLike], tuple[Any, ...], dict[str, Any]],
+    ArrayFunctionResult,
+]
 
 
 @dataclass(frozen=True, slots=True)

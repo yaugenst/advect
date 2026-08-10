@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from advect.core._native import DynamicTape
     from advect.core._protocols import TracedArrayLike
     from advect.numpy._array_function.composite import CompositeResult
+    from advect.numpy._array_function.emission import ArrayFunctionHandler
 
 _UNIQUE_ALLOWED_KWARGS = frozenset(
     {"return_index", "return_inverse", "return_counts", "axis", "equal_nan", "sorted"}
@@ -171,7 +172,7 @@ def _named_unique_handler(
 
 
 def register_unique_handlers(
-    handlers: dict[Any, Any],
+    handlers: dict[Callable[..., Any], ArrayFunctionHandler],
 ) -> None:
     """Register NumPy's classic and Array-API-style unique functions."""
     handlers[np.unique] = _unique_handler

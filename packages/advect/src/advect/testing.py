@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import math
+from functools import partial
 from typing import TYPE_CHECKING, Any, NoReturn, cast
 
 from advect.core._abstract import AbstractValue, ArraySpec
@@ -42,8 +43,20 @@ def _ones_like(value: Any) -> Any:
     return value * 0 + 1
 
 
+def _scaled_difference(upper: Any, lower: Any, *, scale: float) -> Any:
+    return (upper - lower) / scale
+
+
 def _tree_difference(positive: Any, negative: Any, scale: float) -> Any:
-    return tree_map(lambda upper, lower: (upper - lower) / scale, positive, negative)
+    return tree_map(partial(_scaled_difference, scale=scale), positive, negative)
+
+
+def _shift_leaf(value: Any, step: Any, *, scale: float) -> Any:
+    return value + scale * step
+
+
+def _as_abstract_value(value: Any) -> AbstractValue:
+    return AbstractValue(_array_spec(value))
 
 
 def _tree_allclose(actual: Any, expected: Any, *, atol: float, rtol: float) -> bool:
@@ -288,12 +301,12 @@ def check_gradient(
     finite_difference_passed = False
     for epsilon in steps:
         positive = tree_map(
-            lambda value, step, scale=epsilon: value + scale * step,
+            partial(_shift_leaf, scale=epsilon),
             primal,
             direction,
         )
         negative = tree_map(
-            lambda value, step, scale=epsilon: value - scale * step,
+            partial(_shift_leaf, scale=-epsilon),
             primal,
             direction,
         )
@@ -456,7 +469,7 @@ def check_primitive(  # noqa: C901, PLR0912, PLR0913, PLR0915
         if abstract_rule is None:
             _missing_rule(primitive, "abstract", "@primitive.def_abstract")
         abstract_arguments = {
-            name: tree_map(lambda value: AbstractValue(_array_spec(value)), primal)
+            name: tree_map(_as_abstract_value, primal)
             for name, primal in zip(dynamic_names, primals, strict=True)
         }
         abstract_arguments.update(static_arguments)
@@ -495,10 +508,7 @@ def check_primitive(  # noqa: C901, PLR0912, PLR0913, PLR0915
 
     tangent_tree = (
         tree_map(
-            lambda value: _default_check_tangent(
-                value,
-                complex_direction="complex" in requested,
-            ),
+            partial(_default_check_tangent, complex_direction="complex" in requested),
             primals,
         )
         if tangents is None

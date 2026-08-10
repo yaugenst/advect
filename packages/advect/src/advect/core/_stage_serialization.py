@@ -20,6 +20,10 @@ _ENCODED_VALUE_FIELDS = {_VALUE_KIND, _VALUE_PAYLOAD}
 _TREEDEF_FIELDS = {"type", "aux", "children", "num_leaves"}
 
 
+def _encoded_entry_sort_key(entry: list[dict[str, object]]) -> str:
+    return json.dumps(entry[0], sort_keys=True, separators=(",", ":"))
+
+
 def _encode_value(value: object) -> dict[str, object]:
     if value is None or type(value) in (bool, int, str):
         return {_VALUE_KIND: "scalar", _VALUE_PAYLOAD: value}
@@ -36,7 +40,7 @@ def _encode_value(value: object) -> dict[str, object]:
         return {_VALUE_KIND: "tuple", _VALUE_PAYLOAD: [_encode_value(item) for item in value]}
     if type(value) is dict:
         entries = [[_encode_value(key), _encode_value(item)] for key, item in value.items()]
-        entries.sort(key=lambda entry: json.dumps(entry[0], sort_keys=True, separators=(",", ":")))
+        entries.sort(key=_encoded_entry_sort_key)
         return {_VALUE_KIND: "dict", _VALUE_PAYLOAD: entries}
     msg = f"Staged metadata is not JSON serializable: {type(value).__name__}"
     raise TypeError(msg)

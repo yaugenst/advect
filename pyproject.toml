@@ -46,7 +46,7 @@ scientific = [
   "scipy>=1.18,<1.19",
   "xarray>=2026.7,<2026.8",
 ]
-torch = [ "torch>=2.10,<2.11" ]
+torch = [ "torch>=2.13.0,<2.14" ]
 xarray = [ "xarray>=2026.7,<2026.8" ]
 
 [dependency-groups]
@@ -55,8 +55,8 @@ dev = [
   "autograd>=1.9,<1.10",
   "hypothesis[numpy]>=6.148.3",
   "pre-commit>=4.5,<5",
-  "pyrefly==1.1.1",
-  "pytest>=9.0.1",
+  "pyrefly==1.2.0",
+  "pytest>=9.0.3",
   "ruff>=0.14.6",
   "scipy>=1.18,<1.19",
   "xarray>=2026.7,<2026.8",

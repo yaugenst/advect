@@ -20,6 +20,7 @@ if TYPE_CHECKING:
 
     from advect.core._native import DynamicTape
     from advect.core._protocols import TracedArrayLike
+    from advect.numpy._array_function.emission import ArrayFunctionHandler
 
 np: Any = _numpy
 
@@ -406,7 +407,9 @@ def _ifftshift(
     )
 
 
-def register_fft_handlers(handlers: dict[Callable[..., Any], Callable[..., Any]]) -> None:
+def register_fft_handlers(
+    handlers: dict[Callable[..., Any], ArrayFunctionHandler],
+) -> None:
     """Register FFT array-function handlers."""
     handlers[np.fft.fft] = _fft
     handlers[np.fft.ifft] = _ifft

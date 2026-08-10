@@ -24,6 +24,7 @@ if TYPE_CHECKING:
     from advect.core._native import DynamicTape
     from advect.core._protocols import TracedArrayLike
     from advect.numpy._array_function.composite import CompositeResult
+    from advect.numpy._array_function.emission import ArrayFunctionHandler
 
 
 _BINARY_ARITY = 2
@@ -443,7 +444,7 @@ def _roots_handler(
 
 
 def register_polynomial_handlers(
-    handlers: dict[Callable[..., Any], Callable[..., Any]],
+    handlers: dict[Callable[..., Any], ArrayFunctionHandler],
 ) -> None:
     """Register classic polynomial functions with differentiable parameters."""
     handlers[np.poly] = _poly_handler

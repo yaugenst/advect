@@ -165,7 +165,7 @@ jobs:
       - name: Install the qualified CPU PyTorch build
         run: >-
           uv pip install --python .venv/bin/python
-          'torch>=2.10,<2.11'
+          'torch>=2.13,<2.14'
           --index https://download.pytorch.org/whl/cpu
 
       - name: Test every host-autodiff bridge

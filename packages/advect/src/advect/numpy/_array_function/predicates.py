@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from advect.core._native import DynamicTape
     from advect.core._protocols import TracedArrayLike
     from advect.numpy._array_function.composite import CompositeResult
+    from advect.numpy._array_function.emission import ArrayFunctionHandler
 
 
 _BINARY_ARITY = 2
@@ -272,7 +273,7 @@ def _unary_predicate_handler(
 
 
 def register_predicate_handlers(
-    handlers: dict[Callable[..., Any], Callable[..., Any]],
+    handlers: dict[Callable[..., Any], ArrayFunctionHandler],
 ) -> None:
     """Register boolean-valued functions with exact a.e. zero derivatives."""
     handlers[np.all] = _all_handler

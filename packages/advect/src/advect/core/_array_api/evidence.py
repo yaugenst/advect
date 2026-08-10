@@ -1047,7 +1047,7 @@ def operation_cases(
             portable=True,
         ),
     ]
-    cases.sort(key=lambda case: case.identifier)
+    cases.sort(key=_operation_case_identifier)
     identifiers = [case.identifier for case in cases]
     if len(identifiers) != len(set(identifiers)):
         duplicates = sorted(
@@ -1069,6 +1069,10 @@ def operation_cases(
         for case in cases
         if profile.admits(case.path)
     )
+
+
+def _operation_case_identifier(case: OperationCase) -> str:
+    return case.identifier
 
 
 def operation_evidence_cases(

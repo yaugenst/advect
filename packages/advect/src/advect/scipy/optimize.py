@@ -120,8 +120,12 @@ def root_solver(
             solve_kwargs["method"] = method
         if captured_options is not None:
             solve_kwargs["options"] = dict(captured_options)
+
+        def packed_residual(flat: np.ndarray) -> np.ndarray:
+            return pack(residual(unpack(flat)))
+
         result = _scipy_optimize.root(
-            lambda flat: pack(residual(unpack(flat))),
+            packed_residual,
             packed_initial,
             **solve_kwargs,
         )

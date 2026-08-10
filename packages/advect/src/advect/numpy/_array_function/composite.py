@@ -19,6 +19,7 @@ if TYPE_CHECKING:
 
     from advect.core._native import DynamicTape
     from advect.core._protocols import TracedArrayLike
+    from advect.numpy._array_function.emission import ArrayFunctionHandler
 
 type CompositeResult = tuple[Any, Any]
 
@@ -1149,7 +1150,7 @@ def _corrcoef_handler(
 
 
 def register_composite_handlers(
-    handlers: dict[Callable[..., Any], Callable[..., Any]],
+    handlers: dict[Callable[..., Any], ArrayFunctionHandler],
 ) -> None:
     """Register conveniences that need no new primitive semantics."""
     handlers[np.hstack] = _hstack_handler

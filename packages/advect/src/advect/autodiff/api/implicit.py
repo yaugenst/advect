@@ -115,6 +115,10 @@ def _zero_tree(value: Any) -> Any:
     return tree_map(_zero_like, value)
 
 
+def _negate_leaf(leaf: Any) -> Any:
+    return None if leaf is None else -leaf
+
+
 def _fill_missing_tangents(
     primals: tuple[Any, ...],
     tangents: tuple[Any | None, ...],
@@ -128,17 +132,15 @@ def _fill_missing_tangents(
 
 
 def _negate_tree(value: Any) -> Any:
-    return tree_map(lambda leaf: None if leaf is None else -leaf, value)
+    return tree_map(_negate_leaf, value)
+
+
+def _materialize_cotangent_leaf(cotangent: Any, primal: Any) -> Any:
+    return _zero_like(primal) if cotangent is None else cotangent
 
 
 def _materialize_cotangent(cotangent: Any, primal: Any) -> Any:
-    return tree_map(
-        lambda cotangent_leaf, primal_leaf: (
-            _zero_like(primal_leaf) if cotangent_leaf is None else cotangent_leaf
-        ),
-        cotangent,
-        primal,
-    )
+    return tree_map(_materialize_cotangent_leaf, cotangent, primal)
 
 
 def _restore_flat_output(value: Any, treedef: TreeDef, *, label: str) -> Any:

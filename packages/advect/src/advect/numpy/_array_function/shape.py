@@ -21,6 +21,7 @@ if TYPE_CHECKING:
 
     from advect.core._native import DynamicTape
     from advect.core._protocols import TracedArrayLike
+    from advect.numpy._array_function.emission import ArrayFunctionHandler
 
 np: Any = _numpy
 
@@ -411,7 +412,9 @@ def _tile_handler(
     return result, node_id
 
 
-def register_shape_handlers(handlers: dict[Callable[..., Any], Callable[..., Any]]) -> None:
+def register_shape_handlers(
+    handlers: dict[Callable[..., Any], ArrayFunctionHandler],
+) -> None:
     """Register shape-related array functions."""
     handlers[np.reshape] = _reshape_handler
     handlers[np.transpose] = _make_unary_shape_handler(

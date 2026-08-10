@@ -56,8 +56,12 @@ from advect.numpy._array_function.unique import register_unique_handlers
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from advect.numpy._array_function.emission import ArrayFunctionHandler
 
-def register_family_handlers(handlers: dict[Callable[..., Any], Callable[..., Any]]) -> None:
+
+def register_family_handlers(
+    handlers: dict[Callable[..., Any], ArrayFunctionHandler],
+) -> None:
     """Register the domain-family array-function handlers."""
     register_alias_handlers(handlers)
     register_algorithm_handlers(handlers)

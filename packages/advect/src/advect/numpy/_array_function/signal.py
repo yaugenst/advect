@@ -20,6 +20,7 @@ if TYPE_CHECKING:
 
     from advect.core._native import DynamicTape
     from advect.core._protocols import TracedArrayLike
+    from advect.numpy._array_function.emission import ArrayFunctionHandler
 
 np: Any = _numpy
 
@@ -112,7 +113,7 @@ def _correlate_handler(
 
 
 def register_signal_handlers(
-    handlers: dict[Callable[..., Any], Callable[..., Any]],
+    handlers: dict[Callable[..., Any], ArrayFunctionHandler],
 ) -> None:
     """Register NumPy signal operations."""
     handlers[np.convolve] = _convolve_handler

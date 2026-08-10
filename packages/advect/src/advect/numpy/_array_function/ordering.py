@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from advect.core._native import DynamicTape
     from advect.core._protocols import TracedArrayLike
     from advect.numpy._array_function.composite import CompositeResult
+    from advect.numpy._array_function.emission import ArrayFunctionHandler
 
 
 _BINARY_ARITY = 2
@@ -530,7 +531,7 @@ def _multi_index_handler(
 
 
 def register_ordering_handlers(
-    handlers: dict[Callable[..., Any], Callable[..., Any]],
+    handlers: dict[Callable[..., Any], ArrayFunctionHandler],
 ) -> None:
     """Register discrete algorithms with their exact a.e. zero derivatives."""
     handlers[np.argsort] = _argsort_handler

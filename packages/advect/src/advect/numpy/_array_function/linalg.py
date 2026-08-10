@@ -26,7 +26,10 @@ if TYPE_CHECKING:
 
     from advect.core._native import DynamicTape
     from advect.core._protocols import TracedArrayLike
-    from advect.numpy._array_function.emission import ArrayFunctionResult
+    from advect.numpy._array_function.emission import (
+        ArrayFunctionHandler,
+        ArrayFunctionResult,
+    )
 
 np: Any = _numpy
 
@@ -1401,7 +1404,9 @@ def _einsum_handler(
     return result, node_id
 
 
-def register_linalg_handlers(handlers: dict[Callable[..., Any], Callable[..., Any]]) -> None:
+def register_linalg_handlers(
+    handlers: dict[Callable[..., Any], ArrayFunctionHandler],
+) -> None:
     """Register linalg-related array functions."""
     handlers[np.linalg.slogdet] = _slogdet_handler
     handlers[np.linalg.svd] = _svd_handler

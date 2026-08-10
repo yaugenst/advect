@@ -92,6 +92,10 @@ def _numpy_tree(value: Any) -> Any:
     return jax.tree_util.tree_map(np.asarray, value)
 
 
+def _shape_dtype_struct(value: Any) -> Any:
+    return jax.ShapeDtypeStruct(value.shape, value.dtype)
+
+
 def _require_result_specs_when_staged(value: Any) -> None:
     leaves = jax.tree_util.tree_leaves(value)
     if any(isinstance(leaf, jax.core.Tracer) for leaf in leaves):
@@ -194,10 +198,7 @@ def wrap(
         if result_shape_dtypes is None:
             _require_result_specs_when_staged((values, cotangents))
             return tuple(jax.device_put(backward_callback(values, cotangents)))
-        input_specs = jax.tree_util.tree_map(
-            lambda value: jax.ShapeDtypeStruct(value.shape, value.dtype),
-            values,
-        )
+        input_specs = jax.tree_util.tree_map(_shape_dtype_struct, values)
         gradients = jax.pure_callback(
             backward_callback,
             input_specs,

@@ -20,6 +20,22 @@ _BINARY_ARITY = 2
 _SINGLE_OUTPUT_ARITY = 1
 
 
+def _callable_row_key(row: dict[str, object]) -> str:
+    return str(row["callable"])
+
+
+def _kind_and_callable_row_key(row: dict[str, object]) -> tuple[str, str]:
+    return str(row["kind"]), str(row["callable"])
+
+
+def _function_name(function: object) -> str:
+    return str(getattr(function, "__name__", ""))
+
+
+def _function_module(function: Callable[..., object]) -> str:
+    return str(getattr(function, "__module__", ""))
+
+
 def _derivative_status(definition: OpDef) -> tuple[Capability, VJPCapability]:
     if definition.non_differentiable_reason is not None:
         return "n/a", "n/a"
@@ -156,7 +172,7 @@ def _array_api_extension() -> dict[str, object]:
         and path not in _ARRAY_API_COMPOSITES
         and selected_profile.admits(path)
     )
-    rows.sort(key=lambda row: str(row["callable"]))
+    rows.sort(key=_callable_row_key)
     supported_profiles = []
     for version in SUPPORTED_ARRAY_API_VERSIONS:
         support_profile = build_support_profile(version)
@@ -326,7 +342,7 @@ def _numpy_ufunc_rows(array_api_ops: frozenset[str]) -> list[dict[str, object]]:
 
     modes_by_form, derivatives_by_form = _numpy_declared_contracts()
     rows = []
-    for ufunc in sorted(_SUPPORTED_UFUNCS, key=lambda operation: operation.__name__):
+    for ufunc in sorted(_SUPPORTED_UFUNCS, key=_function_name):
         path = f"numpy.{ufunc.__name__}"
         modes = modes_by_form.get(("ufunc_call", path))
         if modes is None:
@@ -360,7 +376,7 @@ def _numpy_ufunc_method_rows(array_api_ops: frozenset[str]) -> list[dict[str, ob
 
     modes_by_form, derivatives_by_form = _numpy_declared_contracts()
     rows = []
-    for ufunc in sorted(_SUPPORTED_UFUNCS, key=lambda operation: operation.__name__):
+    for ufunc in sorted(_SUPPORTED_UFUNCS, key=_function_name):
         name = ufunc.__name__
         methods: list[tuple[str, str]] = []
         reduction = _NUMPY_UFUNC_REDUCTIONS.get(name)
@@ -471,7 +487,7 @@ def _numpy_extension(array_api_ops: frozenset[str]) -> dict[str, object]:
         *_numpy_ufunc_method_rows(array_api_ops),
         *_numpy_array_method_rows(array_api_ops),
     ]
-    rows.sort(key=lambda row: (str(row["kind"]), str(row["callable"])))
+    rows.sort(key=_kind_and_callable_row_key)
     supported_method_count = sum(row["kind"] == "ufunc_method" for row in rows)
     return {
         "available": True,
@@ -499,7 +515,7 @@ def _walk_public_functions(module: ModuleType) -> tuple[Callable[..., object], .
                 functions.append(cast("Callable[..., object]", value))
 
     visit(module)
-    return tuple(sorted(functions, key=lambda function: str(getattr(function, "__module__", ""))))
+    return tuple(sorted(functions, key=_function_module))
 
 
 def _scipy_primitive_lowering(entrypoint: str) -> str:
@@ -558,7 +574,7 @@ def _scipy_extension() -> dict[str, object]:
         return {"available": False, "functions": [], "version": None}
 
     rows = [_scipy_function_row(function) for function in _walk_public_functions(scipy_extension)]
-    rows.sort(key=lambda row: str(row["callable"]))
+    rows.sort(key=_callable_row_key)
     return {
         "available": True,
         "functions": rows,

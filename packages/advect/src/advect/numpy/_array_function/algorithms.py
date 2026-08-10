@@ -27,6 +27,7 @@ if TYPE_CHECKING:
     from advect.core._native import DynamicTape
     from advect.core._protocols import TracedArrayLike
     from advect.numpy._array_function.composite import CompositeResult
+    from advect.numpy._array_function.emission import ArrayFunctionHandler
 
 
 _BINARY_ARITY = 2
@@ -1161,7 +1162,7 @@ def _histogramdd_handler(  # noqa: PLR0912, PLR0915
 
 
 def register_algorithm_handlers(
-    handlers: dict[Callable[..., Any], Callable[..., Any]],
+    handlers: dict[Callable[..., Any], ArrayFunctionHandler],
 ) -> None:
     """Register higher-level algorithms with traceable composite lowerings."""
     handlers[np.apply_along_axis] = _apply_along_axis_handler

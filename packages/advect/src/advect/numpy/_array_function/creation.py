@@ -37,6 +37,7 @@ if TYPE_CHECKING:
     from advect.core._native import DynamicTape
     from advect.core._protocols import TracedArrayLike
     from advect.numpy._array_function.composite import CompositeResult
+    from advect.numpy._array_function.emission import ArrayFunctionHandler
 
 _MIN_REQUIRED_ARGS = 2
 
@@ -272,7 +273,7 @@ def _tri_handler(
 
 
 def register_creation_handlers(
-    handlers: dict[Callable[..., Any], Callable[..., Any]],
+    handlers: dict[Callable[..., Any], ArrayFunctionHandler],
 ) -> None:
     """Register constructors that NumPy dispatches through a traced like= value."""
     handlers[np.array] = lambda _graph, traced_type, args, kwargs: _finish(

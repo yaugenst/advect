@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING, Any, cast
 import numpy as np
 
 from advect.numpy._array_function.emission import (
-    ArrayFunctionResult,
     _make_arg_reduction_handler,
     _make_atleast_handler,
     _make_axis_keepdims_reduction_handler,
@@ -32,12 +31,10 @@ if TYPE_CHECKING:
 
     from advect.core._native import DynamicTape
     from advect.core._protocols import TracedArrayLike
-
-
-type Handler = Callable[
-    [DynamicTape, type[TracedArrayLike], tuple[Any, ...], dict[str, Any]],
-    ArrayFunctionResult,
-]
+    from advect.numpy._array_function.emission import (
+        ArrayFunctionHandler,
+        ArrayFunctionResult,
+    )
 
 
 class ArrayFunctionNotSupportedError(Exception):
@@ -48,7 +45,7 @@ class ArrayFunctionNotSupportedError(Exception):
 class ArrayFunctionRuntime:
     """Resolved NumPy array-function handlers."""
 
-    handlers: dict[Callable[..., Any], Handler]
+    handlers: dict[Callable[..., Any], ArrayFunctionHandler]
 
     def get_array_function_name(self, func: Callable[..., Any]) -> str:
         module = getattr(func, "__module__", "numpy")
@@ -90,7 +87,7 @@ def _op_name(suffix: str) -> str:
 
 
 def _register_all_handlers(
-    handlers: dict[Callable[..., Any], Handler],
+    handlers: dict[Callable[..., Any], ArrayFunctionHandler],
 ) -> None:
     reduction_ops: list[str] = [
         "sum",
@@ -178,6 +175,6 @@ _STATIC_ARRAY_FUNCTIONS = frozenset(
         np.size,
     }
 )
-_HANDLERS: dict[Callable[..., Any], Handler] = {}
+_HANDLERS: dict[Callable[..., Any], ArrayFunctionHandler] = {}
 _register_all_handlers(_HANDLERS)
 ARRAY_FUNCTION_RUNTIME = ArrayFunctionRuntime(handlers=_HANDLERS)
