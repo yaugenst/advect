@@ -1,27 +1,18 @@
 # advect-native
 
-`advect-native` is Advect's required PyO3 adapter. Maturin builds it as the private
-`advect._native_core` extension inside the `advect` wheel; it is not a
-separately installable distribution.
+`advect-native` is Advect's private PyO3 extension. Maturin packages it as
+`advect._native_core` inside the `advect` wheel; it is not installed separately.
 
-The adapter owns Python-specific runtime state:
+The extension owns two Python-facing runtime jobs:
 
-- invocation-local dynamic-tape values, literals, callbacks, and residual
-  handles;
-- reentrant JVP and VJP callback invocation;
-- Python conversion and exception mapping;
-- thin Python handles over runtime-owned graph builders and stores;
-- `PythonHost`, which links and evaluates Python providers through the
-  host-independent staged execution schedule and clones Python handles for
-  repeated flat graph outputs.
+- the invocation-local dynamic tape used by JVP and VJP traversal;
+- translation between Python values and the host-independent staged runtime.
 
-Durable graph authority lives in the PyO3-free `advect-runtime` crate:
-`RawArena`, graph metadata, portable constants, validation, canonical
-serialization, fixed cleanup, topology, use counts, conservative alias-root
-sets, and execution planning. `PythonHost` validates inputs, constants, and
-every evaluated output leaf. `advect-native` does not maintain a second durable
-graph model, optimizer, serializer, or staged execution loop.
+It also maps exceptions, invokes Python callbacks, and links provider
+operations through `PythonHost`. `advect-runtime` remains the authority for the
+staged graph, validation, optimization, serialization, scheduling, and value
+lifetimes. The adapter keeps only thin handles to those runtime-owned objects.
 
-Dynamic autodiff uses this extension for its invocation-local tape and direct
-forward/reverse traversal. It does not convert that tape to `GraphStore` or run
-staged cleanup before backward.
+Dynamic traces are not converted into staged graphs or sent through the staged
+optimizer before a backward pass. The [codebase map](../../docs/development/codebase.md)
+explains the complete Python/runtime split.

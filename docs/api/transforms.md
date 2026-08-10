@@ -7,9 +7,9 @@ program with the same input signature and Array API revision. `vjp_program` is
 the explicit staged pullback transform and is documented with
 [staging](staging.md). The remaining transforms do not produce staged programs.
 
-See the [API overview](index.md) for semantics shared across transforms and the
-[target API](https://github.com/yaugenst/advect/blob/main/design/target-api.md)
-for normative examples.
+The [gradient](../tutorials/gradients.md), [linear-map](../tutorials/linear-maps.md),
+and [higher-order](../tutorials/advanced-differentiation.md) tutorials connect
+these transforms through complete examples.
 
 ::: advect.grad
 

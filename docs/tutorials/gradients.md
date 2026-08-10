@@ -1,9 +1,10 @@
 # Gradients and Pytrees
 
-## Differentiate a NumPy function
+Advect transforms ordinary Python callables. Start with a function that returns
+one real scalar, then call `grad` with the same inputs you would pass to the
+original function.
 
-`grad` expects a real scalar output and differentiates the first argument by
-default:
+## Differentiate a NumPy function
 
 ```{.python .run}
 import numpy as np
@@ -17,61 +18,46 @@ def loss(x):
 
 x = np.linspace(-0.5, 0.5, 8)
 gradient = ad.grad(loss)(x)
+
 np.testing.assert_allclose(gradient, 2 * np.sin(x) * np.cos(x))
-print(gradient)
+print("gradient:", np.round(gradient, 6))
 ```
 
-The function is traced with the concrete value on every call. Python branches,
-loops, and data-dependent shapes therefore behave as they do in an ordinary
-call, provided every numerical operation is supported by the frontend.
+The transform traces the concrete call, runs reverse mode, and releases the
+trace before returning. A later call can take different branches, shapes, or
+loop counts; [Dynamic control flow](control-flow.md) develops that model.
 
-Real Python scalar inputs use the same array tracer. Advect lifts them to
-zero-dimensional `float64` arrays at the transform boundary and returns their
-derivatives as Python scalars:
+Use `value_and_grad` when an optimizer needs the objective and gradient from
+the same evaluation:
 
 ```{.python .run}
-gradient = ad.grad(lambda value: value * value)(3.0)
-assert gradient == 6.0
-print(gradient)
+value, gradient = ad.value_and_grad(loss)(x)
+updated = x - 0.1 * gradient
+
+print(f"loss: {value:.6f}")
+print(f"loss after one step: {loss(updated):.6f}")
 ```
 
-This is boundary convenience rather than a parallel scalar-operation
-frontend. Use provider operations inside functions that need transcendental
-functions or mixed array/scalar behavior.
-
-## Construct arrays from traced values
-
-Keep ordinary NumPy and give its constructor a live dispatch anchor through
-the standard `like=` parameter:
+If the function also returns diagnostics, set `has_aux=True`. The auxiliary
+value follows the call but is not differentiated:
 
 ```{.python .run}
-def constructor_loss(x):
-    coefficients = np.array(
-        [[x[0], x[1]], [x[1], 2 * x[0]]],
-        like=x,
-    )
-    return coefficients.sum().item()
+def loss_with_metrics(x):
+    value = loss(x)
+    return value, {"maximum": np.max(np.abs(x)), "size": x.size}
 
 
-gradient = ad.grad(constructor_loss)(np.array([1.0, 2.0]))
-np.testing.assert_allclose(gradient, np.array([3.0, 2.0]))
-print(gradient)
+value, gradient, metrics = ad.value_and_grad(
+    loss_with_metrics,
+    has_aux=True,
+)(x)
+print(f"loss: {value:.6f}; metrics: {metrics}")
 ```
 
-`like=x` selects Advect's constructor handling and x's array provider; it does
-not itself create a mathematical dependence on `x`. `np.array` creates an
-owned value by default, while `np.asarray` preserves a direct tracer when no
-conversion is required. Both accept rectangular nested lists or tuples.
+## Select arguments and preserve structure
 
-`ad.array` and `ad.asarray` remain explicit provider-neutral alternatives. For
-constructor-heavy migration code, `import advect.numpy as np` is a secondary
-convenience: it overrides the traced constructors and delegates every other
-attribute directly to the installed NumPy module.
-
-## Multiple arguments and pytrees
-
-Use `argnums` to select positional arguments. Dictionaries, lists, tuples, and
-custom pytree nodes preserve their structure:
+Lists, tuples, dictionaries, and registered pytree nodes keep their structure.
+`argnums` selects positional arguments; `argnames` selects named arguments.
 
 ```{.python .run}
 parameters = {
@@ -81,34 +67,46 @@ parameters = {
 features = np.array([2.0, -1.0, 0.5])
 
 
-def model_loss(params, inputs):
+def model_loss(params, inputs, *, scale):
     prediction = params["weight"] * inputs + params["bias"]
-    return np.sum(prediction**2)
+    return scale * np.sum(prediction**2)
 
 
-dparameters, dfeatures = ad.grad(
+(dparameters, dfeatures), named = ad.grad(
     model_loss,
     argnums=(0, 1),
-)(parameters, features)
-print(dparameters, dfeatures)
+    argnames=("scale",),
+)(parameters, features, scale=0.5)
+
+print("weight gradient:", dparameters["weight"])
+print("feature gradient:", dfeatures)
+print("scale gradient:", named["scale"])
 ```
 
-The first result has the same dictionary structure as `parameters`. Keyword
-arguments can be selected with `argnames`:
+The gradient tree mirrors the selected input tree. Real Python scalars are
+accepted at the boundary and return Python-scalar derivatives; numerical work
+inside the function still follows the active array provider.
+
+## Stop one dependency explicitly
+
+`stop_gradient` keeps a concrete dynamic value in the computation while
+removing its derivative contribution. Here the normalization scale is measured
+from the input but treated as fixed during differentiation:
 
 ```{.python .run}
-def scaled_loss(value, *, scale):
-    return np.sum(scale * value**2)
+def normalized_loss(x):
+    scale = ad.stop_gradient(np.max(np.abs(x)))
+    return np.sum((x / scale) ** 2)
 
 
-positional, named = ad.grad(
-    scaled_loss,
-    argnums=(0,),
-    argnames=("scale",),
-)(features, scale=0.5)
-print(positional, named)
+sample = np.array([-2.0, 1.0])
+gradient = ad.grad(normalized_loss)(sample)
+print("gradient with fixed scale:", gradient)
 ```
 
-Continue with [Advanced differentiation](advanced-differentiation.md) for
-Jacobians, nested derivatives, Hessian-vector products, dense Hessians, and
-checkpointing.
+Stopping a gradient is an explicit modeling choice, not a way to hide an
+unsupported operation. It is available only for dynamic calls because a staged
+trace has no concrete value to detach.
+
+Next, see how the same transform handles [branches, loops, and local
+mutation](control-flow.md).

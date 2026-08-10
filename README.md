@@ -1,33 +1,20 @@
 # Advect
 
-Advect differentiates ordinary NumPy programs and can turn the same code into
-an immutable, serializable array program. Dynamic transforms preserve Python
-control flow; explicit staging creates the durable graph boundary.
+Advect differentiates ordinary NumPy and Array API programs. Dynamic transforms
+follow the Python code that runs for each call; `stage` turns one fixed input
+signature into an immutable program that can be reused, saved, and loaded.
 
-Advect is alpha software. Public APIs and serialized artifacts may change
-before 1.0.
+Advect is pre-1.0 software. Public APIs and serialized programs may change
+before the first stable release.
 
-## Install
+## Try it
 
-Advect requires Python 3.12 or 3.13.
-
-```bash
-python -m pip install advect
-```
-
-SciPy helpers and xarray-aware gradients are available together:
+Advect requires Python 3.12 or newer. The first package release is still being
+prepared, so install the current source from a checkout:
 
 ```bash
-python -m pip install "advect[scientific]"
+python -m pip install .
 ```
-
-The first public release is still being prepared. Until it is published, the
-same package can be installed from a checkout with `python -m pip install .`.
-
-## First gradient
-
-`grad` traces a concrete call and returns a function with the same input
-structure. The differentiated code stays ordinary NumPy:
 
 ```python
 import numpy as np
@@ -36,105 +23,44 @@ import advect as ad
 
 
 def energy(x):
-    centered = x - np.mean(x)
-    return np.sum(np.sin(centered) ** 2)
+    return np.sum(np.sin(x) ** 2)
 
 
-x = np.linspace(0.0, 1.0, 8)
-gradient = ad.grad(energy)(x)
+x = np.array([0.0, 0.5, 1.0])
+value, gradient = ad.value_and_grad(energy)(x)
+
+print(f"loss: {value:.6f}")
+print("gradient:", np.round(gradient, 6))
+# loss: 0.937922
+# gradient: [0.       0.841471 0.909297]
 ```
 
-Each call follows the Python control flow taken by its concrete inputs. Local
-array mutation is functionalized while tracing, including ordinary
-accumulation and basic indexed updates. Mutating inputs or mutating through an
-ambiguous view fails at the operation that crosses the boundary.
-
-## Dynamic calls and staged programs
-
-Use dynamic transforms for ordinary Python execution. Use `stage` when one
-shape and dtype signature must run repeatedly, move between processes, or be
-saved:
+Each dynamic call traces its own branches, loops, and supported local array
+updates. When the same shape and dtype will run repeatedly, stage the same
+function:
 
 ```python
 program = ad.stage(energy, x)
-result = program(x)
-
-payload = program.to_dict()
-restored = ad.StagedProgram.from_dict(payload)
+restored = ad.StagedProgram.from_dict(program.to_dict())
+print(f"restored loss: {restored(x):.6f}")
+# restored loss: 0.937922
 ```
 
-A staged program is immutable and records its required Array API revision.
-Staged differentiation returns durable programs as well: `ad.grad(program)`
-builds a scalar gradient, while `ad.vjp_program(program)` builds a reusable
-pullback with an explicit cotangent input.
+The core API also covers JVPs, VJPs, Jacobians, higher-order derivatives,
+checkpointing, implicit differentiation, and custom primitives. Optional
+integrations add SciPy functions, xarray-aware gradients, and first-order
+bridges into JAX, PyTorch, and HIPS Autograd.
 
-Complex derivatives are real-linear. For a real loss,
-`grad(abs(z) ** 2) == 2 * z`; complex-output `grad` is rejected in favor of
-`linearize`, `jvp`, or `vjp`.
+## Learn and contribute
 
-## Scientific Python boundaries
-
-NumPy 2.0 through 2.4 is the primary frontend. Advect also carries explicit
-Array API 2022.12, 2023.12, and 2024.12 contracts for provider-neutral
-execution and serialized programs. The
-[compatibility catalog](https://yaugenst.github.io/advect/latest/compatibility/)
-reports dynamic, staged, and serialized support separately; a registered
-operation is not itself a public support claim.
-
-The optional [`advect.scipy`](https://yaugenst.github.io/advect/latest/api/scipy/)
-namespace provides a bounded NumPy-backed set of differentiable special
-functions, image filters, and root/GMRES solver adapters. Importing
-[`advect.xarray`](https://yaugenst.github.io/advect/latest/api/xarray/)
-registers supported `DataArray` and `Dataset` pytrees whose gradients preserve
-labels and metadata.
-
-Optional bridges make a NumPy-backed Advect function one differentiable
-operation inside PyTorch, JAX, or HIPS Autograd:
-
-```bash
-python -m pip install "advect[torch]"  # or advect[jax], advect[autograd]
-```
-
-These are first-order host-transform boundaries, not additional array
-providers. See the
-[host interop reference](https://yaugenst.github.io/advect/latest/api/interop/)
-for their eager, compiled, pytree, and auxiliary-output contracts.
-
-## Extending Advect
-
-A custom operation starts with its concrete implementation and adds only the
-semantic rules it needs:
-
-```python
-@ad.primitive
-def solve(a, b): ...
-
-
-@solve.def_abstract
-def solve_abstract(a, b): ...
-
-
-@solve.def_jvp
-def solve_jvp(output, primals, tangents): ...
-```
-
-Advect infers a default operation name from the function. Package authors may
-pass `name="acme.solve"` when serialized programs need an identity independent
-of the Python module path. The name is a link key, not automatic semantic
-versioning: a serialized artifact must be loaded with its matching operation
-implementation. The [custom primitive tutorial](https://yaugenst.github.io/advect/latest/tutorials/primitives/)
-and [primitive reference](https://yaugenst.github.io/advect/latest/api/primitives/)
-cover the authoring contract.
-
-## Documentation and development
-
-The [documentation](https://yaugenst.github.io/advect/) starts with runnable
-tutorials, then separates architecture, public API, and compatibility
-contracts. Contributors should start with
+Start with the [runnable tutorials](https://yaugenst.github.io/advect/latest/tutorials/),
+then use the [API reference](https://yaugenst.github.io/advect/latest/api/) and
+[compatibility tables](https://yaugenst.github.io/advect/latest/compatibility/)
+for exact contracts. Contributors should begin with
 [CONTRIBUTING.md](https://github.com/yaugenst/advect/blob/main/CONTRIBUTING.md)
 and the [developer guide](https://yaugenst.github.io/advect/latest/development/).
 
-Security reports belong in the repository's
-[private advisory form](https://github.com/yaugenst/advect/security/advisories/new),
-not a public issue. Advect is licensed under the
+Report security issues through GitHub's
+[private advisory form](https://github.com/yaugenst/advect/security/advisories/new).
+Advect is distributed under the
 [MIT License](https://github.com/yaugenst/advect/blob/main/LICENSE).

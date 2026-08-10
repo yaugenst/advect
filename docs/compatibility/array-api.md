@@ -6,11 +6,11 @@ Any array whose namespace implements the Array API standard reaches Advect throu
 
 ## Providers
 
-| Provider | Route into Advect | Status |
-|---|---|---|
-| NumPy | first-class protocol frontend | qualified — see [NumPy](numpy.md) for the minor-to-revision mapping |
-| `array-api-strict` | `__array_namespace__()` directly | qualified for all three revisions below |
-| CuPy | the built-in fallback — install the matching CuPy build and pass CuPy arrays directly | manual qualification gate; CuPy `14.0.1`, `14.1.1` has source records for Array API `2022.12`, `2023.12`, `2024.12`; no published immutable artifact currently verifies release support — see [CuPy](cupy.md) |
+| Provider | Status |
+|---|---|
+| NumPy | Qualified through its first-class frontend; see [NumPy](numpy.md) for the minor-to-revision mapping |
+| `array-api-strict` | Qualified through `__array_namespace__()` for all three revisions below |
+| CuPy | Built-in compatibility path; not yet a release support claim. See [CuPy](cupy.md) |
 
 The fallback handles raw provider arrays at Advect's input boundary; it does not make an array traceable when its namespace does not implement the standard.
 
@@ -22,192 +22,182 @@ The fallback handles raw provider arrays at Advect's input boundary; it does not
 | `2023.12` | 164 | 162 |
 | `2024.12` | 170 | 168 |
 
-The `2022.12` revision is the baseline; later revisions extend it. The full baseline surface is listed below, followed by what each revision adds or changes; the official callables whose claim stays incomplete are collected at the end.
+The `2022.12` revision is the baseline; later revisions extend it. Its callable set appears below, followed by additions, changes, and the few official functions with a remaining boundary.
 
-The mode columns are public support claims: **yes** means the callable's declared contract is supported end to end in that execution mode (dynamic tracing, abstract staging, serialized artifacts). Restricted implementation paths may remain internal, but registration alone does not promote an additional upstream spelling into this catalog.
-
-`Abstract=yes` means that a primitive has a standalone abstract rule. A frontend may still be staged by an explicit method or composite lowering when its displayed primitive does not.
+Every listed function works in dynamic transforms. **Stage/save** says whether the same call can appear in a staged and serialized program. **Differentiate** reports user-visible derivative support. **No** means no derivative rule is available; **n/a** marks a structural or mathematically nondifferentiable operation.
 
 ## Array API 2022.12 baseline
 
-<details class="compat-columns">
-<summary>capability details</summary>
-</details>
-
-| Function | Lowers to | Dynamic | Staged | Serialized | JVP | VJP | Abstract |
-|---|---|:---:|:---:|:---:|:---:|:---:|:---:|
-| `abs` | `array.absolute` | yes | yes | yes | yes | direct | yes |
-| `acos` | `array.arccos` | yes | yes | yes | yes | from JVP | yes |
-| `acosh` | `array.arccosh` | yes | yes | yes | yes | from JVP | yes |
-| `add` | `array.add` | yes | yes | yes | yes | direct | yes |
-| `all` | `array.all` | yes | yes | yes | n/a | n/a | yes |
-| `any` | `array.any` | yes | yes | yes | n/a | n/a | yes |
-| `arange` | `array.arange` | yes | yes | yes | no | no | yes |
-| `argmax` | `array.argmax` | yes | yes | yes | n/a | n/a | yes |
-| `argmin` | `array.argmin` | yes | yes | yes | n/a | n/a | yes |
-| `argsort` | `array.argsort` | yes | yes | yes | n/a | n/a | yes |
-| `asarray` | `array.astype` | yes | yes | yes | yes | direct | yes |
-| `asin` | `array.arcsin` | yes | yes | yes | yes | from JVP | yes |
-| `asinh` | `array.arcsinh` | yes | yes | yes | yes | from JVP | yes |
-| `astype` | `array.astype` | yes | yes | yes | yes | direct | yes |
-| `atan` | `array.arctan` | yes | yes | yes | yes | from JVP | yes |
-| `atan2` | `array.arctan2` | yes | yes | yes | yes | from JVP | yes |
-| `atanh` | `array.arctanh` | yes | yes | yes | yes | from JVP | yes |
-| `bitwise_and` | `array.bitwise_and` | yes | yes | yes | n/a | n/a | yes |
-| `bitwise_invert` | `array.invert` | yes | yes | yes | n/a | n/a | yes |
-| `bitwise_left_shift` | `array.left_shift` | yes | yes | yes | no | no | yes |
-| `bitwise_or` | `array.bitwise_or` | yes | yes | yes | n/a | n/a | yes |
-| `bitwise_right_shift` | `array.right_shift` | yes | yes | yes | no | no | yes |
-| `bitwise_xor` | `array.bitwise_xor` | yes | yes | yes | n/a | n/a | yes |
-| `broadcast_arrays` | composite | yes | yes | yes | composite | composite | composite |
-| `broadcast_to` | `array.broadcast_to` | yes | yes | yes | yes | direct | yes |
-| `can_cast` | metadata | yes | yes | yes | n/a | n/a | n/a |
-| `ceil` | `array.ceil` | yes | yes | yes | yes | direct | yes |
-| `concat` | `array.concatenate` | yes | yes | yes | yes | direct | yes |
-| `conj` | `array.conjugate` | yes | yes | yes | yes | direct | yes |
-| `cos` | `array.cos` | yes | yes | yes | yes | direct | yes |
-| `cosh` | `array.cosh` | yes | yes | yes | yes | from JVP | yes |
-| `divide` | `array.divide` | yes | yes | yes | yes | direct | yes |
-| `empty` | `array.empty` | yes | yes | yes | no | no | yes |
-| `empty_like` | `array.empty_like` | yes | yes | yes | yes | from JVP | yes |
-| `equal` | `array.equal` | yes | yes | yes | n/a | n/a | yes |
-| `exp` | `array.exp` | yes | yes | yes | yes | direct | yes |
-| `expand_dims` | `array.expand_dims` | yes | yes | yes | yes | direct | yes |
-| `expm1` | `array.expm1` | yes | yes | yes | yes | from JVP | yes |
-| `eye` | `array.eye` | yes | yes | yes | no | no | yes |
-| `fft.fft` | `array_ext.fft.fft` | yes | yes | yes | yes | direct | yes |
-| `fft.fftfreq` | `array_ext.fft.fftfreq` | yes | yes | yes | no | no | yes |
-| `fft.fftn` | `array_ext.fft.fftn` | yes | yes | yes | yes | direct | yes |
-| `fft.fftshift` | `array_ext.fft.fftshift` | yes | yes | yes | yes | direct | yes |
-| `fft.hfft` | `array_ext.fft.hfft` | yes | yes | yes | yes | from JVP | yes |
-| `fft.ifft` | `array_ext.fft.ifft` | yes | yes | yes | yes | direct | yes |
-| `fft.ifftn` | `array_ext.fft.ifftn` | yes | yes | yes | yes | direct | yes |
-| `fft.ifftshift` | `array_ext.fft.ifftshift` | yes | yes | yes | yes | direct | yes |
-| `fft.ihfft` | `array_ext.fft.ihfft` | yes | yes | yes | yes | from JVP | yes |
-| `fft.irfft` | `array_ext.fft.irfft` | yes | yes | yes | yes | direct | yes |
-| `fft.irfftn` | `array_ext.fft.irfftn` | yes | yes | yes | yes | direct | yes |
-| `fft.rfft` | `array_ext.fft.rfft` | yes | yes | yes | yes | direct | yes |
-| `fft.rfftfreq` | `array_ext.fft.rfftfreq` | yes | yes | yes | no | no | yes |
-| `fft.rfftn` | `array_ext.fft.rfftn` | yes | yes | yes | yes | direct | yes |
-| `finfo` | metadata | yes | yes | yes | n/a | n/a | n/a |
-| `flip` | `array.flip` | yes | yes | yes | yes | direct | yes |
-| `floor` | `array.floor` | yes | yes | yes | yes | direct | yes |
-| `floor_divide` | `array.floor_divide` | yes | yes | yes | yes | direct | yes |
-| `full` | `array.full` | yes | yes | yes | yes | from JVP | yes |
-| `full_like` | `array.full_like` | yes | yes | yes | yes | from JVP | yes |
-| `greater` | `array.greater` | yes | yes | yes | n/a | n/a | yes |
-| `greater_equal` | `array.greater_equal` | yes | yes | yes | n/a | n/a | yes |
-| `iinfo` | metadata | yes | yes | yes | n/a | n/a | n/a |
-| `imag` | `array.imag` | yes | yes | yes | yes | direct | yes |
-| `isdtype` | metadata | yes | yes | yes | n/a | n/a | n/a |
-| `isfinite` | `array.isfinite` | yes | yes | yes | n/a | n/a | yes |
-| `isinf` | `array.isinf` | yes | yes | yes | n/a | n/a | yes |
-| `isnan` | `array.isnan` | yes | yes | yes | n/a | n/a | yes |
-| `less` | `array.less` | yes | yes | yes | n/a | n/a | yes |
-| `less_equal` | `array.less_equal` | yes | yes | yes | n/a | n/a | yes |
-| `linalg.cholesky` | `array_ext.linalg.cholesky` | yes | yes | yes | yes | direct | yes |
-| `linalg.cross` | `array.cross` | yes | yes | yes | yes | direct | yes |
-| `linalg.det` | `array_ext.linalg.det` | yes | yes | yes | yes | from JVP | yes |
-| `linalg.diagonal` | `array.diagonal` | yes | yes | yes | yes | direct | yes |
-| `linalg.eigh` | `array_ext.linalg.eigh` | yes | yes | yes | yes | direct | yes |
-| `linalg.eigvalsh` | `array_ext.linalg.eigvalsh` | yes | yes | yes | yes | direct | yes |
-| `linalg.inv` | `array_ext.linalg.inv` | yes | yes | yes | yes | from JVP | yes |
-| `linalg.matmul` | `array.matmul` | yes | yes | yes | yes | direct | yes |
-| `linalg.matrix_norm` | `array_ext.linalg.matrix_norm` | yes | yes | yes | yes | from JVP | yes |
-| `linalg.matrix_power` | composite | yes | yes | yes | composite | composite | composite |
-| `linalg.matrix_rank` | composite | yes | yes | yes | n/a | n/a | composite |
-| `linalg.matrix_transpose` | `array.transpose` | yes | yes | yes | yes | direct | yes |
-| `linalg.outer` | `array.outer` | yes | yes | yes | yes | direct | yes |
-| `linalg.pinv` | `array_ext.linalg.pinv` | yes | yes | yes | yes | direct | yes |
-| `linalg.qr` | `array_ext.linalg.qr` | yes | yes | yes | yes | direct | yes |
-| `linalg.slogdet` | `array_ext.linalg.slogdet` | yes | yes | yes | yes | from JVP | yes |
-| `linalg.solve` | `array_ext.linalg.solve` | yes | yes | yes | yes | direct | yes |
-| `linalg.svd` | `array_ext.linalg.svd` | yes | yes | yes | yes | direct | yes |
-| `linalg.svdvals` | `array_ext.linalg.svdvals` | yes | yes | yes | yes | direct | yes |
-| `linalg.tensordot` | `array.tensordot` | yes | yes | yes | yes | direct | yes |
-| `linalg.trace` | `array.trace` | yes | yes | yes | yes | direct | yes |
-| `linalg.vecdot` | `array.vecdot` | yes | yes | yes | yes | direct | yes |
-| `linalg.vector_norm` | `array_ext.linalg.vector_norm` | yes | yes | yes | yes | from JVP | yes |
-| `linspace` | `array.linspace` | yes | yes | yes | yes | direct | yes |
-| `log` | `array.log` | yes | yes | yes | yes | from JVP | yes |
-| `log10` | `array.log10` | yes | yes | yes | yes | from JVP | yes |
-| `log1p` | `array.log1p` | yes | yes | yes | yes | from JVP | yes |
-| `log2` | `array.log2` | yes | yes | yes | yes | from JVP | yes |
-| `logaddexp` | `array.logaddexp` | yes | yes | yes | yes | from JVP | yes |
-| `logical_and` | `array.logical_and` | yes | yes | yes | n/a | n/a | yes |
-| `logical_not` | `array.logical_not` | yes | yes | yes | n/a | n/a | yes |
-| `logical_or` | `array.logical_or` | yes | yes | yes | n/a | n/a | yes |
-| `logical_xor` | `array.logical_xor` | yes | yes | yes | n/a | n/a | yes |
-| `matmul` | `array.matmul` | yes | yes | yes | yes | direct | yes |
-| `matrix_transpose` | `array.transpose` | yes | yes | yes | yes | direct | yes |
-| `max` | `array.max` | yes | yes | yes | yes | from JVP | yes |
-| `mean` | `array.mean` | yes | yes | yes | yes | direct | yes |
-| `meshgrid` | composite | yes | yes | yes | composite | composite | composite |
-| `min` | `array.min` | yes | yes | yes | yes | from JVP | yes |
-| `multiply` | `array.multiply` | yes | yes | yes | yes | direct | yes |
-| `negative` | `array.negative` | yes | yes | yes | yes | direct | yes |
-| `nonzero` | composite | yes | no | no | n/a | n/a | no |
-| `not_equal` | `array.not_equal` | yes | yes | yes | n/a | n/a | yes |
-| `ones` | `array.ones` | yes | yes | yes | no | no | yes |
-| `ones_like` | `array.ones_like` | yes | yes | yes | yes | direct | yes |
-| `permute_dims` | `array.transpose` | yes | yes | yes | yes | direct | yes |
-| `positive` | `array.positive` | yes | yes | yes | yes | direct | yes |
-| `pow` | `array.power` | yes | yes | yes | yes | direct | yes |
-| `prod` | `array.prod` | yes | yes | yes | yes | from JVP | yes |
-| `real` | `array.real` | yes | yes | yes | yes | direct | yes |
-| `remainder` | `array.remainder` | yes | yes | yes | yes | from JVP | yes |
-| `reshape` | `array.reshape` | yes | yes | yes | yes | direct | yes |
-| `result_type` | metadata | yes | yes | yes | n/a | n/a | n/a |
-| `roll` | `array.roll` | yes | yes | yes | yes | direct | yes |
-| `round` | `array.rint` | yes | yes | yes | yes | direct | yes |
-| `sign` | `array.sign` | yes | yes | yes | yes | direct | yes |
-| `sin` | `array.sin` | yes | yes | yes | yes | direct | yes |
-| `sinh` | `array.sinh` | yes | yes | yes | yes | from JVP | yes |
-| `sort` | `array.sort` | yes | yes | yes | yes | from JVP | yes |
-| `sqrt` | `array.sqrt` | yes | yes | yes | yes | from JVP | yes |
-| `square` | `array.square` | yes | yes | yes | yes | from JVP | yes |
-| `squeeze` | `array.squeeze` | yes | yes | yes | yes | direct | yes |
-| `stack` | `array.stack` | yes | yes | yes | yes | direct | yes |
-| `std` | `array.std` | yes | yes | yes | yes | from JVP | yes |
-| `subtract` | `array.subtract` | yes | yes | yes | yes | direct | yes |
-| `sum` | `array.sum` | yes | yes | yes | yes | direct | yes |
-| `take` | `array.take` | yes | yes | yes | yes | direct | yes |
-| `tan` | `array.tan` | yes | yes | yes | yes | from JVP | yes |
-| `tanh` | `array.tanh` | yes | yes | yes | yes | from JVP | yes |
-| `tensordot` | `array.tensordot` | yes | yes | yes | yes | direct | yes |
-| `tril` | `array.tril` | yes | yes | yes | yes | direct | yes |
-| `triu` | `array.triu` | yes | yes | yes | yes | direct | yes |
-| `trunc` | `array.trunc` | yes | yes | yes | yes | direct | yes |
-| `unique_all` | composite | yes | no | no | composite | composite | no |
-| `unique_counts` | composite | yes | no | no | composite | composite | no |
-| `unique_inverse` | composite | yes | no | no | composite | composite | no |
-| `unique_values` | composite | yes | no | no | composite | composite | no |
-| `var` | `array.var` | yes | yes | yes | yes | from JVP | yes |
-| `vecdot` | `array.vecdot` | yes | yes | yes | yes | direct | yes |
-| `where` | `array.where` | yes | yes | yes | yes | direct | yes |
-| `zeros` | `array.zeros` | yes | yes | yes | no | no | yes |
-| `zeros_like` | `array.zeros_like` | yes | yes | yes | yes | direct | yes |
+| Function | Stage/save | Differentiate |
+|---|:---:|:---:|
+| `abs` | yes | yes |
+| `acos` | yes | yes |
+| `acosh` | yes | yes |
+| `add` | yes | yes |
+| `all` | yes | n/a |
+| `any` | yes | n/a |
+| `arange` | yes | no |
+| `argmax` | yes | n/a |
+| `argmin` | yes | n/a |
+| `argsort` | yes | n/a |
+| `asarray` | yes | yes |
+| `asin` | yes | yes |
+| `asinh` | yes | yes |
+| `astype` | yes | yes |
+| `atan` | yes | yes |
+| `atan2` | yes | yes |
+| `atanh` | yes | yes |
+| `bitwise_and` | yes | n/a |
+| `bitwise_invert` | yes | n/a |
+| `bitwise_left_shift` | yes | no |
+| `bitwise_or` | yes | n/a |
+| `bitwise_right_shift` | yes | no |
+| `bitwise_xor` | yes | n/a |
+| `broadcast_arrays` | yes | yes |
+| `broadcast_to` | yes | yes |
+| `can_cast` | yes | n/a |
+| `ceil` | yes | yes |
+| `concat` | yes | yes |
+| `conj` | yes | yes |
+| `cos` | yes | yes |
+| `cosh` | yes | yes |
+| `divide` | yes | yes |
+| `empty` | yes | no |
+| `empty_like` | yes | yes |
+| `equal` | yes | n/a |
+| `exp` | yes | yes |
+| `expand_dims` | yes | yes |
+| `expm1` | yes | yes |
+| `eye` | yes | no |
+| `fft.fft` | yes | yes |
+| `fft.fftfreq` | yes | no |
+| `fft.fftn` | yes | yes |
+| `fft.fftshift` | yes | yes |
+| `fft.hfft` | yes | yes |
+| `fft.ifft` | yes | yes |
+| `fft.ifftn` | yes | yes |
+| `fft.ifftshift` | yes | yes |
+| `fft.ihfft` | yes | yes |
+| `fft.irfft` | yes | yes |
+| `fft.irfftn` | yes | yes |
+| `fft.rfft` | yes | yes |
+| `fft.rfftfreq` | yes | no |
+| `fft.rfftn` | yes | yes |
+| `finfo` | yes | n/a |
+| `flip` | yes | yes |
+| `floor` | yes | yes |
+| `floor_divide` | yes | yes |
+| `full` | yes | yes |
+| `full_like` | yes | yes |
+| `greater` | yes | n/a |
+| `greater_equal` | yes | n/a |
+| `iinfo` | yes | n/a |
+| `imag` | yes | yes |
+| `isdtype` | yes | n/a |
+| `isfinite` | yes | n/a |
+| `isinf` | yes | n/a |
+| `isnan` | yes | n/a |
+| `less` | yes | n/a |
+| `less_equal` | yes | n/a |
+| `linalg.cholesky` | yes | yes |
+| `linalg.cross` | yes | yes |
+| `linalg.det` | yes | yes |
+| `linalg.diagonal` | yes | yes |
+| `linalg.eigh` | yes | yes |
+| `linalg.eigvalsh` | yes | yes |
+| `linalg.inv` | yes | yes |
+| `linalg.matmul` | yes | yes |
+| `linalg.matrix_norm` | yes | yes |
+| `linalg.matrix_power` | yes | yes |
+| `linalg.matrix_rank` | yes | n/a |
+| `linalg.matrix_transpose` | yes | yes |
+| `linalg.outer` | yes | yes |
+| `linalg.pinv` | yes | yes |
+| `linalg.qr` | yes | yes |
+| `linalg.slogdet` | yes | yes |
+| `linalg.solve` | yes | yes |
+| `linalg.svd` | yes | yes |
+| `linalg.svdvals` | yes | yes |
+| `linalg.tensordot` | yes | yes |
+| `linalg.trace` | yes | yes |
+| `linalg.vecdot` | yes | yes |
+| `linalg.vector_norm` | yes | yes |
+| `linspace` | yes | yes |
+| `log` | yes | yes |
+| `log10` | yes | yes |
+| `log1p` | yes | yes |
+| `log2` | yes | yes |
+| `logaddexp` | yes | yes |
+| `logical_and` | yes | n/a |
+| `logical_not` | yes | n/a |
+| `logical_or` | yes | n/a |
+| `logical_xor` | yes | n/a |
+| `matmul` | yes | yes |
+| `matrix_transpose` | yes | yes |
+| `max` | yes | yes |
+| `mean` | yes | yes |
+| `meshgrid` | yes | yes |
+| `min` | yes | yes |
+| `multiply` | yes | yes |
+| `negative` | yes | yes |
+| `nonzero` | no | n/a |
+| `not_equal` | yes | n/a |
+| `ones` | yes | no |
+| `ones_like` | yes | yes |
+| `permute_dims` | yes | yes |
+| `positive` | yes | yes |
+| `pow` | yes | yes |
+| `prod` | yes | yes |
+| `real` | yes | yes |
+| `remainder` | yes | yes |
+| `reshape` | yes | yes |
+| `result_type` | yes | n/a |
+| `roll` | yes | yes |
+| `round` | yes | yes |
+| `sign` | yes | yes |
+| `sin` | yes | yes |
+| `sinh` | yes | yes |
+| `sort` | yes | yes |
+| `sqrt` | yes | yes |
+| `square` | yes | yes |
+| `squeeze` | yes | yes |
+| `stack` | yes | yes |
+| `std` | yes | yes |
+| `subtract` | yes | yes |
+| `sum` | yes | yes |
+| `take` | yes | yes |
+| `tan` | yes | yes |
+| `tanh` | yes | yes |
+| `tensordot` | yes | yes |
+| `tril` | yes | yes |
+| `triu` | yes | yes |
+| `trunc` | yes | yes |
+| `unique_all` | no | yes |
+| `unique_counts` | no | yes |
+| `unique_inverse` | no | yes |
+| `unique_values` | no | yes |
+| `var` | yes | yes |
+| `vecdot` | yes | yes |
+| `where` | yes | yes |
+| `zeros` | yes | no |
+| `zeros_like` | yes | yes |
 
 ## Added in 2023.12
 
-<details class="compat-columns">
-<summary>capability details</summary>
-</details>
-
-| Function | Lowers to | Dynamic | Staged | Serialized | JVP | VJP | Abstract |
-|---|---|:---:|:---:|:---:|:---:|:---:|:---:|
-| `clip` | `array.clip` | yes | yes | yes | yes | from JVP | yes |
-| `copysign` | `array.copysign` | yes | yes | yes | yes | from JVP | yes |
-| `cumulative_sum` | `array.cumsum` | yes | yes | yes | yes | direct | yes |
-| `hypot` | `array.hypot` | yes | yes | yes | yes | from JVP | yes |
-| `maximum` | `array.maximum` | yes | yes | yes | yes | from JVP | yes |
-| `minimum` | `array.minimum` | yes | yes | yes | yes | from JVP | yes |
-| `moveaxis` | `array.moveaxis` | yes | yes | yes | yes | direct | yes |
-| `repeat` | `array.repeat` | yes | yes | yes | yes | direct | yes |
-| `searchsorted` | `array.searchsorted` | yes | yes | yes | n/a | n/a | yes |
-| `signbit` | `array.signbit` | yes | yes | yes | n/a | n/a | yes |
-| `tile` | `array.tile` | yes | yes | yes | yes | direct | yes |
-| `unstack` | composite | yes | yes | yes | composite | composite | composite |
+| Function | Stage/save | Differentiate |
+|---|:---:|:---:|
+| `clip` | yes | yes |
+| `copysign` | yes | yes |
+| `cumulative_sum` | yes | yes |
+| `hypot` | yes | yes |
+| `maximum` | yes | yes |
+| `minimum` | yes | yes |
+| `moveaxis` | yes | yes |
+| `repeat` | yes | yes |
+| `searchsorted` | yes | n/a |
+| `signbit` | yes | n/a |
+| `tile` | yes | yes |
+| `unstack` | yes | yes |
 
 ## Changed in 2023.12
 
@@ -218,18 +208,14 @@ The mode columns are public support claims: **yes** means the callable's declare
 
 ## Added in 2024.12
 
-<details class="compat-columns">
-<summary>capability details</summary>
-</details>
-
-| Function | Lowers to | Dynamic | Staged | Serialized | JVP | VJP | Abstract |
-|---|---|:---:|:---:|:---:|:---:|:---:|:---:|
-| `count_nonzero` | `array.count_nonzero` | yes | yes | yes | n/a | n/a | yes |
-| `cumulative_prod` | `array.cumprod` | yes | yes | yes | yes | from JVP | yes |
-| `diff` | `array.diff` | yes | yes | yes | yes | direct | yes |
-| `nextafter` | `array.nextafter` | yes | yes | yes | yes | from JVP | yes |
-| `reciprocal` | `array.reciprocal` | yes | yes | yes | yes | from JVP | yes |
-| `take_along_axis` | `array.take_along_axis` | yes | yes | yes | yes | direct | yes |
+| Function | Stage/save | Differentiate |
+|---|:---:|:---:|
+| `count_nonzero` | yes | n/a |
+| `cumulative_prod` | yes | yes |
+| `diff` | yes | yes |
+| `nextafter` | yes | yes |
+| `reciprocal` | yes | yes |
+| `take_along_axis` | yes | yes |
 
 ## Changed in 2024.12
 
@@ -238,11 +224,11 @@ The mode columns are public support claims: **yes** means the callable's declare
 | `fft.fftfreq` | signature: `(n, /, *, d=1.0, device=None)` → `(n, /, *, d=1.0, dtype=None, device=None)` |
 | `fft.rfftfreq` | signature: `(n, /, *, d=1.0, device=None)` → `(n, /, *, d=1.0, dtype=None, device=None)` |
 
-## Incomplete claims
+## Limits
 
-This table is the gap between the official-callable and complete-contract counts above. Advect claims support only on executable evidence — a qualification case that exercises the callable end to end. A row without one carries no claim: whatever a provider path happens to do with it today is incidental, not contract. A row with a recorded boundary is claimed except for that boundary.
+These official functions are either unsupported or supported with the boundary shown. Unlisted provider behavior is not a public claim.
 
-| Callable | Kind | Since | Claim |
-|---|---|---|---|
-| `from_dlpack` | function | `2022.12` | none — no qualification case exercises it |
-| `repeat` | function | `2023.12` | claimed with a boundary: array-valued repeats are not traceable |
+| Callable | Since | Boundary |
+|---|---|---|
+| `from_dlpack` | `2022.12` | unsupported — no qualification case exercises it |
+| `repeat` | `2023.12` | array-valued repeats are not traceable |

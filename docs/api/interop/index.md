@@ -6,22 +6,14 @@ the host framework; they do not make host arrays into Advect providers.
 
 ## Install and import
 
-Install only the framework you use:
+The base `advect` import loads no host framework. Install and import only the
+bridge you use:
 
-```bash
-python -m pip install "advect[torch]"
-python -m pip install "advect[jax]"
-python -m pip install "advect[autograd]"
-```
-
-The base `advect` import loads none of these dependencies. Import the adapter
-you intend to use:
-
-| Framework | Entry point | Reverse-mode execution |
-| --- | --- | --- |
-| [PyTorch](torch.md) | `advect.interop.torch.wrap(function)` | Retains and consumes the forward Advect pullback |
-| [JAX](jax.md) | `advect.interop.jax.wrap(function, has_aux=False, result_shape_dtypes=None)` | Executes eagerly or uses callbacks with a JIT/shape contract |
-| [HIPS Autograd](autograd.md) | `advect.interop.autograd.wrap(function)` | Retains and consumes the forward Advect pullback |
+| Framework | Extra | Entry point | Reverse-mode execution |
+| --- | --- | --- | --- |
+| [PyTorch](torch.md) | `advect[torch]` | `advect.interop.torch.wrap(function)` | Retains and consumes the forward Advect pullback |
+| [JAX](jax.md) | `advect[jax]` | `advect.interop.jax.wrap(function, ...)` | Executes eagerly or uses callbacks with a JIT/shape contract |
+| [HIPS Autograd](autograd.md) | `advect[autograd]` | `advect.interop.autograd.wrap(function)` | Retains and consumes the forward Advect pullback |
 
 ## Shared contract
 

@@ -40,10 +40,8 @@ uv run pre-commit run --all-files
 ```
 
 The installed `pre-commit` hook may fix files and require restaging. The
-`commit-msg` hook enforces Conventional Commits. An intentional direct commit
-to `main` may skip only the branch guard with
-`SKIP=no-commit-to-branch git commit`; avoid `--no-verify`, which bypasses all
-checks.
+`commit-msg` hook enforces Conventional Commits. Avoid `--no-verify`, which
+bypasses all checks.
 
 The canonical static and test gates are:
 

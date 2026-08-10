@@ -1,114 +1,130 @@
-# Debugging
+# Troubleshooting
 
-Start with the exception. Advect errors name the rejected behavior and usually
-give the safe rewrite. If that is not enough, rerun the same call in one scoped
-debug mode:
+`debug()` does not change a computation. It makes one trace more observable:
+live tracers show bounded value previews, and recorded operations keep the user
+source location that produced them. This side-by-side trace makes the first
+difference visible.
 
-```python
-import advect as ad
+```{.python .run}
 import numpy as np
 
+import advect as ad
+
+
+def show_trace(x):
+    print(x)
+    return np.sin(x) ** 2
+
+
+sample = np.array(0.5)
+print("ordinary trace")
+ad.grad(show_trace)(sample)
+
+print("debug trace")
 with ad.debug():
-    gradient = ad.grad(loss)(x)
+    ad.grad(show_trace)(sample)
 ```
 
-The scope adds user source locations and bounded live-tracer values. Keep it
-around the transform call; for staging, keep it around `ad.stage(...)` so the
-program retains those locations.
+The ordinary tracer shows shape and dtype. The debug tracer also shows how many
+values are finite and a bounded preview of those values. In a real failure,
+the recorded location is attached to the error. Keep the context around the
+transform call—or around `ad.stage(...)` when diagnosing staging. Debug mode
+does not make an unsupported operation work.
 
-## I got an exception
+## Common rewrites
 
-Common rewrites are:
+- Copy an input before mutation: `owned = x.copy()`.
+- Consume or copy a view before updating its base.
+- Give traced NumPy constructors a `like=` anchor, or use `ad.array` and
+  `ad.asarray`.
+- Move unsupported library work outside the transform, or define its numerical
+  contract with `@ad.primitive`.
+- Replace a data-dependent staged branch with array operations, make the choice
+  static, or keep the function dynamic.
+- Pass random state or sampled data explicitly when staging.
+- Use `linearize`, `jvp`, or `vjp` instead of `grad` for a complex output.
 
-- **Input mutation:** copy first with `owned = x.copy()`.
-- **Stale view:** consume or copy the view before updating its base.
-- **Unsupported conversion:** use a traced `like=` anchor, `ad.asarray`, or
-  `ad.array`; move unsupported library calls outside the transform or wrap the
-  numerical behavior with `@ad.primitive`.
-- **Staged Python branch:** use array operations, make the decision static, or
-  leave the function dynamic.
-- **Ambient staged randomness:** pass explicit state or data as an input.
-- **Complex output from `grad`:** use `linearize`, `jvp`, or `vjp`.
+## Find the first non-finite value
 
-Missing derivative errors suggest the exact `with ad.debug():` retry. Staged
-provider errors retain their original type and traceback and append the failing
-operation, up to three inputs, and a source location when available.
+`debug(numerics=True)` checks dynamic primal and derivative values and raises at
+the first NaN or infinity:
 
-## I need to see a live value
-
-Use ordinary `print(x)` or debugger inspection. Normal mode shows trace
-identity, shape, and dtype. Debug mode adds a bounded preview and finite count:
-
-```text
-TracedArray(node=%2, shape=(4,), dtype=float64,
-            finite=4/4, values=array([...]))
+```{.python .run}
+with np.errstate(invalid="ignore"):
+    try:
+        with ad.debug(numerics=True):
+            ad.grad(lambda value: np.sum(np.sqrt(value)))(
+                np.array([1.0, -1.0])
+            )
+    except ad.NumericsError as error:
+        print(f"{type(error).__name__}: {error}")
 ```
 
-This is display-only; tracer payloads remain private. `ad.stop_gradient` is the
-explicit concrete dynamic boundary, while staging has no payload to detach.
+The check can add provider work and synchronization, which is why it is scoped
+instead of always enabled.
 
-## I got a NaN or infinity
+## Check a suspicious gradient
 
-Ask Advect to locate the first non-finite dynamic value:
-
-```python
-with ad.debug(numerics=True):
-    gradient = ad.grad(loss)(x)
-```
-
-`NumericsError` reports the primal, JVP, or VJP phase, operation, source,
-shape/dtype, finite count, and bounded preview. This mode adds provider work
-and synchronization, so it is intentionally scoped.
-
-## The gradient is finite but looks wrong
-
-Check the composed function against numerical behavior:
-
-```python
+```{.python .run}
 from advect.testing import check_gradient
 
-check_gradient(loss, x, tangent=np.ones_like(x))
+
+def loss(x):
+    centered = x - np.mean(x)
+    return np.sum(np.sin(centered) ** 2)
+
+
+x = np.linspace(-0.5, 0.5, 6)
+direction = np.linspace(0.5, 1.5, x.size)
+check_gradient(loss, x, tangent=direction)
+print("directional gradient check passed")
 ```
 
-The unary argument may itself be a pytree. `check_gradient` compares the
-whole-function JVP with central differences over an epsilon sweep and checks
-the reverse gradient against that direction. It reevaluates the function, so
-use deterministic inputs and keep effects outside it.
+`check_gradient` compares the composed function's JVP with central differences
+over several step sizes and checks reverse mode against the same direction. It
+reevaluates the function, so keep effects outside it. Passing establishes
+consistency with the function that ran; it cannot prove that the function is
+the mathematics you intended, and finite differences remain unreliable near
+discontinuities.
 
-This does not duplicate `check_primitive`: the function check covers the
-actual composition a user ran; the primitive check validates one extension's
-concrete/abstract contract, JVP, transpose, complex behavior, nesting, and
-staging. On a mismatch, `check_gradient` names custom primitives on that path
-and directs their authors to `check_primitive`.
+Use `check_primitive` instead when authoring one custom operation. That check
+owns its abstract, JVP, transpose, nesting, complex, and staging contracts.
 
-Passing only establishes consistency with the function that ran. It cannot
-prove the intended mathematics, and finite differences remain unreliable near
-discontinuities or badly scaled regions.
+## When dynamic code cannot be staged
 
-## Dynamic execution works but staging fails
+Dynamic tracing knows concrete values. Staging knows only the declared
+structure, shapes, and dtypes, so a Python truth test on an array value cannot
+choose one reusable graph:
 
-Dynamic transforms follow concrete Python control flow. `stage` must instead
-produce one reusable graph for one shape/dtype signature, so data-dependent
-Python branches, output shapes, ambient state, or unsupported staged operations
-can work dynamically and correctly fail during staging.
+```{.python .run}
+def branch(value):
+    if np.sum(value) > 0:
+        return 2 * value
+    return -value
 
-Inspect the compiled result directly:
 
-```python
-with ad.debug():
-    program = ad.stage(function, example)
+example = np.array([0.2, 0.4])
+try:
+    ad.stage(branch, example)
+except ad.TracingError as error:
+    print(f"{type(error).__name__}: {error}")
 
-print(program)        # bounded optimized operation sequence
-print(program.graph)  # immutable graph summary
-print(program.optimization)
+
+def stageable_branch(value):
+    return np.where(np.sum(value) > 0, 2 * value, -value)
+
+
+program = ad.stage(stageable_branch, example)
+print("stageable result:", program(example))
 ```
 
-`program.trace` contains the in-process pre-optimization trace and ID mapping;
-it is absent from loaded artifacts. There is no separate `explain()` step.
+Data-dependent output shapes and ambient state have the same problem. Inspect a
+compiled program with `print(program)` and `program.optimization`; there is no
+separate explain step.
 
 ## Tracers and views
 
 A tracer retained after its transform raises `EscapedTracerError`; return an
-ordinary result instead. Views use conservative whole-cell epochs, so a view
-is stale after any update to its root. Rewrite `x[i][j] += value` as one update
-such as `x[i, j] += value`, or copy the view first.
+ordinary result instead. Views use conservative whole-array epochs, so a view
+becomes stale after its root is updated. Rewrite `x[i][j] += value` as one
+update such as `x[i, j] += value`, or copy the view first.

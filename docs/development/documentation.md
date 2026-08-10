@@ -7,7 +7,7 @@ those authorities.
 
 ## Published documentation
 
-Use the smallest public surface that owns the statement:
+Put each statement at the narrowest level that owns it:
 
 - `docs/tutorials/` teaches complete user tasks with runnable examples.
 - `docs/architecture.md` explains the public execution and extension model.
@@ -22,7 +22,7 @@ Use the smallest public surface that owns the statement:
   evidence contracts; it is not a second public API reference.
 
 Keep exhaustive callable inventories in the generated compatibility report or
-mkdocstrings output. Narrative pages should explain semantics and boundaries,
+mkdocstrings output. Narrative pages explain behavior and boundaries,
 then link to the owning inventory.
 
 ## Module and object docstrings

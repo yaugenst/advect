@@ -37,9 +37,12 @@ plugins:
         Tutorials:
           - tutorials/gradients.md
           - tutorials/control-flow.md
+          - tutorials/linear-maps.md
           - tutorials/advanced-differentiation.md
+          - tutorials/implicit-differentiation.md
           - tutorials/staging.md
-          - tutorials/interop.md
+          - tutorials/scientific-python.md
+          - tutorials/host-frameworks.md
           - tutorials/primitives.md
           - tutorials/debugging.md
         API reference:
@@ -146,11 +149,14 @@ nav:
       - tutorials/index.md
       - Gradients and Pytrees: tutorials/gradients.md
       - Dynamic Control Flow and Mutation: tutorials/control-flow.md
-      - Advanced Differentiation: tutorials/advanced-differentiation.md
+      - JVPs, VJPs, and Linear Maps: tutorials/linear-maps.md
+      - Higher-Order Differentiation: tutorials/advanced-differentiation.md
+      - Implicit Differentiation: tutorials/implicit-differentiation.md
       - Staging and Serialization: tutorials/staging.md
-      - Providers and Interop: tutorials/interop.md
+      - Arrays and Scientific Python: tutorials/scientific-python.md
+      - Host Autodiff Frameworks: tutorials/host-frameworks.md
       - Custom Primitives: tutorials/primitives.md
-      - Debugging: tutorials/debugging.md
+      - Troubleshooting: tutorials/debugging.md
   - Architecture: architecture.md
   - Compatibility:
       - compatibility/index.md

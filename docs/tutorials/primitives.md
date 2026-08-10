@@ -1,7 +1,12 @@
 # Custom Primitives
 
-A primitive starts as an ordinary implementation function. Decorating it makes
-the function an atomic Advect operation and provides the rule decorators:
+Create a primitive when a numerical operation is opaque to Advect or needs one
+stable atomic identity in a staged program. Ordinary traceable array code does
+not need a wrapper; Advect can already see and differentiate its operations.
+
+The cube below is intentionally simple so the authoring contract stays visible.
+A primitive starts with its concrete implementation, then adds only the rules
+it promises to support.
 
 ```{.python .run}
 import numpy as np
@@ -10,30 +15,33 @@ import advect as ad
 
 
 @ad.primitive
-def cube(value):
-    return value * value * value
+def cube(x):
+    return x * x * x
 
 
 @cube.def_abstract
-def cube_abstract(value):
-    return value.spec
+def cube_abstract(x):
+    return x.spec
 
 
 @cube.def_jvp
 def cube_jvp(output, primals, tangents):
     del output
-    (value,), (tangent,) = primals, tangents
+    (x,), (tangent,) = primals, tangents
     if tangent is None:
-        return value * 0
-    return 3 * value * value * tangent
+        return np.zeros_like(x)
+    return 3 * x * x * tangent
 
 
-print(cube(np.array([1.0, 2.0, 3.0])))
+print("cube:", cube(np.array([1.0, 2.0, 3.0])))
 ```
 
-The JVP is ordinary traceable code. Advect validates real-linearity when it
-derives the transpose. The optional authoring checks exercise that path before
-publication:
+The implementation handles ordinary calls. The abstract rule describes output
+shape and dtype for staging. The JVP is ordinary traceable code, so Advect can
+use it for forward mode, derive its transpose for reverse mode, and compose it
+under higher-order transforms.
+
+## Check the promised capabilities
 
 ```{.python .run}
 from advect.testing import check_primitive
@@ -45,23 +53,22 @@ check_primitive(
     check=("abstract", "jvp", "transpose", "nested", "stage"),
 )
 
-dcube = ad.grad(lambda value: np.sum(cube(value)))(sample)
-np.testing.assert_allclose(dcube, 3 * sample**2)
-print(dcube)
+gradient = ad.grad(lambda x: np.sum(cube(x)))(sample)
+np.testing.assert_allclose(gradient, 3 * sample**2)
+print("gradient:", gradient)
 ```
 
-The default checker tuple—`abstract`, `jvp`, and `transpose`—is a first-order
-smoke check. For a serializable primitive, run the full tuple above separately
-for every materially different shape, dtype, and static-argument form. Add a
-`complex` check with complex primals when complex values are supported. The
-stage check executes the compiled and restored program, compares exact output
-metadata, and verifies that inputs remain unchanged.
+The default checker covers the first-order abstract, JVP, and transpose paths.
+Request only the extra capabilities the primitive claims, and run materially
+different shape, dtype, static-argument, and complex cases separately. Follow
+the primitive check with `check_gradient` on a representative composition.
 
-The operation name defaults to the function's module and qualified name. Use
-`@ad.primitive(name="example.cube")` only when a library needs a stable public
-identity for serialized programs. There is one implementation and no
-user-managed schema version or provider-key registry; portable implementations
-can use Array API operations directly, while backend-specific operations should
-validate their accepted inputs in the function. Advect does not infer whether a
-changed implementation is semantically compatible with an old artifact; the
-loading environment must provide the matching code.
+The operation name defaults to the function's module and qualified name. Give
+it an explicit name such as `example.cube` only when saved programs need an
+identity independent of the Python module path. Loading still requires the
+matching implementation to be imported under that name.
+
+Some operations need an explicit transpose, exact forward residuals, static
+arguments, or intentionally first-order behavior. Those are real contracts,
+but they are extension-author reference material rather than prerequisites for
+the common JVP-first path; see the [primitive API](../api/primitives.md).

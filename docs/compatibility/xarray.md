@@ -1,28 +1,27 @@
 # xarray
 
-The xarray integration is a pytree contract, not a function catalog: with
-`advect[xarray]` installed, `import advect.xarray` registers `DataArray` and
-`Dataset` as pytree nodes, and every transform then works leaf-wise on their
-data buffers. Registration is explicit — installing the package changes
-nothing until the module is imported.
+The xarray integration preserves labeled containers; it is not another array
+provider. With `advect[xarray]` installed, importing `advect.xarray` registers
+`DataArray` and `Dataset` as pytrees. Dynamic transforms then operate on their
+data buffers and rebuild the labels around derivative results.
 
-## The contract
+## Contract
 
-- Floating- and complex-valued data buffers are differentiable. Integer,
-  boolean, string, and object data variables are rejected instead of
-  receiving meaningless zero gradients.
-- Dimensions, coordinates, names, and attributes are copied static metadata
-  and are restored around the gradient. Datasets expose one leaf per data
-  variable.
-- xarray continues to own alignment, named indexing, and named reductions
-  when those operations lower to supported array primitives.
+- Floating and complex data buffers are differentiable. Integer, boolean,
+  string, and object variables are rejected rather than assigned zero
+  gradients.
+- Dimensions, coordinates, names, attributes, and dataset variable order are
+  static metadata.
+- xarray continues to own alignment, named indexing, and named reductions when
+  those operations lower to supported array primitives.
 
 ## Boundaries
 
-The contract is dynamic-only. To reuse a staged kernel, stage the raw array
-function, call it with `field.data`, and restore labels outside the program.
-Data-dependent coordinates, MultiIndex coordinates, Dask execution, and broad
-groupby/rolling/interpolation coverage are not part of this slice.
+This integration is dynamic-only. For a reusable staged kernel, stage the raw
+array function, call it with `field.data`, and restore labels outside the
+program. Data-dependent coordinates, MultiIndex coordinates, Dask execution,
+and broad groupby, rolling, or interpolation coverage are outside the current
+contract.
 
-See the [interop tutorial](../tutorials/interop.md#preserve-xarray-labels)
-for a worked example.
+See [Arrays and Scientific Python](../tutorials/scientific-python.md#preserve-xarray-labels)
+for a complete example.

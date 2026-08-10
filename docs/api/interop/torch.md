@@ -16,6 +16,7 @@ def numpy_energy(value):
 energy = wrap(numpy_energy)
 x = torch.linspace(0, 1, 8, requires_grad=True)
 energy(x).backward()
+print(x.grad)
 ```
 
 Inputs are copied through host NumPy. Outputs return to the common input device,

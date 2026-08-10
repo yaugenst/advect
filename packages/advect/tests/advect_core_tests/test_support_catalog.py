@@ -6,7 +6,11 @@ import json
 from pathlib import Path
 
 import numpy as np
-from scripts._support.report_extension_support import render_pages
+import pytest
+from scripts._support.report_extension_support import (
+    _render_frontend_table,
+    render_pages,
+)
 
 import advect as ad
 from advect.core._array_api.frontend import (
@@ -196,23 +200,56 @@ def test_checked_in_compatibility_pages_are_generated_from_the_live_catalog() ->
         assert document.read_text(encoding="utf-8") == content, name
 
 
-def test_wide_compatibility_matrices_disclose_capability_columns() -> None:
+def test_compatibility_tables_show_user_capabilities() -> None:
     pages = render_pages(ad.support_catalog())
 
-    for name in ("numpy.md", "array-api.md", "cupy.md"):
+    for name in ("numpy.md", "array-api.md", "scipy.md"):
         page = pages[name]
-        disclosures = page.count('<details class="compat-columns')
-        assert disclosures == page.count("| Function | Lowers to |") > 0
-        assert disclosures == page.count("<summary>capability details</summary>")
-    assert '<details class="compat-columns' not in pages["scipy.md"]
+        assert "| Function | Stage/save | Differentiate |" in page
+        assert "Lowers to" not in page
+        assert "compat-columns" not in page
+
+    array_api = pages["array-api.md"]
+    assert "**No** means no derivative rule is available" in array_api
+    assert "| `add` | yes | yes |" in array_api
+    assert "| `all` | yes | n/a |" in array_api
+    assert "| `arange` | yes | no |" in array_api
 
 
-def test_cupy_source_history_is_not_rendered_as_current_verification() -> None:
+def test_compact_table_preserves_asymmetric_capabilities() -> None:
+    rows = [
+        {
+            "callable": "forward",
+            "dynamic": True,
+            "staged": True,
+            "serialized": False,
+            "jvp": "yes",
+            "vjp": "no",
+        },
+        {
+            "callable": "reverse",
+            "dynamic": True,
+            "staged": False,
+            "serialized": True,
+            "jvp": "no",
+            "vjp": "direct",
+        },
+    ]
+
+    table = "\n".join(_render_frontend_table(rows))
+
+    assert "| `forward` | stage only | forward only |" in table
+    assert "| `reverse` | save only | reverse only |" in table
+    with pytest.raises(ValueError, match="every row to support dynamic"):
+        _render_frontend_table([{**rows[0], "dynamic": False}])
+
+
+def test_cupy_page_is_honest_without_duplicating_the_array_api_catalog() -> None:
     page = render_pages(ad.support_catalog())["cupy.md"]
 
-    assert "unpublished: no immutable artifact URL" in page
-    assert "does not verify a release CuPy support claim" in page
-    assert "| passed |" not in page
+    assert "not yet a release claim" in page
+    assert "## Functions" not in page
+    assert "| Function | Stage/save | Differentiate |" not in page
 
 
 def test_numpy_version_is_live() -> None:

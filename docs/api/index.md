@@ -4,7 +4,7 @@ Advect's public API has a small root namespace and a few explicit modules. The
 [tutorials](../tutorials/index.md) teach complete workflows; these pages render
 the installed signatures and docstrings.
 
-| Public surface | Responsibility |
+| Public API | Responsibility |
 | --- | --- |
 | [Transforms](transforms.md) | Dynamic differentiation, higher-order transforms, checkpointing, and implicit roots |
 | [Staging](staging.md) | Immutable programs, serialization, and staged differentiation |

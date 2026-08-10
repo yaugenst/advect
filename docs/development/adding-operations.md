@@ -19,76 +19,41 @@ different authorities and therefore different evidence.
 ## Public custom primitives
 
 Use `@advect.primitive` when application or library code needs one closed
-operation that Advect cannot see through. The decorated handle is the single
-authoring surface. Its implementation must use fixed named parameters:
-positional-or-keyword and keyword-only parameters are valid, but positional-only
-parameters, `*args`, and `**kwargs` are not. Calls still follow that signature.
+operation that Advect cannot see through. The [tutorial](../tutorials/primitives.md)
+and [API reference](../api/primitives.md) own the rule signatures and common
+JVP-first workflow; this page adds the repository-facing boundaries and
+evidence.
 
-`static_argnames` removes complete named arguments from the traced operands.
-Those values become operation attributes, are passed by name to every rule, and
-must be valid durable attributes when the primitive is staged.
-`nondiff_argnames` keeps complete arguments dynamic but gives every leaf a
-`None` tangent and suppresses every transpose contribution. An argument cannot
-be both static and nondifferentiable.
+The implementation uses fixed named parameters. Positional-or-keyword and
+keyword-only parameters are valid; positional-only parameters, `*args`, and
+`**kwargs` are not. `static_argnames` turns complete named arguments into
+operation attributes; staged calls require values that the artifact can
+serialize. `nondiff_argnames` keeps arguments dynamic but removes their tangent
+and transpose contributions. One argument cannot be both.
 
-The concrete implementation and abstract rule receive the authored argument
-pytrees. Derivative rules instead receive one flat `primals` tuple and one flat
-`tangents` tuple containing every dynamic array/scalar leaf, in implementation
-parameter and pytree order. Keep non-array configuration static rather than
-smuggling it into a dynamic leaf.
+Prefer a traceable real-linear JVP so forward mode, structural transposition,
+and higher-order paths can reuse it. Add an explicit transpose only when the
+real adjoint cannot be derived or a measured hot path justifies it. A
+transpose-only primitive supports reverse mode but not forward mode.
 
-Attach the rules to the handle returned by the decorator:
+Use `residual=True` only when reverse mode needs exact opaque data from the
+forward invocation. Return `PrimitiveResult(output, residual, release=...)`
+and provide an explicit transpose. Advect retains the residual until the owning
+pullback or linear map releases it, calling `release` exactly once. This is a
+first-order boundary: the primal may stage, but staged derivatives,
+higher-order derivatives, and `checkpoint` cannot retain the residual.
 
-1. `@handle.def_abstract` has the implementation signature. Dynamic leaves are
-   `AbstractValue` objects; return the output pytree with `ArraySpec` or
-   `AbstractValue` leaves. This rule is required for staging.
-2. `@handle.def_jvp` receives
-   `(output, primals, tangents, **static_attrs)` and returns the output tangent
-   pytree. This is the preferred derivative rule and is required for forward
-   mode and structural transposition. Write it as traceable real-linear code so
-   those paths and their higher-order compositions can reuse it.
-3. `@handle.def_transpose` ordinarily receives
-   `(cotangent, primals, output, **static_attrs)` and returns one contribution
-   per flattened dynamic leaf. Add it only when structural transposition cannot
-   express the correct real adjoint or measurement justifies a direct rule.
-   A keyword-only `active_input_indices=None` is available when skipping unused
-   contributions matters. An explicit transpose may also stand alone without a
-   JVP. That primitive does not support forward mode or structural
-   transposition, but a traceable non-residual transpose can still participate
-   in reverse-over-reverse differentiation. A residual-bearing transpose is
-   the deliberate first-order boundary described below.
+Give the primitive an explicit stable name only when saved programs need an
+identity independent of the Python module path. The name is a link key, not
+semantic versioning; loading requires the matching implementation to be
+registered under that name.
 
-For exact invocation-local reverse data, declare `residual=True` and return
-`PrimitiveResult(output, residual, release=...)` from the implementation. The
-caller receives only `output`; the transpose receives
-`(cotangent, primals, output, residual, **static_attrs)`. The JVP never receives
-the residual. Advect retains the exact residual until the owning pullback or
-linear map releases it and calls `release` exactly once. The output must remain
-valid after release. Without a reverse consumer, a direct call, JVP, or plain
-staged replay releases the residual before returning; a reusable `LinearMap`
-retains it until the map is closed. Residual primitives require an explicit
-transpose and are first-order boundaries: they may execute in a primal staged
-program, but they cannot be embedded in a staged or higher-order derivative or
-in `checkpoint`.
-
-Use a stable explicit name when a serialized artifact needs identity independent
-of the Python module path; the name is a link key, not semantic versioning, and
-must resolve to the matching registered implementation when loaded.
-
-`advect.testing.check_primitive` always runs one concrete representative call.
-Its default `("abstract", "jvp", "transpose")` is a first-order smoke check; it
-does not stage the primitive or check input preservation. Add `"nested"` for
-higher-order traceability, `"complex"` in a separate complex-valued case, and
-`"stage"` to compile and restore the program, compare values and exact output
-metadata, and verify staged input preservation. Run these cases for every
-materially different shape, dtype, pytree, and static-argument form. Choose the
-tuple that matches the primitive's capabilities: for a transpose-only boundary,
-start with `("transpose",)`. Add `"abstract"` and `"stage"` together only when
-it has an abstract rule and is intended to stage. The checker validates that
-explicit transpose against a central finite difference; `"jvp"`, `"complex"`,
-and `"nested"` require a JVP. Then run `advect.testing.check_gradient` on a
-representative composition. These author checks do not create a built-in
-support claim and do not require an internal `InvocationCase`.
+Run `check_primitive` for every materially different shape, dtype, pytree,
+static-argument, and complex case. Its default abstract/JVP/transpose tuple is a
+first-order smoke check. Add `nested` and `stage` only when the primitive claims
+those paths, then run `check_gradient` on a representative composition. These
+author checks do not create a built-in support claim or require an internal
+`InvocationCase`.
 
 ## Built-in canonical operations
 
@@ -104,7 +69,7 @@ assembled in `advect/_builtin_ops.py` from authorities that remain separate:
 - NumPy reachability belongs to its protocol path: ufunc admission in
   `numpy/_supported_ufuncs.py`, array-function handlers under
   `numpy/_array_function/`, canonical naming in `numpy/_op_bindings.py`, and
-  exceptional durable replay in `numpy/_eval.py`;
+  exceptional serialized replay in `numpy/_eval.py`;
 - Array API binding and provider execution belong in
   `core/_array_api/frontend.py`; NumPy and Array API reachability must be added
   independently; and
@@ -339,7 +304,7 @@ for `implicit_root`. Test shape and scalar-category preservation, upstream
 solver behavior, convergence failures, and integration with the implicit
 derivative boundary. Do not claim staging or serialization for opaque solver
 iterations; stage explicit iterations or define a closed primitive when a
-durable program is required.
+staged program is required.
 
 Run the public SciPy suite after any of these changes:
 

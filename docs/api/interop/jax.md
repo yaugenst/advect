@@ -20,6 +20,7 @@ def numpy_energy(value):
 energy = wrap(numpy_energy)
 x = jnp.linspace(0, 1, 8)
 value, gradient = jax.value_and_grad(energy)(x)
+print(value, gradient)
 ```
 
 For auxiliary outputs, pass `has_aux=True` to both the bridge and the JAX
@@ -35,6 +36,7 @@ energy_with_metrics = wrap(energy_and_metrics, has_aux=True)
     energy_with_metrics,
     has_aux=True,
 )(x)
+print(value, metrics, gradient)
 ```
 
 Auxiliary leaves may be JAX-compatible floating, complex, integer, or boolean
@@ -56,6 +58,7 @@ compiled_energy = wrap(
 (value, metrics), gradient = jax.jit(
     jax.value_and_grad(compiled_energy, has_aux=True)
 )(x)
+print(value, metrics, gradient)
 ```
 
 If staging starts without `result_shape_dtypes`, the bridge raises a `TypeError`
@@ -66,5 +69,4 @@ results. The callback path uses a pure host callback, so the callable must be
 deterministic and free of externally visible effects. Reverse mode replays it
 once at the saved primal values to construct and immediately consume an Advect
 pullback. `jax.vmap` remains unsupported; an output specification does not add
-batching semantics. An effectful or remote operation needs an
-application-specific token/residual adapter instead.
+batching semantics.

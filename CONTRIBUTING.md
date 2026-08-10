@@ -1,11 +1,10 @@
 # Contributing to Advect
 
-Advect is deliberately small: preserve one semantic core, one canonical
-operation registry, and one source of truth for every public support claim. A
-focused issue or draft pull request is the best place to align on a broad or
-user-visible extension before implementing it.
+Advect stays small by keeping one semantic core and one executable source for
+every support claim. For a broad or user-visible change, open a focused issue or
+draft pull request before committing to an implementation.
 
-## Start here
+## Set up the repository
 
 Advect requires Python 3.12 or newer and Rust 1.94 or newer:
 
@@ -16,39 +15,27 @@ uv run pre-commit install --install-hooks
 rustup toolchain install stable --component clippy rustfmt
 ```
 
-Hook installation is per clone. It installs the file-quality checks used by CI
-and the Conventional Commit message check. Run the complete hook set after
-setup with `uv run pre-commit run --all-files`. For a deliberate direct commit
-to `main`, bypass only the branch guard with
-`SKIP=no-commit-to-branch git commit`; do not disable every hook with
-`--no-verify`.
+The hooks are installed per clone. They cover file quality and Conventional
+Commit messages; run the full set with `uv run pre-commit run --all-files`.
+Avoid `--no-verify`, which bypasses every local check.
 
-The [developer guide](docs/development/index.md) is the contributor authority:
-
-- [codebase map](docs/development/codebase.md) — responsibility and dependency boundaries;
-- [adding operations](docs/development/adding-operations.md) — custom and built-in
-  primitives, NumPy and SciPy forms, providers, the Python staged-program
-  envelope, the Rust graph artifact, and the native adapter and dynamic tape;
-- [testing](docs/development/testing.md) — suite ownership and complete local gates;
-- [documentation](docs/development/documentation.md) — public pages, docstrings,
-  generated compatibility reports, and runnable examples.
-
-Read the relevant design decision only when a change touches its contract. The
-[`design/` index](design/README.md) routes requirements, decisions,
-implementation status, and performance evidence.
+The [developer guide](docs/development/index.md) routes code ownership,
+operation authoring, tests, and documentation. Read a record from the
+[`design/` index](design/README.md) only when the change touches the decision it
+owns.
 
 ## Submit a change
 
-Work on a feature branch and keep the pull request to one coherent problem.
-Run the focused checks while iterating, then every applicable gate in the
+Work on a feature branch and keep the pull request to one coherent problem. Run
+the owning checks while iterating, then every applicable gate in the
 [testing guide](docs/development/testing.md). In the pull request, state the
-user-visible contract, what was verified, and any unavailable hardware or
+user-visible contract, what you verified, and any unavailable hardware or
 remote-CI lane.
 
-Do not add compatibility aliases, duplicated registries, or speculative
-fallbacks to make a narrow change appear broader. Contributions accepted into
-this repository are distributed under the MIT license.
+Do not add compatibility aliases, duplicate registries, or speculative
+fallbacks to make a narrow change look broader. Contributions accepted into
+this repository are distributed under the MIT License.
 
-Report suspected vulnerabilities through the repository's
-[private security-advisory form](https://github.com/yaugenst/advect/security/advisories/new),
+Report suspected vulnerabilities through GitHub's
+[private advisory form](https://github.com/yaugenst/advect/security/advisories/new),
 not a public issue.

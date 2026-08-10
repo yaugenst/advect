@@ -1,9 +1,10 @@
 # Staging and Serialization
 
-## Stage repeated work
+Dynamic transforms trace each concrete call. `stage` instead compiles one exact
+input signature, optimizes the graph once, and returns an immutable program for
+repeated execution.
 
-`stage` traces abstract shape and dtype values, builds a durable graph, and
-runs Advect's fixed optimization pipeline once:
+## Stage once, call many times
 
 ```{.python .run}
 import numpy as np
@@ -15,61 +16,103 @@ def loss(x):
     return np.sum(np.sin(x) ** 2)
 
 
-x = np.linspace(-0.5, 0.5, 8)
+sample = np.linspace(-0.5, 0.5, 8)
+program = ad.stage(loss, sample)
 
-program = ad.stage(loss, x)
-gradient_program = ad.grad(program)
-
-value = program(x)
-gradient = gradient_program(x)
-print(gradient_program.optimization)
+print(f"sample loss: {program(sample):.6f}")
+print(f"shifted loss: {program(sample + 0.1):.6f}")
+print("Array API target:", program.array_api_version)
+print(
+    "optimized nodes:",
+    f"{program.optimization.nodes_before} -> {program.optimization.nodes_after}",
+)
 ```
 
-`gradient_program` is itself a `StagedProgram`. A warm call executes its
-prebound derivative graph; it does not record a dynamic tape or perform a
-reverse sweep. `program.graph` exposes the optimized nodes — the
-[architecture page](../architecture.md) walks them, and the
-playground draws them live.
+The example fixes the positional pytree, shape, dtype, device, and Python
+scalar category. Calls that change that contract fail instead of compiling a
+hidden second program. The original Python function is not rerun during warm
+calls.
 
-For reusable derivative stitching, compile a VJP program. Its cotangent has the
-same pytree, shape, and dtype contract as the primal output:
+## Declare a signature without example data
+
+Use `ArraySpec` when no representative value is available. `kw_specs` declares
+keyword inputs, and `StaticSpec` snapshots a compile-time Python value. Static
+values can control Python branches because they are known while staging:
 
 ```{.python .run}
-field_program = ad.stage(lambda value: np.sin(value), x)
-pullback_program = ad.vjp_program(field_program)
+@ad.stage(
+    specs=(ad.ArraySpec((4,), "float64"),),
+    kw_specs={
+        "scale": ad.ArraySpec((), "float64"),
+        "center": ad.StaticSpec(True),
+    },
+)
+def transform(x, *, scale, center):
+    if center:
+        x = x - np.mean(x)
+    return scale * x
 
-cotangent = np.linspace(1.0, 2.0, 8)
-input_cotangent = pullback_program(x, cotangent=cotangent)
-np.testing.assert_allclose(input_cotangent, cotangent * np.cos(x))
-print(input_cotangent)
+
+values = np.array([1.0, 2.0, 4.0, 5.0])
+result = transform(
+    values,
+    scale=np.asarray(2.0),
+    center=True,
+)
+print("staged transform:", result)
 ```
 
-Unlike the one-shot `Pullback` returned by dynamic `vjp`, `pullback_program`
-contains no invocation-local tape. It is reusable, optimized once, and can be
-serialized directly.
+The static value is part of the signature: calling this program with
+`center=False` is a contract mismatch. Data-dependent Python branches remain
+dynamic-only because an abstract staged value has no data to test.
 
-A positional example supplies its shape, dtype, device, and scalar weakness,
-but its data is not available to the abstract trace. Use
-`specs=(ad.ArraySpec(...),)` when no representative value is available. A
-different signature is compiled into a different `StagedProgram`; the program
-object is never also a hidden multi-signature cache.
+## Differentiate the program once
 
-## Serialize a staged derivative
+`grad` and `value_and_grad` accept a staged program and return another staged
+program. `vjp_program` adds an explicit cotangent input for a reusable
+pullback:
 
-Staged primals, scalar gradients, and VJP programs share the same artifact
-format:
+```{.python .run}
+value_and_gradient = ad.value_and_grad(program)
+value, gradient = value_and_gradient(sample)
+
+field_program = ad.stage(lambda x: np.sin(x), sample)
+pullback_program = ad.vjp_program(field_program)
+cotangent = np.linspace(1.0, 2.0, sample.size)
+input_cotangent = pullback_program(sample, cotangent=cotangent)
+
+np.testing.assert_allclose(input_cotangent, cotangent * np.cos(sample))
+print(f"staged loss: {value:.6f}")
+print("staged gradient:", gradient)
+print("reusable pullback:", input_cotangent)
+```
+
+Warm derivative calls execute their prebuilt graphs. They do not create a
+dynamic tape or run a reverse sweep. This is the reusable counterpart to the
+one-shot pullback returned by dynamic `vjp`.
+
+## Save and restore the program
 
 ```{.python .run}
 import json
 
-payload = json.dumps(gradient_program.to_dict(), sort_keys=True)
+payload = json.dumps(value_and_gradient.to_dict(), sort_keys=True)
 restored = ad.StagedProgram.from_dict(json.loads(payload))
-np.testing.assert_allclose(restored(x), gradient_program(x))
-print(restored(x))
+restored_value, restored_gradient = restored(sample)
+
+np.testing.assert_allclose(restored_gradient, gradient)
+print(f"restored loss: {restored_value:.6f}")
+print("serialized bytes:", len(payload.encode()))
 ```
 
-A loaded program executes its one serialized signature. Any custom primitive
-referenced by the artifact must be linked by name and schema version in the
-loading process. In particular, import
-`advect.scipy` before calling `StagedProgram.from_dict()` for an artifact that
-contains an `advect.scipy` primitive.
+The artifact contains the graph and its exact call contract, not Python code.
+Captured arrays and static values are snapshotted at compile time. A custom
+primitive referenced by the graph must be imported or registered under the
+same stable name before loading, with an implementation that matches the saved
+program.
+
+Provider-neutral functions written through `x.__array_namespace__()` can be
+staged against an explicit Array API revision and replayed by a compatible
+provider. NumPy-authored functions retain the separate NumPy frontend contract.
+Serialized formats may change before 1.0, so matching Advect versions are the
+safest choice for saved programs.
