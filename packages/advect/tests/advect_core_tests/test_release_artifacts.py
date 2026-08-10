@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 from scripts._support.release_artifacts import ReleaseArtifactError, assemble_release_artifacts
 
-_VERSION = "0.1.0"
+_VERSION = "1.2.3"
 _REVISION = "a" * 40
 _LICENSE_FILES = (
     "LICENSE",

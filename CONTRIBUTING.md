@@ -36,6 +36,8 @@ Do not add compatibility aliases, duplicate registries, or speculative
 fallbacks to make a narrow change look broader. Contributions accepted into
 this repository are distributed under the MIT License.
 
+Maintainers should follow the [release process](RELEASING.md).
+
 Report suspected vulnerabilities through GitHub's
 [private advisory form](https://github.com/yaugenst/advect/security/advisories/new),
 not a public issue.

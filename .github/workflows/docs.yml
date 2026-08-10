@@ -1,15 +1,12 @@
 name: Docs
 
 on:
-  push:
-    branches: [main]
   workflow_call:
     inputs:
       version:
         description: Version label to publish with mike
         required: true
         type: string
-  workflow_dispatch:
 
 concurrency:
   group: docs-deploy
@@ -48,23 +45,6 @@ jobs:
         with:
           enable-cache: true
 
-      - name: Resolve documentation version
-        id: docs
-        env:
-          REQUESTED_VERSION: ${{ inputs.version }}
-        run: |
-          docs_version=${REQUESTED_VERSION:-dev}
-          if [[ "$docs_version" != "dev" && ! "$docs_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "documentation version must be dev or a stable semantic version" >&2
-            exit 1
-          fi
-          echo "version=$docs_version" >> "$GITHUB_OUTPUT"
-          if [[ "$docs_version" == "dev" ]]; then
-            echo "release=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "release=true" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Set up Python
         run: uv python install 3.12
 
@@ -97,19 +77,9 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-      - name: Deploy development documentation
-        if: steps.docs.outputs.release == 'false'
-        env:
-          DOCS_VERSION: ${{ steps.docs.outputs.version }}
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh auth setup-git
-          uv run mike deploy --push "$DOCS_VERSION"
-
       - name: Deploy released documentation
-        if: steps.docs.outputs.release == 'true'
         env:
-          DOCS_VERSION: ${{ steps.docs.outputs.version }}
+          DOCS_VERSION: ${{ inputs.version }}
           GH_TOKEN: ${{ github.token }}
         run: |
           gh auth setup-git
