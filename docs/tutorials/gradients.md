@@ -18,6 +18,7 @@ def loss(x):
 x = np.linspace(-0.5, 0.5, 8)
 gradient = ad.grad(loss)(x)
 np.testing.assert_allclose(gradient, 2 * np.sin(x) * np.cos(x))
+print(gradient)
 ```
 
 The function is traced with the concrete value on every call. Python branches,
@@ -31,6 +32,7 @@ derivatives as Python scalars:
 ```{.python .run}
 gradient = ad.grad(lambda value: value * value)(3.0)
 assert gradient == 6.0
+print(gradient)
 ```
 
 This is boundary convenience rather than a parallel scalar-operation
@@ -53,6 +55,7 @@ def constructor_loss(x):
 
 gradient = ad.grad(constructor_loss)(np.array([1.0, 2.0]))
 np.testing.assert_allclose(gradient, np.array([3.0, 2.0]))
+print(gradient)
 ```
 
 `like=x` selects Advect's constructor handling and x's array provider; it does
@@ -87,6 +90,7 @@ dparameters, dfeatures = ad.grad(
     model_loss,
     argnums=(0, 1),
 )(parameters, features)
+print(dparameters, dfeatures)
 ```
 
 The first result has the same dictionary structure as `parameters`. Keyword
@@ -102,22 +106,9 @@ positional, named = ad.grad(
     argnums=(0,),
     argnames=("scale",),
 )(features, scale=0.5)
+print(positional, named)
 ```
 
-`jacobian` uses the same selection model and preserves both sides of the
-derivative. For an output leaf with shape `(m,)` and an input leaf with shape
-`(n,)`, its block has shape `(m, n)`. Output and input pytrees remain nested
-rather than being flattened into one package-specific matrix:
-
-```{.python .run}
-def model(params, inputs):
-    return {
-        "prediction": params["weight"] * inputs + params["bias"],
-        "energy": np.sum(inputs**2),
-    }
-
-
-blocks = ad.jacobian(model, argnums=(0, 1))(parameters, features)
-assert blocks["prediction"][0]["weight"].shape == (3, 3)
-assert blocks["energy"][1].shape == (3,)
-```
+Continue with [Advanced differentiation](advanced-differentiation.md) for
+Jacobians, nested derivatives, Hessian-vector products, dense Hessians, and
+checkpointing.

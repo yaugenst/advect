@@ -87,7 +87,9 @@ contract changes; it is intentionally narrative rather than generated.
 Mark a runnable Python fence with ```` ```{.python .run} ````. A page is one
 Python session: running a block first executes any unexecuted runnable blocks
 above it. Each marked block must therefore run cleanly in order with only
-NumPy, Advect, and anything defined by earlier marked blocks.
+NumPy, Advect, and anything defined by earlier marked blocks. Every runnable
+block must also print a meaningful result so its browser output confirms what
+the example demonstrated.
 
 Run all snippets natively:
 

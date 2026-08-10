@@ -1,14 +1,13 @@
-# Control Flow and Mutation
+# Dynamic Control Flow and Mutation
 
-Dynamic transforms trace the actual Python call, so loops, branches, and
-helper functions need no special forms. The boundaries appear where code
-mutates arrays or hides iteration behind an opaque callback — this page covers
-both.
+Advect's dynamic transforms are *define by run*: every call executes the
+ordinary Python function with the current inputs and differentiates only the
+path that ran. There is no special conditional or loop API.
 
-## Mutation is local and functional
+## Each call follows its own branch
 
-Advect records supported mutation syntax as immutable SSA updates. Inputs are
-not implicitly writable: copy first, then update the owned local value.
+A Python condition may depend on a traced value. Calling the same gradient
+function with different values traces different branches:
 
 ```{.python .run}
 import numpy as np
@@ -16,6 +15,58 @@ import numpy as np
 import advect as ad
 
 
+def piecewise_loss(value):
+    if np.sum(value) > 0:
+        return np.sum(np.sin(value))
+    return np.sum(value * value)
+
+
+gradient = ad.grad(piecewise_loss)
+positive = np.array([0.2, 0.4])
+negative = np.array([-0.2, -0.4])
+
+print("positive branch:", gradient(positive))
+print("negative branch:", gradient(negative))
+```
+
+The first result differentiates `sin`; the second differentiates the square.
+This is a pathwise derivative. Advect does not differentiate the discrete
+decision that selected the branch, so derivatives can jump where the
+condition changes.
+
+## Loops execute until Python stops them
+
+Iteration counts may also depend on concrete traced values. Auxiliary outputs
+are useful when the algorithm should report what happened without
+differentiating that report:
+
+```{.python .run}
+def settle_loss(value):
+    state = value
+    steps = 0
+    while np.max(np.abs(state)) > 0.25:
+        state = 0.5 * state
+        steps += 1
+    return np.sum(state * state), steps
+
+
+gradient, steps = ad.grad(settle_loss, has_aux=True)(
+    np.array([2.0, -1.0])
+)
+print(f"{steps} iterations:", gradient)
+```
+
+The loop is unrolled into this invocation's dynamic trace. A later call may
+run a different number of iterations and gets a fresh trace. Helper functions
+behave the same way: Advect records the supported numerical operations they
+execute, not the Python call boundary.
+
+## Mutation is local and functional
+
+Advect records supported mutation syntax as immutable SSA updates. Inputs are
+not implicitly writable: copy first, then update the owned local value.
+
+```{.python .run}
 def stencil_loss(field):
     updated = field.copy()
     laplacian = field[2:] - 2 * field[1:-1] + field[:-2]
@@ -25,6 +76,7 @@ def stencil_loss(field):
 
 field = np.linspace(0.0, 1.0, 128)
 dfield = ad.grad(stencil_loss)(field)
+print(dfield[[0, len(dfield) // 2, -1]])
 ```
 
 Basic indexed updates and a direct named basic-slice view are supported by the
@@ -32,10 +84,11 @@ NumPy frontend. Mutation of an input, advanced-index updates, and arbitrary
 mutation through transformed views raise with a suggested rewrite; see
 [Debugging](debugging.md) for the full taxonomy.
 
-## Differentiate a converged solve
+## Do not trace iterations that only find a root
 
-`implicit_root` differentiates the equation defining a converged state rather
-than recording solver iterations:
+Sometimes a loop is an implementation detail rather than the computation you
+want to differentiate. `implicit_root` differentiates the equation defining a
+converged state instead of recording the solver's iterations:
 
 ```{.python .run}
 def newton_sqrt(residual, initial):
@@ -62,6 +115,7 @@ gradient = ad.grad(
     lambda values: np.sum(square_root(values, initial=initial))
 )(parameters)
 np.testing.assert_allclose(gradient, 0.5 / np.sqrt(parameters))
+print(gradient)
 ```
 
 The state and parameter may be built-in pytrees. `initial` selects a root but
@@ -74,45 +128,21 @@ Opaque callback-based roots are dynamic. `stage` rejects them before invoking
 the solver. A traceable solver callback may support nested dynamic derivatives,
 but Advect never selects that path by catching a provider failure.
 
-## Use SciPy callbacks, special functions, and image filters
-
-The built-in `advect.scipy` module contains a deliberately small function
-surface when `advect[scipy]` is installed:
+With `advect[scipy]` installed, ready-made SciPy root and linear-solver
+callbacks can supply the same interface:
 
 ```python
-from advect.scipy import ndimage, special
 from advect.scipy.optimize import root_solver
 from advect.scipy.sparse.linalg import gmres_solver
-
-
-def likelihood_loss(value):
-    normalized = special.logsumexp(value, axis=-1, keepdims=True)
-    return np.sum(special.gammaln(value) + special.ndtr(value) - normalized)
-
-
-gradient = ad.grad(likelihood_loss)(np.array([[0.7, 1.4, 2.8]]))
-
-smoothed_gradient = ad.grad(
-    lambda value: np.sum(ndimage.gaussian_filter(value, 1.2, mode="reflect"))
-)(np.array([[0.7, 1.4, 2.8]]))
 
 scipy_square_root = ad.implicit_root(
     lambda solution, parameters: solution**2 - parameters,
     solve=root_solver(),
     linear_solve=gmres_solver(rtol=1e-10, atol=1e-12),
 )
+print(scipy_square_root(parameters, initial=initial))
 ```
 
-The supported special surface covers gamma/error/normal-distribution functions,
-logistic transforms, `logsumexp`, and softmax forms. The `ndimage` surface
-covers Gaussian and uniform filters, convolution/correlation, derivative
-filters, extrema and rank filters, and greyscale morphology. These NumPy-backed
-calls preserve their SciPy 1.18 signatures, output forms, modes, axes, and
-neighborhood configuration, and may be staged and serialized.
-`root_solver` and `gmres_solver` accept NumPy arrays, NumPy scalars, and Python
-numeric scalars. They preserve array shape and scalar container category, turn
-SciPy nonconvergence into `ImplicitSolveError`, and form a first-order dynamic
-boundary. `root_solver` follows SciPy's dtype promotion; `gmres_solver`
-restores the inexact right-hand-side dtype. A traceable callback can support
-higher-order dynamic differentiation. Staging requires explicit traceable
-iterations or a closed custom primitive, not an opaque callback.
+These callbacks turn SciPy nonconvergence into `ImplicitSolveError` and form a
+first-order dynamic boundary. See the [SciPy API](../api/scipy/index.md) for
+the solver, special-function, and image-filter surfaces.

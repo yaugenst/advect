@@ -37,6 +37,7 @@ plugins:
         Tutorials:
           - tutorials/gradients.md
           - tutorials/control-flow.md
+          - tutorials/advanced-differentiation.md
           - tutorials/staging.md
           - tutorials/interop.md
           - tutorials/primitives.md
@@ -144,7 +145,8 @@ nav:
   - Tutorials:
       - tutorials/index.md
       - Gradients and Pytrees: tutorials/gradients.md
-      - Control Flow and Mutation: tutorials/control-flow.md
+      - Dynamic Control Flow and Mutation: tutorials/control-flow.md
+      - Advanced Differentiation: tutorials/advanced-differentiation.md
       - Staging and Serialization: tutorials/staging.md
       - Providers and Interop: tutorials/interop.md
       - Custom Primitives: tutorials/primitives.md

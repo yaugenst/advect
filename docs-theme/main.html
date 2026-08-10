@@ -26,8 +26,9 @@ index
     {%- set below = "    " if loop.last else "│   " -%}
     {%- set indent = (prefix ~ branch)|length -%}
     {%- if item.children -%}
-<span class="trow" style="--ti:{{ indent }}ch"><span class="dim">{{ prefix }}{{ branch }}</span>{{ tree_label(item) }}/</span>
-{{- tree_children(item.children, prefix + below) -}}
+      {%- set index = item.children[0] if item.children[0].is_index else none -%}
+<span class="trow" style="--ti:{{ indent }}ch"><span class="dim">{{ prefix }}{{ branch }}</span>{% if index %}<a href="{{ index.url|url }}"{% if page and index == page %} class="cur" aria-current="page"{% endif %} title="{{ item.title }}">{{ tree_label(item) }}/</a>{% else %}{{ tree_label(item) }}/{% endif %}</span>
+{{- tree_children(item.children[1:] if index else item.children, prefix + below) -}}
     {%- else -%}
 <span class="trow" style="--ti:{{ indent }}ch"><span class="dim">{{ prefix }}{{ branch }}</span><a href="{{ item.url|url }}"{% if page and item == page %} class="cur" aria-current="page"{% endif %} title="{{ item.title }}">{{ tree_label(item) }}</a></span>
     {%- endif -%}
@@ -74,7 +75,7 @@ var base_url = "{{ base_url }}";
 {%- block desktop %}
   <aside class="tile treetile" id="treetile" aria-label="Documentation tree" aria-hidden="true">
     <span class="ptitle"><span class="pn">tree</span> docs/</span>
-    <pre class="tree"><span class="trow">docs/</span>{{- tree_children(nav, "") -}}</pre>
+    <pre class="tree"><span class="trow"><a href="{{ '.'|url }}"{% if page and page.is_homepage %} class="cur" aria-current="page"{% endif %} title="Home">docs/</a></span>{{- tree_children(nav.items[1:], "") -}}</pre>
   </aside>
 
   <article class="tile manwin" aria-label="Manual page">

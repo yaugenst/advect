@@ -9,6 +9,8 @@ the same command works natively and inside a Pyodide virtual environment.
 
 from __future__ import annotations
 
+import contextlib
+import io
 import re
 import sys
 from pathlib import Path
@@ -38,7 +40,14 @@ def main(arguments: list[str]) -> int:
         namespace: dict[str, object] = {"__name__": f"docs_snippets_{page.stem}"}
         for index, source in enumerate(snippets):
             code = compile(source, f"{page}#snippet{index + 1}", "exec")
-            exec(code, namespace)  # noqa: S102 — running the docs is the point
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
+                exec(code, namespace)  # noqa: S102 — running the docs is the point
+            captured = output.getvalue()
+            if not captured.strip():
+                message = f"{page}#snippet{index + 1} produced no output"
+                raise SystemExit(message)
+            print(captured, end="")
         total += len(snippets)
         print(f"{page}: {len(snippets)} snippets ok")
     if not total:

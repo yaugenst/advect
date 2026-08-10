@@ -15,6 +15,9 @@ def centered_energy(value):
     xp = value.__array_namespace__()
     centered = value - xp.mean(value)
     return xp.sum(centered * centered)
+
+
+print(centered_energy(np.asarray([1.0, 2.0, 4.0], dtype=np.float32)))
 ```
 
 The same Advect transform accepts qualified NumPy and Array API Strict inputs;
@@ -25,6 +28,7 @@ qualification:
 numpy_gradient = ad.grad(centered_energy)(
     np.asarray([1.0, 2.0, 4.0], dtype=np.float32)
 )
+print(numpy_gradient)
 ```
 
 ## Array providers

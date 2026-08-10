@@ -26,6 +26,9 @@ def cube_jvp(output, primals, tangents):
     if tangent is None:
         return value * 0
     return 3 * value * value * tangent
+
+
+print(cube(np.array([1.0, 2.0, 3.0])))
 ```
 
 The JVP is ordinary traceable code. Advect validates real-linearity when it
@@ -44,6 +47,7 @@ check_primitive(
 
 dcube = ad.grad(lambda value: np.sum(cube(value)))(sample)
 np.testing.assert_allclose(dcube, 3 * sample**2)
+print(dcube)
 ```
 
 The default checker tuple—`abstract`, `jvp`, and `transpose`—is a first-order

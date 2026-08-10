@@ -23,12 +23,12 @@ does not become a primitive.
 
 ```text
 numpy.* ─────────────> NumPy frontend ────┐
-                                         ├─ array call ─> canonical operation
+                                          ├─ array call ─> canonical operation
 __array_namespace__ → Array API frontend ─┤                  ├─ dynamic tape
-        ↑                                │                  ├─ staged graph
-        └─ NumPy or CuPy provider        │                  └─ derivative rules
-                                         └─ metadata ─> trace-time metadata
-                                                        (no graph node)
+        ↑                                 │                  ├─ staged graph
+        └─ NumPy or CuPy provider         │                  └─ derivative rules
+                                          └─ metadata ─> trace-time metadata
+                                                         (no graph node)
 ```
 
 CuPy reaches Advect through the designated Array API provider path; Advect does

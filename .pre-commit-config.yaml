@@ -28,9 +28,6 @@ repos:
       - id: mixed-line-ending
         args: [--fix=lf]
         exclude: ^docs-theme/fonts/LICENSE-source-code-pro\.md$
-      - id: no-commit-to-branch
-        args: [--branch=main]
-
   # ==========================================================================
   # Python: Ruff (linting + formatting)
   # ==========================================================================

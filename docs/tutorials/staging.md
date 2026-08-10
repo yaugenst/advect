@@ -41,6 +41,7 @@ pullback_program = ad.vjp_program(field_program)
 cotangent = np.linspace(1.0, 2.0, 8)
 input_cotangent = pullback_program(x, cotangent=cotangent)
 np.testing.assert_allclose(input_cotangent, cotangent * np.cos(x))
+print(input_cotangent)
 ```
 
 Unlike the one-shot `Pullback` returned by dynamic `vjp`, `pullback_program`
@@ -64,6 +65,7 @@ import json
 payload = json.dumps(gradient_program.to_dict(), sort_keys=True)
 restored = ad.StagedProgram.from_dict(json.loads(payload))
 np.testing.assert_allclose(restored(x), gradient_program(x))
+print(restored(x))
 ```
 
 A loaded program executes its one serialized signature. Any custom primitive
