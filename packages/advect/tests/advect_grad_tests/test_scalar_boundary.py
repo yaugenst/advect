@@ -332,6 +332,14 @@ def test_unsupported_python_scalar_primals_fail_at_the_boundary(
         ad.grad(lambda value: value)(primal)
 
 
+@pytest.mark.parametrize("transform_name", ["grad", "value_and_grad"])
+def test_nonscalar_output_error_names_the_public_transform(transform_name: str) -> None:
+    transform = getattr(ad, transform_name)
+
+    with pytest.raises(ValueError, match=rf"^{transform_name} requires a scalar-valued function"):
+        transform(lambda value: np.stack((value, value)))(np.array(1.0))
+
+
 @pytest.mark.parametrize(
     "tangent",
     [

@@ -15,7 +15,6 @@ from advect.core._protocols import _snapshot_traced
 from advect.core._pytree import _get_node_impl
 
 __all__ = [
-    "_ARRAY_API_VERSION",
     "ResolvedArrayNamespace",
     "_array_namespace_can_donate",
     "_clear_array_namespace_caches",
@@ -23,13 +22,9 @@ __all__ = [
     "_get_array_namespace",
     "_get_backend_key_from_namespace",
     "_get_provider_array_api_version",
-    "_infer_array_namespace_for_call",
     "_negotiate_array_namespace_for_call",
 ]
 
-# Kept as the newest supported revision for internal callers which need a
-# concrete default. Trace and stage paths negotiate or carry an explicit target.
-_ARRAY_API_VERSION = LATEST_ARRAY_API_VERSION
 _DEFAULT_API_VERSION = object()
 _NAMESPACE_CACHE_MISS = object()
 _NAMESPACE_BY_TYPE: dict[tuple[type[Any], str | None], Any | None] = {}
@@ -154,12 +149,6 @@ def _resolve_wrapped_namespace(value: Any, *, api_version: str | None) -> Any | 
     return namespace
 
 
-def _default_api_version() -> str | None:
-    from advect.core._context import _get_active_array_api_version  # noqa: PLC0415
-
-    return _get_active_array_api_version() or LATEST_ARRAY_API_VERSION
-
-
 def _get_array_namespace(
     value: Any,
     *,
@@ -168,7 +157,9 @@ def _get_array_namespace(
     if value is None or type(value) in _PRIMITIVE_TYPES:
         return None
     if api_version is _DEFAULT_API_VERSION:
-        requested: str | None = _default_api_version()
+        from advect.core._context import _get_active_array_api_version  # noqa: PLC0415
+
+        requested: str | None = _get_active_array_api_version() or LATEST_ARRAY_API_VERSION
     elif isinstance(api_version, str) or api_version is None:
         requested = api_version
     else:
@@ -321,31 +312,3 @@ def _negotiate_array_namespace_for_call(
             f"{required_version}; attempted {versions}"
         )
     raise TypeError(message)
-
-
-def _infer_array_namespace_for_call(
-    *,
-    args: tuple[Any, ...],
-    kwargs: dict[str, Any],
-    api_version: str | None | object = _DEFAULT_API_VERSION,
-) -> Any | None:
-    """Resolve one validated namespace for a whole call."""
-    if api_version is _DEFAULT_API_VERSION:
-        required: str | None = None
-    elif isinstance(api_version, str) or api_version is None:
-        required = api_version
-    else:
-        message = f"Invalid Array API version request {api_version!r}"
-        raise TypeError(message)
-    if required is None and api_version is None:
-        for value in _call_array_candidates(args=args, kwargs=kwargs):
-            xp = _get_array_namespace(value, api_version=None)
-            if xp is not None:
-                return xp
-        return None
-    resolution = _negotiate_array_namespace_for_call(
-        args=args,
-        kwargs=kwargs,
-        required_version=required,
-    )
-    return None if resolution is None else resolution.raw_namespace

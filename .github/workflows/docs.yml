@@ -5,11 +5,12 @@ on:
     inputs:
       version:
         description: Version label to publish with mike
-        required: true
+        required: false
         type: string
+        default: ""
 
 concurrency:
-  group: docs-deploy
+  group: docs-${{ inputs.version != '' && 'deploy' || github.ref }}
   cancel-in-progress: false
 
 permissions:
@@ -20,11 +21,14 @@ env:
   UV_SYSTEM_PYTHON: "1"
 
 jobs:
-  deploy:
-    name: Build and deploy
+  docs:
+    name: Documentation
     runs-on: ubuntu-22.04
+    env:
+      PYODIDE_XBUILDENV_PATH: ${{ github.workspace }}/.cache/pyodide-xbuildenv
     permissions:
-      contents: write # mike pushes the rendered version to gh-pages
+      # The caller limits ordinary CI to read; release grants write for mike.
+      contents: write
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -45,6 +49,14 @@ jobs:
         with:
           enable-cache: true
 
+      - name: Cache the Pyodide cross-build environment
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: ${{ env.PYODIDE_XBUILDENV_PATH }}
+          key: pyodide-0.36.0-${{ runner.os }}-${{ hashFiles('pyproject.toml', 'Cargo.lock') }}
+          restore-keys: |
+            pyodide-0.36.0-${{ runner.os }}-
+
       - name: Set up Python
         run: uv python install 3.12
 
@@ -54,17 +66,22 @@ jobs:
       - name: Install Pyodide build tools
         run: python -m pip install pyodide-build==0.36.0
 
-      - name: Build the Advect browser wheel
+      - name: Build the WebAssembly wheel
         run: |
           mkdir -p dist
           pyodide build . --outdir dist/pyodide
 
-      - name: Test the Advect browser wheel
-        run: |
-          pyodide venv .venv-pyodide
-          .venv-pyodide/bin/python -m pip install dist/pyodide/advect-*.whl
-          .venv-pyodide/bin/python scripts/smoke_pyodide.py
-          .venv-pyodide/bin/python scripts/run_doc_snippets.py docs
+      - name: Create the Pyodide runtime
+        run: pyodide venv .venv-pyodide
+
+      - name: Install Advect into Pyodide
+        run: .venv-pyodide/bin/python -m pip install dist/pyodide/advect-*.whl
+
+      - name: Execute the gradient smoke test in Pyodide
+        run: .venv-pyodide/bin/python scripts/smoke_pyodide.py
+
+      - name: Run the documentation snippets in Pyodide
+        run: .venv-pyodide/bin/python scripts/run_doc_snippets.py docs
 
       - name: Run the documentation snippets natively
         run: uv run python scripts/run_doc_snippets.py docs
@@ -73,11 +90,13 @@ jobs:
         run: uv run mkdocs build --strict
 
       - name: Configure git identity
+        if: inputs.version != ''
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
       - name: Deploy released documentation
+        if: inputs.version != ''
         env:
           DOCS_VERSION: ${{ inputs.version }}
           GH_TOKEN: ${{ github.token }}

@@ -1,8 +1,8 @@
 //! Invocation-local evaluation, value lifetimes, aliasing, and donation.
 
 use super::host::{Host, LinkedOperation, Operand};
-use super::plan::{ExecutionNode, LinkedExecutionPlan, ValueSource, node_index};
-use crate::{ExecutionError, NodeId};
+use super::plan::{ExecutionPlan, LinkedExecutionPlan, NodeView, ValueSource, node_index};
+use crate::ExecutionError;
 
 impl<T> LinkedExecutionPlan<T> {
     /// Execute once with invocation-local dense storage.
@@ -22,13 +22,13 @@ impl<T> LinkedExecutionPlan<T> {
             )));
         }
         let mut inputs = inputs.into_iter().map(Some).collect::<Vec<_>>();
-        let mut values: Vec<Option<H::Value>> =
-            (0..self.structure.nodes.len()).map(|_| None).collect();
+        let node_count = self.structure.store.node_count();
+        let mut values: Vec<Option<H::Value>> = (0..node_count).map(|_| None).collect();
         let mut remaining_uses = self.structure.remaining_uses.clone();
-        let mut live_aliases = vec![0_usize; self.structure.nodes.len()];
+        let mut live_aliases = vec![0_usize; node_count];
 
-        for node in &self.structure.nodes {
-            let current_index = node_index(node.id, self.structure.nodes.len(), "value")?;
+        for current_index in 0..node_count {
+            let node = self.structure.node(current_index)?;
             let value = match node.source {
                 ValueSource::Input(slot) => {
                     inputs.get_mut(slot).and_then(Option::take).ok_or_else(|| {
@@ -51,7 +51,7 @@ impl<T> LinkedExecutionPlan<T> {
                     host.materialize_constant(node_id, constant)
                         .map_err(|source| ExecutionError::Host {
                             node_id,
-                            op: node.op.clone(),
+                            op: node.op.to_owned(),
                             source,
                         })?
                 }
@@ -89,15 +89,15 @@ impl<T> LinkedExecutionPlan<T> {
                     host.evaluate(&binding.implementation, operands)
                         .map_err(|source| ExecutionError::Host {
                             node_id: node.id,
-                            op: node.op.clone(),
+                            op: node.op.to_owned(),
                             source,
                         })?
                 }
             };
-            host.validate_value(&value, &node.outputs)
+            host.validate_value(&value, node.outputs)
                 .map_err(|source| ExecutionError::Host {
                     node_id: node.id,
-                    op: node.op.clone(),
+                    op: node.op.to_owned(),
                     source,
                 })?;
 
@@ -107,8 +107,8 @@ impl<T> LinkedExecutionPlan<T> {
                 Some(value);
             increment_live_aliases(&self.alias_root_sets, &mut live_aliases, current_index)?;
 
-            for &parent in &node.parents {
-                let parent_index = node_index(parent, self.structure.nodes.len(), "parent use")?;
+            for parent in node.parents.iter() {
+                let parent_index = node_index(parent, node_count, "parent use")?;
                 let remaining = remaining_uses.get_mut(parent_index).ok_or_else(|| {
                     ExecutionError::runtime("staged use-count slot is unavailable")
                 })?;
@@ -141,24 +141,18 @@ impl<T> LinkedExecutionPlan<T> {
             }
         }
 
-        collect_outputs(
-            host,
-            &self.structure.nodes,
-            &self.structure.outputs,
-            &mut values,
-            &mut remaining_uses,
-        )
+        collect_outputs(host, &self.structure, &mut values, &mut remaining_uses)
     }
 }
 
 fn collect_outputs<H: Host>(
     host: &mut H,
-    nodes: &[ExecutionNode],
-    outputs: &[NodeId],
+    plan: &ExecutionPlan,
     values: &mut [Option<H::Value>],
     remaining_uses: &mut [usize],
 ) -> Result<Vec<H::Value>, ExecutionError<H::Error>> {
-    outputs
+    plan.store
+        .outputs()
         .iter()
         .map(|&node_id| {
             let index = node_index(node_id, values.len(), "output")?;
@@ -183,13 +177,11 @@ fn collect_outputs<H: Host>(
                     "staged graph output %{node_id} has no computed value"
                 ))
             })?;
-            let node = nodes.get(index).ok_or_else(|| {
-                ExecutionError::runtime("staged graph output node is unavailable")
-            })?;
+            let node = plan.node(index)?;
             host.retain_value(value)
                 .map_err(|source| ExecutionError::Host {
                     node_id,
-                    op: node.op.clone(),
+                    op: node.op.to_owned(),
                     source,
                 })
         })
@@ -200,19 +192,15 @@ fn select_donation_position<T, E>(
     plan: &LinkedExecutionPlan<T>,
     remaining_uses: &[usize],
     live_aliases: &[usize],
-    node: &ExecutionNode,
+    node: NodeView<'_>,
     binding: &LinkedOperation<T>,
 ) -> Result<Option<usize>, ExecutionError<E>> {
     for &position in &binding.donation_positions {
-        let parent = node.parents.get(position).copied().ok_or_else(|| {
+        let parent = node.parents.get(position).ok_or_else(|| {
             ExecutionError::runtime("validated staged donation position is unavailable")
         })?;
-        let parent_index = node_index(parent, plan.structure.nodes.len(), "donation")?;
-        let parent_node = plan
-            .structure
-            .nodes
-            .get(parent_index)
-            .ok_or_else(|| ExecutionError::runtime("staged donation source is unavailable"))?;
+        let parent_index = node_index(parent, plan.structure.store.node_count(), "donation")?;
+        let parent_node = plan.structure.node(parent_index)?;
         let alias_roots = plan
             .alias_root_sets
             .get(parent_index)
@@ -235,10 +223,10 @@ fn take_donor<V, E>(
     values: &mut [Option<V>],
     alias_root_sets: &[Vec<usize>],
     live_aliases: &mut [usize],
-    node: &ExecutionNode,
+    node: NodeView<'_>,
     position: usize,
 ) -> Result<V, ExecutionError<E>> {
-    let parent = node.parents.get(position).copied().ok_or_else(|| {
+    let parent = node.parents.get(position).ok_or_else(|| {
         ExecutionError::runtime("validated staged donation position is unavailable")
     })?;
     let parent_index = node_index(parent, values.len(), "donation")?;
@@ -256,11 +244,11 @@ fn take_donor<V, E>(
 
 fn collect_operands<'a, V, E>(
     values: &'a [Option<V>],
-    node: &ExecutionNode,
+    node: NodeView<'_>,
     mut donated: Option<(usize, V)>,
 ) -> Result<Vec<Operand<'a, V>>, ExecutionError<E>> {
     let mut operands = Vec::with_capacity(node.parents.len());
-    for (position, &parent) in node.parents.iter().enumerate() {
+    for (position, parent) in node.parents.iter().enumerate() {
         if donated
             .as_ref()
             .is_some_and(|(donated_position, _)| *donated_position == position)

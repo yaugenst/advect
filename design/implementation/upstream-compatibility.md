@@ -122,8 +122,7 @@ retained minor.
 Benchmarking is selective. A new spelling or ordinary formula needs no
 benchmark by default. Add a reference-versus-candidate Advect workload only
 when the change introduces a new mechanism, touches a measured hot path, or
-makes a performance claim; ecosystem comparisons are informative rather than
-acceptance gates.
+makes a performance claim.
 
 ## Intentional compatibility removal
 

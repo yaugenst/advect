@@ -83,11 +83,9 @@ def test_handle_ufunc_records_single_output_node() -> None:
     with _active(recorder):
         result, node_id = UFUNC_RUNTIME.handle_ufunc(
             ufunc=cast("UfuncLike", np.add),
-            method="__call__",
             recorder=recorder,
             traced_type=_DummyTraced,
             inputs=(x, y),
-            out=None,
             kwargs={},
         )
 
@@ -107,11 +105,9 @@ def test_handle_ufunc_normalizes_structural_array_to_backend_literal() -> None:
     with _active(recorder):
         result, node_id = UFUNC_RUNTIME.handle_ufunc(
             ufunc=cast("UfuncLike", np.add),
-            method="__call__",
             recorder=recorder,
             traced_type=_DummyTraced,
             inputs=(x, foreign),
-            out=None,
             kwargs={},
         )
 
@@ -129,11 +125,9 @@ def test_handle_ufunc_multi_output_creates_getoutput_nodes() -> None:
     with _active(recorder):
         result, node_ids = UFUNC_RUNTIME.handle_ufunc(
             ufunc=cast("UfuncLike", np.modf),
-            method="__call__",
             recorder=recorder,
             traced_type=_DummyTraced,
             inputs=(x,),
-            out=None,
             kwargs={},
         )
 

@@ -7,57 +7,33 @@ from typing import Any, Literal, cast
 from advect.autodiff.rules.array_family._backend_runtime import _moveaxis, xp
 from advect.autodiff.rules.array_family.jvp.common import _astype_preserving_trace
 
-_SELECT_INPUTS_VJP_ATTR = "__advect_vjp_for_input_indices__"
 
-
-def _input_shape(
-    inputs: tuple[xp.ndarray, ...],
-    input_shape: tuple[int, ...] | None,
-) -> tuple[int, ...]:
-    """Resolve the source shape from lightweight saved metadata or a direct call."""
-    if input_shape is not None:
-        return tuple(input_shape)
-    if inputs:
-        return tuple(inputs[0].shape)
-    msg = "Shape pullback requires input_shape metadata."
-    raise RuntimeError(msg)
-
-
-def _vjp_squeeze(
+def _vjp_restore_shape(
     ans: xp.ndarray,
-    *inputs: xp.ndarray,
+    x: xp.ndarray,
+    *rest: xp.ndarray,
     g: xp.ndarray,
-    input_shape: tuple[int, ...] | None = None,
     **attrs: Any,
 ) -> tuple[xp.ndarray]:
-    """Restore squeezed axes with one traceable reshape."""
-    _ = ans, attrs
-    return (xp.reshape(g, _input_shape(inputs, input_shape)),)
+    _ = ans, rest, attrs
+    return (xp.reshape(g, tuple(x.shape)),)
 
 
-def _vjp_expand_dims(
-    ans: xp.ndarray,
-    *inputs: xp.ndarray,
-    g: xp.ndarray,
-    input_shape: tuple[int, ...] | None = None,
-    **attrs: Any,
-) -> tuple[xp.ndarray]:
-    """Remove inserted axes with one traceable reshape."""
-    _ = ans, attrs
-    return (xp.reshape(g, _input_shape(inputs, input_shape)),)
+_vjp_squeeze = _vjp_restore_shape
+_vjp_expand_dims = _vjp_restore_shape
 
 
 def _vjp_reshape(
     ans: xp.ndarray,
-    *inputs: xp.ndarray,
+    x: xp.ndarray,
+    *rest: xp.ndarray,
     g: xp.ndarray,
-    input_shape: tuple[int, ...] | None = None,
     order: str | None = None,
     **attrs: Any,
 ) -> tuple[xp.ndarray]:
     """Restore the source shape, preserving NumPy's optional order contract."""
-    _ = ans
-    source_shape = _input_shape(inputs, input_shape)
+    _ = ans, rest
+    source_shape = tuple(x.shape)
     if order is not None and "_advect_array_api_version" not in attrs:
         reshape_order = cast("Literal['A', 'C', 'F']", order)
         return (xp.reshape(g, source_shape, order=reshape_order),)
@@ -100,14 +76,14 @@ def _vjp_moveaxis(
 
 def _vjp_broadcast_to(
     ans: xp.ndarray,
-    *inputs: xp.ndarray,
+    x: xp.ndarray,
+    *rest: xp.ndarray,
     g: xp.ndarray,
-    input_shape: tuple[int, ...] | None = None,
     **attrs: Any,
 ) -> tuple[xp.ndarray]:
     """Sum broadcast axes and restore the source shape."""
-    _ = ans, attrs
-    source_shape = _input_shape(inputs, input_shape)
+    _ = ans, rest, attrs
+    source_shape = tuple(x.shape)
     grad = g
     while grad.ndim > len(source_shape):
         grad = xp.sum(grad, axis=0, dtype=grad.dtype)
@@ -115,83 +91,22 @@ def _vjp_broadcast_to(
         if size == 1 and grad.shape[axis] != 1:
             grad = xp.sum(grad, axis=axis, dtype=grad.dtype, keepdims=True)
     reshaped = xp.reshape(grad, source_shape)
-    source_dtype = getattr(inputs[0], "dtype", None) if inputs else None
+    source_dtype = getattr(x, "dtype", None)
     if source_dtype is not None and getattr(reshaped, "dtype", None) != source_dtype:
         reshaped = _astype_preserving_trace(reshaped, dtype=source_dtype)
     return (reshaped,)
 
 
-def _vjp_zeros_like(
+def _vjp_constant_like(
     ans: xp.ndarray,
     *inputs: xp.ndarray,
     g: xp.ndarray,
     **attrs: Any,
 ) -> tuple[None]:
-    """Return symbolic zero for the non-differentiable zeros_like template."""
+    """Return symbolic zero for a non-differentiable creation template."""
     _ = ans, inputs, g, attrs
     return (None,)
 
 
-def _vjp_ones_like(
-    ans: xp.ndarray,
-    *inputs: xp.ndarray,
-    g: xp.ndarray,
-    **attrs: Any,
-) -> tuple[None]:
-    """Return symbolic zero for the non-differentiable ones_like template."""
-    _ = ans, inputs, g, attrs
-    return (None,)
-
-
-def _select_squeeze_input(
-    ans: xp.ndarray,
-    *inputs: xp.ndarray,
-    g: xp.ndarray,
-    active_input_indices: tuple[int, ...],
-    **attrs: Any,
-) -> tuple[xp.ndarray | None]:
-    if 0 not in active_input_indices:
-        return (None,)
-    return _vjp_squeeze(ans, *inputs, g=g, **attrs)
-
-
-def _select_expand_dims_input(
-    ans: xp.ndarray,
-    *inputs: xp.ndarray,
-    g: xp.ndarray,
-    active_input_indices: tuple[int, ...],
-    **attrs: Any,
-) -> tuple[xp.ndarray | None]:
-    if 0 not in active_input_indices:
-        return (None,)
-    return _vjp_expand_dims(ans, *inputs, g=g, **attrs)
-
-
-def _select_broadcast_to_input(
-    ans: xp.ndarray,
-    *inputs: xp.ndarray,
-    g: xp.ndarray,
-    active_input_indices: tuple[int, ...],
-    **attrs: Any,
-) -> tuple[xp.ndarray | None]:
-    if 0 not in active_input_indices:
-        return (None,)
-    return _vjp_broadcast_to(ans, *inputs, g=g, **attrs)
-
-
-def _select_constant_like_input(
-    ans: xp.ndarray,
-    *inputs: xp.ndarray,
-    g: xp.ndarray,
-    active_input_indices: tuple[int, ...],
-    **attrs: Any,
-) -> tuple[None]:
-    _ = ans, inputs, g, active_input_indices, attrs
-    return (None,)
-
-
-setattr(_vjp_squeeze, _SELECT_INPUTS_VJP_ATTR, _select_squeeze_input)
-setattr(_vjp_expand_dims, _SELECT_INPUTS_VJP_ATTR, _select_expand_dims_input)
-setattr(_vjp_broadcast_to, _SELECT_INPUTS_VJP_ATTR, _select_broadcast_to_input)
-setattr(_vjp_zeros_like, _SELECT_INPUTS_VJP_ATTR, _select_constant_like_input)
-setattr(_vjp_ones_like, _SELECT_INPUTS_VJP_ATTR, _select_constant_like_input)
+_vjp_zeros_like = _vjp_constant_like
+_vjp_ones_like = _vjp_constant_like

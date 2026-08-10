@@ -303,20 +303,19 @@ body::after {
 .search-box { top: 12vh; transform: translate(-50%, 0); width: min(74ch, 94vw); min-width: 0; }
 .search-in { display: flex; gap: 1ch; }
 .search-in .ps { color: var(--dim); }
-#searchq {
+#mkdocs-search-query {
   font: inherit; color: inherit; background: transparent; border: 0;
   border-bottom: 1px dashed var(--dim); flex: 1; padding: 0 1px;
 }
-#searchq:focus { outline: none; border-bottom-color: var(--accent); }
+#mkdocs-search-query:focus { outline: none; border-bottom-color: var(--accent); }
 .search-hits { margin: 12px 0 0; max-height: 50vh; overflow-y: auto; }
-.search-hit { display: block; padding: 4px 6px; color: var(--ink); }
-.search-hit:hover { background: var(--faint); color: var(--ink); }
-.search-hit.selq { background: var(--ink); color: var(--bg); text-shadow: none; }
-.search-hit .h-loc { color: var(--dim); font-size: 12px; }
-.search-hit.selq .h-loc, .search-hit.selq mark { color: var(--bg); }
-.search-hit .h-title { font-weight: 700; }
-.search-hit mark { background: none; color: var(--accent); font-weight: 700; }
-.search-none { color: var(--dim); padding: 4px 6px; }
+.search-hits article { padding: 4px 6px; }
+.search-hits article:hover { background: var(--faint); }
+.search-hits h3 { margin: 0; font-size: 13.5px; letter-spacing: 0; text-transform: none; }
+.search-hits h3::before { content: none; }
+.search-hits a { color: var(--ink); }
+.search-hits a:hover { background: none; color: var(--accent); }
+.search-hits p { margin: 0; color: var(--dim); font-size: 12px; }
 
 /* ---------- bottom bar ---------- */
 .bar {

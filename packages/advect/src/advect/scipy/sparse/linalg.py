@@ -8,7 +8,7 @@ import numpy as np
 from scipy.sparse import linalg as _scipy_sparse_linalg
 
 from advect.autodiff.api.implicit import ImplicitSolveError
-from advect.scipy._containers import _restore_container
+from advect.scipy._containers import _as_concrete_array, _restore_container
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -16,32 +16,6 @@ if TYPE_CHECKING:
 
 type LinearOperator = Callable[[object], object]
 type LinearSolver = Callable[[LinearOperator, object], object]
-
-
-def _as_concrete_array(value: object) -> np.ndarray:
-    if not isinstance(value, (np.ndarray, np.generic)) and type(value) not in (
-        bool,
-        int,
-        float,
-        complex,
-    ):
-        msg = (
-            "SciPy GMRES requires concrete NumPy arrays or scalars; "
-            f"got {type(value).__name__}. Convert provider arrays to NumPy before "
-            "entering the solver boundary. This callback supports first-order "
-            "dynamic implicit differentiation only."
-        )
-        raise ImplicitSolveError(msg)
-    try:
-        return np.asarray(value)
-    except (RuntimeError, TypeError, ValueError) as error:
-        msg = (
-            "SciPy GMRES requires concrete NumPy values and supports first-order "
-            "dynamic implicit differentiation only. Use a traceable linear solver "
-            "for higher-order dynamic differentiation; stage explicit iterations or "
-            "define a closed custom primitive for durable programs."
-        )
-        raise ImplicitSolveError(msg) from error
 
 
 def gmres_solver(
@@ -92,7 +66,7 @@ def gmres_solver(
         raise ValueError(msg)
 
     def solve(operator: LinearOperator, rhs: object) -> object:
-        rhs_array = _as_concrete_array(rhs)
+        rhs_array = _as_concrete_array(rhs, operation="GMRES")
         shape = rhs_array.shape
         size = rhs_array.size
         is_complex = np.iscomplexobj(rhs_array)
@@ -111,7 +85,7 @@ def gmres_solver(
             return _restore_container(unpacked, rhs)
 
         def pack(value: object) -> np.ndarray:
-            result = _as_concrete_array(value)
+            result = _as_concrete_array(value, operation="GMRES operator")
             if result.shape != shape:
                 msg = (
                     "SciPy GMRES operator must preserve the right-hand-side shape "

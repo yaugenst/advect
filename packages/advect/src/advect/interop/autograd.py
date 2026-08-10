@@ -11,7 +11,6 @@ import numpy as np
 from advect.core._pytree import tree_flatten, tree_unflatten
 from advect.interop._common import (
     conjugate_complex_tree,
-    differentiable_argnums,
     numeric_tree,
     require_dependency,
     validated_vjp,
@@ -71,7 +70,6 @@ def wrap(function: Callable[..., Any]) -> Callable[..., Any]:
 
     @functools.wraps(function)
     def wrapped(*args: Any) -> Any:
-        argnums = differentiable_argnums(len(args))
         if not _contains_box(args):
             numeric_tree(args, boundary="HIPS Autograd bridge input")
             value = function(*args)
@@ -94,7 +92,6 @@ def wrap(function: Callable[..., Any]) -> Callable[..., Any]:
             output_leaves, output_treedef, pullback = validated_vjp(
                 function,
                 concrete_args,
-                argnums=argnums,
             )
             output_treedef_holder.append(output_treedef)
             pullback_holder.append(pullback)

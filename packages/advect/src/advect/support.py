@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import inspect
 from importlib import metadata
+from operator import attrgetter, itemgetter
 from types import ModuleType
 from typing import TYPE_CHECKING, Any, Literal, cast
 
@@ -18,22 +19,6 @@ type Backing = Literal["array_api", "numpy", "scipy", "advect", "composite", "me
 
 _BINARY_ARITY = 2
 _SINGLE_OUTPUT_ARITY = 1
-
-
-def _callable_row_key(row: dict[str, object]) -> str:
-    return str(row["callable"])
-
-
-def _kind_and_callable_row_key(row: dict[str, object]) -> tuple[str, str]:
-    return str(row["kind"]), str(row["callable"])
-
-
-def _function_name(function: object) -> str:
-    return str(getattr(function, "__name__", ""))
-
-
-def _function_module(function: Callable[..., object]) -> str:
-    return str(getattr(function, "__module__", ""))
 
 
 def _derivative_status(definition: OpDef) -> tuple[Capability, VJPCapability]:
@@ -89,18 +74,16 @@ def _function_row(
     kind: str,
     lowering: str,
     backed_by: Backing,
-    dynamic: bool,
     staged: bool,
-    serialized: bool,
 ) -> dict[str, object]:
     return {
         "backed_by": backed_by,
         "callable": callable_path,
-        "dynamic": dynamic,
+        "dynamic": True,
         "entrypoint": entrypoint,
         "kind": kind,
         "lowering": lowering,
-        "serialized": serialized,
+        "serialized": staged,
         "staged": staged,
         **_primitive_capabilities(lowering),
     }
@@ -130,9 +113,7 @@ def _array_api_extension() -> dict[str, object]:
             kind="function",
             lowering=spec.op,
             backed_by="array_api",
-            dynamic=True,
             staged=_has_abstract_semantics(spec.op),
-            serialized=_has_abstract_semantics(spec.op),
         )
         for path, spec in _FUNCTION_SPECS.items()
         if selected_profile.admits(path)
@@ -146,9 +127,7 @@ def _array_api_extension() -> dict[str, object]:
             kind="function",
             lowering="composite",
             backed_by="composite",
-            dynamic=True,
             staged=path in _STAGED_ARRAY_API_COMPOSITES,
-            serialized=path in _STAGED_ARRAY_API_COMPOSITES,
         )
         if path not in _STAGED_ARRAY_API_COMPOSITES:
             row["abstract"] = "no"
@@ -163,16 +142,14 @@ def _array_api_extension() -> dict[str, object]:
             kind="metadata",
             lowering="metadata",
             backed_by="metadata",
-            dynamic=True,
             staged=True,
-            serialized=True,
         )
         for path in _ARRAY_API_META_FUNCTIONS
         if path not in _FUNCTION_SPECS
         and path not in _ARRAY_API_COMPOSITES
         and selected_profile.admits(path)
     )
-    rows.sort(key=_callable_row_key)
+    rows.sort(key=itemgetter("callable"))
     supported_profiles = []
     for version in SUPPORTED_ARRAY_API_VERSIONS:
         support_profile = build_support_profile(version)
@@ -324,9 +301,7 @@ def _numpy_function_rows(array_api_ops: frozenset[str]) -> list[dict[str, object
             kind="function",
             lowering=lowering,
             backed_by=_backing(lowering, array_api_ops),
-            dynamic="dynamic" in modes,
             staged="staged" in modes,
-            serialized="serialized" in modes,
         )
         _apply_numpy_derivative_evidence(
             row,
@@ -342,7 +317,7 @@ def _numpy_ufunc_rows(array_api_ops: frozenset[str]) -> list[dict[str, object]]:
 
     modes_by_form, derivatives_by_form = _numpy_declared_contracts()
     rows = []
-    for ufunc in sorted(_SUPPORTED_UFUNCS, key=_function_name):
+    for ufunc in sorted(_SUPPORTED_UFUNCS, key=attrgetter("__name__")):
         path = f"numpy.{ufunc.__name__}"
         modes = modes_by_form.get(("ufunc_call", path))
         if modes is None:
@@ -354,9 +329,7 @@ def _numpy_ufunc_rows(array_api_ops: frozenset[str]) -> list[dict[str, object]]:
             kind="ufunc_call",
             lowering=lowering,
             backed_by=_backing(lowering, array_api_ops),
-            dynamic="dynamic" in modes,
             staged="staged" in modes,
-            serialized="serialized" in modes,
         )
         _apply_numpy_derivative_evidence(
             row,
@@ -376,7 +349,7 @@ def _numpy_ufunc_method_rows(array_api_ops: frozenset[str]) -> list[dict[str, ob
 
     modes_by_form, derivatives_by_form = _numpy_declared_contracts()
     rows = []
-    for ufunc in sorted(_SUPPORTED_UFUNCS, key=_function_name):
+    for ufunc in sorted(_SUPPORTED_UFUNCS, key=attrgetter("__name__")):
         name = ufunc.__name__
         methods: list[tuple[str, str]] = []
         reduction = _NUMPY_UFUNC_REDUCTIONS.get(name)
@@ -406,9 +379,7 @@ def _numpy_ufunc_method_rows(array_api_ops: frozenset[str]) -> list[dict[str, ob
                 kind="ufunc_method",
                 lowering=lowering,
                 backed_by=_backing(lowering, array_api_ops),
-                dynamic="dynamic" in modes,
                 staged="staged" in modes,
-                serialized="serialized" in modes,
             )
             _apply_numpy_derivative_evidence(
                 row,
@@ -437,9 +408,7 @@ def _numpy_array_method_rows(array_api_ops: frozenset[str]) -> list[dict[str, ob
             kind="array_method",
             lowering=lowering,
             backed_by=_backing(lowering, array_api_ops),
-            dynamic="dynamic" in modes,
             staged="staged" in modes,
-            serialized="serialized" in modes,
         )
         _apply_numpy_derivative_evidence(
             row,
@@ -488,7 +457,7 @@ def _numpy_extension(array_api_ops: frozenset[str]) -> dict[str, object]:
         *_numpy_ufunc_method_rows(array_api_ops),
         *_numpy_array_method_rows(array_api_ops),
     ]
-    rows.sort(key=_kind_and_callable_row_key)
+    rows.sort(key=itemgetter("kind", "callable"))
     supported_method_count = sum(row["kind"] == "ufunc_method" for row in rows)
     return {
         "available": True,
@@ -516,7 +485,7 @@ def _walk_public_functions(module: ModuleType) -> tuple[Callable[..., object], .
                 functions.append(cast("Callable[..., object]", value))
 
     visit(module)
-    return tuple(sorted(functions, key=_function_module))
+    return tuple(sorted(functions, key=attrgetter("__module__")))
 
 
 def _scipy_primitive_lowering(entrypoint: str) -> str:
@@ -549,9 +518,7 @@ def _scipy_function_row(function: Callable[..., object]) -> dict[str, object]:
             kind="adapter",
             lowering="adapter",
             backed_by="scipy",
-            dynamic=True,
             staged=False,
-            serialized=False,
         )
 
     return _function_row(
@@ -560,9 +527,7 @@ def _scipy_function_row(function: Callable[..., object]) -> dict[str, object]:
         kind="function",
         lowering=lowering,
         backed_by="composite" if lowering == "composite" else "scipy",
-        dynamic=True,
         staged=stage_support,
-        serialized=stage_support,
     )
 
 
@@ -575,7 +540,7 @@ def _scipy_extension() -> dict[str, object]:
         return {"available": False, "functions": [], "version": None}
 
     rows = [_scipy_function_row(function) for function in _walk_public_functions(scipy_extension)]
-    rows.sort(key=_callable_row_key)
+    rows.sort(key=itemgetter("callable"))
     return {
         "available": True,
         "functions": rows,

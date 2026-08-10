@@ -4,16 +4,15 @@
 metadata and both Rust crates derive their version from it;
 [`Cargo.lock`](Cargo.lock) is the generated mirror.
 
-## One-time setup
+## Check release state
 
-- Create `testpypi` and `pypi` GitHub environments.
-- Register trusted publishers for `yaugenst/advect`, `release.yml`, and the
-  matching environment on [TestPyPI](https://test.pypi.org/manage/account/publishing/)
-  and [PyPI](https://pypi.org/manage/account/publishing/). No API-token secret
-  is needed.
-- Configure GitHub Pages to serve the root of the `gh-pages` branch. Before the
-  first public release, remove the old deployment with
-  `uv run mike delete --push dev`.
+Before changing the version, confirm that:
+
+- `main` is current and its required CI checks pass;
+- the target version is unused as a Git tag and on TestPyPI and PyPI;
+- the Release workflow's TestPyPI and PyPI publishing identities are active;
+- versioned documentation can deploy to `gh-pages`; and
+- you can push an annotated release tag and inspect the resulting workflow.
 
 ## Prepare a version
 
@@ -47,17 +46,15 @@ git tag -a vX.Y.Z -m "Advect X.Y.Z"
 git push origin vX.Y.Z
 ```
 
-The tag rebuilds and validates the distributions, deploys the documentation,
-creates the GitHub Release, publishes the distributions to PyPI through trusted
-publishing, and verifies a clean public install. The GitHub Release contains
-the 15 wheels, source distribution, checksums, and provenance manifest. The
-Pyodide wheel belongs to the documentation build; the Rust crates are not
-published separately.
+The tag rebuilds and validates the distributions, publishes versioned
+documentation, creates the GitHub Release, publishes to PyPI, and verifies a
+clean public install. Wait for the workflow to finish, then confirm that:
 
-## Documentation versions
+- the GitHub Release contains 15 wheels, one source distribution, checksums,
+  and the provenance manifest;
+- the PyPI installation smoke passed; and
+- `/X.Y.Z/` and `/latest/` serve the released documentation.
 
-Ordinary CI builds the docs and runs every native and Pyodide snippet, but does
-not deploy them. Each release publishes an immutable `/X.Y.Z/` version with
-Mike, moves `/latest/` to that release, and makes `latest` the site root. Older
-release versions remain available; there is no public `dev` version. Add a
-version picker when a second public version makes it useful.
+The Pyodide wheel belongs to the documentation build, and the Rust crates are
+not published separately. Never replace a published artifact or move an
+existing version tag; fix the issue under a new version.

@@ -445,9 +445,6 @@ There is no `holomorphic=True` promise in the initial API.
 - Per-phase thresholds are derived from paired replicate noise, with explicit
   configurable minimum and stability ceiling. A geometric mean cannot hide a
   workload or lifecycle regression.
-- HIPS Autograd and other ecosystem implementations are informative historical
-  comparisons. Same-process measurements in that report are called warmed
-  replicates and never determine acceptance.
 - Isolated-process memory reports distinguish peak RSS, provider-live bytes,
   provider or pool reservation, native structural bytes, reverse-entry bytes,
   and post-close provider-owned bytes. Timing runs keep profiling disabled.

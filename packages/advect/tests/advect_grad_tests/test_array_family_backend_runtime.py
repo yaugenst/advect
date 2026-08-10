@@ -7,10 +7,7 @@ from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
 import advect.autodiff.rules.array_family._backend_runtime as backend_runtime
-from advect.autodiff.rules.array_family.providers import (
-    ArrayFamilyBackendProvider,
-    register_array_family_backend_provider,
-)
+from advect.autodiff.rules.array_family.providers import ArrayFamilyBackendProvider
 
 if TYPE_CHECKING:
     import pytest
@@ -25,10 +22,8 @@ class _TestProvider(ArrayFamilyBackendProvider):
 
 def test_wrap_vjp_uses_active_provider_without_re_resolving(
     monkeypatch: pytest.MonkeyPatch,
-    isolated_provider_registry: None,
 ) -> None:
     provider = _TestProvider(backend="numpy", namespace=SimpleNamespace(__name__="numpy"))
-    register_array_family_backend_provider(provider)
 
     def _fail_resolve(*_values: object) -> _TestProvider:
         msg = "wrapper should not resolve provider when context is already active"
@@ -53,10 +48,8 @@ def test_wrap_vjp_uses_active_provider_without_re_resolving(
 
 def test_wrap_jvp_uses_active_provider_without_re_resolving(
     monkeypatch: pytest.MonkeyPatch,
-    isolated_provider_registry: None,
 ) -> None:
     provider = _TestProvider(backend="numpy", namespace=SimpleNamespace(__name__="numpy"))
-    register_array_family_backend_provider(provider)
 
     def _fail_resolve(*_values: object) -> _TestProvider:
         msg = "wrapper should not resolve provider when context is already active"
@@ -83,10 +76,8 @@ def test_wrap_jvp_uses_active_provider_without_re_resolving(
 
 def test_wrap_jvp_resolves_provider_and_restores_context(
     monkeypatch: pytest.MonkeyPatch,
-    isolated_provider_registry: None,
 ) -> None:
     provider = _TestProvider(backend="numpy", namespace=SimpleNamespace(__name__="numpy"))
-    register_array_family_backend_provider(provider)
     monkeypatch.setattr(
         backend_runtime,
         "resolve_array_family_backend_provider",

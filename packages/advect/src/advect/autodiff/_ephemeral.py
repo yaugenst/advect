@@ -91,40 +91,16 @@ class _TransposeRule:
     selective_vjp: Callable[..., tuple[Any | None, ...]] | None
 
 
-class _TransposeRuleCache:
-    __slots__ = ("registry", "revision", "rules")
-
-    def __init__(self) -> None:
-        self.registry: object | None = None
-        self.revision = -1
-        self.rules: dict[str, _TransposeRule] = {}
-
-
-_TRANSPOSE_RULE_CACHE = _TransposeRuleCache()
 _BATCH_VJP_ATTR = "__advect_vjp_many__"
 
 
-def _transpose_rules() -> dict[str, _TransposeRule]:
-    registry = get_registry()
-    revision = registry.get_revision()
-    cache = _TRANSPOSE_RULE_CACHE
-    if cache.registry is not registry or cache.revision != revision:
-        cache.registry = registry
-        cache.revision = revision
-        cache.rules = {}
-    return cache.rules
-
-
-def _transpose_rule(op: str, rules: dict[str, _TransposeRule]) -> _TransposeRule:
-    cached = rules.get(op)
-    if cached is not None:
-        return cached
+def _transpose_rule(op: str) -> _TransposeRule:
     definition = get_registry()._get_canonical(op)  # noqa: SLF001 - tape IDs are canonical
     vjp = definition.vjp
     if vjp is not None:
         vjp = _maybe_unwrap_array_family_vjp_rule(vjp) or vjp
     selective = None if vjp is None else getattr(vjp, "__advect_vjp_for_input_indices__", None)
-    cached = _TransposeRule(
+    return _TransposeRule(
         definition=definition,
         vjp=vjp,
         selective_vjp=(
@@ -133,8 +109,6 @@ def _transpose_rule(op: str, rules: dict[str, _TransposeRule]) -> _TransposeRule
             else None
         ),
     )
-    rules[op] = cached
-    return cached
 
 
 class _DynamicBindingCache:
@@ -224,7 +198,7 @@ def _vjp_binding(op: str) -> Callable[..., object]:
     cached = cache.vjp.get(op)
     if cached is not None:
         return cached
-    rule = _transpose_rule(op, _transpose_rules())
+    rule = _transpose_rule(op)
 
     def apply(
         answer: object,
@@ -649,30 +623,6 @@ def _real_part(value: object) -> object:
     return real if real is not None else value
 
 
-def project_cotangent_like(primal: object, contribution: object) -> object:
-    """Project an adjoint contribution into ``primal``'s real tangent space."""
-    if isinstance(primal, tuple) and isinstance(contribution, tuple):
-        return tuple(
-            project_cotangent_like(primal_leaf, contribution_leaf)
-            for primal_leaf, contribution_leaf in zip(primal, contribution, strict=True)
-        )
-    if isinstance(contribution, tuple):
-        return contribution
-
-    primal_dtype = getattr(primal, "dtype", None)
-    contribution_dtype = getattr(contribution, "dtype", None)
-    if primal_dtype is None:
-        if isinstance(primal, complex):
-            return contribution
-        if isinstance(contribution, complex):
-            return contribution.real
-        return contribution
-
-    if not _dtype_is_complex(primal_dtype) and _dtype_is_complex(contribution_dtype):
-        return _real_part(contribution)
-    return contribution
-
-
 def _project_cotangent_to_dtype(target_dtype: object, contribution: object) -> object:
     """Project without retaining a primal value solely for its dtype."""
     if isinstance(contribution, tuple):
@@ -878,12 +828,10 @@ def apply_transpose(
     output_cotangents: dict[int, Any],
     *,
     consume: bool = False,
-    copy_output_cotangents: bool = True,
 ) -> dict[int, Any]:
     """Run the real adjoint of one concrete linearization."""
     with _use_array_api_version(trace.array_api_version):
         provider = _trace_provider(trace)
-        del copy_output_cotangents
         if provider is None:
             return _apply_transpose(
                 trace,
@@ -961,7 +909,6 @@ def apply_unary_array_pullback(trace: TraceResult, cotangent: object) -> object:
             trace,
             {trace.output_ids[0]: cotangent},
             consume=True,
-            copy_output_cotangents=False,
         )
         gradient = gradients.get(input_id)
         if gradient is not None:
@@ -1394,6 +1341,5 @@ __all__ = [
     "apply_jvp",
     "apply_transpose",
     "linearize_call",
-    "project_cotangent_like",
     "trace_call",
 ]

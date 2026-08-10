@@ -26,15 +26,6 @@ def _array_operand(value: object) -> object:
     return np.asarray(value)
 
 
-def _provider_name(value: object) -> str:
-    namespace = _get_array_namespace(value)
-    if namespace is None:
-        module = type(value).__module__.partition(".")[0]
-        return module or type(value).__name__
-    name = getattr(namespace, "__name__", None)
-    return name if isinstance(name, str) and name else type(namespace).__name__
-
-
 def _require_numpy_values(module: str, name: str, *values: object) -> None:
     for value in values:
         if value is None:
@@ -45,8 +36,10 @@ def _require_numpy_values(module: str, name: str, *values: object) -> None:
         if _is_traced_value(value):
             continue
         namespace = _get_array_namespace(value)
-        provider = None if namespace is None else _provider_name(value)
-        if provider is not None and provider != "numpy":
+        if namespace is None:
+            continue
+        provider = getattr(namespace, "__name__", None) or type(namespace).__name__
+        if provider != "numpy":
             msg = (
                 f"advect.scipy.{module}.{name} supports NumPy arrays only; got Array API "
                 f"provider {provider!r}. Convert to a NumPy array before calling "

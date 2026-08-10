@@ -43,18 +43,15 @@ def _format_leaf_name(prefix: str | None, path: TreePath) -> str | None:
 @dataclass(frozen=True, slots=True)
 class _SignatureMetadata:
     signature: inspect.Signature
-    param_names: tuple[str, ...]
     fixed_positional_names: tuple[str, ...]
     positional_index_by_name: dict[str, int]
     varargs_name: str | None
 
 
-_MISSING_SIGNATURE_ATTR = object()
 _SIGNATURE_METADATA_CACHE_SIZE = 512
 
 
 def _build_signature_metadata(sig: inspect.Signature) -> _SignatureMetadata:
-    param_names = tuple(sig.parameters.keys())
     fixed_positional_names: list[str] = []
     positional_index_by_name: dict[str, int] = {}
     varargs_name: str | None = None
@@ -75,22 +72,9 @@ def _build_signature_metadata(sig: inspect.Signature) -> _SignatureMetadata:
 
     return _SignatureMetadata(
         signature=sig,
-        param_names=param_names,
         fixed_positional_names=tuple(fixed_positional_names),
         positional_index_by_name=positional_index_by_name,
         varargs_name=varargs_name,
-    )
-
-
-def _signature_cache_tokens(f: Any) -> tuple[int, int, int, int, int]:
-    signature_override = getattr(f, "__signature__", _MISSING_SIGNATURE_ATTR)
-    wrapped = getattr(f, "__wrapped__", _MISSING_SIGNATURE_ATTR)
-    return (
-        id(f),
-        0 if signature_override is _MISSING_SIGNATURE_ATTR else 1,
-        id(signature_override),
-        0 if wrapped is _MISSING_SIGNATURE_ATTR else 1,
-        id(wrapped),
     )
 
 
@@ -103,26 +87,13 @@ def _get_signature_metadata_uncached(f: Any) -> _SignatureMetadata:
 
 
 @functools.lru_cache(maxsize=_SIGNATURE_METADATA_CACHE_SIZE)
-def _get_signature_metadata_cached(
-    f: Any,
-    callable_id: int,
-    signature_override_present: int,
-    signature_override_id: int,
-    wrapped_present: int,
-    wrapped_id: int,
-) -> _SignatureMetadata:
-    del callable_id
-    del signature_override_present
-    del signature_override_id
-    del wrapped_present
-    del wrapped_id
+def _get_signature_metadata_cached(f: Any) -> _SignatureMetadata:
     return _get_signature_metadata_uncached(f)
 
 
 def _get_signature_metadata(f: Any) -> _SignatureMetadata:
-    cache_tokens = _signature_cache_tokens(f)
     try:
-        return _get_signature_metadata_cached(f, *cache_tokens)
+        return _get_signature_metadata_cached(f)
     except TypeError:
         # Unhashable callable objects cannot be cached by lru_cache keys.
         return _get_signature_metadata_uncached(f)
@@ -492,30 +463,6 @@ def _trace_selected_args_and_kwargs(
     dict[str, _TracedInputSpec],
 ]:
     """Trace selected positional args and argnames (pytree-aware)."""
-    if argnames is None and normalized_argnums == [0]:
-        # Dominant grad/vjp/jvp case: one selected positional input and no
-        # named selections. Preserve the exact pytree path below for anything
-        # that is not an unregistered leaf.
-        fixed_names, varargs_name = _get_positional_param_names(f)
-        prefix = _prefix_for_argnum(0, fixed=fixed_names, varargs_name=varargs_name)
-        traced_value, spec = _trace_value_as_inputs(
-            graph,
-            args[0],
-            prefix=prefix,
-            xp=xp,
-        )
-        traced_args = list(args)
-        traced_args[0] = traced_value
-        traced_args, traced_kwargs = _trace_passive_outer_arguments(
-            f,
-            graph=graph,
-            traced_args=traced_args,
-            traced_kwargs=kwargs,
-            normalized_argnums=normalized_argnums,
-            argnames=argnames,
-        )
-        return traced_args, traced_kwargs, [spec], {}
-
     _check_argnums_argnames_overlap(f, normalized_argnums=normalized_argnums, argnames=argnames)
 
     traced_args, pos_specs = _trace_positional_selections(

@@ -8,7 +8,7 @@ import sys
 
 import numpy as np
 import pytest
-from scripts._support import bench_runtime_memory as benchmark
+from scripts import bench_runtime_memory as benchmark
 
 
 @pytest.mark.parametrize(
@@ -477,16 +477,3 @@ def test_controller_requires_a_named_profile() -> None:
 
     assert completed.returncode == 2
     assert "--profile is required" in completed.stderr
-
-
-@pytest.mark.parametrize("removed_flag", ["--workload", "--framework", "--provider"])
-def test_controller_rejects_removed_free_form_selection(removed_flag: str) -> None:
-    completed = subprocess.run(  # noqa: S603 - fixed current interpreter and repository module
-        [sys.executable, "-m", "scripts.bench_runtime_memory", removed_flag, "numpy"],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-
-    assert completed.returncode == 2
-    assert f"unrecognized arguments: {removed_flag} numpy" in completed.stderr

@@ -41,14 +41,14 @@ def _scalar_cotangent_leaf(out_leaf: Any) -> Any:
     return _ones_like(out_leaf)
 
 
-def _extract_scalar_output_for_grad(value: Any) -> tuple[Any, Any]:
+def _extract_scalar_output(value: Any, *, transform_name: str) -> tuple[Any, Any]:
     leaves, out_treedef = tree_flatten(value)
     if out_treedef.node_type is None:
         out_leaf = value
     else:
         if len(leaves) != 1:
             msg = (
-                "grad requires a scalar-valued function, but output pytree has "
+                f"{transform_name} requires a scalar-valued function, but output pytree has "
                 f"{len(leaves)} leaves. "
                 "Use vjp() for non-scalar outputs, or reduce your output to a scalar."
             )
@@ -63,33 +63,8 @@ def _extract_scalar_output_for_grad(value: Any) -> tuple[Any, Any]:
     if not is_scalar:
         shape = getattr(out_leaf, "shape", "unknown")
         msg = (
-            f"grad requires a scalar-valued function, but output has shape {shape}. "
+            f"{transform_name} requires a scalar-valued function, but output has shape {shape}. "
             "Use vjp() for non-scalar outputs, or reduce your output to a scalar."
         )
-        raise ValueError(msg)
-    return out_leaf, out_treedef
-
-
-def _extract_scalar_output_for_value_and_grad(value: Any) -> tuple[Any, Any]:
-    leaves, out_treedef = tree_flatten(value)
-    if out_treedef.node_type is None:
-        out_leaf = value
-    else:
-        if len(leaves) != 1:
-            msg = (
-                "value_and_grad requires a scalar-valued function, but output pytree has "
-                f"{len(leaves)} leaves."
-            )
-            raise ValueError(msg)
-        out_leaf = leaves[0]
-
-    is_scalar = (
-        _is_scalar_value(out_leaf)
-        or (hasattr(out_leaf, "shape") and out_leaf.shape == ())
-        or (hasattr(out_leaf, "ndim") and out_leaf.ndim == 0)
-    )
-    if not is_scalar:
-        shape = getattr(out_leaf, "shape", "unknown")
-        msg = f"value_and_grad requires a scalar-valued function, but output has shape {shape}."
         raise ValueError(msg)
     return out_leaf, out_treedef

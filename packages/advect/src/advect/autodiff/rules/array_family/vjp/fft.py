@@ -2,19 +2,14 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal, cast
+from functools import partial
+from typing import Any, cast
 
 from advect.autodiff.rules.array_family._backend_runtime import _array_constructor_like, xp
-
-type FFTNorm = Literal["backward", "ortho", "forward"]
-
-
-def _adjoint_norm(norm: FFTNorm | None) -> FFTNorm:
-    if norm in {None, "backward"}:
-        return "forward"
-    if norm == "forward":
-        return "backward"
-    return "ortho"
+from advect.autodiff.rules.array_family._transpose_utils import (
+    FFTNorm,
+    _adjoint_fft_norm as _adjoint_norm,
+)
 
 
 def _normalize_axis(axis: int, *, ndim: int) -> int:
@@ -183,48 +178,8 @@ def _vjp_ifftn(
     )
 
 
-def _vjp_fft2(
-    ans: xp.ndarray,
-    x: xp.ndarray,
-    *rest: xp.ndarray,
-    g: xp.ndarray,
-    s: tuple[int, ...] | None = None,
-    axes: tuple[int, ...] | None = (-2, -1),
-    norm: FFTNorm | None = None,
-    **attrs: Any,
-) -> tuple[xp.ndarray]:
-    return _vjp_fftn(
-        ans,
-        x,
-        *rest,
-        g=g,
-        s=s,
-        axes=axes,
-        norm=norm,
-        **attrs,
-    )
-
-
-def _vjp_ifft2(
-    ans: xp.ndarray,
-    x: xp.ndarray,
-    *rest: xp.ndarray,
-    g: xp.ndarray,
-    s: tuple[int, ...] | None = None,
-    axes: tuple[int, ...] | None = (-2, -1),
-    norm: FFTNorm | None = None,
-    **attrs: Any,
-) -> tuple[xp.ndarray]:
-    return _vjp_ifftn(
-        ans,
-        x,
-        *rest,
-        g=g,
-        s=s,
-        axes=axes,
-        norm=norm,
-        **attrs,
-    )
+_vjp_fft2 = partial(_vjp_fftn, axes=(-2, -1))
+_vjp_ifft2 = partial(_vjp_ifftn, axes=(-2, -1))
 
 
 def _vjp_rfft(
@@ -331,26 +286,7 @@ def _vjp_rfftn(
     )
 
 
-def _vjp_rfft2(
-    ans: xp.ndarray,
-    x: xp.ndarray,
-    *rest: xp.ndarray,
-    g: xp.ndarray,
-    s: tuple[int, ...] | None = None,
-    axes: tuple[int, ...] | None = (-2, -1),
-    norm: FFTNorm | None = None,
-    **attrs: Any,
-) -> tuple[xp.ndarray]:
-    return _vjp_rfftn(
-        ans,
-        x,
-        *rest,
-        g=g,
-        s=s,
-        axes=axes,
-        norm=norm,
-        **attrs,
-    )
+_vjp_rfft2 = partial(_vjp_rfftn, axes=(-2, -1))
 
 
 def _vjp_irfft(
@@ -438,26 +374,7 @@ def _vjp_irfftn(
     )
 
 
-def _vjp_irfft2(
-    ans: xp.ndarray,
-    x: xp.ndarray,
-    *rest: xp.ndarray,
-    g: xp.ndarray,
-    s: tuple[int, ...] | None = None,
-    axes: tuple[int, ...] | None = (-2, -1),
-    norm: FFTNorm | None = None,
-    **attrs: Any,
-) -> tuple[xp.ndarray]:
-    return _vjp_irfftn(
-        ans,
-        x,
-        *rest,
-        g=g,
-        s=s,
-        axes=axes,
-        norm=norm,
-        **attrs,
-    )
+_vjp_irfft2 = partial(_vjp_irfftn, axes=(-2, -1))
 
 
 def _vjp_fftshift(
@@ -480,21 +397,3 @@ def _vjp_ifftshift(
 ) -> tuple[xp.ndarray]:
     _ = ans, inputs, attrs
     return (xp.fft.fftshift(g, axes=axes),)
-
-
-__all__ = [
-    "_vjp_fft",
-    "_vjp_fft2",
-    "_vjp_fftn",
-    "_vjp_fftshift",
-    "_vjp_ifft",
-    "_vjp_ifft2",
-    "_vjp_ifftn",
-    "_vjp_ifftshift",
-    "_vjp_irfft",
-    "_vjp_irfft2",
-    "_vjp_irfftn",
-    "_vjp_rfft",
-    "_vjp_rfft2",
-    "_vjp_rfftn",
-]

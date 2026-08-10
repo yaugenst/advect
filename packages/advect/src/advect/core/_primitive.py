@@ -300,13 +300,10 @@ class Primitive(Generic[P, R]):
         with self._dispatch_exact(*args, **kwargs) as execution:
             return execution.output
 
-    def _trace_dynamic_call(
+    def _partition_arguments(
         self,
         arguments: Mapping[str, Any],
-        *,
-        track_output_arity: bool,
-    ) -> Any:
-        """Record one concrete-only call, optionally allowing per-node output arity."""
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
         static_arguments = {name: arguments[name] for name in self.static_argnames}
         for name, value in static_arguments.items():
             if _contains_tracer(value):
@@ -316,9 +313,18 @@ class Primitive(Generic[P, R]):
                     "the argument from static_argnames."
                 )
                 raise TypeError(msg)
-        dynamic_arguments = {
+        return static_arguments, {
             name: value for name, value in arguments.items() if name not in static_arguments
         }
+
+    def _trace_dynamic_call(
+        self,
+        arguments: Mapping[str, Any],
+        *,
+        track_output_arity: bool,
+    ) -> Any:
+        """Record one concrete-only call, optionally allowing per-node output arity."""
+        static_arguments, dynamic_arguments = self._partition_arguments(arguments)
         recorder = _get_active_recorder()
         if recorder is None:
             msg = "Primitive tracing requires an active trace"
@@ -374,21 +380,10 @@ class Primitive(Generic[P, R]):
         if not is_tracing():
             return cast("R", self._dispatch_impl(**arguments))
 
-        static_arguments = {name: arguments[name] for name in self.static_argnames}
-        for name, value in static_arguments.items():
-            if _contains_tracer(value):
-                msg = (
-                    f"Primitive '{self.name}' argument '{name}' is declared static but "
-                    "received a traced value. Pass concrete configuration data or remove "
-                    "the argument from static_argnames."
-                )
-                raise TypeError(msg)
-        dynamic_arguments = {
-            name: value for name, value in arguments.items() if name not in static_arguments
-        }
         if _get_active_trace_kind() == "stage_abstract":
             from advect.core._stage import call_primitive_abstract  # noqa: PLC0415
 
+            static_arguments, dynamic_arguments = self._partition_arguments(arguments)
             return cast(
                 "R",
                 call_primitive_abstract(

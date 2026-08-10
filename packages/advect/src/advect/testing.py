@@ -7,7 +7,8 @@ import math
 from functools import partial
 from typing import TYPE_CHECKING, Any, NoReturn, cast
 
-from advect.core._abstract import AbstractValue, ArraySpec
+from advect.autodiff.api._scalar_boundary import _is_complex_numeric
+from advect.core._abstract import AbstractValue, ArraySpec, _scalar_spec
 from advect.core._array_api.providers import _get_array_namespace
 from advect.core._primitive import MissingPrimitiveRuleError
 from advect.core._primitive_call import _infer_namespace, _normalize_output_pytree
@@ -18,19 +19,6 @@ if TYPE_CHECKING:
 
     from advect.core._primitive import Primitive
     from advect.core._residual import _PrimitiveExecution
-
-
-def _array_spec(value: Any) -> ArraySpec:
-    shape = getattr(value, "shape", ())
-    dtype = getattr(value, "dtype", None)
-    if dtype is None:
-        dtype = {
-            bool: "bool",
-            int: "int64",
-            float: "float64",
-            complex: "complex128",
-        }.get(type(value), type(value).__name__)
-    return ArraySpec(tuple(int(size) for size in shape), dtype)
 
 
 def _ones_like(value: Any) -> Any:
@@ -56,7 +44,7 @@ def _shift_leaf(value: Any, step: Any, *, scale: float) -> Any:
 
 
 def _as_abstract_value(value: Any) -> AbstractValue:
-    return AbstractValue(_array_spec(value))
+    return AbstractValue(_scalar_spec(value))
 
 
 def _tree_allclose(actual: Any, expected: Any, *, atol: float, rtol: float) -> bool:
@@ -103,8 +91,8 @@ def _check_same_tree_specs(
     for index, (actual_leaf, expected_leaf) in enumerate(
         zip(actual_leaves, expected_leaves, strict=True),
     ):
-        actual_spec = _array_spec(actual_leaf)
-        expected_spec = _array_spec(expected_leaf)
+        actual_spec = _scalar_spec(actual_leaf)
+        expected_spec = _scalar_spec(expected_leaf)
         if actual_spec.shape != expected_spec.shape or str(actual_spec.dtype) != str(
             expected_spec.dtype
         ):
@@ -168,7 +156,7 @@ def _check_output_specs(primitive: Primitive[Any, Any], concrete: Any, abstract:
         if not isinstance(spec, ArraySpec):
             msg = f"Primitive '{primitive.name}' abstract output leaf {index} is not an ArraySpec"
             raise AssertionError(msg)  # noqa: TRY004 - this is a failed author check.
-        concrete_spec = _array_spec(value)
+        concrete_spec = _scalar_spec(value)
         if concrete_spec.shape != spec.shape or str(concrete_spec.dtype) != str(spec.dtype):
             msg = (
                 f"Primitive '{primitive.name}' abstract output leaf {index} disagrees with "
@@ -178,16 +166,9 @@ def _check_output_specs(primitive: Primitive[Any, Any], concrete: Any, abstract:
             raise AssertionError(msg)
 
 
-def _is_complex_value(value: Any) -> bool:
-    if isinstance(value, complex):
-        return True
-    dtype = getattr(value, "dtype", None)
-    return getattr(dtype, "kind", None) == "c" or "complex" in str(dtype).lower()
-
-
 def _default_check_tangent(value: Any, *, complex_direction: bool) -> Any:
     tangent = _ones_like(value)
-    if complex_direction and _is_complex_value(value):
+    if complex_direction and _is_complex_numeric(value):
         return tangent * (1 + 1j)
     return tangent
 
@@ -477,7 +458,7 @@ def check_primitive(  # noqa: C901, PLR0912, PLR0913, PLR0915
         _check_output_specs(primitive, concrete, abstract)
 
     primal_leaves, primal_treedef = tree_flatten(primals)
-    if "complex" in requested and not any(_is_complex_value(value) for value in primal_leaves):
+    if "complex" in requested and not any(_is_complex_numeric(value) for value in primal_leaves):
         msg = f"Primitive '{primitive.name}' complex check requires at least one complex primal"
         raise ValueError(msg)
 
@@ -720,7 +701,7 @@ def _check_primitive_stage(
 ) -> None:
     from advect.core._stage import StagedProgram, stage  # noqa: PLC0415
 
-    specs = cast("tuple[Any, ...]", tree_map(_array_spec, primals))
+    specs = cast("tuple[Any, ...]", tree_map(_scalar_spec, primals))
     program = cast("StagedProgram", stage(dynamic_call, specs=specs))
     restored = StagedProgram.from_dict(program.to_dict())
     snapshot = tree_map(_copy_check_value, primals)

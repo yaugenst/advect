@@ -92,7 +92,7 @@ fn reverse_inner(
     let node_count = tape.try_borrow()?.arena.node_count();
     let mut cotangents: Vec<Option<Py<PyAny>>> =
         std::iter::repeat_with(|| None).take(node_count).collect();
-    validate_requested_inputs(tape, &requested_inputs)?;
+    let requested_input_indices = validate_requested_inputs(tape, requested_inputs)?;
     seed_outputs(py, tape, &mut cotangents, output_cotangents)?;
 
     for node_index in (0..node_count).rev() {
@@ -130,10 +130,9 @@ fn reverse_inner(
         }
     }
 
-    requested_inputs
+    requested_input_indices
         .into_iter()
-        .map(|node_id| {
-            let index = node_index(node_id, node_count)?;
+        .map(|index| {
             Ok(cotangents
                 .get_mut(index)
                 .ok_or_else(|| PyRuntimeError::new_err("requested cotangent slot is unavailable"))?
@@ -149,7 +148,7 @@ fn reverse_many_inner(
     requested_inputs: Vec<NodeId>,
 ) -> PyResult<Vec<Vec<Option<Py<PyAny>>>>> {
     let node_count = tape.try_borrow()?.arena.node_count();
-    validate_requested_inputs(tape, &requested_inputs)?;
+    let requested_input_indices = validate_requested_inputs(tape, requested_inputs)?;
     if output_cotangent_sets.is_empty() {
         return Ok(Vec::new());
     }
@@ -208,10 +207,9 @@ fn reverse_many_inner(
 
     let mut results: Vec<Vec<Option<Py<PyAny>>>> = cotangent_tables
         .iter()
-        .map(|_cotangents| Vec::with_capacity(requested_inputs.len()))
+        .map(|_cotangents| Vec::with_capacity(requested_input_indices.len()))
         .collect();
-    for node_id in requested_inputs {
-        let index = node_index(node_id, node_count)?;
+    for index in requested_input_indices {
         for (result, cotangents) in results.iter_mut().zip(cotangent_tables.iter_mut()) {
             result.push(
                 cotangents
@@ -228,18 +226,20 @@ fn reverse_many_inner(
 
 fn validate_requested_inputs(
     tape: &Bound<'_, DynamicTape>,
-    requested_inputs: &[NodeId],
-) -> PyResult<()> {
+    requested_inputs: Vec<NodeId>,
+) -> PyResult<Vec<usize>> {
     let state = tape.try_borrow()?;
-    for &node_id in requested_inputs {
-        state.require_node(node_id)?;
+    let mut indices = Vec::with_capacity(requested_inputs.len());
+    for node_id in requested_inputs {
+        let (index, _node) = state.require_node(node_id)?;
         if !state.inputs.contains(&node_id) {
             return Err(PyValueError::new_err(format!(
                 "dynamic VJP requested node %{node_id}, which is not a tape input"
             )));
         }
+        indices.push(index);
     }
-    Ok(())
+    Ok(indices)
 }
 
 fn seed_outputs(
@@ -613,15 +613,4 @@ fn add_cotangents(
         )),
         (None, None) => existing.add(contribution).map(Bound::unbind),
     }
-}
-
-fn node_index(node_id: NodeId, node_count: usize) -> PyResult<usize> {
-    let index = usize::try_from(node_id)
-        .map_err(|_| PyValueError::new_err("dynamic node ID is out of range"))?;
-    if index >= node_count {
-        return Err(PyValueError::new_err(format!(
-            "dynamic node %{node_id} does not exist"
-        )));
-    }
-    Ok(index)
 }

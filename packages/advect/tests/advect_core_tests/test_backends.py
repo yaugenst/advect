@@ -127,8 +127,8 @@ def test_hook_registration_is_idempotent_for_the_identical_callable() -> None:
 
     register_hook("idempotent.evaluate_op", evaluate)
 
-    cached, _decode = resolve_backend_hooks("idempotent.add", ())
-    assert cached is evaluate
+    resolved_again, _decode = resolve_backend_hooks("idempotent.add", ())
+    assert resolved_again is evaluate
     assert get_hook("idempotent.evaluate_op") is evaluate
 
 

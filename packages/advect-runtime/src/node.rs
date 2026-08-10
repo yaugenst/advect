@@ -1,11 +1,9 @@
 //! Closed node metadata.
 
-use serde::{Deserialize, Serialize};
-
 use crate::{AttrMap, DTypeDescriptor, GraphError, NodeId, RawArena};
 
 /// Shape and dtype of one flat runtime value.
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct ValueSpec {
     shape: Vec<usize>,
     dtype: DTypeDescriptor,
@@ -32,10 +30,9 @@ impl ValueSpec {
 }
 
 /// Durable metadata for one graph node.
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct NodeMetadata {
     attrs: AttrMap,
-    value: ValueSpec,
     name: Option<String>,
     outputs: Vec<ValueSpec>,
     source_location: Option<String>,
@@ -63,7 +60,7 @@ impl NodeMetadata {
                     "single-output node must not declare output_shapes/output_dtypes",
                 ));
             }
-            vec![value.clone()]
+            vec![value]
         } else {
             let shapes = output_shapes.ok_or_else(|| {
                 GraphError::new("multi-output node is missing output_shapes/output_dtypes")
@@ -92,7 +89,6 @@ impl NodeMetadata {
         };
         Ok(Self {
             attrs,
-            value,
             name,
             outputs,
             source_location,
@@ -108,19 +104,13 @@ impl NodeMetadata {
     /// Primary output shape.
     #[must_use]
     pub fn shape(&self) -> &[usize] {
-        self.value.shape()
+        self.primary_output().shape()
     }
 
     /// Primary output dtype.
     #[must_use]
-    pub const fn dtype(&self) -> &DTypeDescriptor {
-        self.value.dtype()
-    }
-
-    /// Primary output specification.
-    #[must_use]
-    pub const fn value_spec(&self) -> &ValueSpec {
-        &self.value
+    pub fn dtype(&self) -> &DTypeDescriptor {
+        self.primary_output().dtype()
     }
 
     /// Optional user-facing name.
@@ -167,6 +157,13 @@ impl NodeMetadata {
     #[must_use]
     pub fn source_location(&self) -> Option<&str> {
         self.source_location.as_deref()
+    }
+
+    fn primary_output(&self) -> &ValueSpec {
+        let Some(value) = self.outputs.first() else {
+            unreachable!("validated node metadata always has an output")
+        };
+        value
     }
 }
 

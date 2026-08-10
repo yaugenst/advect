@@ -2,14 +2,22 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal, cast
+from typing import Any, cast
 
 from advect.autodiff.rules.array_family._backend_runtime import (
     _array_constructor_like,
     _moveaxis,
     _scalar_like,
-    current_array_backend_provider,
     xp,
+)
+from advect.autodiff.rules.array_family._transpose_utils import (
+    _conjugate_transpose as _h,
+    _diagonal_matrix as _diag_matrix,
+    _lower_triangular_halfdiag,
+    _normalize_uplo,
+    _right_solve,
+    _uses_standard_linalg_contract,
+    zeros_output_tangent_structure as _zeros_output_tangent_structure,
 )
 from advect.autodiff.rules.array_family.jvp.common import (
     _MATRIX_AXIS_COUNT,
@@ -24,32 +32,7 @@ from advect.autodiff.rules.array_family.jvp.common import (
     _reshape_reduction_result,
     _shape_unwrapped,
     _zeros_output_tangent,
-    _zeros_output_tangent_structure,
 )
-
-
-def _h(x: xp.ndarray) -> xp.ndarray:
-    """Conjugate-transpose the final two axes."""
-    return cast("xp.ndarray", xp.conjugate(xp.swapaxes(x, -1, -2)))
-
-
-def _uses_standard_linalg_contract() -> bool:
-    provider = current_array_backend_provider()
-    return provider is not None and provider.backend.split(".", 1)[0] != "numpy"
-
-
-def _diag_matrix(values: xp.ndarray, *, dtype: xp.dtype[Any]) -> xp.ndarray:
-    size = _shape_unwrapped(values)[-1]
-    eye = _array_constructor_like(values, "eye", size, dtype=dtype)
-    return cast("xp.ndarray", eye * values[..., None, :])
-
-
-def _normalize_uplo(value: str) -> Literal["L", "U"]:
-    normalized = str(value).upper()
-    if normalized not in {"L", "U"}:
-        msg = f"expected UPLO='L' or 'U', got {value!r}"
-        raise ValueError(msg)
-    return cast("Literal['L', 'U']", normalized)
 
 
 def _hermitian_from_triangle(x: xp.ndarray, *, uplo: str) -> xp.ndarray:
@@ -64,22 +47,6 @@ def _hermitian_from_triangle(x: xp.ndarray, *, uplo: str) -> xp.ndarray:
         msg = f"expected UPLO='L' or 'U', got {uplo!r}"
         raise ValueError(msg)
     return cast("xp.ndarray", strict + _h(strict) + diag_matrix)
-
-
-def _lower_triangular_halfdiag(x: xp.ndarray) -> xp.ndarray:
-    """Project to the lower triangle and halve its diagonal."""
-    lower = xp.tril(x)
-    diag = xp.diagonal(lower, axis1=-2, axis2=-1)
-    return cast(
-        "xp.ndarray",
-        lower - _scalar_like(0.5, lower) * _diag_matrix(diag, dtype=xp.dtype(lower.dtype)),
-    )
-
-
-def _right_solve(a: xp.ndarray, b: xp.ndarray) -> xp.ndarray:
-    """Solve ``result @ a = b`` over the final two axes."""
-    solved = xp.linalg.solve(xp.swapaxes(a, -1, -2), xp.swapaxes(b, -1, -2))
-    return cast("xp.ndarray", xp.swapaxes(solved, -1, -2))
 
 
 def _jvp_linalg_cholesky(

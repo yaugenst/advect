@@ -7,11 +7,10 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-import advect.autodiff as ad
+import advect as ad
 from advect.core._pytree import tree_flatten, tree_unflatten
 from advect.interop._common import (
     conjugate_complex_tree,
-    differentiable_argnums,
     numeric_tree,
     require_dependency,
 )
@@ -70,7 +69,6 @@ def _output_payload(value: Any, expected_treedef: Any | None, *, has_aux: bool) 
 
 
 def _validate_inputs(values: tuple[Any, ...]) -> None:
-    differentiable_argnums(len(values))
     leaves, _treedef = jax.tree_util.tree_flatten(values)
     if not leaves:
         message = "JAX bridge inputs must contain at least one array leaf"
@@ -168,7 +166,7 @@ def wrap(
         concrete_cotangents = _numpy_tree(value_cotangents)
         _, pullback = ad.vjp(
             differentiable_function,
-            argnums=differentiable_argnums(len(concrete_values)),
+            argnums=tuple(range(len(concrete_values))),
         )(*concrete_values)
         gradients = pullback(conjugate_complex_tree(concrete_cotangents))
         return _gradient_payloads(gradients, concrete_values)

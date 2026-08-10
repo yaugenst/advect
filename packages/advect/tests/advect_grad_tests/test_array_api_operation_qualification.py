@@ -8,7 +8,7 @@ from typing import Any
 import array_api_strict
 import numpy as np
 import pytest
-from scripts._support import qualify_array_api_operations as qualifier
+from scripts import qualify_array_api_operations as qualifier
 
 import advect as ad
 from advect.autodiff._ephemeral import trace_call

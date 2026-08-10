@@ -5,10 +5,12 @@ from __future__ import annotations
 from typing import Any, cast
 
 from advect.autodiff.rules.array_family._backend_runtime import _array_constructor_like, xp
+from advect.autodiff.rules.array_family._transpose_utils import (
+    infer_output_tangent_dtype as _infer_output_tangent_dtype,
+)
 from advect.autodiff.rules.array_family.jvp.common import (
     _asarray_preserving_trace,
     _asarray_unwrapped,
-    _infer_output_tangent_dtype,
     _zeros_output_tangent,
 )
 

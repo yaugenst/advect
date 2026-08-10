@@ -40,7 +40,13 @@ pub(crate) fn dynamic_jvp(
         let mut state = tape.try_borrow_mut()?;
         state.begin_traversal(TraversalKind::Forward)?;
     }
-    let result = forward_inner(py, &tape, tangent_seeds, requested_outputs);
+    let result = forward_many_inner(py, &tape, vec![tangent_seeds], requested_outputs).and_then(
+        |mut results| {
+            results
+                .pop()
+                .ok_or_else(|| PyRuntimeError::new_err("dynamic JVP result is unavailable"))
+        },
+    );
     finish_traversal(py, &tape, consume, result)
 }
 
@@ -66,64 +72,6 @@ pub(crate) fn dynamic_jvp_many(
     finish_traversal(py, &tape, false, result)
 }
 
-fn forward_inner(
-    py: Python<'_>,
-    tape: &Bound<'_, DynamicTape>,
-    tangent_seeds: Vec<(NodeId, Py<PyAny>)>,
-    requested_outputs: Vec<NodeId>,
-) -> PyResult<Vec<Option<Py<PyAny>>>> {
-    let node_count = tape.try_borrow()?.arena.node_count();
-    let mut tangents: Vec<Option<Py<PyAny>>> =
-        std::iter::repeat_with(|| None).take(node_count).collect();
-    validate_requested_outputs(tape, &requested_outputs)?;
-    seed_inputs(tape, &mut tangents, tangent_seeds)?;
-
-    for node_index in 0..node_count {
-        let node_id = NodeId::try_from(node_index)
-            .map_err(|_| PyRuntimeError::new_err("dynamic JVP node ID overflowed"))?;
-        let node = tape
-            .try_borrow()?
-            .arena
-            .node(node_id)
-            .ok_or_else(|| PyRuntimeError::new_err("dynamic JVP node is unavailable"))?;
-        if node.flags().is_input() {
-            continue;
-        }
-        let prepared = prepare_invocation(
-            py,
-            tape,
-            node_id,
-            node_index,
-            std::slice::from_ref(&tangents),
-        )?;
-        let Some((invocation, mut tangent_sets)) = prepared else {
-            continue;
-        };
-        let tangent_set = tangent_sets
-            .pop()
-            .flatten()
-            .ok_or_else(|| PyRuntimeError::new_err("dynamic JVP tangent set is unavailable"))?;
-        let tangent = execute_callback(py, &invocation, &tangent_set)?;
-        if !tangent.bind(py).is_none() {
-            *tangents
-                .get_mut(node_index)
-                .ok_or_else(|| PyRuntimeError::new_err("dynamic JVP slot is unavailable"))? =
-                Some(tangent);
-        }
-    }
-
-    requested_outputs
-        .into_iter()
-        .map(|node_id| {
-            let index = node_index(node_id, node_count)?;
-            Ok(tangents
-                .get_mut(index)
-                .ok_or_else(|| PyRuntimeError::new_err("requested JVP slot is unavailable"))?
-                .take())
-        })
-        .collect()
-}
-
 fn forward_many_inner(
     py: Python<'_>,
     tape: &Bound<'_, DynamicTape>,
@@ -131,7 +79,7 @@ fn forward_many_inner(
     requested_outputs: Vec<NodeId>,
 ) -> PyResult<Vec<Vec<Option<Py<PyAny>>>>> {
     let node_count = tape.try_borrow()?.arena.node_count();
-    validate_requested_outputs(tape, &requested_outputs)?;
+    let requested_output_indices = validate_requested_outputs(tape, requested_outputs)?;
     if tangent_seed_sets.is_empty() {
         return Ok(Vec::new());
     }
@@ -175,10 +123,9 @@ fn forward_many_inner(
 
     let mut results: Vec<Vec<Option<Py<PyAny>>>> = tangent_tables
         .iter()
-        .map(|_tangents| Vec::with_capacity(requested_outputs.len()))
+        .map(|_tangents| Vec::with_capacity(requested_output_indices.len()))
         .collect();
-    for node_id in requested_outputs {
-        let index = node_index(node_id, node_count)?;
+    for index in requested_output_indices {
         for (result, tangents) in results.iter_mut().zip(tangent_tables.iter_mut()) {
             result.push(
                 tangents
@@ -225,18 +172,20 @@ fn seed_inputs(
 
 fn validate_requested_outputs(
     tape: &Bound<'_, DynamicTape>,
-    requested_outputs: &[NodeId],
-) -> PyResult<()> {
+    requested_outputs: Vec<NodeId>,
+) -> PyResult<Vec<usize>> {
     let state = tape.try_borrow()?;
-    for &node_id in requested_outputs {
-        state.require_node(node_id)?;
+    let mut indices = Vec::with_capacity(requested_outputs.len());
+    for node_id in requested_outputs {
+        let (index, _node) = state.require_node(node_id)?;
         if !state.outputs.contains(&node_id) {
             return Err(PyValueError::new_err(format!(
                 "dynamic JVP requested node %{node_id}, which is not a marked output"
             )));
         }
+        indices.push(index);
     }
-    Ok(())
+    Ok(indices)
 }
 
 fn prepare_invocation(
@@ -347,15 +296,4 @@ fn execute_callback(
             );
         })
         .map(Bound::unbind)
-}
-
-fn node_index(node_id: NodeId, node_count: usize) -> PyResult<usize> {
-    let index = usize::try_from(node_id)
-        .map_err(|_| PyValueError::new_err("dynamic node ID is out of range"))?;
-    if index >= node_count {
-        return Err(PyValueError::new_err(format!(
-            "dynamic node %{node_id} does not exist"
-        )));
-    }
-    Ok(index)
 }

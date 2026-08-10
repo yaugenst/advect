@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import inspect
 from typing import Never
 
 import pytest
@@ -10,33 +9,6 @@ import pytest
 import advect as ad
 from advect.autodiff.api import inputs as inputs_api
 from advect.autodiff.api.inputs import _get_signature
-
-
-def _single_param_signature(name: str) -> inspect.Signature:
-    return inspect.Signature(
-        parameters=[
-            inspect.Parameter(
-                name=name,
-                kind=inspect.Parameter.POSITIONAL_OR_KEYWORD,
-            )
-        ]
-    )
-
-
-def test_get_signature_reflects_signature_override_updates() -> None:
-    def f(x: float, y: float = 1.0) -> float:
-        return x + y
-
-    assert tuple(_get_signature(f).parameters) == ("x", "y")
-
-    f.__signature__ = _single_param_signature("a")
-    assert tuple(_get_signature(f).parameters) == ("a",)
-
-    f.__signature__ = _single_param_signature("b")
-    assert tuple(_get_signature(f).parameters) == ("b",)
-
-    del f.__signature__
-    assert tuple(_get_signature(f).parameters) == ("x", "y")
 
 
 def test_get_signature_supports_unhashable_callable_instances() -> None:

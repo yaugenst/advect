@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 from numpy.testing import assert_allclose
 
-from advect.autodiff import ImplicitSolveError, grad, implicit_root, jvp, linearize, vjp
+from advect import ImplicitSolveError, grad, implicit_root, jvp, linearize, vjp
 from advect.core import ArraySpec, TracingError, primitive, stage
 from advect.core._registry import get_registry
 

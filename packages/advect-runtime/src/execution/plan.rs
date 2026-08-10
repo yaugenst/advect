@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use super::host::{Host, LinkedOperation, OutputOwnership};
-use crate::{AttrMap, ExecutionError, GraphStore, NodeId, ValueSpec};
+use crate::{AttrMap, ExecutionError, GraphStore, NodeId, Parents, ValueSpec};
 
 #[derive(Clone, Copy, Debug)]
 pub(super) enum ValueSource {
@@ -12,185 +12,101 @@ pub(super) enum ValueSource {
     Evaluate,
 }
 
-#[derive(Debug)]
-pub(super) struct ExecutionNode {
+#[derive(Clone, Copy, Debug)]
+pub(super) struct NodeView<'a> {
     pub(super) id: NodeId,
-    pub(super) op: String,
+    pub(super) op: &'a str,
     pub(super) schema_version: u32,
-    pub(super) parents: Vec<NodeId>,
-    pub(super) attrs: AttrMap,
-    pub(super) outputs: Vec<ValueSpec>,
+    pub(super) parents: Parents<'a>,
+    pub(super) attrs: &'a AttrMap,
+    pub(super) outputs: &'a [ValueSpec],
     pub(super) source: ValueSource,
 }
 
-/// Host-independent dense execution structure.
 #[derive(Debug)]
-pub struct ExecutionPlan {
+pub(super) struct ExecutionPlan {
     pub(super) store: Arc<GraphStore>,
-    pub(super) nodes: Vec<ExecutionNode>,
-    pub(super) outputs: Vec<NodeId>,
+    pub(super) sources: Vec<ValueSource>,
     pub(super) input_count: usize,
     pub(super) remaining_uses: Vec<usize>,
 }
 
 impl ExecutionPlan {
-    /// Build and validate a dense structural schedule.
-    pub fn from_store(
-        store: Arc<GraphStore>,
-    ) -> Result<Self, ExecutionError<std::convert::Infallible>> {
-        let arena = store.arena();
-        if store.metadata().len() != arena.node_count() {
-            return Err(ExecutionError::runtime(
-                "graph metadata does not match the structural arena",
-            ));
-        }
-        let mut sources = vec![ValueSource::Evaluate; arena.node_count()];
+    fn from_store<E>(store: Arc<GraphStore>) -> Result<Self, ExecutionError<E>> {
+        let node_count = store.node_count();
+        let mut sources = vec![ValueSource::Evaluate; node_count];
         for (slot, &node_id) in store.inputs().iter().enumerate() {
-            let index = node_index(node_id, arena.node_count(), "input")?;
-            *sources.get_mut(index).ok_or_else(|| {
-                ExecutionError::runtime("graph input source slot is unavailable")
-            })? = ValueSource::Input(slot);
+            let index = node_index(node_id, node_count, "input")?;
+            *sources
+                .get_mut(index)
+                .ok_or_else(|| ExecutionError::runtime("graph input source is unavailable"))? =
+                ValueSource::Input(slot);
         }
         for &node_id in store.constants().keys() {
-            let index = node_index(node_id, arena.node_count(), "constant")?;
-            let source = sources.get_mut(index).ok_or_else(|| {
-                ExecutionError::runtime("graph constant source slot is unavailable")
-            })?;
-            if !matches!(*source, ValueSource::Evaluate) {
-                return Err(ExecutionError::runtime(format!(
-                    "graph node %{node_id} has conflicting value sources"
-                )));
-            }
-            *source = ValueSource::Constant(node_id);
+            let index = node_index(node_id, node_count, "constant")?;
+            *sources
+                .get_mut(index)
+                .ok_or_else(|| ExecutionError::runtime("graph constant source is unavailable"))? =
+                ValueSource::Constant(node_id);
         }
 
-        let mut nodes = Vec::with_capacity(arena.node_count());
-        for (node_index, (node, metadata)) in arena
-            .nodes()
-            .iter()
-            .copied()
-            .zip(store.metadata())
-            .enumerate()
-        {
-            let id = NodeId::try_from(node_index)
-                .map_err(|_| ExecutionError::runtime("graph node ID exceeded its range"))?;
-            let schema = arena.op_schema(node.op()).ok_or_else(|| {
-                ExecutionError::runtime("graph operation table contains an invalid ID")
-            })?;
-            let parents = arena
+        let mut remaining_uses = vec![0_usize; node_count];
+        for &node in store.arena().nodes() {
+            let parents = store
+                .arena()
                 .parents(node)
-                .ok_or_else(|| ExecutionError::runtime("graph edge range is invalid"))?
-                .to_vec();
-            nodes.push(ExecutionNode {
-                id,
-                op: schema.name().to_owned(),
-                schema_version: schema.schema_version(),
-                parents,
-                attrs: metadata.attrs().clone(),
-                outputs: metadata.outputs().to_vec(),
-                source: *sources.get(node_index).ok_or_else(|| {
-                    ExecutionError::runtime("graph value source slot is unavailable")
-                })?,
-            });
-        }
-        let mut remaining_uses = vec![0_usize; nodes.len()];
-        for node in &nodes {
-            for &parent in &node.parents {
+                .ok_or_else(|| ExecutionError::runtime("graph edge range is invalid"))?;
+            for parent in parents.iter() {
                 increment_use(&mut remaining_uses, parent)?;
             }
         }
         for &output in store.outputs() {
             increment_use(&mut remaining_uses, output)?;
         }
-        let outputs = store.outputs().to_vec();
         let input_count = store.inputs().len();
         Ok(Self {
             store,
-            nodes,
-            outputs,
+            sources,
             input_count,
             remaining_uses,
         })
     }
 
-    /// Bind each operation exactly once through a host.
-    pub fn link<H: Host>(
-        self,
-        host: &mut H,
-    ) -> Result<LinkedExecutionPlan<H::LinkedOp>, ExecutionError<H::Error>> {
-        let bindings = self
-            .nodes
-            .iter()
-            .map(|node| {
-                if !matches!(node.source, ValueSource::Evaluate) {
-                    return Ok(None);
-                }
-                let linked = host
-                    .link(&node.op, node.schema_version, &node.attrs, &node.outputs)
-                    .map_err(|source| ExecutionError::Host {
-                        node_id: node.id,
-                        op: node.op.clone(),
-                        source,
-                    })?;
-                validate_binding(node, &linked)?;
-                Ok(Some(linked))
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-
-        let mut alias_root_sets = (0..self.nodes.len())
-            .map(|index| vec![index])
-            .collect::<Vec<_>>();
-        let mut owned_values = vec![false; self.nodes.len()];
-        for (index, (node, binding)) in self.nodes.iter().zip(&bindings).enumerate() {
-            let Some(binding) = binding else {
-                continue;
-            };
-            match binding.output_ownership {
-                OutputOwnership::Owned => {
-                    *alias_root_sets.get_mut(index).ok_or_else(|| {
-                        ExecutionError::runtime("staged alias-root slot is unavailable")
-                    })? = vec![index];
-                    *owned_values.get_mut(index).ok_or_else(|| {
-                        ExecutionError::runtime("staged ownership slot is unavailable")
-                    })? = true;
-                }
-                OutputOwnership::Alias(position) => {
-                    let parent = node.parents.get(position).copied().ok_or_else(|| {
-                        ExecutionError::runtime("validated alias position is unavailable")
-                    })?;
-                    let parent_index = node_index(parent, self.nodes.len(), "alias source")?;
-                    let parent_roots = alias_root_sets
-                        .get(parent_index)
-                        .ok_or_else(|| {
-                            ExecutionError::runtime("staged alias-root set is unavailable")
-                        })?
-                        .clone();
-                    *alias_root_sets.get_mut(index).ok_or_else(|| {
-                        ExecutionError::runtime("staged alias slot is unavailable")
-                    })? = parent_roots;
-                }
-                OutputOwnership::Unknown => {
-                    let mut roots = vec![index];
-                    for &parent in &node.parents {
-                        let parent_index =
-                            node_index(parent, self.nodes.len(), "unknown alias source")?;
-                        roots.extend_from_slice(alias_root_sets.get(parent_index).ok_or_else(
-                            || ExecutionError::runtime("staged alias-root set is unavailable"),
-                        )?);
-                    }
-                    roots.sort_unstable();
-                    roots.dedup();
-                    *alias_root_sets.get_mut(index).ok_or_else(|| {
-                        ExecutionError::runtime("staged alias slot is unavailable")
-                    })? = roots;
-                }
-            }
-        }
-        Ok(LinkedExecutionPlan {
-            structure: self,
-            bindings,
-            alias_root_sets,
-            owned_values,
+    pub(super) fn node<E>(&self, index: usize) -> Result<NodeView<'_>, ExecutionError<E>> {
+        let id = NodeId::try_from(index)
+            .map_err(|_| ExecutionError::runtime("graph node ID exceeded its range"))?;
+        let node = self
+            .store
+            .arena()
+            .node(id)
+            .ok_or_else(|| ExecutionError::runtime("graph node is unavailable"))?;
+        let schema = self
+            .store
+            .arena()
+            .op_schema(node.op())
+            .ok_or_else(|| ExecutionError::runtime("graph operation ID is invalid"))?;
+        let parents = self
+            .store
+            .arena()
+            .parents(node)
+            .ok_or_else(|| ExecutionError::runtime("graph edge range is invalid"))?;
+        let metadata = self
+            .store
+            .metadata()
+            .get(index)
+            .ok_or_else(|| ExecutionError::runtime("graph metadata is unavailable"))?;
+        let source = *self
+            .sources
+            .get(index)
+            .ok_or_else(|| ExecutionError::runtime("graph value source is unavailable"))?;
+        Ok(NodeView {
+            id,
+            op: schema.name(),
+            schema_version: schema.schema_version(),
+            parents,
+            attrs: metadata.attrs(),
+            outputs: metadata.outputs(),
+            source,
         })
     }
 }
@@ -205,6 +121,86 @@ pub struct LinkedExecutionPlan<T> {
 }
 
 impl<T> LinkedExecutionPlan<T> {
+    /// Build the dense schedule and bind each operation once through a host.
+    pub fn from_store<H>(
+        store: Arc<GraphStore>,
+        host: &mut H,
+    ) -> Result<Self, ExecutionError<H::Error>>
+    where
+        H: Host<LinkedOp = T>,
+    {
+        let structure = ExecutionPlan::from_store(store)?;
+        let node_count = structure.store.node_count();
+        let mut bindings = Vec::with_capacity(node_count);
+        for index in 0..node_count {
+            let node = structure.node(index)?;
+            if !matches!(node.source, ValueSource::Evaluate) {
+                bindings.push(None);
+                continue;
+            }
+            let linked = host
+                .link(node.op, node.schema_version, node.attrs, node.outputs)
+                .map_err(|source| ExecutionError::Host {
+                    node_id: node.id,
+                    op: node.op.to_owned(),
+                    source,
+                })?;
+            validate_binding(node, &linked)?;
+            bindings.push(Some(linked));
+        }
+
+        let mut alias_root_sets = (0..node_count).map(|index| vec![index]).collect::<Vec<_>>();
+        let mut owned_values = vec![false; node_count];
+        for (index, binding) in bindings.iter().enumerate() {
+            let Some(binding) = binding else {
+                continue;
+            };
+            let node = structure.node(index)?;
+            match binding.output_ownership {
+                OutputOwnership::Owned => {
+                    *owned_values.get_mut(index).ok_or_else(|| {
+                        ExecutionError::runtime("staged ownership slot is unavailable")
+                    })? = true;
+                }
+                OutputOwnership::Alias(position) => {
+                    let parent = node.parents.get(position).ok_or_else(|| {
+                        ExecutionError::runtime("validated alias position is unavailable")
+                    })?;
+                    let parent_index = node_index(parent, node_count, "alias source")?;
+                    let parent_roots = alias_root_sets
+                        .get(parent_index)
+                        .ok_or_else(|| {
+                            ExecutionError::runtime("staged alias-root set is unavailable")
+                        })?
+                        .clone();
+                    *alias_root_sets.get_mut(index).ok_or_else(|| {
+                        ExecutionError::runtime("staged alias slot is unavailable")
+                    })? = parent_roots;
+                }
+                OutputOwnership::Unknown => {
+                    let mut roots = vec![index];
+                    for parent in node.parents.iter() {
+                        let parent_index = node_index(parent, node_count, "unknown alias source")?;
+                        roots.extend_from_slice(alias_root_sets.get(parent_index).ok_or_else(
+                            || ExecutionError::runtime("staged alias-root set is unavailable"),
+                        )?);
+                    }
+                    roots.sort_unstable();
+                    roots.dedup();
+                    *alias_root_sets.get_mut(index).ok_or_else(|| {
+                        ExecutionError::runtime("staged alias slot is unavailable")
+                    })? = roots;
+                }
+            }
+        }
+        Ok(Self {
+            structure,
+            bindings,
+            alias_root_sets,
+            owned_values,
+        })
+    }
+
     /// Number of constants.
     #[must_use]
     pub fn constant_count(&self) -> usize {
@@ -218,7 +214,7 @@ impl<T> LinkedExecutionPlan<T> {
 }
 
 fn validate_binding<T, E>(
-    node: &ExecutionNode,
+    node: NodeView<'_>,
     binding: &LinkedOperation<T>,
 ) -> Result<(), ExecutionError<E>> {
     if binding

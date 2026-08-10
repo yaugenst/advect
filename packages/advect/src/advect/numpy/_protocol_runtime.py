@@ -87,23 +87,23 @@ class ArrayProtocolRuntime(_ArrayFunctionProtocolMixin):
     def _resolve_out_arg(
         traced_type: type[_TracedProtocolArray],
         out_obj: object,
-    ) -> tuple[tuple[_TracedProtocolArray, ...] | None, _TracedProtocolArray | None]:
+    ) -> _TracedProtocolArray | None:
         if out_obj is None:
-            return None, None
+            return None
         if not isinstance(out_obj, tuple):
             msg = "out= must be a tuple when provided"
             raise TracingError(msg)
         if len(out_obj) == 1 and out_obj[0] is None:
-            return None, None
+            return None
         if len(out_obj) != 1:
             msg = "Only single-output out= is supported during tracing"
             raise TracingError(msg)
 
         candidate = out_obj[0]
         if candidate is None:
-            return None, None
+            return None
         if isinstance(candidate, traced_type):
-            return (candidate,), candidate
+            return candidate
 
         msg = "out= must be a TracedArray from the active trace"
         raise TracingError(msg)
@@ -279,11 +279,9 @@ class ArrayProtocolRuntime(_ArrayFunctionProtocolMixin):
         where = pure_kwargs.pop("where", _MISSING)
         result_value, node_id = UFUNC_RUNTIME.handle_ufunc(
             ufunc=ufunc,
-            method="__call__",
             recorder=cast("Any", recorder),
             traced_type=cast("Any", traced_type),
             inputs=cast("Any", inputs),
-            out=None,
             kwargs=pure_kwargs,
         )
         if isinstance(node_id, tuple) or isinstance(result_value, tuple):
@@ -322,7 +320,7 @@ class ArrayProtocolRuntime(_ArrayFunctionProtocolMixin):
         )
         return out_arr
 
-    def array_ufunc(  # noqa: C901, PLR0912 - one protocol boundary owns dispatch validation
+    def array_ufunc(  # noqa: C901 - one protocol boundary owns dispatch validation
         self,
         self_arr: object,
         ufunc: UfuncLike,
@@ -341,11 +339,7 @@ class ArrayProtocolRuntime(_ArrayFunctionProtocolMixin):
             )
 
         simple_call = (
-            method == "__call__"
-            and out is None
-            and not kwargs
-            and len(inputs) == int(ufunc.nin)
-            and int(ufunc.nout) == 1
+            out is None and not kwargs and len(inputs) == int(ufunc.nin) and int(ufunc.nout) == 1
         )
         if simple_call:
             return self.run_simple_ufunc(
@@ -379,7 +373,7 @@ class ArrayProtocolRuntime(_ArrayFunctionProtocolMixin):
             )
         recorder = _select_deepest_active_recorder(traced_recorders)
         resolved_out_obj = clean_kwargs.pop("out", out)
-        resolved_out, out_arr = self._resolve_out_arg(traced_type, resolved_out_obj)
+        out_arr = self._resolve_out_arg(traced_type, resolved_out_obj)
         if out_arr is not None:
             if cast("Any", out_arr).recorder is not recorder:
                 msg = "ufunc out= must belong to the current trace recorder"
@@ -404,29 +398,15 @@ class ArrayProtocolRuntime(_ArrayFunctionProtocolMixin):
         try:
             result_value, node_id = UFUNC_RUNTIME.handle_ufunc(
                 ufunc=ufunc,
-                method=method,
                 recorder=cast("Any", recorder),
                 traced_type=cast("Any", traced_type),
                 inputs=cast("Any", normalized_inputs),
-                out=cast("Any", resolved_out),
                 kwargs=clean_kwargs,
             )
         except Exception as exc:
             if type(exc).__name__ == "UfuncNotSupportedError":
                 raise TracingError(str(exc)) from exc
             raise
-
-        if out_arr is not None:
-            if isinstance(node_id, tuple) or isinstance(result_value, tuple):
-                msg = "out= is not supported for multi-output ufuncs"
-                raise TracingError(msg)
-            node_id_int = cast("int", node_id)
-            out_arr.advect_replace(
-                value=result_value,
-                node_id=node_id_int,
-                operation="ufunc out=",
-            )
-            return out_arr
 
         if isinstance(node_id, tuple):
             if not isinstance(result_value, tuple):

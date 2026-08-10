@@ -5,7 +5,7 @@ mod host;
 mod plan;
 
 pub use host::{Host, LinkedOperation, Operand, OutputOwnership};
-pub use plan::{ExecutionPlan, LinkedExecutionPlan};
+pub use plan::LinkedExecutionPlan;
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]

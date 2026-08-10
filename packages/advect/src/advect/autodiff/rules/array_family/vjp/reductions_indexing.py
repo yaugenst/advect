@@ -29,22 +29,21 @@ def _is_basic_index(index: object) -> bool:
 
 def _vjp_sum(
     ans: xp.ndarray,
-    *inputs: object,
+    source: object,
+    *rest: object,
     g: xp.ndarray,
     axis: int | tuple[int, ...] | None = None,
     keepdims: bool = False,
-    input_shape: tuple[int, ...] | None = None,
     **attrs: Any,
 ) -> tuple[xp.ndarray]:
     """Broadcast the output cotangent across the reduced axes."""
-    _ = ans
+    _ = ans, rest
     return (
         _reduction_pullback(
-            inputs,
+            source,
             g,
             axis=axis,
             keepdims=keepdims,
-            input_shape=input_shape,
             mean=False,
             attrs=attrs,
         ),
@@ -53,22 +52,21 @@ def _vjp_sum(
 
 def _vjp_mean(
     ans: xp.ndarray,
-    *inputs: object,
+    source: object,
+    *rest: object,
     g: xp.ndarray,
     axis: int | tuple[int, ...] | None = None,
     keepdims: bool = False,
-    input_shape: tuple[int, ...] | None = None,
     **attrs: Any,
 ) -> tuple[xp.ndarray]:
     """Broadcast and scale the output cotangent across the reduced axes."""
-    _ = ans
+    _ = ans, rest
     return (
         _reduction_pullback(
-            inputs,
+            source,
             g,
             axis=axis,
             keepdims=keepdims,
-            input_shape=input_shape,
             mean=True,
             attrs=attrs,
         ),
@@ -76,24 +74,18 @@ def _vjp_mean(
 
 
 def _reduction_pullback(
-    inputs: tuple[object, ...],
+    source: object,
     cotangent: object,
     *,
     axis: int | tuple[int, ...] | None,
     keepdims: bool,
-    input_shape: tuple[int, ...] | None,
     mean: bool,
     attrs: dict[str, Any],
 ) -> xp.ndarray:
     if any(attrs.get(name) is not None for name in ("out", "where")):
         msg = "reduction derivatives do not support where/out control operands"
         raise NotImplementedError(msg)
-    if not inputs:
-        msg = "reduction pullback requires the source array"
-        raise ValueError(msg)
-
-    source = inputs[0]
-    source_shape = tuple(input_shape) if input_shape is not None else _shape_of(source)
+    source_shape = _shape_of(source)
     axes = _reduction_axes(axis, ndim=len(source_shape))
     expanded: Any = cotangent
     if mean:

@@ -4,7 +4,6 @@
 
 from __future__ import annotations
 
-import sys
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -31,16 +30,6 @@ _state = _BackendState()
 
 # Registered hook functions from backends
 _hooks: dict[str, Callable[..., Any]] = {}
-
-
-def _invalidate_backend_hook_cache() -> None:
-    """Best-effort invalidation for shared backend hook lookup caches."""
-    module = sys.modules.get("advect.core._backend_hooks")
-    if module is None:
-        return
-    clear_backend_hook_cache = getattr(module, "clear_backend_hook_cache", None)
-    if callable(clear_backend_hook_cache):
-        clear_backend_hook_cache()
 
 
 def register_input_handler(
@@ -101,7 +90,6 @@ def register_hook(name: str, fn: Callable[..., Any]) -> None:
         msg = f"Hook {name!r} is already registered"
         raise ValueError(msg)
     _hooks[name] = fn
-    _invalidate_backend_hook_cache()
 
 
 def get_hook(name: str) -> Callable[..., Any] | None:

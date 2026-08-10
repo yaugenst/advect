@@ -18,7 +18,10 @@ from advect.numpy._array_function.emission import (
     _get_value,
     _result_shape_and_dtype,
 )
-from advect.numpy._array_function.normalization import _binary_handler
+from advect.numpy._array_function.normalization import (
+    _binary_handler,
+    _bind_optional_positionals,
+)
 from advect.numpy._op_bindings import canonicalize_numpy_op
 
 if TYPE_CHECKING:
@@ -51,6 +54,43 @@ def _reject_duplicate_positionals(
             raise TypeError(msg)
 
 
+def _record_multi_output(
+    *,
+    graph: DynamicTape,
+    traced_type: type[TracedArrayLike],
+    name: str,
+    source: object,
+    outputs: tuple[Any, ...],
+    attrs: dict[str, Any],
+    expected: int,
+) -> tuple[int, ...]:
+    if len(outputs) != expected:
+        msg = f"np.linalg.{name} returned {len(outputs)} outputs, expected {expected}"
+        raise ValueError(msg)
+    output_meta = tuple(_result_shape_and_dtype(output) for output in outputs)
+    parent_id = _add_backend_node(
+        graph=graph,
+        op=canonicalize_numpy_op(_op_name(name)),
+        inputs=(_get_node(source, graph, traced_type),),
+        value=outputs,
+        attrs=attrs,
+        shape=output_meta[0][0],
+        dtype=output_meta[0][1],
+    )
+    return tuple(
+        _add_backend_node(
+            graph=graph,
+            op="advect.getoutput",
+            inputs=(parent_id,),
+            value=output,
+            attrs={"index": index, "num_outputs": len(outputs)},
+            shape=shape,
+            dtype=dtype,
+        )
+        for index, (output, (shape, dtype)) in enumerate(zip(outputs, output_meta, strict=True))
+    )
+
+
 def _slogdet_handler(
     graph: DynamicTape,
     traced_type: type[TracedArrayLike],
@@ -58,7 +98,6 @@ def _slogdet_handler(
     kwargs: dict[str, Any],
 ) -> ArrayFunctionResult:
     """Handle np.linalg.slogdet as a multi-output op."""
-    expected_outputs = 2
     if not args:
         msg = "np.linalg.slogdet requires an input array"
         raise ValueError(msg)
@@ -69,42 +108,16 @@ def _slogdet_handler(
     a = args[0]
     result = np.linalg.slogdet(_get_value(a, traced_type))
     outputs = tuple(result)
-    if len(outputs) != expected_outputs:
-        msg = f"np.linalg.slogdet returned {len(outputs)} outputs, expected {expected_outputs}"
-        raise ValueError(msg)
-
-    output_meta = tuple(_result_shape_and_dtype(out) for out in outputs)
-    output_shapes = tuple(shape for shape, _ in output_meta)
-    output_dtypes = tuple(dtype for _, dtype in output_meta)
-
-    parent_id = _add_backend_node(
+    node_ids = _record_multi_output(
         graph=graph,
-        op=canonicalize_numpy_op(_op_name("slogdet")),
-        inputs=(_get_node(a, graph, traced_type),),
-        value=outputs,
+        traced_type=traced_type,
+        name="slogdet",
+        source=a,
+        outputs=outputs,
         attrs={},
-        shape=output_shapes[0],
-        dtype=output_dtypes[0],
-        num_outputs=len(outputs),
-        output_shapes=output_shapes,
-        output_dtypes=output_dtypes,
+        expected=2,
     )
-    node_ids: list[int] = []
-    for index, (output, shape, dtype) in enumerate(
-        zip(outputs, output_shapes, output_dtypes, strict=True)
-    ):
-        node_id = _add_backend_node(
-            graph=graph,
-            op="advect.getoutput",
-            inputs=(parent_id,),
-            value=output,
-            attrs={"index": index, "num_outputs": len(outputs)},
-            shape=shape,
-            dtype=dtype,
-        )
-        node_ids.append(node_id)
-
-    return restore_array_api_result("linalg.slogdet", outputs), tuple(node_ids)
+    return restore_array_api_result("linalg.slogdet", outputs), node_ids
 
 
 def _svd_handler(
@@ -119,7 +132,6 @@ def _svd_handler(
     pos_hermitian = 3
     max_svd_args = 4
 
-    expected_outputs = 3
     if not args:
         msg = "np.linalg.svd requires an input array"
         raise ValueError(msg)
@@ -175,46 +187,20 @@ def _svd_handler(
         hermitian=bool(hermitian),
     )
     outputs = tuple(result)
-    if len(outputs) != expected_outputs:
-        msg = f"np.linalg.svd returned {len(outputs)} outputs, expected {expected_outputs}"
-        raise ValueError(msg)
-
-    output_meta = tuple(_result_shape_and_dtype(out) for out in outputs)
-    output_shapes = tuple(shape for shape, _ in output_meta)
-    output_dtypes = tuple(dtype for _, dtype in output_meta)
-
-    parent_id = _add_backend_node(
+    node_ids = _record_multi_output(
         graph=graph,
-        op=canonicalize_numpy_op(_op_name("svd")),
-        inputs=(_get_node(a, graph, traced_type),),
-        value=outputs,
+        traced_type=traced_type,
+        name="svd",
+        source=a,
+        outputs=outputs,
         attrs={
             "full_matrices": bool(full_matrices),
             "compute_uv": True,
             "hermitian": bool(hermitian),
         },
-        shape=output_shapes[0],
-        dtype=output_dtypes[0],
-        num_outputs=len(outputs),
-        output_shapes=output_shapes,
-        output_dtypes=output_dtypes,
+        expected=3,
     )
-    node_ids: list[int] = []
-    for index, (output, shape, dtype) in enumerate(
-        zip(outputs, output_shapes, output_dtypes, strict=True)
-    ):
-        node_id = _add_backend_node(
-            graph=graph,
-            op="advect.getoutput",
-            inputs=(parent_id,),
-            value=output,
-            attrs={"index": index, "num_outputs": len(outputs)},
-            shape=shape,
-            dtype=dtype,
-        )
-        node_ids.append(node_id)
-
-    return outputs, tuple(node_ids)
+    return outputs, node_ids
 
 
 def _svdvals_handler(
@@ -563,7 +549,6 @@ def _qr_handler(
     pos_mode = 1
     max_qr_args = 2
 
-    expected_outputs = 2
     if not args:
         msg = "np.linalg.qr requires an input array"
         raise ValueError(msg)
@@ -607,42 +592,16 @@ def _qr_handler(
 
     result = np.linalg.qr(_get_value(a, traced_type), mode=mode)
     outputs = tuple(result)
-    if len(outputs) != expected_outputs:
-        msg = f"np.linalg.qr returned {len(outputs)} outputs, expected {expected_outputs}"
-        raise ValueError(msg)
-
-    output_meta = tuple(_result_shape_and_dtype(out) for out in outputs)
-    output_shapes = tuple(shape for shape, _ in output_meta)
-    output_dtypes = tuple(dtype for _, dtype in output_meta)
-
-    parent_id = _add_backend_node(
+    node_ids = _record_multi_output(
         graph=graph,
-        op=canonicalize_numpy_op(_op_name("qr")),
-        inputs=(_get_node(a, graph, traced_type),),
-        value=outputs,
+        traced_type=traced_type,
+        name="qr",
+        source=a,
+        outputs=outputs,
         attrs={"mode": mode},
-        shape=output_shapes[0],
-        dtype=output_dtypes[0],
-        num_outputs=len(outputs),
-        output_shapes=output_shapes,
-        output_dtypes=output_dtypes,
+        expected=2,
     )
-    node_ids: list[int] = []
-    for index, (output, shape, dtype) in enumerate(
-        zip(outputs, output_shapes, output_dtypes, strict=True)
-    ):
-        node_id = _add_backend_node(
-            graph=graph,
-            op="advect.getoutput",
-            inputs=(parent_id,),
-            value=output,
-            attrs={"index": index, "num_outputs": len(outputs)},
-            shape=shape,
-            dtype=dtype,
-        )
-        node_ids.append(node_id)
-
-    return outputs, tuple(node_ids)
+    return outputs, node_ids
 
 
 def _eig_handler(
@@ -652,7 +611,6 @@ def _eig_handler(
     kwargs: dict[str, Any],
 ) -> ArrayFunctionResult:
     """Handle np.linalg.eig as a multi-output op."""
-    expected_outputs = 2
     max_eig_args = 1
 
     if not args:
@@ -668,42 +626,16 @@ def _eig_handler(
     a = args[0]
     result = np.linalg.eig(_get_value(a, traced_type))
     outputs = tuple(result)
-    if len(outputs) != expected_outputs:
-        msg = f"np.linalg.eig returned {len(outputs)} outputs, expected {expected_outputs}"
-        raise ValueError(msg)
-
-    output_meta = tuple(_result_shape_and_dtype(out) for out in outputs)
-    output_shapes = tuple(shape for shape, _ in output_meta)
-    output_dtypes = tuple(dtype for _, dtype in output_meta)
-
-    parent_id = _add_backend_node(
+    node_ids = _record_multi_output(
         graph=graph,
-        op=canonicalize_numpy_op(_op_name("eig")),
-        inputs=(_get_node(a, graph, traced_type),),
-        value=outputs,
+        traced_type=traced_type,
+        name="eig",
+        source=a,
+        outputs=outputs,
         attrs={},
-        shape=output_shapes[0],
-        dtype=output_dtypes[0],
-        num_outputs=len(outputs),
-        output_shapes=output_shapes,
-        output_dtypes=output_dtypes,
+        expected=2,
     )
-    node_ids: list[int] = []
-    for index, (output, shape, dtype) in enumerate(
-        zip(outputs, output_shapes, output_dtypes, strict=True)
-    ):
-        node_id = _add_backend_node(
-            graph=graph,
-            op="advect.getoutput",
-            inputs=(parent_id,),
-            value=output,
-            attrs={"index": index, "num_outputs": len(outputs)},
-            shape=shape,
-            dtype=dtype,
-        )
-        node_ids.append(node_id)
-
-    return outputs, tuple(node_ids)
+    return outputs, node_ids
 
 
 def _eigh_handler(
@@ -715,8 +647,6 @@ def _eigh_handler(
     """Handle np.linalg.eigh as a multi-output op."""
     pos_uplo = 1
     max_eigh_args = 2
-    expected_outputs = 2
-
     if not args:
         msg = "np.linalg.eigh requires an input array"
         raise ValueError(msg)
@@ -745,42 +675,16 @@ def _eigh_handler(
 
     result = np.linalg.eigh(_get_value(a, traced_type), UPLO=uplo_norm)
     outputs = tuple(result)
-    if len(outputs) != expected_outputs:
-        msg = f"np.linalg.eigh returned {len(outputs)} outputs, expected {expected_outputs}"
-        raise ValueError(msg)
-
-    output_meta = tuple(_result_shape_and_dtype(out) for out in outputs)
-    output_shapes = tuple(shape for shape, _ in output_meta)
-    output_dtypes = tuple(dtype for _, dtype in output_meta)
-
-    parent_id = _add_backend_node(
+    node_ids = _record_multi_output(
         graph=graph,
-        op=canonicalize_numpy_op(_op_name("eigh")),
-        inputs=(_get_node(a, graph, traced_type),),
-        value=outputs,
+        traced_type=traced_type,
+        name="eigh",
+        source=a,
+        outputs=outputs,
         attrs={"UPLO": uplo_norm},
-        shape=output_shapes[0],
-        dtype=output_dtypes[0],
-        num_outputs=len(outputs),
-        output_shapes=output_shapes,
-        output_dtypes=output_dtypes,
+        expected=2,
     )
-    node_ids: list[int] = []
-    for index, (output, shape, dtype) in enumerate(
-        zip(outputs, output_shapes, output_dtypes, strict=True)
-    ):
-        node_id = _add_backend_node(
-            graph=graph,
-            op="advect.getoutput",
-            inputs=(parent_id,),
-            value=output,
-            attrs={"index": index, "num_outputs": len(outputs)},
-            shape=shape,
-            dtype=dtype,
-        )
-        node_ids.append(node_id)
-
-    return outputs, tuple(node_ids)
+    return outputs, node_ids
 
 
 def _eigvals_handler(
@@ -872,31 +776,6 @@ _TENSORDOT_DEFAULT_AXES = 2
 _TENSORDOT_MAX_ARGS = 3
 
 
-def _bind_optional_positionals(
-    *,
-    name: str,
-    args: tuple[Any, ...],
-    kwargs: dict[str, Any],
-    required: int,
-    optional: tuple[str, ...],
-    keyword_only: frozenset[str] = frozenset(),
-) -> dict[str, Any]:
-    if len(args) < required or len(args) > required + len(optional):
-        msg = f"numpy.linalg.{name} received an invalid positional signature during tracing"
-        raise TracingError(msg)
-    unsupported = set(kwargs) - (set(optional) | set(keyword_only))
-    if unsupported:
-        msg = f"numpy.linalg.{name} kwargs not supported during tracing: {sorted(unsupported)}"
-        raise TracingError(msg)
-    values = dict(kwargs)
-    for parameter, value in zip(optional, args[required:], strict=False):
-        if parameter in values:
-            msg = f"numpy.linalg.{name} received {parameter} twice"
-            raise TracingError(msg)
-        values[parameter] = value
-    return values
-
-
 def _real_epsilon(dtype: object) -> float:
     real_dtype = np.empty((), dtype=np.dtype(dtype)).real.dtype
     return float(np.finfo(real_dtype).eps)
@@ -909,7 +788,7 @@ def _matrix_rank_handler(
     kwargs: dict[str, Any],
 ) -> tuple[Any, Any]:
     values = _bind_optional_positionals(
-        name="matrix_rank",
+        name="linalg.matrix_rank",
         args=args,
         kwargs=kwargs,
         required=1,
@@ -958,7 +837,7 @@ def _lstsq_handler(
     kwargs: dict[str, Any],
 ) -> tuple[Any, Any]:
     values = _bind_optional_positionals(
-        name="lstsq",
+        name="linalg.lstsq",
         args=args,
         kwargs=kwargs,
         required=_BINARY_ARG_COUNT,

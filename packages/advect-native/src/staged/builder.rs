@@ -1,8 +1,8 @@
 //! Thin Python wrapper over the runtime graph builder.
 
 use advect_runtime::{
-    ConstantKind, GRAPH_FORMAT_VERSION, GraphBuilder as RuntimeGraphBuilder,
-    LATEST_ARRAY_API_VERSION, NodeFlags, NodeId, NumericDType, OptimizationReport,
+    AttrMap, ConstantKind, GraphBuilder as RuntimeGraphBuilder, GraphError,
+    LATEST_ARRAY_API_VERSION, NodeFlags, NodeId, NodeMetadata, NumericDType, OptimizationReport,
     PortableConstant, optimize,
 };
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
@@ -12,7 +12,6 @@ use pyo3::types::{PyBytes, PyDict, PyList};
 use crate::staged::GraphStore;
 use crate::staged::conversion::attr::AttrMapCache;
 use crate::staged::conversion::dtype::DTypeCache;
-use crate::staged::node::{NodeSpec, PreparedNode};
 
 /// Python construction handle around one runtime-owned builder.
 #[derive(Debug)]
@@ -29,36 +28,16 @@ impl GraphBuilder {
             .as_mut()
             .ok_or_else(|| PyRuntimeError::new_err("GraphBuilder has already finished"))
     }
-
-    fn prepare_node(&mut self, py: Python<'_>, spec: NodeSpec<'_>) -> PyResult<PreparedNode> {
-        PreparedNode::from_spec(py, spec, &mut self.dtype_cache, &mut self.attr_cache)
-    }
-
-    fn append_prepared(
-        &mut self,
-        prepared: PreparedNode,
-        schema_version: u32,
-        flags: NodeFlags,
-    ) -> PyResult<NodeId> {
-        let (op, inputs, metadata) = prepared.into_parts();
-        self.require_inner_mut()?
-            .append_operation(&op, schema_version, &inputs, flags, metadata)
-            .map_err(graph_error)
-    }
 }
 
 #[pymethods]
 impl GraphBuilder {
     #[new]
-    #[pyo3(signature = (
-        version = GRAPH_FORMAT_VERSION,
-        *,
-        required_array_api_version = LATEST_ARRAY_API_VERSION
-    ))]
-    fn new(version: &str, required_array_api_version: &str) -> PyResult<Self> {
+    #[pyo3(signature = (*, required_array_api_version = LATEST_ARRAY_API_VERSION))]
+    fn new(required_array_api_version: &str) -> PyResult<Self> {
         Ok(Self {
             inner: Some(
-                RuntimeGraphBuilder::new_for_array_api(version, required_array_api_version)
+                RuntimeGraphBuilder::new_for_array_api(required_array_api_version)
                     .map_err(graph_error)?,
             ),
             dtype_cache: DTypeCache::default(),
@@ -86,22 +65,28 @@ impl GraphBuilder {
         output_dtypes: Option<&Bound<'_, PyAny>>,
         source_location: Option<String>,
     ) -> PyResult<NodeId> {
-        let prepared = self.prepare_node(
-            py,
-            NodeSpec {
-                op,
-                inputs,
-                attrs,
-                shape,
-                dtype,
-                name,
-                num_outputs,
-                output_shapes,
-                output_dtypes,
-                source_location,
-            },
-        )?;
-        self.append_prepared(prepared, schema_version, NodeFlags::NONE)
+        if op.is_empty() {
+            return Err(PyValueError::new_err("node op must not be empty"));
+        }
+        let attrs = self.attr_cache.resolve(py, attrs)?;
+        let dtype = self.dtype_cache.resolve(py, dtype)?;
+        let output_dtypes = output_dtypes
+            .map(|values| self.dtype_cache.resolve_sequence(py, values))
+            .transpose()?;
+        let metadata = NodeMetadata::new(
+            attrs,
+            shape,
+            dtype,
+            name,
+            num_outputs,
+            output_shapes,
+            output_dtypes,
+            source_location,
+        )
+        .map_err(|error| metadata_error(&op, &error))?;
+        self.require_inner_mut()?
+            .append_operation(&op, schema_version, &inputs, NodeFlags::NONE, metadata)
+            .map_err(graph_error)
     }
 
     #[pyo3(signature = (shape, dtype, *, name=None))]
@@ -112,23 +97,17 @@ impl GraphBuilder {
         dtype: &Bound<'_, PyAny>,
         name: Option<String>,
     ) -> PyResult<NodeId> {
-        let attrs = PyDict::new(py);
-        let prepared = self.prepare_node(
-            py,
-            NodeSpec {
-                op: "advect.input".to_owned(),
-                inputs: Vec::new(),
-                attrs: &attrs,
-                shape,
-                dtype,
-                name,
-                num_outputs: 1,
-                output_shapes: None,
-                output_dtypes: None,
-                source_location: None,
-            },
-        )?;
-        let (_, _, metadata) = prepared.into_parts();
+        let metadata = NodeMetadata::new(
+            AttrMap::new(),
+            shape,
+            self.dtype_cache.resolve(py, dtype)?,
+            name,
+            1,
+            None,
+            None,
+            None,
+        )
+        .map_err(|error| metadata_error("advect.input", &error))?;
         self.require_inner_mut()?
             .append_input(metadata)
             .map_err(graph_error)
@@ -146,31 +125,17 @@ impl GraphBuilder {
         let kind = kind
             .parse::<ConstantKind>()
             .map_err(|error| PyValueError::new_err(error.to_string()))?;
-        let dtype_name = self.dtype_cache.resolve(py, dtype)?.name().to_owned();
-        let numeric_dtype = dtype_name
+        let dtype = self.dtype_cache.resolve(py, dtype)?;
+        let numeric_dtype = dtype
+            .name()
             .parse::<NumericDType>()
             .map_err(|error| PyValueError::new_err(error.to_string()))?;
         let constant =
             PortableConstant::new(kind, numeric_dtype, shape.clone(), data.as_bytes().to_vec())
                 .map_err(|error| PyValueError::new_err(error.into_message()))?;
         let digest = constant.digest().to_owned();
-        let attrs = PyDict::new(py);
-        let prepared = self.prepare_node(
-            py,
-            NodeSpec {
-                op: "advect.const".to_owned(),
-                inputs: Vec::new(),
-                attrs: &attrs,
-                shape,
-                dtype,
-                name: None,
-                num_outputs: 1,
-                output_shapes: None,
-                output_dtypes: None,
-                source_location: None,
-            },
-        )?;
-        let (_, _, metadata) = prepared.into_parts();
+        let metadata = NodeMetadata::new(AttrMap::new(), shape, dtype, None, 1, None, None, None)
+            .map_err(|error| metadata_error("advect.const", &error))?;
         let node_id = self
             .require_inner_mut()?
             .append_constant(metadata, constant)
@@ -239,6 +204,24 @@ fn report_to_python(py: Python<'_>, report: &OptimizationReport) -> PyResult<Py<
     Ok(payload.unbind())
 }
 
-fn graph_error(error: advect_runtime::GraphError) -> PyErr {
+fn graph_error(error: GraphError) -> PyErr {
     PyValueError::new_err(error.into_message())
+}
+
+fn metadata_error(op: &str, error: &GraphError) -> PyErr {
+    let message = error.message();
+    if message == "node num_outputs must be at least 1" {
+        return PyValueError::new_err(format!("Op '{op}' must have num_outputs >= 1 (got 0)"));
+    }
+    if message == "single-output node must not declare output_shapes/output_dtypes" {
+        return PyValueError::new_err(format!(
+            "Op '{op}' is single-output; output_shapes/output_dtypes must be None"
+        ));
+    }
+    if message == "multi-output node is missing output_shapes/output_dtypes" {
+        return PyValueError::new_err(format!(
+            "Op '{op}' has multiple outputs but output_shapes/output_dtypes are missing"
+        ));
+    }
+    PyValueError::new_err(format!("Op '{op}' has invalid metadata: {message}"))
 }

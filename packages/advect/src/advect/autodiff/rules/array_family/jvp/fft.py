@@ -5,18 +5,11 @@ from __future__ import annotations
 from typing import Any, cast
 
 from advect.autodiff.rules.array_family._backend_runtime import xp
-from advect.autodiff.rules.array_family.jvp.common import (
+from advect.autodiff.rules.array_family._transpose_utils import (
     FFTNorm,
-    _zeros_output_tangent,
+    _adjoint_fft_norm as _adjoint_norm,
 )
-
-
-def _adjoint_norm(norm: FFTNorm | None) -> FFTNorm:
-    if norm in {None, "backward"}:
-        return "forward"
-    if norm == "forward":
-        return "backward"
-    return "ortho"
+from advect.autodiff.rules.array_family.jvp.common import _zeros_output_tangent
 
 
 def _jvp_fft(

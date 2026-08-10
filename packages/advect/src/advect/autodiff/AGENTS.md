@@ -21,7 +21,8 @@
 - [Adding operations](../../../../../docs/development/adding-operations.md)
 - [Testing](../../../../../docs/development/testing.md)
 - [Primitive conformance decision](../../../../../design/decisions/2026-07-27-primitive-conformance-testing.md)
-- The relevant transform semantics in [target API](../../../../../design/target-api.md)
+- The relevant public contract under [Transforms](../../../../../docs/api/transforms.md)
+  or [Staging](../../../../../docs/api/staging.md)
 
 ## Verify
 

@@ -22,12 +22,11 @@ from advect.autodiff._ephemeral import (
     unary_array_trace_provider,
 )
 from advect.autodiff.api._reverse_scalars import (
-    _extract_scalar_output_for_grad,
-    _extract_scalar_output_for_value_and_grad,
+    _extract_scalar_output,
     _scalar_cotangent_for_output,
     _scalar_cotangent_leaf,
 )
-from advect.autodiff.api._scalar_boundary import _unlift_scalar_array
+from advect.autodiff.api._scalar_boundary import _is_complex_numeric, _unlift_scalar_array
 from advect.autodiff.api.inputs import (
     _get_positional_param_names,
     _get_signature,
@@ -183,18 +182,8 @@ def _staged_gradient_scalar_mask(
     return tuple(bool(leaf) for leaf in leaves)
 
 
-def _is_complex_scalar(value: Any) -> bool:
-    if isinstance(value, complex):
-        return True
-    dtype = getattr(value, "dtype", None)
-    kind = getattr(dtype, "kind", None)
-    if kind is not None:
-        return bool(kind == "c")
-    return "complex" in str(dtype).lower()
-
-
 def _reject_complex_grad_output(out_leaf: Any) -> None:
-    if _is_complex_scalar(out_leaf):
+    if _is_complex_numeric(out_leaf):
         msg = (
             "grad requires a real scalar output. For complex outputs use "
             "linearize(), jvp(), or vjp(); Advect does not guess a holomorphic convention."
@@ -240,7 +229,7 @@ def _try_unary_array_value_and_grad(
     kwargs: dict[str, Any],
     input_name: str,
     provider_cache: _UnaryArrayProviderCache,
-    value_and_grad: bool,
+    transform_name: str,
 ) -> tuple[Any, Any] | None:
     # The concrete unary fast path performs provider introspection that an
     # enclosing abstract trace deliberately cannot answer. The general
@@ -264,7 +253,7 @@ def _try_unary_array_value_and_grad(
         cotangent = _real_scalar_seed(
             trace.output,
             output_is_leaf=trace.output_treedef.node_type is None,
-            value_and_grad=value_and_grad,
+            transform_name=transform_name,
         )
         return trace.output, apply_unary_array_pullback(trace, cotangent)
     except Exception:
@@ -276,7 +265,7 @@ def _real_scalar_seed(
     output: Any,
     *,
     output_is_leaf: bool,
-    value_and_grad: bool,
+    transform_name: str,
 ) -> Any:
     """Validate and seed the common concrete rank-zero output directly."""
     if output_is_leaf and getattr(output, "shape", None) == ():
@@ -291,12 +280,7 @@ def _real_scalar_seed(
             return scalar_type(1)
         return _scalar_cotangent_leaf(output)
 
-    extractor = (
-        _extract_scalar_output_for_value_and_grad
-        if value_and_grad
-        else _extract_scalar_output_for_grad
-    )
-    out_leaf, _out_treedef = extractor(output)
+    out_leaf, _out_treedef = _extract_scalar_output(output, transform_name=transform_name)
     _reject_complex_grad_output(out_leaf)
     return _scalar_cotangent_leaf(out_leaf)
 
@@ -485,66 +469,21 @@ def _dynamic_grad(
     argnames: tuple[str, ...] | None = None,
     has_aux: bool = False,
 ) -> Callable[..., Any]:
-    """Build the concrete reverse transform used by both lifetimes."""
-    argnums_tuple, single_argnum = _selected_arguments(
+    """Project the gradient from the shared concrete reverse transform."""
+    transformed = _dynamic_value_and_grad(
         f,
         argnums=argnums,
         argnames=argnames,
-    )
-    use_unary_fast_path, input_name = _unary_array_fast_path(
-        f,
-        argnums=argnums_tuple,
-        single_argnum=single_argnum,
-        argnames=argnames,
         has_aux=has_aux,
+        transform_name="grad",
     )
-    provider_cache = _UnaryArrayProviderCache()
 
     def grad_fn(*args: Any, **kwargs: Any) -> Any:
-        if use_unary_fast_path:
-            fast_result = _try_unary_array_value_and_grad(
-                f,
-                args=args,
-                kwargs=kwargs,
-                input_name=input_name,
-                provider_cache=provider_cache,
-                value_and_grad=False,
-            )
-            if fast_result is not None:
-                _value, gradient = fast_result
-                return gradient
-
-        aux_box: list[Any] = []
-        trace_target = f
+        result = transformed(*args, **kwargs)
         if has_aux:
-
-            def trace_target(*inner_args: Any, **inner_kwargs: Any) -> Any:
-                value, aux = f(*inner_args, **inner_kwargs)
-                aux_box.append(_materialize_aux(aux))
-                return value
-
-        value, linear = linearize_call(
-            trace_target,
-            args=args,
-            kwargs=kwargs,
-            argnums=argnums_tuple,
-            argnames=argnames,
-            single_argnum=single_argnum,
-            reverse_only=True,
-        )
-        try:
-            out_leaf, out_treedef = _extract_scalar_output_for_grad(value)
-            _reject_complex_grad_output(out_leaf)
-            cotangent = _scalar_cotangent_for_output(
-                out_leaf=out_leaf,
-                out_treedef=out_treedef,
-            )
-            gradients = linear._consume_pullback(cotangent)  # noqa: SLF001
-        except Exception:
-            linear.close()
-            raise
-        if has_aux:
-            return gradients, _materialize_aux(aux_box[-1])
+            _value, gradients, aux = result
+            return gradients, aux
+        _value, gradients = result
         return gradients
 
     if not isinstance(f, StagedProgram):
@@ -558,6 +497,7 @@ def _dynamic_value_and_grad(
     *,
     argnames: tuple[str, ...] | None = None,
     has_aux: bool = False,
+    transform_name: str = "value_and_grad",
 ) -> Callable[..., tuple[Any, ...]]:
     """Build the concrete value-and-gradient transform for either lifetime."""
     argnums_tuple, single_argnum = _selected_arguments(
@@ -582,7 +522,7 @@ def _dynamic_value_and_grad(
                 kwargs=kwargs,
                 input_name=input_name,
                 provider_cache=provider_cache,
-                value_and_grad=True,
+                transform_name=transform_name,
             )
             if fast_result is not None:
                 return fast_result
@@ -606,7 +546,10 @@ def _dynamic_value_and_grad(
             reverse_only=True,
         )
         try:
-            out_leaf, out_treedef = _extract_scalar_output_for_value_and_grad(value)
+            out_leaf, out_treedef = _extract_scalar_output(
+                value,
+                transform_name=transform_name,
+            )
             _reject_complex_grad_output(out_leaf)
             cotangent = _scalar_cotangent_for_output(
                 out_leaf=out_leaf,

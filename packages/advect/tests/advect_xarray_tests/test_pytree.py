@@ -51,6 +51,26 @@ def test_dataset_pytree_round_trip_preserves_variable_metadata() -> None:
     xr.testing.assert_identical(rebuilt, value)
 
 
+def test_dataset_pytree_identity_preserves_mapping_order() -> None:
+    value = xr.Dataset(
+        data_vars={"field": ("x", [1.0, 2.0]), "weight": ("x", [3.0, 4.0])},
+        coords={"x": [10, 20], "label": "sample"},
+    )
+    variables_reordered = value[["weight", "field"]]
+    coordinates_reordered = value.drop_vars(["x", "label"]).assign_coords(
+        label=value.coords["label"], x=value.coords["x"]
+    )
+
+    _leaves, tree = ad.pytree.tree_flatten(value)
+    _variable_leaves, variables_tree = ad.pytree.tree_flatten(variables_reordered)
+    _coordinate_leaves, coordinates_tree = ad.pytree.tree_flatten(coordinates_reordered)
+
+    assert value.identical(variables_reordered)
+    assert value.identical(coordinates_reordered)
+    assert tree != variables_tree
+    assert tree != coordinates_tree
+
+
 def test_dataarray_rejects_nondifferentiable_data_dtype() -> None:
     value = xr.DataArray(
         np.array([1, 2, 3]),

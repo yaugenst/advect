@@ -20,6 +20,7 @@ from advect.numpy._array_function.composite import (
     _ndim,
     _normalize_axes,
 )
+from advect.numpy._array_function.normalization import _bind_optional_positionals
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -97,31 +98,6 @@ _I0_LARGE_COEFFICIENTS = (
 )
 
 
-def _bind_optional_positionals(
-    *,
-    function_name: str,
-    args: tuple[Any, ...],
-    kwargs: dict[str, Any],
-    required: int,
-    optional_names: tuple[str, ...],
-    keyword_only_names: frozenset[str] = frozenset(),
-) -> dict[str, Any]:
-    if len(args) < required or len(args) > required + len(optional_names):
-        msg = f"numpy.{function_name} received an invalid positional signature during tracing"
-        raise TracingError(msg)
-    unsupported = set(kwargs) - (set(optional_names) | set(keyword_only_names))
-    if unsupported:
-        msg = f"numpy.{function_name} kwargs not supported during tracing: {sorted(unsupported)}"
-        raise TracingError(msg)
-    values = dict(kwargs)
-    for name, value in zip(optional_names, args[required:], strict=False):
-        if name in values:
-            msg = f"numpy.{function_name} received {name} twice"
-            raise TracingError(msg)
-        values[name] = value
-    return values
-
-
 def _chebyshev_evaluate(value: Any, coefficients: tuple[float, ...]) -> Any:
     current: Any = coefficients[0]
     previous: Any = 0.0
@@ -190,12 +166,12 @@ def _arange_handler(
     kwargs: dict[str, Any],
 ) -> CompositeResult:
     values = _bind_optional_positionals(
-        function_name="arange",
+        name="arange",
         args=args,
         kwargs=kwargs,
         required=1,
-        optional_names=("stop", "step", "dtype"),
-        keyword_only_names=frozenset({"device", "like"}),
+        optional=("stop", "step", "dtype"),
+        keyword_only=frozenset({"device", "like"}),
     )
     unsupported = set(values) - {"stop", "step", "dtype", "device", "like"}
     if unsupported:
@@ -374,11 +350,11 @@ def _logspace_handler(
     kwargs: dict[str, Any],
 ) -> CompositeResult:
     values = _bind_optional_positionals(
-        function_name="logspace",
+        name="logspace",
         args=args,
         kwargs=kwargs,
         required=_BINARY_ARITY,
-        optional_names=("num", "endpoint", "base", "dtype", "axis"),
+        optional=("num", "endpoint", "base", "dtype", "axis"),
     )
     start, stop = args[:2]
     num = int(values.get("num", 50))
@@ -400,11 +376,11 @@ def _geomspace_handler(
     kwargs: dict[str, Any],
 ) -> CompositeResult:
     values = _bind_optional_positionals(
-        function_name="geomspace",
+        name="geomspace",
         args=args,
         kwargs=kwargs,
         required=_BINARY_ARITY,
-        optional_names=("num", "endpoint", "dtype", "axis"),
+        optional=("num", "endpoint", "dtype", "axis"),
     )
     start, stop = args[:2]
     num = int(values.get("num", 50))
@@ -547,11 +523,11 @@ def _unwrap_handler(
 ) -> CompositeResult:
     period = kwargs.pop("period", 2 * np.pi)
     values = _bind_optional_positionals(
-        function_name="unwrap",
+        name="unwrap",
         args=args,
         kwargs=kwargs,
         required=1,
-        optional_names=("discont", "axis"),
+        optional=("discont", "axis"),
     )
     phase = args[0]
     axis = int(values.get("axis", -1))
@@ -575,11 +551,11 @@ def _real_if_close_handler(
     kwargs: dict[str, Any],
 ) -> CompositeResult:
     values = _bind_optional_positionals(
-        function_name="real_if_close",
+        name="real_if_close",
         args=args,
         kwargs=kwargs,
         required=1,
-        optional_names=("tol",),
+        optional=("tol",),
     )
     array = args[0]
     _node_id, concrete = _snapshot_traced(array)
@@ -595,11 +571,11 @@ def _bincount_handler(
     kwargs: dict[str, Any],
 ) -> CompositeResult:
     values = _bind_optional_positionals(
-        function_name="bincount",
+        name="bincount",
         args=args,
         kwargs=kwargs,
         required=1,
-        optional_names=("weights", "minlength"),
+        optional=("weights", "minlength"),
     )
     indices = args[0]
     anchor = _first_traced((indices, values.get("weights")), traced_type=traced_type)
@@ -668,11 +644,11 @@ def _insert_handler(
     kwargs: dict[str, Any],
 ) -> CompositeResult:
     values = _bind_optional_positionals(
-        function_name="insert",
+        name="insert",
         args=args,
         kwargs=kwargs,
         required=_TERNARY_ARITY,
-        optional_names=("axis",),
+        optional=("axis",),
     )
     array_raw, obj, inserted_raw = args[:_TERNARY_ARITY]
     if isinstance(obj, traced_type):
@@ -802,11 +778,11 @@ def _histogram_handler(
     kwargs: dict[str, Any],
 ) -> CompositeResult:
     values = _bind_optional_positionals(
-        function_name="histogram",
+        name="histogram",
         args=args,
         kwargs=kwargs,
         required=1,
-        optional_names=("bins", "range", "density", "weights"),
+        optional=("bins", "range", "density", "weights"),
     )
     samples = np.ravel(args[0])
     bins = values.get("bins", 10)
@@ -872,11 +848,11 @@ def _histogram_bin_edges_handler(
     kwargs: dict[str, Any],
 ) -> CompositeResult:
     values = _bind_optional_positionals(
-        function_name="histogram_bin_edges",
+        name="histogram_bin_edges",
         args=args,
         kwargs=kwargs,
         required=1,
-        optional_names=("bins", "range", "weights"),
+        optional=("bins", "range", "weights"),
     )
     samples = np.ravel(args[0])
     bins = values.get("bins", 10)
@@ -931,11 +907,11 @@ def _histogram2d_handler(
     kwargs: dict[str, Any],
 ) -> CompositeResult:
     values = _bind_optional_positionals(
-        function_name="histogram2d",
+        name="histogram2d",
         args=args,
         kwargs=kwargs,
         required=_BINARY_ARITY,
-        optional_names=("bins", "range", "density", "weights"),
+        optional=("bins", "range", "density", "weights"),
     )
     x = np.ravel(args[0])
     y = np.ravel(args[1])
@@ -1024,11 +1000,11 @@ def _histogramdd_handler(  # noqa: PLR0912, PLR0915
     kwargs: dict[str, Any],
 ) -> CompositeResult:
     values = _bind_optional_positionals(
-        function_name="histogramdd",
+        name="histogramdd",
         args=args,
         kwargs=kwargs,
         required=1,
-        optional_names=("bins", "range", "density", "weights"),
+        optional=("bins", "range", "density", "weights"),
     )
     sample_arg = args[0]
     if isinstance(sample_arg, (tuple, list)):

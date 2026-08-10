@@ -26,7 +26,10 @@ These are routes, not a checklist. Read only what the change needs:
 - [Codebase map](../../../../../docs/development/codebase.md) for an ownership question.
 - [Adding operations](../../../../../docs/development/adding-operations.md) for
   an operation or staged-program implementation.
-- [Target API](../../../../../design/target-api.md) only for a public-contract change.
+- The relevant page under [API reference](../../../../../docs/api/index.md) for
+  a public-contract change.
+- [Core requirements](../../../../../design/requirements.md) only for a
+  normative semantic change.
 - The relevant record under [design decisions](../../../../../design/decisions/README.md)
   only for a boundary or rationale change.
 

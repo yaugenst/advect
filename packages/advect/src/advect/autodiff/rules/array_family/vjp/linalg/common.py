@@ -5,6 +5,9 @@ from __future__ import annotations
 from typing import Any, cast
 
 from advect.autodiff.rules.array_family._backend_runtime import _scalar_like, xp
+from advect.autodiff.rules.array_family._transpose_utils import (
+    _conjugate_transpose as _h,
+)
 
 _MIN_MATRIX_NDIM = 2
 
@@ -48,23 +51,6 @@ def _merge_multioutput_cotangent(
     return tuple(merged)
 
 
-def _h(x: xp.ndarray) -> xp.ndarray:
-    axes = list(range(len(_shape_of(x))))
-    axes[-2], axes[-1] = axes[-1], axes[-2]
-    transposed = xp.transpose(x, tuple(axes))
-    return cast("xp.ndarray", xp.conj(transposed)) if xp.iscomplexobj(x) else transposed
-
-
-def _lower_triangular_halfdiag(x: xp.ndarray) -> xp.ndarray:
-    """Project to strict-lower + half-diagonal components."""
-    tri = xp.tril(x)
-    n = int(tri.shape[-1])
-    eye = xp.eye(n, dtype=_dtype_of(tri))
-    diag = xp.diagonal(tri, axis1=-2, axis2=-1)
-    diag_matrix = eye * diag[..., None, :]
-    return cast("xp.ndarray", tri - _scalar_like(0.5, tri) * diag_matrix)
-
-
 def _hermitian_triangle_adjoint(x: xp.ndarray, *, uplo: str) -> xp.ndarray:
     """Transpose the map from one stored triangle to a Hermitian matrix."""
     n = int(x.shape[-1])
@@ -84,12 +70,6 @@ def _hermitian_triangle_adjoint(x: xp.ndarray, *, uplo: str) -> xp.ndarray:
 def _broadcast_eye(*, n: int, batch_ndim: int, dtype: xp.dtype[Any]) -> xp.ndarray:
     eye = xp.eye(n, dtype=dtype)
     return cast("xp.ndarray", xp.reshape(eye, (1,) * batch_ndim + (n, n)))
-
-
-def _right_solve(a: xp.ndarray, b: xp.ndarray) -> xp.ndarray:
-    """Solve x @ a = b for x (batch-aware)."""
-    x_t = xp.linalg.solve(xp.swapaxes(a, -1, -2), xp.swapaxes(b, -1, -2))
-    return xp.swapaxes(x_t, -1, -2)
 
 
 def _qr_skew_pullback(

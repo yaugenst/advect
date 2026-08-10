@@ -129,17 +129,6 @@ jobs:
           --output
           "artifacts/qualification/$ARRAY_API_VERSION/array-api-official-suite.json"
 
-      - name: Report the non-gating dynamic ecosystem comparison
-        if: matrix.array-api-version == '2024.12'
-        run: >-
-          uv run --with autograd python -m scripts.bench_autodiff_runtime
-          --suite all
-          --format json
-          --warmed-replicates 3
-          --phases
-          --scientific-mutation-size
-          --output artifacts/benchmarks/dynamic-ecosystem-comparison.json
-
       - name: Build exact reference and candidate wheels
         if: matrix.array-api-version == '2024.12'
         id: performance-wheels

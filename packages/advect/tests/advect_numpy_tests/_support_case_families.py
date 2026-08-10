@@ -2,35 +2,37 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from advect_numpy_tests._support_cases import (
+    _ALL_MODES,
+    _COMPLEX,
+    _DYNAMIC_ONLY,
+    _INDEX,
+    _MATRIX,
+    _POSITIVE,
+    _REAL,
+    _RECTANGULAR,
+    _RIGHT,
     ArrayInput,
     DType,
     Function,
     Input,
-    NumpySupportCase,
+    _function,
 )
 
-_ALL_MODES = ("dynamic", "staged", "serialized")
-_DYNAMIC_ONLY = ("dynamic",)
+if TYPE_CHECKING:
+    from advect_numpy_tests._support_cases import DerivativeArgnums, NumpySupportCase
 
-_REAL = ArrayInput([-1.5, -0.25, 0.5, 2.0], "float64")
-_RIGHT = ArrayInput([0.75, 1.5, 2.0, 0.5], "float64")
-_POSITIVE = ArrayInput([0.25, 0.5, 1.5, 3.0], "float64")
 _VECTOR = ArrayInput([1.0, 2.0, 4.0], "float64")
 _SHORT = ArrayInput([0.5, 1.5], "float64")
 _SCALAR = ArrayInput(0.5, "float64")
 _OTHER_SCALAR = ArrayInput(2.0, "float64")
-_MATRIX = ArrayInput([[4.0, 1.0], [1.0, 3.0]], "float64")
-_RECTANGULAR = ArrayInput([[1.0, 2.0], [3.0, 5.0], [7.0, 11.0]], "float64")
-_COMPLEX = ArrayInput([1.0 + 0.5j, -2.0 + 1.0j, 0.25 - 0.75j], "complex128")
 _COMPLEX_MATRIX = ArrayInput(
     [[1.5 + 0.2j, -0.2 + 0.3j], [0.4 - 0.1j, 0.8 + 0.5j]],
     "complex128",
 )
 _BOOL = ArrayInput([True, False, True, False], "bool")
-_INDEX = ArrayInput([2, 0, 2, 1], "int64")
 _NONNEGATIVE_INDEX = ArrayInput([0, 1, 0, 2], "int64")
 
 
@@ -38,7 +40,7 @@ def _case(
     path: str,
     inputs: tuple[ArrayInput, ...],
     args: tuple[object, ...],
-    derivative_argnums: tuple[tuple[int, ...], ...] | None,
+    derivative_argnums: DerivativeArgnums | None,
     kwargs: tuple[tuple[str, object], ...] = (),
     *,
     modes: tuple[str, ...] = _DYNAMIC_ONLY,
@@ -48,16 +50,15 @@ def _case(
     result_adapter: Literal["identity", "array", "dtype_num", "tuple"] = "identity",
     expected_deprecation: str | None = None,
 ) -> NumpySupportCase:
-    return NumpySupportCase(
-        callable=f"numpy.{path}",
-        kind="function",
-        inputs=inputs,
-        args=args,
-        derivative_argnums=derivative_argnums,
-        kwargs=kwargs,
+    return _function(
+        path,
+        inputs,
+        args,
+        kwargs,
         modes=modes,
         variant=variant,
         compare_values=compare_values,
+        derivative_argnums=derivative_argnums,
         trace_argnums=trace_argnums,
         result_adapter=result_adapter,
         expected_deprecation=expected_deprecation,
@@ -657,22 +658,9 @@ _EXTENDED_FUNCTION_CASES = (
 )
 
 
-def _validate_cases() -> None:
-    identifiers = [case.identifier for case in _EXTENDED_FUNCTION_CASES]
-    duplicate_identifiers = sorted(
-        identifier for identifier in set(identifiers) if identifiers.count(identifier) > 1
-    )
-    if duplicate_identifiers:
-        msg = f"duplicate extended NumPy case identifiers: {duplicate_identifiers}"
-        raise RuntimeError(msg)
-
-
-_validate_cases()
-
-
 def function_family_cases() -> tuple[NumpySupportCase, ...]:
     """Return executable cases for grouped NumPy function families."""
-    return tuple(sorted(_EXTENDED_FUNCTION_CASES, key=lambda case: case.identifier))
+    return _EXTENDED_FUNCTION_CASES
 
 
 __all__ = ["function_family_cases"]

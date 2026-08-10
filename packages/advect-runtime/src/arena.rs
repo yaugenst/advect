@@ -322,24 +322,7 @@ impl RawArena {
         flags: NodeFlags,
     ) -> Result<NodeId, RawArenaError> {
         let (node_id, inputs) = self.prepare_node(parents)?;
-        let op_id = self.intern_op(op_name, schema_version)?;
-        self.commit_node(op_id, parents, flags, inputs);
-        Ok(node_id)
-    }
-
-    /// Append a node with an already interned operation ID.
-    pub fn append_op(
-        &mut self,
-        op_id: OpId,
-        parents: &[NodeId],
-        flags: NodeFlags,
-    ) -> Result<NodeId, RawArenaError> {
-        if self.ops.schema(op_id).is_none() {
-            return Err(RawArenaError::new(format!(
-                "arena operation ID {op_id} does not exist"
-            )));
-        }
-        let (node_id, inputs) = self.prepare_node(parents)?;
+        let op_id = self.ops.intern(op_name, schema_version)?;
         self.commit_node(op_id, parents, flags, inputs);
         Ok(node_id)
     }
@@ -353,15 +336,6 @@ impl RawArena {
             inputs,
             flags,
         });
-    }
-
-    /// Intern one stable operation schema.
-    pub fn intern_op(
-        &mut self,
-        name: &str,
-        schema_version: SchemaVersion,
-    ) -> Result<OpId, RawArenaError> {
-        self.ops.intern(name, schema_version)
     }
 
     /// Look up one node.

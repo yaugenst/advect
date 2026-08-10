@@ -4,6 +4,7 @@ site_name: Advect
 site_description: A small extensible automatic-differentiation core for Python
 site_url: https://yaugenst.github.io/advect/
 repo_url: https://github.com/yaugenst/advect
+exclude_docs: AGENTS.md
 
 copyright: Copyright &copy; 2025-2026 Yannick Augenstein
 
@@ -107,41 +108,19 @@ plugins:
 
 markdown_extensions:
   # Python Markdown
-  - abbr
   - admonition
   - attr_list
-  - def_list
-  - footnotes
-  - md_in_html
   - tables
   - toc:
       permalink: true
       toc_depth: 3
 
   # Python Markdown Extensions
-  - pymdownx.betterem:
-      smart_enable: all
-  - pymdownx.caret
-  - pymdownx.details
   - pymdownx.highlight:
       anchor_linenums: true
       line_spans: __span
       pygments_lang_class: true
-  - pymdownx.inlinehilite
-  - pymdownx.keys
-  - pymdownx.magiclink
-  - pymdownx.mark
-  - pymdownx.smartsymbols
-  - pymdownx.snippets:
-      check_paths: true
   - pymdownx.superfences
-  - pymdownx.tasklist:
-      custom_checkbox: true
-  - pymdownx.tilde
-
-extra:
-  version:
-    provider: mike
 
 nav:
   - Home: index.md

@@ -2,10 +2,17 @@
 
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import Any, Literal, cast
 
-from advect.autodiff.rules.array_family._backend_runtime import xp
+from advect.autodiff.rules.array_family._backend_runtime import (
+    _array_constructor_like,
+    _scalar_like,
+    current_array_backend_provider,
+    xp,
+)
 from advect.core._protocols import _snapshot_traced
+
+type FFTNorm = Literal["backward", "ortho", "forward"]
 
 
 def _is_traced_leaf(value: Any) -> bool:
@@ -28,6 +35,60 @@ def _tangent_type_operand(value: Any) -> Any:
     if type(unwrapped) in {bool, complex, float, int}:
         return unwrapped
     return xp.asarray(unwrapped).dtype
+
+
+def _adjoint_fft_norm(norm: FFTNorm | None) -> FFTNorm:
+    if norm in {None, "backward"}:
+        return "forward"
+    if norm == "forward":
+        return "backward"
+    return "ortho"
+
+
+def _conjugate_transpose(value: xp.ndarray) -> xp.ndarray:
+    """Conjugate-transpose the final two axes."""
+    return cast("xp.ndarray", xp.conj(xp.swapaxes(value, -1, -2)))
+
+
+def _diagonal_matrix(values: xp.ndarray, *, dtype: xp.dtype[Any]) -> xp.ndarray:
+    size = int(values.shape[-1])
+    eye = _array_constructor_like(values, "eye", size, dtype=dtype)
+    return cast("xp.ndarray", eye * values[..., None, :])
+
+
+def _lower_triangular_halfdiag(value: xp.ndarray) -> xp.ndarray:
+    """Project to the lower triangle and halve its diagonal."""
+    lower = xp.tril(value)
+    diagonal = xp.diagonal(lower, axis1=-2, axis2=-1)
+    return cast(
+        "xp.ndarray",
+        lower - _scalar_like(0.5, lower) * _diagonal_matrix(diagonal, dtype=xp.dtype(lower.dtype)),
+    )
+
+
+def _normalize_uplo(value: str) -> Literal["L", "U"]:
+    normalized = str(value).upper()
+    if normalized not in {"L", "U"}:
+        msg = f"expected UPLO='L' or 'U', got {value!r}"
+        raise ValueError(msg)
+    return cast("Literal['L', 'U']", normalized)
+
+
+def _right_solve(a: xp.ndarray, b: xp.ndarray) -> xp.ndarray:
+    """Solve ``result @ a = b`` over the final two axes."""
+    return cast(
+        "xp.ndarray",
+        xp.swapaxes(
+            xp.linalg.solve(xp.swapaxes(a, -1, -2), xp.swapaxes(b, -1, -2)),
+            -1,
+            -2,
+        ),
+    )
+
+
+def _uses_standard_linalg_contract() -> bool:
+    provider = current_array_backend_provider()
+    return provider is not None and provider.backend.split(".", 1)[0] != "numpy"
 
 
 def dtype_is_inexact(dtype: object) -> bool:

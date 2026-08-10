@@ -13,12 +13,11 @@ from advect.autodiff.rules.array_family._backend_runtime import (
     xp,
 )
 from advect.autodiff.rules.array_family._transpose_utils import (
-    infer_output_tangent_dtype as _transpose_infer_output_tangent_dtype,
-    infer_tangent_dtype as _transpose_infer_tangent_dtype,
-    zeros_output_tangent as _transpose_zeros_output_tangent,
-    zeros_output_tangent_structure as _transpose_zeros_output_tangent_structure,
+    _is_traced_leaf,
+    _unwrap_traced_leaf,
+    infer_tangent_dtype as _infer_tangent_dtype,
+    zeros_output_tangent as _zeros_output_tangent,
 )
-from advect.core._protocols import _snapshot_traced
 
 _JVPReturn = xp.ndarray | tuple[xp.ndarray, ...]
 
@@ -43,8 +42,6 @@ SortKind = Literal[
 
 PartitionKind = Literal["introselect"]
 
-FFTNorm = Literal["backward", "ortho", "forward"]
-
 _WHERE_INPUT_ARITY = 3
 
 _INTERP_FP_TANGENT_INDEX = 2
@@ -54,42 +51,6 @@ _VECTOR_AXIS_COUNT = 1
 _MATRIX_AXIS_COUNT = 2
 
 _L2_NORM_ORD = 2
-
-
-def _infer_output_tangent_dtype(ans: Any, tangents: tuple[Any | None, ...]) -> xp.dtype[Any]:
-    return _transpose_infer_output_tangent_dtype(ans, tangents)
-
-
-def _zeros_output_tangent_structure(
-    ans: Any,
-    tangents: tuple[Any | None, ...],
-) -> tuple[xp.ndarray[Any, Any], ...] | xp.ndarray[Any, Any]:
-    return cast(
-        "tuple[xp.ndarray[Any, Any], ...] | xp.ndarray[Any, Any]",
-        _transpose_zeros_output_tangent_structure(ans, tangents),
-    )
-
-
-def _infer_tangent_dtype(ans: Any, tangents: tuple[Any | None, ...]) -> xp.dtype[Any]:
-    return _transpose_infer_tangent_dtype(ans, tangents)
-
-
-def _zeros_output_tangent(ans: Any, tangents: tuple[Any | None, ...]) -> xp.ndarray:
-    return _transpose_zeros_output_tangent(ans, tangents)
-
-
-def _is_traced_leaf(value: Any) -> bool:
-    return callable(getattr(value, "_advect_snapshot", None))
-
-
-def _unwrap_traced_leaf(value: Any) -> Any:
-    current = value
-    while _is_traced_leaf(current):
-        _node_id, next_value = _snapshot_traced(current)
-        if next_value is current:
-            break
-        current = next_value
-    return current
 
 
 def _asarray_unwrapped(value: Any) -> xp.ndarray[Any, Any]:

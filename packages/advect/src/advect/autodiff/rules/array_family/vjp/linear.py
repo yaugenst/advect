@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from functools import partial
 from math import comb, prod
 from typing import Any, cast
 
@@ -9,6 +10,9 @@ from advect.autodiff.rules.array_family._backend_runtime import (
     _array_constructor_like,
     _moveaxis,
     xp,
+)
+from advect.autodiff.rules.array_family._transpose_utils import (
+    _conjugate_transpose as _h,
 )
 
 _PAD_PAIR_LENGTH = 2
@@ -133,24 +137,8 @@ def _vjp_flip(
     return (xp.flip(g, axis=axis),)
 
 
-def _vjp_fliplr(
-    ans: xp.ndarray,
-    *inputs: xp.ndarray,
-    g: xp.ndarray,
-    **attrs: Any,
-) -> tuple[xp.ndarray]:
-    _ = ans, inputs, attrs
-    return (xp.fliplr(g),)
-
-
-def _vjp_flipud(
-    ans: xp.ndarray,
-    *inputs: xp.ndarray,
-    g: xp.ndarray,
-    **attrs: Any,
-) -> tuple[xp.ndarray]:
-    _ = ans, inputs, attrs
-    return (xp.flipud(g),)
+_vjp_fliplr = partial(_vjp_flip, axis=1)
+_vjp_flipud = partial(_vjp_flip, axis=0)
 
 
 def _vjp_roll(
@@ -215,35 +203,9 @@ def _vjp_triangular(
     return (xp.triu(g, k=k) if upper else xp.tril(g, k=k),)
 
 
-def _vjp_triu(
-    ans: xp.ndarray,
-    *inputs: xp.ndarray,
-    g: xp.ndarray,
-    k: int = 0,
-    **attrs: Any,
-) -> tuple[xp.ndarray]:
-    return _vjp_triangular(ans, *inputs, g=g, k=k, upper=True, **attrs)
-
-
-def _vjp_tril(
-    ans: xp.ndarray,
-    *inputs: xp.ndarray,
-    g: xp.ndarray,
-    k: int = 0,
-    **attrs: Any,
-) -> tuple[xp.ndarray]:
-    return _vjp_triangular(ans, *inputs, g=g, k=k, upper=False, **attrs)
-
-
-def _vjp_atleast(
-    ans: xp.ndarray,
-    x: xp.ndarray,
-    *rest: xp.ndarray,
-    g: xp.ndarray,
-    **attrs: Any,
-) -> tuple[xp.ndarray]:
-    _ = ans, rest, attrs
-    return (xp.reshape(g, _shape(x)),)
+_vjp_triu = partial(_vjp_triangular, upper=True)
+_vjp_tril = partial(_vjp_triangular, upper=False)
+_vjp_atleast = _vjp_ravel
 
 
 def _vjp_diag(
@@ -747,13 +709,6 @@ def _vjp_linspace(
     return cast("xp.ndarray", start_grad), cast("xp.ndarray", stop_grad)
 
 
-def _h(value: xp.ndarray) -> xp.ndarray:
-    axes = list(range(value.ndim))
-    axes[-2], axes[-1] = axes[-1], axes[-2]
-    transposed = xp.transpose(value, tuple(axes))
-    return cast("xp.ndarray", xp.conj(transposed) if xp.iscomplexobj(value) else transposed)
-
-
 def _vjp_solve(
     ans: xp.ndarray,
     a: xp.ndarray,
@@ -770,35 +725,3 @@ def _vjp_solve(
     else:
         matrix_grad = -xp.matmul(rhs_grad, _h(ans))
     return cast("xp.ndarray", matrix_grad), cast("xp.ndarray", rhs_grad)
-
-
-__all__ = [
-    "_vjp_atleast",
-    "_vjp_concatenate",
-    "_vjp_cross",
-    "_vjp_cumsum",
-    "_vjp_diag",
-    "_vjp_diagonal",
-    "_vjp_diff",
-    "_vjp_flip",
-    "_vjp_fliplr",
-    "_vjp_flipud",
-    "_vjp_gradient",
-    "_vjp_inner",
-    "_vjp_kron",
-    "_vjp_linspace",
-    "_vjp_outer",
-    "_vjp_pad",
-    "_vjp_ravel",
-    "_vjp_repeat",
-    "_vjp_roll",
-    "_vjp_rollaxis",
-    "_vjp_rot90",
-    "_vjp_solve",
-    "_vjp_stack",
-    "_vjp_swapaxes",
-    "_vjp_tile",
-    "_vjp_trace",
-    "_vjp_tril",
-    "_vjp_triu",
-]

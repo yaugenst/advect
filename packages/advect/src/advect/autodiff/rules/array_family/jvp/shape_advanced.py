@@ -5,6 +5,9 @@ from __future__ import annotations
 from typing import Any, Literal, cast
 
 from advect.autodiff.rules.array_family._backend_runtime import _take_along_axis, xp
+from advect.autodiff.rules.array_family._transpose_utils import (
+    zeros_output_tangent_structure as _zeros_output_tangent_structure,
+)
 from advect.autodiff.rules.array_family.jvp.common import (
     PartitionKind,
     SortKind,
@@ -14,7 +17,6 @@ from advect.autodiff.rules.array_family.jvp.common import (
     _infer_tangent_dtype,
     _shape_unwrapped,
     _zeros_output_tangent,
-    _zeros_output_tangent_structure,
 )
 
 

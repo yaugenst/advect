@@ -1,4 +1,4 @@
-"""Backend-provider registry for canonical array-family derivative execution."""
+"""Runtime providers for canonical array-family derivative execution."""
 
 from __future__ import annotations
 
@@ -10,12 +10,9 @@ from advect.core._array_api.providers import (
     _get_backend_key_from_namespace,
     _negotiate_array_namespace_for_call,
 )
-from advect.core._protocols import _snapshot_traced
 
 __all__ = [
     "ArrayFamilyBackendProvider",
-    "get_array_family_backend_provider",
-    "register_array_family_backend_provider",
     "resolve_array_family_backend_provider",
     "try_resolve_array_family_backend_provider",
 ]
@@ -38,40 +35,7 @@ class ArrayFamilyBackendProvider(Protocol):
         """Return the optional backend extension namespace."""
 
 
-_ARRAY_FAMILY_BACKEND_PROVIDERS: dict[str, ArrayFamilyBackendProvider] = {}
 _RUNTIME_ARRAY_API_PROVIDERS: dict[tuple[str, int, str], ArrayFamilyBackendProvider] = {}
-_SCALAR_VALUE_MISSING = object()
-
-
-class _ExtensionNamespaceChain:
-    """Resolve attributes across extension packs for one array backend."""
-
-    __slots__ = ("namespaces",)
-
-    def __init__(self, namespaces: tuple[object, ...]) -> None:
-        self.namespaces = namespaces
-
-    def __getattr__(self, name: str) -> object:
-        for namespace in self.namespaces:
-            try:
-                return getattr(namespace, name)
-            except AttributeError:
-                continue
-        msg = f"No registered array extension exposes {name!r}"
-        raise AttributeError(msg)
-
-    def __dir__(self) -> list[str]:
-        names = set(super().__dir__())
-        for namespace in self.namespaces:
-            names.update(dir(namespace))
-        return sorted(names)
-
-
-@dataclass(frozen=True, slots=True)
-class _ComposedArrayFamilyBackendProvider:
-    backend: str
-    namespace: object
-    ext: object | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -297,116 +261,9 @@ class _StandardArrayAPIExtensions:
         return bool(isdtype(dtype, "complex floating"))
 
 
-def _extension_namespaces(provider: ArrayFamilyBackendProvider) -> tuple[object, ...]:
-    extension = provider.ext
-    if extension is None or extension is provider.namespace:
-        return ()
-    if isinstance(extension, _ExtensionNamespaceChain):
-        return extension.namespaces
-    return (extension,)
-
-
-def _deduplicate_namespaces(namespaces: tuple[object, ...]) -> tuple[object, ...]:
-    result: list[object] = []
-    seen_ids: set[int] = set()
-    for namespace in namespaces:
-        namespace_id = id(namespace)
-        if namespace_id in seen_ids:
-            continue
-        seen_ids.add(namespace_id)
-        result.append(namespace)
-    return tuple(result)
-
-
-def _public_namespace_attributes(namespace: object) -> frozenset[str]:
-    return frozenset(name for name in dir(namespace) if not name.startswith("_"))
-
-
-def _reject_extension_collisions(
-    backend: str,
-    namespaces: tuple[object, ...],
-) -> None:
-    public_attributes = tuple(_public_namespace_attributes(namespace) for namespace in namespaces)
-    for left_index, left_attributes in enumerate(public_attributes):
-        for right_attributes in public_attributes[left_index + 1 :]:
-            overlap = sorted(left_attributes & right_attributes)
-            if overlap:
-                names = ", ".join(repr(name) for name in overlap)
-                msg = (
-                    f"Array-family extension namespaces for backend {backend!r} "
-                    f"export overlapping public attributes: {names}"
-                )
-                raise ValueError(msg)
-
-
-def _normalize_backend_key(backend: str) -> str:
-    normalized = backend.strip()
-    if normalized == "":
-        msg = "backend must be non-empty"
-        raise ValueError(msg)
-    return normalized
-
-
 def _missing_backend_error(backend: str) -> RuntimeError:
-    msg = (
-        f"Array namespace '{backend}' does not implement the required Python Array API "
-        "protocol and has no explicitly registered array-family provider."
-    )
+    msg = f"Array namespace '{backend}' does not implement the required Python Array API protocol."
     return RuntimeError(msg)
-
-
-def register_array_family_backend_provider(provider: ArrayFamilyBackendProvider) -> None:
-    """Register a provider, composing extension packs for the same namespace.
-
-    A concrete array namespace has one provider. Optional extension namespaces
-    may add kernels not present in the standard Array API. Re-registering the
-    base provider must not erase those extensions, and extension ordering must
-    not affect availability.
-    """
-    backend = _normalize_backend_key(provider.backend)
-    existing = _ARRAY_FAMILY_BACKEND_PROVIDERS.get(backend)
-    if existing is None or existing.namespace is not provider.namespace:
-        _ARRAY_FAMILY_BACKEND_PROVIDERS[backend] = provider
-        return
-
-    existing_extensions = _extension_namespaces(existing)
-    incoming_extensions = _extension_namespaces(provider)
-    if not incoming_extensions or all(
-        any(extension is candidate for candidate in existing_extensions)
-        for extension in incoming_extensions
-    ):
-        return
-    extensions = _deduplicate_namespaces((*existing_extensions, *incoming_extensions))
-    _reject_extension_collisions(backend, extensions)
-    if len(extensions) == 1 and provider.ext is extensions[0]:
-        _ARRAY_FAMILY_BACKEND_PROVIDERS[backend] = provider
-        return
-    extension: object = (
-        extensions[0] if len(extensions) == 1 else _ExtensionNamespaceChain(extensions)
-    )
-    _ARRAY_FAMILY_BACKEND_PROVIDERS[backend] = _ComposedArrayFamilyBackendProvider(
-        backend=backend,
-        namespace=provider.namespace,
-        ext=extension,
-    )
-
-
-def get_array_family_backend_provider(backend: str) -> ArrayFamilyBackendProvider:
-    """Return a previously registered array-family backend provider."""
-    normalized = _normalize_backend_key(backend)
-    provider = _ARRAY_FAMILY_BACKEND_PROVIDERS.get(normalized)
-    if provider is None:
-        raise _missing_backend_error(normalized)
-    return provider
-
-
-def _candidate_backend_keys(backend_key: str) -> tuple[str, ...]:
-    if "." not in backend_key:
-        return (backend_key,)
-    head = backend_key.split(".", 1)[0]
-    if head == backend_key:
-        return (backend_key,)
-    return backend_key, head
 
 
 def _is_standard_array_api_namespace(
@@ -440,7 +297,7 @@ def _runtime_array_api_provider(
         return None
     if not isinstance(namespace, ModuleType):
         # Trace-aware namespace proxies are invocation-local. Retaining them in
-        # a process-global provider registry would leak completed traces.
+        # a process-global provider cache would leak completed traces.
         return _RuntimeArrayAPIProvider(
             backend=backend,
             namespace=namespace,
@@ -458,94 +315,39 @@ def _runtime_array_api_provider(
     return provider
 
 
-def _sole_registered_provider() -> ArrayFamilyBackendProvider | None:
-    if len(_ARRAY_FAMILY_BACKEND_PROVIDERS) != 1:
-        return None
-    return next(iter(_ARRAY_FAMILY_BACKEND_PROVIDERS.values()))
-
-
-def _is_runtime_scalar(value: object) -> bool:
-    if value is None or isinstance(value, (bool, int, float, complex, str, bytes, bytearray)):
-        return True
-    if isinstance(value, (tuple, list)):
-        return all(_is_runtime_scalar(item) for item in value)
-    if isinstance(value, dict):
-        return all(_is_runtime_scalar(item) for item in value.values())
-    snapshot = getattr(value, "_advect_snapshot", None)
-    if callable(snapshot):
-        _node_id, wrapped = _snapshot_traced(value)
-    else:
-        wrapped = _SCALAR_VALUE_MISSING
-    if wrapped is not _SCALAR_VALUE_MISSING and wrapped is not value:
-        return _is_runtime_scalar(wrapped)
-    shape = getattr(value, "shape", _SCALAR_VALUE_MISSING)
-    return isinstance(shape, tuple) and shape == ()
-
-
 def resolve_array_family_backend_provider(
     *values: object,
-    scalar_backend_hint: str | None = None,
     array_api_version: str | None = None,
 ) -> ArrayFamilyBackendProvider:
     """Resolve a provider from runtime values.
 
-    Detection uses runtime array namespaces and first maps namespace keys to
-    registered providers. Standards-compliant Python Array API namespaces can
-    execute canonical rules directly without a backend plugin; no NumPy fallback
-    is used. For namespace names with dotted suffixes (for example,
-    ``numpy.array_api``), both the full key and its leading segment are checked.
-    A caller-scoped ``scalar_backend_hint`` is used only when every runtime value
-    is scalar and no array namespace can be inferred. Array values always retain
-    ordinary dynamic provider resolution.
+    Standards-compliant Python Array API namespaces execute canonical rules
+    directly. No backend plugin or NumPy fallback is used.
     """
     resolution = _negotiate_array_namespace_for_call(
         args=values,
         kwargs={},
         required_version=array_api_version,
     )
-    runtime_namespace = None if resolution is None else resolution.raw_namespace
-    backend_key = (
-        None if runtime_namespace is None else _get_backend_key_from_namespace(runtime_namespace)
-    )
-    if (
-        scalar_backend_hint is not None
-        and backend_key is None
-        and values
-        and all(_is_runtime_scalar(value) for value in values)
-    ):
-        return get_array_family_backend_provider(scalar_backend_hint)
-
-    if backend_key is not None:
-        for candidate in _candidate_backend_keys(backend_key):
-            provider = _ARRAY_FAMILY_BACKEND_PROVIDERS.get(candidate)
-            if provider is not None:
-                return provider
-        if runtime_namespace is not None:
-            selected = resolution.requested_version if resolution is not None else array_api_version
-            if selected is None:  # pragma: no cover - runtime namespace implies a resolution
-                msg = "Array API provider resolution did not retain its selected revision"
-                raise RuntimeError(msg)
-            runtime_provider = _runtime_array_api_provider(
-                backend_key,
-                runtime_namespace,
-                array_api_version=selected,
-            )
-            if runtime_provider is not None:
-                return runtime_provider
-
-    sole_provider = _sole_registered_provider()
-    if sole_provider is not None and backend_key is None:
-        return sole_provider
-
-    if backend_key is None:
-        if len(_ARRAY_FAMILY_BACKEND_PROVIDERS) == 1:
-            return next(iter(_ARRAY_FAMILY_BACKEND_PROVIDERS.values()))
+    if resolution is None:
         msg = (
             "Could not resolve an array-family backend from runtime values. "
-            "Pass arrays implementing __array_namespace__ or register an explicit provider."
+            "Pass arrays implementing __array_namespace__."
         )
         raise RuntimeError(msg)
 
+    runtime_namespace = resolution.raw_namespace
+    backend_key = _get_backend_key_from_namespace(runtime_namespace)
+    if backend_key is None:  # pragma: no cover - namespace negotiation requires a name
+        msg = "Array API provider namespace does not expose a backend name"
+        raise RuntimeError(msg)
+    runtime_provider = _runtime_array_api_provider(
+        backend_key,
+        runtime_namespace,
+        array_api_version=resolution.requested_version,
+    )
+    if runtime_provider is not None:
+        return runtime_provider
     raise _missing_backend_error(backend_key)
 
 
@@ -570,10 +372,6 @@ def try_resolve_array_family_backend_provider(
     backend_key = _get_backend_key_from_namespace(runtime_namespace)
     if backend_key is None:
         return None
-    for candidate in _candidate_backend_keys(backend_key):
-        provider = _ARRAY_FAMILY_BACKEND_PROVIDERS.get(candidate)
-        if provider is not None:
-            return provider
     return _runtime_array_api_provider(
         backend_key,
         runtime_namespace,

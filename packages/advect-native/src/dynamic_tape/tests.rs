@@ -9,7 +9,7 @@ use super::lifecycle::DynamicTape;
 fn tape_without_outputs_can_freeze() {
     Python::initialize();
     Python::attach(|py| {
-        let mut tape = DynamicTape::create();
+        let mut tape = DynamicTape::default();
 
         assert!(tape.freeze(py, Vec::new(), Vec::new(), Vec::new()).is_ok());
         assert!(tape.require_available().is_ok());

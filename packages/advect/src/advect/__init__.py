@@ -8,7 +8,6 @@ from typing import Any
 
 from advect import pytree
 from advect._array import array, asarray, is_traced, stop_gradient
-from advect._autodiff_exports import AUTODIFF_EXPORT_MODULES
 from advect.core import (
     AbstractValue,
     AdvectError,
@@ -47,21 +46,39 @@ try:
 except PackageNotFoundError:
     __version__ = "0.0.0+local"
 
+_AUTODIFF_EXPORT_MODULES = {
+    "ImplicitSolveError": "implicit",
+    "LinearMap": "forward",
+    "Pullback": "reverse",
+    "checkpoint": "checkpoint",
+    "grad": "reverse",
+    "hessian": "higher_order",
+    "hessian_diag": "higher_order",
+    "hvp": "higher_order",
+    "implicit_root": "implicit",
+    "jacobian": "forward",
+    "jvp": "forward",
+    "linearize": "forward",
+    "value_and_grad": "reverse",
+    "vjp": "reverse",
+    "vjp_program": "reverse",
+}
+
 
 def __getattr__(name: str) -> Any:  # noqa: ANN401 - lazy public transform
     """Load automatic-differentiation transforms on first use."""
-    if name not in AUTODIFF_EXPORT_MODULES:
+    module = _AUTODIFF_EXPORT_MODULES.get(name)
+    if module is None:
         msg = f"module {__name__!r} has no attribute {name!r}"
         raise AttributeError(msg)
-    autodiff = import_module("advect.autodiff")
-    value = getattr(autodiff, name)
+    value = getattr(import_module(f"advect.autodiff.api.{module}"), name)
     globals()[name] = value
     return value
 
 
 def __dir__() -> list[str]:
     """List the deliberately small public surface."""
-    return sorted(set(globals()).union(AUTODIFF_EXPORT_MODULES))
+    return sorted(set(globals()).union(_AUTODIFF_EXPORT_MODULES))
 
 
 __all__ = [
@@ -95,4 +112,4 @@ __all__ = [
     "stop_gradient",
     "support_catalog",
 ]
-__all__ += list(AUTODIFF_EXPORT_MODULES)
+__all__ += list(_AUTODIFF_EXPORT_MODULES)

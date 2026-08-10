@@ -16,9 +16,7 @@ from advect.core._context import (
     is_debug,
 )
 from advect.core._errors import TraceLevelError, TracingError
-from advect.numpy._array_function.registry import ARRAY_FUNCTION_RUNTIME
 from advect.numpy._op_bindings import canonicalize_numpy_op
-from advect.numpy._protocol_runtime import NUMPY_PROTOCOL_RUNTIME
 from advect.numpy._protocol_ufunc import UFUNC_RUNTIME
 from advect.numpy._traced_array_checks import require_active_trace
 
@@ -29,16 +27,12 @@ if TYPE_CHECKING:
     from advect.numpy._traced_array import TracedArray
 
 
-_UFUNC_RUNTIME = UFUNC_RUNTIME
-_ARRAY_FUNCTION_RUNTIME = ARRAY_FUNCTION_RUNTIME
-_RUNTIME = NUMPY_PROTOCOL_RUNTIME
-
 _FAST_REDUCTION_KWARGS = frozenset({"axis", "keepdims", "dtype"})
 _BINARY_INPUTS = 2
 NOT_HANDLED = object()
 _EPHEMERAL_UFUNC_OPS = {
     ufunc: canonicalize_numpy_op(f"numpy.{ufunc.__name__}")
-    for ufunc in _UFUNC_RUNTIME.supported_ufuncs
+    for ufunc in UFUNC_RUNTIME.supported_ufuncs
 }
 _SUM_OP = canonicalize_numpy_op("numpy.sum")
 

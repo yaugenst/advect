@@ -160,15 +160,6 @@ def _creation_full(
     )
 
 
-def _full_like(
-    specs: Sequence[ArraySpec],
-    attrs: Mapping[str, Any],
-) -> tuple[ArraySpec, ...]:
-    dtype = dtype_name(attrs["dtype"]) if attrs.get("dtype") is not None else None
-    shape = specs[0].shape if attrs.get("shape") is None else shape_tuple(attrs["shape"])
-    return (ArraySpec(shape, dtype or dtype_name(specs[0].dtype)),)
-
-
 def _like(
     specs: Sequence[ArraySpec],
     attrs: Mapping[str, Any],
@@ -184,6 +175,6 @@ EVALUATORS: dict[str, ResultEvaluator] = {
     "arange": _arange,
     "linspace": _linspace,
     "creation_full": _creation_full,
-    "full_like": _full_like,
+    "full_like": _like,
     "like": _like,
 }

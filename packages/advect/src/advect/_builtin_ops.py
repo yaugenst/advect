@@ -47,10 +47,7 @@ def builtin_operation_definitions() -> tuple[OpDef, ...]:
         for name in (
             "advect.input",
             "advect.const",
-            "advect.getitem",
             "advect.getoutput",
-            "advect.index_update",
-            "advect.copy",
             *(name for name, _rule in jvp_items),
             *(name for name, _reason in non_differentiable),
         )

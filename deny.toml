@@ -1,6 +1,3 @@
-[graph]
-all-features = true
-
 [advisories]
 version = 2
 # cargo-deny 0.19 models unmaintained advisories as a scope rather than a

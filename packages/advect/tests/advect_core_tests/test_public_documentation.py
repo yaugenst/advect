@@ -31,7 +31,6 @@ _PUBLIC_MODULE_DIRECTIVES = {
     "advect.scipy.sparse.linalg",
     "advect.scipy.special",
     "advect.testing",
-    "advect.xarray",
 }
 _INTEROP_OBJECT_DIRECTIVES = {
     "advect.interop.autograd.wrap",

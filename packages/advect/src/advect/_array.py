@@ -72,9 +72,7 @@ def _tracer_namespace(value: object) -> Any:
 
 def _same_dtype(value: object, dtype: object) -> bool:
     current = getattr(value, "dtype", None)
-    if current == dtype:
-        return True
-    return str(current) == str(dtype)
+    return current == dtype or str(current) == str(dtype)
 
 
 def _cast_traced(value: Any, dtype: object | None, *, copy: bool | None) -> Any:
@@ -112,9 +110,7 @@ def _namespace_asarray(
 def _stack_traced_sequence(value: object, *, namespace: Any) -> Any:
     if is_traced(value):
         return value
-    if not isinstance(value, (tuple, list)):
-        return _namespace_asarray(namespace, value, dtype=None, copy=None)
-    if not value:
+    if not isinstance(value, (tuple, list)) or not value:
         return _namespace_asarray(namespace, value, dtype=None, copy=None)
 
     children = tuple(_stack_traced_sequence(item, namespace=namespace) for item in value)
@@ -193,13 +189,6 @@ def array(
 
 
 def _concrete_tracer_copy(value: object) -> object:
-    if bool(getattr(type(value), "__advect_abstract_array__", False)):
-        msg = (
-            "stop_gradient requires a concrete dynamic trace; abstract staged "
-            "values have no primal payload"
-        )
-        raise TracingError(msg)
-
     current = value
     seen: set[int] = set()
     while is_traced(current):

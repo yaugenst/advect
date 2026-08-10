@@ -20,24 +20,6 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 
-@pytest.mark.parametrize(
-    "legacy_name",
-    [
-        "Primitive",
-        "PrimitiveCapabilities",
-        "check_primitive",
-        "custom_vjp",
-        "defjvp",
-        "defvjp",
-        "get_primitive",
-        "opaque_residual",
-    ],
-)
-def test_primitive_decorator_is_the_only_public_authoring_path(legacy_name: str) -> None:
-    assert callable(ad.primitive)
-    assert not hasattr(ad, legacy_name)
-
-
 def test_primitive_infers_its_name_and_preserves_its_signature() -> None:
     @ad.primitive
     def square(x: float, scale: float = 1.0) -> float:

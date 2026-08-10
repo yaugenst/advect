@@ -8,8 +8,8 @@ use std::sync::Arc;
 
 use super::*;
 use crate::{
-    AttrMap, ConstantKind, DTypeDescriptor, GRAPH_FORMAT_VERSION, GraphBuilder, GraphError,
-    GraphStore, NodeFlags, NodeId, NodeMetadata, NumericDType, PortableConstant, ValueSpec,
+    AttrMap, ConstantKind, DTypeDescriptor, GraphBuilder, GraphError, GraphStore, NodeFlags,
+    NodeId, NodeMetadata, NumericDType, PortableConstant, ValueSpec,
 };
 
 #[derive(Clone, Debug)]
@@ -187,7 +187,7 @@ fn metadata() -> NodeMetadata {
 }
 
 fn graph() -> Result<GraphStore, GraphError> {
-    let mut builder = GraphBuilder::new(GRAPH_FORMAT_VERSION)?;
+    let mut builder = GraphBuilder::new();
     let input = builder.append_input(metadata())?;
     let constant = PortableConstant::new(
         ConstantKind::Scalar,
@@ -210,7 +210,7 @@ fn graph() -> Result<GraphStore, GraphError> {
 }
 
 fn unknown_alias_graph() -> Result<GraphStore, GraphError> {
-    let mut builder = GraphBuilder::new(GRAPH_FORMAT_VERSION)?;
+    let mut builder = GraphBuilder::new();
     let input = builder.append_input(metadata())?;
     let constant = PortableConstant::new(
         ConstantKind::Scalar,
@@ -243,7 +243,7 @@ fn unknown_alias_graph() -> Result<GraphStore, GraphError> {
 
 #[test]
 fn graph_outputs_are_a_flat_vector_in_declared_order() {
-    let mut builder = GraphBuilder::new(GRAPH_FORMAT_VERSION).unwrap();
+    let mut builder = GraphBuilder::new();
     let input = builder.append_input(metadata()).unwrap();
     let constant = PortableConstant::new(
         ConstantKind::Scalar,
@@ -280,10 +280,7 @@ fn graph_outputs_are_a_flat_vector_in_declared_order() {
         next_id: 0,
         donate: false,
     };
-    let plan = ExecutionPlan::from_store(Arc::new(graph))
-        .unwrap()
-        .link(&mut host)
-        .unwrap();
+    let plan = LinkedExecutionPlan::from_store(Arc::new(graph), &mut host).unwrap();
 
     let input = host.value(3.0);
     let outputs = plan.execute(&mut host, vec![input]).unwrap();
@@ -296,7 +293,7 @@ fn graph_outputs_are_a_flat_vector_in_declared_order() {
 
 #[test]
 fn repeated_graph_outputs_retain_an_additional_host_handle() {
-    let mut builder = GraphBuilder::new(GRAPH_FORMAT_VERSION).unwrap();
+    let mut builder = GraphBuilder::new();
     let input = builder.append_input(metadata()).unwrap();
     builder.append_output(input).unwrap();
     builder.append_output(input).unwrap();
@@ -309,10 +306,7 @@ fn repeated_graph_outputs_retain_an_additional_host_handle() {
         next_id: 0,
         donate: false,
     };
-    let plan = ExecutionPlan::from_store(Arc::new(graph))
-        .unwrap()
-        .link(&mut host)
-        .unwrap();
+    let plan = LinkedExecutionPlan::from_store(Arc::new(graph), &mut host).unwrap();
     let input_value = host.value(3.0);
     let input_id = input_value.id;
     let outputs = plan.execute(&mut host, vec![input_value]).unwrap();
@@ -331,7 +325,7 @@ fn repeated_graph_outputs_retain_an_additional_host_handle() {
 
 #[test]
 fn input_values_are_validated_at_the_host_boundary() {
-    let mut builder = GraphBuilder::new(GRAPH_FORMAT_VERSION).unwrap();
+    let mut builder = GraphBuilder::new();
     let input = builder.append_input(metadata()).unwrap();
     builder.append_output(input).unwrap();
     let graph = builder.finish().unwrap().store;
@@ -341,10 +335,7 @@ fn input_values_are_validated_at_the_host_boundary() {
         next_id: 0,
         donate: false,
     };
-    let plan = ExecutionPlan::from_store(Arc::new(graph))
-        .unwrap()
-        .link(&mut host)
-        .unwrap();
+    let plan = LinkedExecutionPlan::from_store(Arc::new(graph), &mut host).unwrap();
     let invalid = host.value(f64::NAN);
 
     let error = plan.execute(&mut host, vec![invalid]).unwrap_err();
@@ -357,7 +348,7 @@ fn input_values_are_validated_at_the_host_boundary() {
 
 #[test]
 fn materialized_constants_are_validated_at_the_host_boundary() {
-    let mut builder = GraphBuilder::new(GRAPH_FORMAT_VERSION).unwrap();
+    let mut builder = GraphBuilder::new();
     let constant = PortableConstant::new(
         ConstantKind::Scalar,
         NumericDType::Float64,
@@ -374,10 +365,7 @@ fn materialized_constants_are_validated_at_the_host_boundary() {
         next_id: 0,
         donate: false,
     };
-    let plan = ExecutionPlan::from_store(Arc::new(graph))
-        .unwrap()
-        .link(&mut host)
-        .unwrap();
+    let plan = LinkedExecutionPlan::from_store(Arc::new(graph), &mut host).unwrap();
 
     let error = plan.execute(&mut host, vec![]).unwrap_err();
 
@@ -396,10 +384,7 @@ fn values_drop_immediately_after_their_last_use() {
         next_id: 0,
         donate: false,
     };
-    let plan = ExecutionPlan::from_store(Arc::new(graph))
-        .unwrap()
-        .link(&mut host)
-        .unwrap();
+    let plan = LinkedExecutionPlan::from_store(Arc::new(graph), &mut host).unwrap();
 
     let input = host.value(3.0);
     let outputs = plan.execute(&mut host, vec![input]).unwrap();
@@ -421,10 +406,7 @@ fn last_use_owned_value_is_offered_for_donation() {
         next_id: 0,
         donate: true,
     };
-    let plan = ExecutionPlan::from_store(Arc::new(graph))
-        .unwrap()
-        .link(&mut host)
-        .unwrap();
+    let plan = LinkedExecutionPlan::from_store(Arc::new(graph), &mut host).unwrap();
     let input = host.value(3.0);
     let outputs = plan.execute(&mut host, vec![input]).unwrap();
     assert_eq!(outputs.first().map(|value| value.value), Some(5.0));
@@ -440,10 +422,7 @@ fn unknown_alias_prevents_donation_while_possible_parent_alias_is_live() {
         next_id: 0,
         donate: true,
     };
-    let plan = ExecutionPlan::from_store(Arc::new(graph))
-        .unwrap()
-        .link(&mut host)
-        .unwrap();
+    let plan = LinkedExecutionPlan::from_store(Arc::new(graph), &mut host).unwrap();
     let input = host.value(3.0);
     let outputs = plan.execute(&mut host, vec![input]).unwrap();
     assert_eq!(
@@ -460,7 +439,7 @@ fn unknown_alias_prevents_donation_while_possible_parent_alias_is_live() {
 
 #[test]
 fn host_error_names_node_and_operation() {
-    let mut builder = GraphBuilder::new(GRAPH_FORMAT_VERSION).unwrap();
+    let mut builder = GraphBuilder::new();
     let input = builder.append_input(metadata()).unwrap();
     let failed = builder
         .append_operation("advect.fail", 1, &[input], NodeFlags::NONE, metadata())
@@ -473,10 +452,7 @@ fn host_error_names_node_and_operation() {
         next_id: 0,
         donate: false,
     };
-    let plan = ExecutionPlan::from_store(Arc::new(graph))
-        .unwrap()
-        .link(&mut host)
-        .unwrap();
+    let plan = LinkedExecutionPlan::from_store(Arc::new(graph), &mut host).unwrap();
     let input = host.value(3.0);
     let error = plan.execute(&mut host, vec![input]).unwrap_err();
     assert_eq!(

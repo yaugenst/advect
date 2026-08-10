@@ -9,6 +9,7 @@ import numpy as _numpy  # noqa: ICN001 - typed module and dynamic lowering names
 from advect.core._errors import TracingError
 from advect.core._protocols import _snapshot_traced
 from advect.numpy._array_function.composite import _finish, _first_traced
+from advect.numpy._array_function.normalization import _bind_optional_positionals
 
 np: Any = _numpy
 
@@ -23,31 +24,6 @@ if TYPE_CHECKING:
 
 _BINARY_ARITY = 2
 _NO_VALUE = getattr(np, "_NoValue", object())
-
-
-def _bind_optional_positionals(
-    *,
-    name: str,
-    args: tuple[Any, ...],
-    kwargs: dict[str, Any],
-    required: int,
-    optional: tuple[str, ...],
-    keyword_only: frozenset[str] = frozenset(),
-) -> dict[str, Any]:
-    if len(args) < required or len(args) > required + len(optional):
-        msg = f"numpy.{name} received an invalid positional signature during tracing"
-        raise TracingError(msg)
-    unsupported = set(kwargs) - (set(optional) | set(keyword_only))
-    if unsupported:
-        msg = f"numpy.{name} kwargs not supported during tracing: {sorted(unsupported)}"
-        raise TracingError(msg)
-    values = dict(kwargs)
-    for parameter, value in zip(optional, args[required:], strict=False):
-        if parameter in values:
-            msg = f"numpy.{name} received {parameter} twice"
-            raise TracingError(msg)
-        values[parameter] = value
-    return values
 
 
 def _concrete(value: object, traced_type: type[TracedArrayLike]) -> object:

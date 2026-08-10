@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import pytest
-from scripts._support import bench_advect_regression as benchmark
+from scripts import bench_advect_regression as benchmark
 
 if TYPE_CHECKING:
     from pathlib import Path

@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use advect_runtime::{
-    AttrMap, ExecutionPlan, GraphArtifact, Host, LinkedOperation, NodeId, NumericDType, Operand,
+    AttrMap, GraphStore, Host, LinkedExecutionPlan, LinkedOperation, NodeId, NumericDType, Operand,
     OutputOwnership, PortableConstant, ValueSpec,
 };
 
@@ -117,17 +117,13 @@ fn python_staged_fixture_round_trips_and_executes_in_pure_rust() {
         "2024.12"
     );
     let graph = serde_json::to_string(fixture_graph).unwrap();
-    let artifact = GraphArtifact::from_json(&graph).unwrap();
+    let store = GraphStore::from_json(&graph).unwrap();
     let restored_graph: serde_json::Value =
-        serde_json::from_str(&artifact.to_json().unwrap()).unwrap();
+        serde_json::from_str(&store.to_json().unwrap()).unwrap();
     assert_eq!(&restored_graph, fixture_graph);
 
-    let store = artifact.into_store();
     let mut host = VectorHost;
-    let plan = ExecutionPlan::from_store(Arc::new(store))
-        .unwrap()
-        .link(&mut host)
-        .unwrap();
+    let plan = LinkedExecutionPlan::from_store(Arc::new(store), &mut host).unwrap();
     let outputs = plan
         .execute(&mut host, vec![vec![3.0, 4.0], vec![2.0, -1.0]])
         .unwrap();

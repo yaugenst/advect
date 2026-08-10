@@ -17,6 +17,7 @@ from advect.numpy._array_function.composite import (
 )
 from advect.numpy._array_function.emission import _add_backend_node, _get_node, _get_value
 from advect.numpy._array_function.normalization import (
+    _bind_optional_positionals,
     _normalize_constant_values,
     _normalize_pad_width,
     _normalize_shape,
@@ -46,6 +47,7 @@ _LINSPACE_TRAILING_PARAMETERS = ("num", "endpoint", "retstep", "dtype", "axis")
 _LINSPACE_MAX_ARGS = _MIN_REQUIRED_ARGS + len(_LINSPACE_TRAILING_PARAMETERS)
 _LINEAR_PAD_MODES = frozenset({"constant", "edge", "linear_ramp", "reflect", "symmetric", "wrap"})
 _STATISTICAL_PAD_MODES = frozenset({"maximum", "mean", "median", "minimum"})
+_CONSTRUCTOR_KEYWORD_ONLY = frozenset({"device", "like"})
 
 
 def _full_handler(
@@ -109,30 +111,6 @@ def _full_handler(
     return result, node_id
 
 
-def _bind_constructor_args(
-    *,
-    name: str,
-    args: tuple[Any, ...],
-    kwargs: dict[str, Any],
-    required: int,
-    optional: tuple[str, ...],
-) -> dict[str, Any]:
-    if len(args) < required or len(args) > required + len(optional):
-        msg = f"numpy.{name} received an invalid positional signature during tracing"
-        raise TracingError(msg)
-    unsupported = set(kwargs) - (set(optional) | {"device", "like"})
-    if unsupported:
-        msg = f"numpy.{name} kwargs not supported during tracing: {sorted(unsupported)}"
-        raise TracingError(msg)
-    values = dict(kwargs)
-    for parameter, value in zip(optional, args[required:], strict=False):
-        if parameter in values:
-            msg = f"numpy.{name} received {parameter} twice"
-            raise TracingError(msg)
-        values[parameter] = value
-    return values
-
-
 def _like_anchor(
     values: dict[str, Any],
     *,
@@ -157,12 +135,13 @@ def _basic_constructor_handler(
     *,
     name: str,
 ) -> CompositeResult:
-    values = _bind_constructor_args(
+    values = _bind_optional_positionals(
         name=name,
         args=args,
         kwargs=kwargs,
         required=1,
         optional=("dtype", "order"),
+        keyword_only=_CONSTRUCTOR_KEYWORD_ONLY,
     )
     shape = _normalize_shape(args[0])
     anchor = _like_anchor(values, traced_type=traced_type, name=name)
@@ -193,12 +172,13 @@ def _eye_handler(
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
 ) -> CompositeResult:
-    values = _bind_constructor_args(
+    values = _bind_optional_positionals(
         name="eye",
         args=args,
         kwargs=kwargs,
         required=1,
         optional=("M", "k", "dtype", "order"),
+        keyword_only=_CONSTRUCTOR_KEYWORD_ONLY,
     )
     anchor = _like_anchor(values, traced_type=traced_type, name="eye")
     rows = int(args[0])
@@ -223,12 +203,13 @@ def _identity_handler(
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
 ) -> CompositeResult:
-    values = _bind_constructor_args(
+    values = _bind_optional_positionals(
         name="identity",
         args=args,
         kwargs=kwargs,
         required=1,
         optional=("dtype",),
+        keyword_only=_CONSTRUCTOR_KEYWORD_ONLY,
     )
     anchor = _like_anchor(values, traced_type=traced_type, name="identity")
     concrete = np.identity(int(args[0]), dtype=values.get("dtype"))
@@ -247,12 +228,13 @@ def _tri_handler(
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
 ) -> CompositeResult:
-    values = _bind_constructor_args(
+    values = _bind_optional_positionals(
         name="tri",
         args=args,
         kwargs=kwargs,
         required=1,
         optional=("M", "k", "dtype"),
+        keyword_only=_CONSTRUCTOR_KEYWORD_ONLY,
     )
     anchor = _like_anchor(values, traced_type=traced_type, name="tri")
     rows = int(args[0])

@@ -14,17 +14,10 @@ from advect.autodiff.api.common import (
     _prepare_higher_order_inputs,
     _require_array_namespace_for_higher_order,
 )
-from advect.autodiff.rules.array_family.providers import (
-    register_array_family_backend_provider,
-    resolve_array_family_backend_provider,
-)
+from advect.autodiff.rules.array_family.providers import resolve_array_family_backend_provider
 from advect.core._array_api.providers import ResolvedArrayNamespace
 from advect.core._errors import HigherOrderNotSupportedError
 from advect.core._eval_dispatch import bind_node_evaluator, evaluate_node_value
-from advect_grad_tests._backend_contract_helpers import (
-    BackendProviderStub,
-    StrictHigherOrderNamespace,
-)
 
 xp = pytest.importorskip("array_api_strict")
 
@@ -47,35 +40,23 @@ def _build_backend_case(backend: str) -> tuple[Any, Any]:
         runtime = np.asarray([1.0, -2.0], dtype=np.float64)
         return np, runtime
     if backend == "array_api_strict":
-        namespace = StrictHigherOrderNamespace(xp)
         runtime = xp.asarray([1.0, -2.0], dtype=xp.float64)
-        return namespace, runtime
+        return xp, runtime
     msg = f"Unknown backend case: {backend}"
     raise ValueError(msg)
 
 
 @pytest.mark.parametrize("backend", ["numpy", "array_api_strict"])
-def test_provider_resolution_matrix(
-    backend: str,
-    isolated_provider_registry: None,
-) -> None:
+def test_provider_resolution_matrix(backend: str) -> None:
     namespace, runtime_value = _build_backend_case(backend)
-    provider = BackendProviderStub(backend=backend, namespace=namespace)
-    register_array_family_backend_provider(provider)
 
     resolved = resolve_array_family_backend_provider(runtime_value)
-    assert resolved is provider
+    assert resolved.backend == backend
+    assert resolved.namespace is namespace
 
 
-@pytest.mark.parametrize("backend", ["numpy", "array_api_strict"])
-def test_higher_order_namespace_contract_matrix(
-    backend: str,
-    isolated_provider_registry: None,
-) -> None:
-    namespace, runtime_value = _build_backend_case(backend)
-    register_array_family_backend_provider(
-        BackendProviderStub(backend=backend, namespace=namespace)
-    )
+def test_numpy_higher_order_namespace_contract() -> None:
+    runtime_value = np.asarray([1.0, -2.0], dtype=np.float64)
 
     array_ns = _require_array_namespace_for_higher_order(args=(runtime_value,), kwargs={})
     _shapes, flat_sizes, primal_dtypes = _prepare_higher_order_inputs(
@@ -94,42 +75,9 @@ def test_higher_order_namespace_contract_matrix(
     assert blocks[0][0].shape == (expected_size, expected_size)
 
 
-def test_unresolved_provider_failure_is_typed(
-    isolated_provider_registry: None,
-) -> None:
-    register_array_family_backend_provider(BackendProviderStub(backend="a", namespace=np))
-    register_array_family_backend_provider(BackendProviderStub(backend="b", namespace=np))
-
+def test_unresolved_provider_failure_is_typed() -> None:
     with pytest.raises(HigherOrderNotSupportedError, match="runtime array namespace"):
         _ = _require_array_namespace_for_higher_order(args=(object(),), kwargs={})
-
-
-@pytest.mark.parametrize("backend", ["numpy", "array_api_strict"])
-def test_matrix_shape_dtype_property_contract(
-    backend: str,
-    isolated_provider_registry: None,
-) -> None:
-    arr = np.asarray([[1.0, -1.0], [0.5, 2.0]], dtype=np.float64)
-    namespace, runtime_value = _build_backend_case(backend)
-    runtime_value = xp.asarray(arr, dtype=xp.float64) if backend == "array_api_strict" else arr
-
-    register_array_family_backend_provider(
-        BackendProviderStub(backend=backend, namespace=namespace)
-    )
-    array_ns = _require_array_namespace_for_higher_order(args=(runtime_value,), kwargs={})
-    _shapes, flat_sizes, primal_dtypes = _prepare_higher_order_inputs(
-        array_ns=array_ns,
-        args=(runtime_value,),
-        argnums=(0,),
-    )
-    blocks = _allocate_hessian_blocks_flat(
-        array_ns=array_ns,
-        primal_flat_sizes=flat_sizes,
-        primal_dtypes=primal_dtypes,
-    )
-
-    expected_dtype = array_ns.result_type(primal_dtypes[0], primal_dtypes[0])
-    assert blocks[0][0].dtype == expected_dtype
 
 
 def test_numpy_authored_transform_stages_and_restores_on_numpy() -> None:

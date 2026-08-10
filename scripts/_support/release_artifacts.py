@@ -10,26 +10,15 @@ import tarfile
 import zipfile
 from dataclasses import asdict, dataclass
 from email.parser import BytesParser
+from itertools import product
 from pathlib import Path
 
 _EXPECTED_WHEELS = frozenset(
-    {
-        ("cp312", "cp312", "linux-x86_64"),
-        ("cp313", "cp313", "linux-x86_64"),
-        ("cp314", "cp314", "linux-x86_64"),
-        ("cp312", "cp312", "linux-aarch64"),
-        ("cp313", "cp313", "linux-aarch64"),
-        ("cp314", "cp314", "linux-aarch64"),
-        ("cp312", "cp312", "macos-x86_64"),
-        ("cp313", "cp313", "macos-x86_64"),
-        ("cp314", "cp314", "macos-x86_64"),
-        ("cp312", "cp312", "macos-arm64"),
-        ("cp313", "cp313", "macos-arm64"),
-        ("cp314", "cp314", "macos-arm64"),
-        ("cp312", "cp312", "windows-x86_64"),
-        ("cp313", "cp313", "windows-x86_64"),
-        ("cp314", "cp314", "windows-x86_64"),
-    }
+    (python_tag, python_tag, platform)
+    for python_tag, platform in product(
+        ("cp312", "cp313", "cp314"),
+        ("linux-x86_64", "linux-aarch64", "macos-x86_64", "macos-arm64", "windows-x86_64"),
+    )
 )
 _SOURCE_REVISION = re.compile(r"[0-9a-f]{40}")
 _WHEEL_NAME_PARTS = 5

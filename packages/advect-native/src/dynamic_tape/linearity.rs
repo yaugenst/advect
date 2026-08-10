@@ -71,16 +71,13 @@ pub(super) fn analyze_real_linearity(
     let tangent_inputs = validate_tangent_inputs(tape, tangent_input_ids)?;
     let mut states = Vec::with_capacity(tape.arena.node_count());
 
-    for node_index in 0..tape.arena.node_count() {
-        let node_id = NodeId::try_from(node_index)
-            .map_err(|_| PyRuntimeError::new_err("dynamic tape node ID overflowed"))?;
-        let (_index, node) = tape.require_node(node_id)?;
+    for (node_index, &node) in tape.arena.nodes().iter().enumerate() {
         let op = tape.arena.op_name(node.op()).ok_or_else(|| {
             PyRuntimeError::new_err("dynamic tape contains an invalid operation ID")
         })?;
 
         let mut state = if op == "advect.input" {
-            if tangent_inputs.contains(&node_id) {
+            if tangent_inputs.contains(&node_index) {
                 Linearity::linear()
             } else {
                 Linearity::constant()
@@ -112,14 +109,13 @@ pub(super) fn analyze_real_linearity(
     }
 
     for &output_id in &tape.outputs {
-        let output_index = node_index(output_id)?;
+        let (output_index, output) = tape.require_node(output_id)?;
         let state = states.get(output_index).ok_or_else(|| {
             PyRuntimeError::new_err("dynamic tape output linearity state is unavailable")
         })?;
         if matches!(state.kind, LinearityKind::Zero | LinearityKind::Linear) {
             continue;
         }
-        let (_index, output) = tape.require_node(output_id)?;
         let op = tape.arena.op_name(output.op()).ok_or_else(|| {
             PyRuntimeError::new_err("dynamic tape contains an invalid operation ID")
         })?;
@@ -151,16 +147,16 @@ pub(super) fn analyze_real_linearity(
 fn validate_tangent_inputs(
     tape: &DynamicTape,
     tangent_input_ids: &[NodeId],
-) -> PyResult<HashSet<NodeId>> {
+) -> PyResult<HashSet<usize>> {
     let mut tangent_inputs = HashSet::with_capacity(tangent_input_ids.len());
     for &node_id in tangent_input_ids {
-        let (_index, node) = tape.require_node(node_id)?;
+        let (index, node) = tape.require_node(node_id)?;
         if !node.flags().is_input() {
             return Err(PyValueError::new_err(format!(
                 "real-linearity tangent node %{node_id} is not an input"
             )));
         }
-        tangent_inputs.insert(node_id);
+        tangent_inputs.insert(index);
     }
     Ok(tangent_inputs)
 }
@@ -188,8 +184,10 @@ fn operand_linearity(
     let mut inputs: Vec<Option<Linearity>> = vec![None; operand_count];
 
     for (&parent, &position) in parents.iter().zip(&parent_positions) {
+        let parent_index = usize::try_from(parent)
+            .map_err(|_| PyValueError::new_err("dynamic tape node ID is out of range"))?;
         let parent_state = states
-            .get(node_index(parent)?)
+            .get(parent_index)
             .ok_or_else(|| PyRuntimeError::new_err("parent linearity state is unavailable"))?
             .clone();
         *inputs
@@ -410,9 +408,4 @@ fn value_is_zero_inner(py: Python<'_>, value: &Bound<'_, PyAny>) -> PyResult<boo
         Err(error) if error.is_instance_of::<PyAttributeError>(py) => comparison.is_truthy(),
         Err(error) => Err(error),
     }
-}
-
-fn node_index(node_id: NodeId) -> PyResult<usize> {
-    usize::try_from(node_id)
-        .map_err(|_| PyValueError::new_err("dynamic tape node ID is out of range"))
 }

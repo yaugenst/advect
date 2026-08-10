@@ -9,7 +9,6 @@ import numpy as np
 
 from advect.core._pytree import tree_flatten, tree_unflatten
 from advect.interop._common import (
-    differentiable_argnums,
     numeric_tree,
     require_dependency,
     validated_vjp,
@@ -95,7 +94,6 @@ def wrap(function: Callable[..., Any]) -> Callable[..., Any]:
 
     @functools.wraps(function)
     def wrapped(*args: Any) -> Any:
-        argnums = differentiable_argnums(len(args))
         input_leaves, input_treedef, device = _input_tensor_leaves(args)
         if not torch.is_grad_enabled() or not any(leaf.requires_grad for leaf in input_leaves):
             return _direct_call(function, args, device=device)
@@ -112,7 +110,6 @@ def wrap(function: Callable[..., Any]) -> Callable[..., Any]:
                 output_leaves, output_treedef, pullback = validated_vjp(
                     function,
                     concrete_args,
-                    argnums=argnums,
                 )
                 try:
                     outputs = tuple(_output_tensor(leaf, device=device) for leaf in output_leaves)

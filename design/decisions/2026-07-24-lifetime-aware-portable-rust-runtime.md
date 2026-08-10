@@ -7,8 +7,7 @@
 ## Context
 
 The native SSA cutover established one compact Rust arena for concrete tapes
-and staged graphs and brought dynamic differentiation to HIPS Autograd latency
-parity. At the time of this decision, its measurements covered only
+and staged graphs. At the time of this decision, its measurements covered only
 Python-visible allocation through `tracemalloc`; they did not establish whether
 Rust reduced total process or device memory.
 
@@ -206,7 +205,7 @@ source-retirement gates:
 - taking each workload's median across three checked runs and then their
   geometric mean gives 50.58165 microseconds for current Advect versus
   48.30620 microseconds for the equivalently aggregated pre-change baseline
-  (`1.0471x`); the median current-to-HIPS core ratio was `1.02159x`;
+  (`1.0471x`);
 - the five-run captured-constant case for a 64 MiB byte budget stored a
   22,369,616-byte constant, reached 94,408,704 bytes peak RSS, compiled in
   66.2097 ms, and ran warm in 3.50635 ms. Provider-cache bytes equaled the
@@ -228,9 +227,9 @@ The subprocess benchmark reports RSS, provider-live bytes, provider pool
 reservation, native structural bytes, and runtime separately.
 
 The reproducible benchmark programs are checked in. Generated calibration,
-retention, checkpoint, residual, donation, staged-regression, CPU-corpus, and
-dynamic-latency JSON is uploaded by the evidence workflow or release process
-alongside its environment and acceptance metadata.
+retention, checkpoint, residual, donation, staged-regression, and CPU-corpus
+JSON is uploaded by the evidence workflow or release process alongside its
+environment and acceptance metadata.
 
 `advect-runtime` builds without PyO3, owns the only durable graph model,
 validator, canonical serializer, optimizer, and execution schedule, and

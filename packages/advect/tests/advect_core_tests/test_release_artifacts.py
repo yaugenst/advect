@@ -9,6 +9,7 @@ import sys
 import tarfile
 import zipfile
 from io import BytesIO
+from itertools import product
 from pathlib import Path
 
 import pytest
@@ -23,22 +24,18 @@ _LICENSE_FILES = (
     "RUST_STDLIB_LICENSE_UNICODE_3_0.txt",
     "THIRD_PARTY_LICENSES.txt",
 )
-_WHEELS = (
-    ("cp312", "cp312", "manylinux_2_17_x86_64.manylinux2014_x86_64"),
-    ("cp313", "cp313", "manylinux_2_17_x86_64.manylinux2014_x86_64"),
-    ("cp314", "cp314", "manylinux_2_17_x86_64.manylinux2014_x86_64"),
-    ("cp312", "cp312", "manylinux_2_17_aarch64.manylinux2014_aarch64"),
-    ("cp313", "cp313", "manylinux_2_17_aarch64.manylinux2014_aarch64"),
-    ("cp314", "cp314", "manylinux_2_17_aarch64.manylinux2014_aarch64"),
-    ("cp312", "cp312", "macosx_10_12_x86_64"),
-    ("cp313", "cp313", "macosx_10_12_x86_64"),
-    ("cp314", "cp314", "macosx_10_12_x86_64"),
-    ("cp312", "cp312", "macosx_11_0_arm64"),
-    ("cp313", "cp313", "macosx_11_0_arm64"),
-    ("cp314", "cp314", "macosx_11_0_arm64"),
-    ("cp312", "cp312", "win_amd64"),
-    ("cp313", "cp313", "win_amd64"),
-    ("cp314", "cp314", "win_amd64"),
+_WHEELS = tuple(
+    (python_tag, python_tag, platform_tag)
+    for python_tag, platform_tag in product(
+        ("cp312", "cp313", "cp314"),
+        (
+            "manylinux_2_17_x86_64.manylinux2014_x86_64",
+            "manylinux_2_17_aarch64.manylinux2014_aarch64",
+            "macosx_10_12_x86_64",
+            "macosx_11_0_arm64",
+            "win_amd64",
+        ),
+    )
 )
 
 

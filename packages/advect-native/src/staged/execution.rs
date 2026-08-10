@@ -1,14 +1,13 @@
 //! `PyO3` host adapter for the runtime-owned execution plan.
 
 use advect_runtime::{
-    ExecutionError, ExecutionPlan, Host, LinkedExecutionPlan, LinkedOperation, NodeId, Operand,
-    OutputOwnership, PortableConstant, ValueSpec,
+    ExecutionError, Host, LinkedExecutionPlan, LinkedOperation, NodeId, Operand, OutputOwnership,
+    PortableConstant, ValueSpec,
 };
 use pyo3::exceptions::{PyAttributeError, PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyBool, PyComplex, PyFloat, PyInt, PyTuple};
 use std::collections::BTreeMap;
-use std::convert::Infallible;
 
 use crate::staged::GraphStore;
 use crate::staged::conversion::attr::attr_map_to_python;
@@ -263,10 +262,8 @@ pub(crate) fn build_graph_execution_plan(
     binder: Py<PyAny>,
 ) -> PyResult<GraphExecutionPlan> {
     let store = store.inner_arc();
-    let structure = ExecutionPlan::from_store(store).map_err(structural_error)?;
     let mut host = PythonHost::for_link(py, binder);
-    let linked = structure
-        .link(&mut host)
+    let linked = LinkedExecutionPlan::from_store(store, &mut host)
         .map_err(|error| execution_error(py, error, "binding"))?;
     Ok(GraphExecutionPlan { linked })
 }
@@ -310,13 +307,6 @@ fn execution_error(py: Python<'_>, error: ExecutionError<PyErr>, action: &str) -
             );
             source
         }
-    }
-}
-
-fn structural_error(error: ExecutionError<Infallible>) -> PyErr {
-    match error {
-        ExecutionError::Runtime(message) => PyRuntimeError::new_err(message),
-        ExecutionError::Host { source, .. } => match source {},
     }
 }
 

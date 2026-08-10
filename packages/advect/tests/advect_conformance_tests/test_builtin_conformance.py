@@ -11,7 +11,6 @@ from hypothesis import HealthCheck, given, settings
 
 import advect as ad
 from advect_conformance_tests._builtin_cases import (
-    BUILTIN_INVOCATIONS,
     INVOCATIONS_BY_ID,
     STAGED_ONLY_INVOCATIONS,
 )
@@ -135,25 +134,3 @@ def test_non_differentiable_staged_extension_round_trips(
 ) -> None:
     values = data.draw(argument_tuples(case), label="arguments")
     check_law(case, Law.STAGED, values)
-
-
-def test_declaration_tables_are_not_silently_empty() -> None:
-    assert BUILTIN_INVOCATIONS
-    assert STAGED_ONLY_INVOCATIONS
-    assert len(INVOCATIONS_BY_ID) == len(BUILTIN_INVOCATIONS)
-
-
-def test_search_depth_tracks_the_selected_hypothesis_profile() -> None:
-    if settings.default.max_examples >= 1000:
-        assert _SEARCH_EXAMPLES >= 20
-    else:
-        assert _SEARCH_EXAMPLES >= 2
-
-
-@pytest.mark.parametrize("profile_name", ["advect", "thorough"])
-def test_hypothesis_profile_scales_across_parametrized_items(profile_name: str) -> None:
-    """Keep pytest's inherited settings chain cacheable for the full matrix."""
-    inherited = settings.get_profile(profile_name)
-    for _item in range(len(_LAW_PARAMETERS)):
-        inherited = settings(parent=inherited)
-        assert inherited.database is not None

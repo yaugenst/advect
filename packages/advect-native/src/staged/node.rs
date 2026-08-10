@@ -1,90 +1,12 @@
 //! Python-facing conversion and snapshots for runtime-owned node metadata.
 
+use advect_runtime::NodeId;
 pub(crate) use advect_runtime::NodeMetadata;
-use advect_runtime::{GraphError, NodeId};
-use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 
-use crate::staged::conversion::attr::{AttrMapCache, attr_map_to_python};
-use crate::staged::conversion::dtype::{DTypeCache, dtype_to_python};
-#[derive(Debug)]
-pub(crate) struct PreparedNode {
-    op: String,
-    inputs: Vec<NodeId>,
-    metadata: NodeMetadata,
-}
-
-#[derive(Debug)]
-pub(crate) struct NodeSpec<'py> {
-    pub(crate) op: String,
-    pub(crate) inputs: Vec<NodeId>,
-    pub(crate) attrs: &'py Bound<'py, PyDict>,
-    pub(crate) shape: Vec<usize>,
-    pub(crate) dtype: &'py Bound<'py, PyAny>,
-    pub(crate) name: Option<String>,
-    pub(crate) num_outputs: usize,
-    pub(crate) output_shapes: Option<Vec<Vec<usize>>>,
-    pub(crate) output_dtypes: Option<&'py Bound<'py, PyAny>>,
-    pub(crate) source_location: Option<String>,
-}
-
-impl PreparedNode {
-    pub(crate) fn from_spec(
-        py: Python<'_>,
-        spec: NodeSpec<'_>,
-        dtype_cache: &mut DTypeCache,
-        attr_cache: &mut AttrMapCache,
-    ) -> PyResult<Self> {
-        if spec.op.is_empty() {
-            return Err(PyValueError::new_err("node op must not be empty"));
-        }
-        let attrs = attr_cache.resolve(py, spec.attrs)?;
-        let dtype = dtype_cache.resolve(py, spec.dtype)?;
-        let output_dtypes = spec
-            .output_dtypes
-            .map(|values| dtype_cache.resolve_sequence(py, values))
-            .transpose()?;
-        let metadata = NodeMetadata::new(
-            attrs,
-            spec.shape,
-            dtype,
-            spec.name,
-            spec.num_outputs,
-            spec.output_shapes,
-            output_dtypes,
-            spec.source_location,
-        )
-        .map_err(|error| metadata_error(&spec.op, &error))?;
-        Ok(Self {
-            op: spec.op,
-            inputs: spec.inputs,
-            metadata,
-        })
-    }
-
-    pub(crate) fn into_parts(self) -> (String, Vec<NodeId>, NodeMetadata) {
-        (self.op, self.inputs, self.metadata)
-    }
-}
-
-fn metadata_error(op: &str, error: &GraphError) -> PyErr {
-    let message = error.message();
-    if message == "node num_outputs must be at least 1" {
-        return PyValueError::new_err(format!("Op '{op}' must have num_outputs >= 1 (got 0)"));
-    }
-    if message == "single-output node must not declare output_shapes/output_dtypes" {
-        return PyValueError::new_err(format!(
-            "Op '{op}' is single-output; output_shapes/output_dtypes must be None"
-        ));
-    }
-    if message == "multi-output node is missing output_shapes/output_dtypes" {
-        return PyValueError::new_err(format!(
-            "Op '{op}' has multiple outputs but output_shapes/output_dtypes are missing"
-        ));
-    }
-    PyValueError::new_err(format!("Op '{op}' has invalid metadata: {message}"))
-}
+use crate::staged::conversion::attr::attr_map_to_python;
+use crate::staged::conversion::dtype::dtype_to_python;
 
 /// Immutable Python-facing snapshot of one canonical graph node.
 #[derive(Debug)]

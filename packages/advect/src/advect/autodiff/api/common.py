@@ -44,8 +44,7 @@ def _require_array_namespace_for_higher_order(
             return np
         msg = (
             "Higher-order autodiff APIs require a runtime array namespace for dense "
-            "Hessian assembly. Pass arrays implementing __array_namespace__ or register "
-            "an explicit array-family provider."
+            "Hessian assembly. Pass arrays implementing __array_namespace__."
         )
         raise HigherOrderNotSupportedError(msg) from exc
 

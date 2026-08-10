@@ -1,11 +1,7 @@
 # markdownlint-cli2 configuration
 # See: https://github.com/DavidAnson/markdownlint/blob/main/doc/Rules.md
 
-# Configuration for markdownlint rules
 config:
-  # Default state for all rules
-  default: true
-
   # MD003/heading-style - Heading style
   MD003:
     style: atx  # Use # style headings
@@ -14,23 +10,10 @@ config:
   MD004:
     style: dash  # Use - for unordered lists
 
-  # MD007/ul-indent - Unordered list indentation
-  MD007:
-    indent: 2
-
-  # MD009/no-trailing-spaces - Trailing spaces
-  MD009:
-    br_spaces: 2  # Allow 2 spaces for line breaks
-    list_item_empty_lines: false
-
   # MD010/no-hard-tabs - Hard tabs
   MD010:
     code_blocks: false  # Allow tabs in code blocks
     spaces_per_tab: 4
-
-  # MD012/no-multiple-blanks - Multiple consecutive blank lines
-  MD012:
-    maximum: 1
 
   # MD013/line-length - Line length
   # Disabled for now - spec documents often have long lines in tables and prose
@@ -45,34 +28,13 @@ config:
   # Disabled - our spec documents use various table styles
   MD060: false
 
-  # MD022/blanks-around-headings - Headings should be surrounded by blank lines
-  MD022:
-    lines_above: 1
-    lines_below: 1
-
   # MD024/no-duplicate-heading - Multiple headings with the same content
   MD024:
     siblings_only: true  # Only check siblings, not all headings
 
-  # MD025/single-title/single-h1 - Multiple top-level headings
-  MD025:
-    level: 1
-    front_matter_title: ""
-
-  # MD026/no-trailing-punctuation - Trailing punctuation in heading
-  MD026:
-    punctuation: ".,;:!。，；：！"
-
   # MD029/ol-prefix - Ordered list item prefix
   MD029:
     style: ordered  # Use 1. 2. 3. etc.
-
-  # MD030/list-marker-space - Spaces after list markers
-  MD030:
-    ul_single: 1
-    ol_single: 1
-    ul_multi: 1
-    ol_multi: 1
 
   # MD031/blanks-around-fences - Fenced code blocks should be surrounded by blank lines
   MD031:
@@ -91,15 +53,6 @@ config:
   # MD035/hr-style - Horizontal rule style
   MD035:
     style: "---"
-
-  # MD036/no-emphasis-as-heading - Emphasis used instead of a heading
-  MD036:
-    punctuation: ".,;:!?。，；：！？"
-
-  # MD041/first-line-heading/first-line-h1 - First line in a file should be a top-level heading
-  MD041:
-    level: 1
-    front_matter_title: ""
 
   # MD044/proper-names - Unsafe for import paths in mkdocstrings directives
   MD044: false
@@ -123,17 +76,3 @@ config:
   # MD053/link-image-reference-definitions - Link and image reference definitions should be needed
   MD053:
     ignored_definitions: []
-
-# Glob patterns for files to ignore
-ignores:
-  - "**/node_modules/**"
-  - "**/vendor/**"
-  - "**/.git/**"
-  - "**/uv.lock"
-  - "**/.venv/**"
-  - "**/.pytest_cache/**"
-  - "target/**"
-  - "dist/**"
-  - "site/**"
-  - "reference/**"
-  - "docs-theme/fonts/LICENSE-source-code-pro.md"

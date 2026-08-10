@@ -9,16 +9,16 @@ Array API namespace from ``__array_namespace__``, evaluates operations through
 that namespace, and records canonical ``array.*`` nodes.  NumPy has a richer,
 separate frontend and is intentionally excluded here.
 
-Operation binding and evaluation are separate: :func:`bind_array_api_call`
-contains no concrete execution.  An abstract staging frontend can therefore
-reuse the same schemas and binding rules with a different evaluator.
+Operation binding remains separate from concrete provider execution so staging
+can reuse the canonical call schema.
 """
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from functools import partial, wraps
-from typing import TYPE_CHECKING, Any, Protocol, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from advect.core._abstract_domains import operation_semantics
 from advect.core._abstract_helpers import (
@@ -74,7 +74,6 @@ if TYPE_CHECKING:
 
 __all__ = [
     "ArrayAPICallBinding",
-    "ArrayAPIEvaluator",
     "ArrayAPINamespace",
     "ArrayAPITracer",
     "bind_array_api_call",
@@ -231,17 +230,6 @@ class ArrayAPICallBinding:
     num_outputs: int
 
 
-class ArrayAPIEvaluator(Protocol):
-    """Execution boundary shared by concrete and future abstract frontends."""
-
-    def __call__(
-        self,
-        function: Callable[..., Any],
-        args: tuple[Any, ...],
-        kwargs: dict[str, Any],
-    ) -> Any: ...
-
-
 def _bind_array_api_arguments(
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
@@ -378,14 +366,6 @@ def bind_array_api_call(
         attrs=attrs,
         num_outputs=get_registry().get(spec.op).num_outputs,
     )
-
-
-def _concrete_evaluator(
-    function: Callable[..., Any],
-    args: tuple[Any, ...],
-    kwargs: dict[str, Any],
-) -> Any:
-    return function(*args, **kwargs)
 
 
 def _normalize_provider_call(
@@ -915,7 +895,6 @@ class ArrayAPINamespace:
 
     __slots__ = (
         "_array_api_version",
-        "_evaluator",
         "_namespace",
         "_path",
         "_profile",
@@ -927,13 +906,11 @@ class ArrayAPINamespace:
         namespace: Any,
         *,
         path: str = "",
-        evaluator: ArrayAPIEvaluator = _concrete_evaluator,
         root_namespace: Any | None = None,
         array_api_version: str = LATEST_ARRAY_API_VERSION,
     ) -> None:
         self._namespace = namespace
         self._path = path
-        self._evaluator = evaluator
         self._root_namespace = namespace if root_namespace is None else root_namespace
         self._array_api_version = array_api_version
         self._profile = materialize_array_api_profile(array_api_version)
@@ -1009,7 +986,6 @@ class ArrayAPINamespace:
             return ArrayAPINamespace(
                 value,
                 path=path,
-                evaluator=self._evaluator,
                 root_namespace=self.raw_namespace,
                 array_api_version=self._array_api_version,
             )
@@ -1161,7 +1137,6 @@ class ArrayAPINamespace:
                 raise TypeError(message)
         return ArrayAPINamespace(
             self.raw_namespace,
-            evaluator=self._evaluator,
             array_api_version=self._array_api_version,
         )
 
@@ -1226,14 +1201,13 @@ class ArrayAPINamespace:
             array_api_version=self._array_api_version,
         )
         if path in _ARRAY_API_META_FUNCTIONS:
-            return self._evaluator(
-                function,
-                cast("tuple[Any, ...]", _unwrap(args)),
-                cast("dict[str, Any]", _unwrap(kwargs)),
+            return function(
+                *cast("tuple[Any, ...]", _unwrap(args)),
+                **cast("dict[str, Any]", _unwrap(kwargs)),
             )
         call_tracers = (*_array_api_tracers(args), *_array_api_tracers(kwargs))
         if not call_tracers:
-            return self._evaluator(function, args, kwargs)
+            return function(*args, **kwargs)
         if path in _ARRAY_API_COMPOSITES:
             namespace = self._composite_namespace(call_tracers, path=path)
             if path in _STAGED_ARRAY_API_COMPOSITES:
@@ -1252,7 +1226,7 @@ class ArrayAPINamespace:
         binding = bind_array_api_call(path, args, kwargs)
         tracers = [operand for operand in binding.operands if isinstance(operand, ArrayAPITracer)]
         if not tracers:
-            return self._evaluator(function, args, kwargs)
+            return function(*args, **kwargs)
 
         for tracer in tracers:
             tracer._require_active_recorder()  # noqa: SLF001 - same frontend invariant
@@ -1274,7 +1248,7 @@ class ArrayAPINamespace:
                 namespace=self.raw_namespace,
             ),
         )
-        result = self._evaluator(function, concrete_args, concrete_kwargs)
+        result = function(*concrete_args, **concrete_kwargs)
         outputs, output_metadata = _normalize_array_api_outputs(
             path,
             result,
@@ -1335,8 +1309,6 @@ class ArrayAPITracer:
         "_node_id",
         "_owned",
         "_recorder",
-        "_trace_frame_id",
-        "_trace_level",
         "_value",
     )
 
@@ -1352,8 +1324,6 @@ class ArrayAPITracer:
         namespace: Any,
         array_api_version: str,
         owned: bool = True,
-        trace_level: int | None = None,
-        trace_frame_id: int | None = None,
     ) -> None:
         self._value = value
         self._node_id = node_id
@@ -1365,9 +1335,6 @@ class ArrayAPITracer:
             array_api_version=array_api_version,
         )
         self._owned = owned
-        bound_level, bound_frame_id = recorder.runtime_trace_identity()
-        self._trace_level = bound_level if trace_level is None else trace_level
-        self._trace_frame_id = bound_frame_id if trace_frame_id is None else trace_frame_id
 
     @property
     def recorder(self) -> DynamicTape:
@@ -1440,23 +1407,12 @@ class ArrayAPITracer:
 
     @property
     def size(self) -> int:
-        size = 1
-        for dimension in self.shape:
-            size *= dimension
-        return size
+        return math.prod(self.shape)
 
     @property
     def device(self) -> Any:
         self._require_active_recorder()
         return getattr(self._value, "device", None)
-
-    @property
-    def trace_level(self) -> int | None:
-        return self._trace_level
-
-    @property
-    def trace_frame_id(self) -> int | None:
-        return self._trace_frame_id
 
     def __array_namespace__(self, *, api_version: str | None = None) -> ArrayAPINamespace:
         self._require_active_recorder()

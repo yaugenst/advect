@@ -34,8 +34,11 @@ functionalization, and the staged artifact boundary.
 
 - [Requirements](requirements.md) — Current requirements (R1-R17) and bounded
   extension contracts (E1-E9)
-- [Data Structures](data-structures.md) — Primitive, tape, tracer, and staged program
-- [Target API](target-api.md) — Target API examples
+- [Public architecture](../docs/architecture.md) — Execution and lifetime model
+- [API reference](../docs/api/index.md) — Current public transforms, staging,
+  primitives, arrays, and optional integrations
+- [Codebase map](../docs/development/codebase.md) — Internal ownership and
+  dependency boundaries
 - [Decisions](decisions/README.md) — Design decisions and rationale
 
 ## Boundaries

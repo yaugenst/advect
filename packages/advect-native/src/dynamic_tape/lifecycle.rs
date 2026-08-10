@@ -68,7 +68,7 @@ impl TraversalKind {
 }
 
 /// Native owner for one concrete define-by-run invocation.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 #[pyclass(module = "advect._native_core")]
 pub(crate) struct DynamicTape {
     pub(super) arena: RawArena,
@@ -95,32 +95,6 @@ pub(crate) struct DynamicTape {
 }
 
 impl DynamicTape {
-    pub(super) fn create() -> Self {
-        Self {
-            arena: RawArena::default(),
-            operand_layouts: Vec::new(),
-            operand_positions: Vec::new(),
-            metadata: Vec::new(),
-            weak_nodes: Vec::new(),
-            values: Vec::new(),
-            attrs: Vec::new(),
-            literals: Vec::new(),
-            residuals: Vec::new(),
-            jvp_bindings: Vec::new(),
-            vjp_bindings: Vec::new(),
-            reverse_needs: Vec::new(),
-            reverse_value_uses: Vec::new(),
-            inputs: Vec::new(),
-            outputs: Vec::new(),
-            trace_level: None,
-            trace_frame_id: None,
-            sealed: false,
-            consumed: false,
-            reverse_pruned: false,
-            traversal: None,
-        }
-    }
-
     pub(super) fn require_recording(&self) -> PyResult<()> {
         if self.consumed {
             return Err(PyRuntimeError::new_err(
@@ -481,7 +455,7 @@ fn take_node_literals(
 impl DynamicTape {
     #[new]
     fn new() -> Self {
-        Self::create()
+        Self::default()
     }
 
     #[pyo3(signature = (value, shape, dtype, *, name=None, active=true))]

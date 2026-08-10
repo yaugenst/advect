@@ -3,16 +3,96 @@
 
 from __future__ import annotations
 
+import datetime as dt
+from dataclasses import dataclass
 from typing import Any
 
+import numpy as np
 import xarray as xr
 
 from advect.core import ArraySpec
 from advect.pytree import register_pytree_node
-from advect.xarray._metadata import contains_tracer, freeze, thaw
 
-_DATAARRAY_AUX_SIZE = 4
-_DATASET_AUX_SIZE = 3
+_DATASET_ORDER_SIZE = 2
+
+
+@dataclass(frozen=True, eq=False, slots=True)
+class _Metadata:  # noqa: PLW1641
+    template: xr.DataArray | xr.Dataset
+    order: tuple[Any, ...]
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, _Metadata) or self.order != other.order:
+            return False
+        if isinstance(self.template, xr.DataArray):
+            return isinstance(other.template, xr.DataArray) and self.template.identical(
+                other.template
+            )
+        return isinstance(other.template, xr.Dataset) and self.template.identical(other.template)
+
+
+def _dummy(shape: tuple[int, ...]) -> np.ndarray[Any, np.dtype[np.uint8]]:
+    """Return a shape-only placeholder backed by one byte."""
+    return np.broadcast_to(np.array(0, dtype=np.uint8), shape)
+
+
+def _contains_tracer(value: Any) -> bool:
+    if callable(getattr(value, "_advect_snapshot", None)):
+        return True
+    if isinstance(value, np.ndarray):
+        return value.dtype.hasobject and any(_contains_tracer(item) for item in value.flat)
+    if isinstance(value, dict):
+        return any(_contains_tracer(item) for item in value.values())
+    if isinstance(value, (list, tuple)):
+        return any(_contains_tracer(item) for item in value)
+    return False
+
+
+def _validate_static(value: Any, *, path: str) -> None:
+    if callable(getattr(value, "_advect_snapshot", None)):
+        msg = (
+            "xarray coordinates, dimensions, names, and attributes are static; "
+            f"found a traced value at {path}. Pass differentiable values as data "
+            "or as a separate argument."
+        )
+        raise TypeError(msg)
+
+    if value is None or isinstance(
+        value,
+        (bool, int, float, complex, str, bytes, dt.date, dt.datetime, dt.timedelta),
+    ):
+        return
+    if isinstance(value, np.generic):
+        if value.dtype.hasobject:
+            _validate_static(value.item(), path=f"{path}.item()")
+        return
+    if isinstance(value, slice):
+        _validate_static(value.start, path=f"{path}.start")
+        _validate_static(value.stop, path=f"{path}.stop")
+        _validate_static(value.step, path=f"{path}.step")
+        return
+    if isinstance(value, (tuple, list)):
+        for index, item in enumerate(value):
+            _validate_static(item, path=f"{path}[{index}]")
+        return
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if not isinstance(key, str):
+                msg = f"xarray attribute keys must be strings; got {type(key).__name__} at {path}"
+                raise TypeError(msg)
+            _validate_static(item, path=f"{path}[{key!r}]")
+        return
+    if isinstance(value, np.ndarray):
+        if value.dtype.fields is not None:
+            msg = f"xarray structured metadata arrays are not supported at {path}"
+            raise TypeError(msg)
+        if value.dtype.hasobject:
+            for index, item in enumerate(value.flat):
+                _validate_static(item, path=f"{path}.flat[{index}]")
+        return
+
+    msg = f"xarray static metadata at {path} has unsupported type {type(value).__name__}"
+    raise TypeError(msg)
 
 
 def _require_differentiable_data(data: Any, *, path: str) -> None:
@@ -33,9 +113,9 @@ def _require_differentiable_data(data: Any, *, path: str) -> None:
         raise TypeError(msg)
 
 
-def _coordinate_spec(name: Any, coordinate: xr.DataArray) -> tuple[Any, ...]:
+def _validate_coordinate(name: Any, coordinate: xr.DataArray) -> None:
     data = coordinate.data
-    if contains_tracer(data):
+    if _contains_tracer(data):
         msg = (
             "xarray coordinates, dimensions, names, and attributes are static; "
             f"found traced coordinate {name!r}. Pass differentiable values as data "
@@ -54,107 +134,83 @@ def _coordinate_spec(name: Any, coordinate: xr.DataArray) -> tuple[Any, ...]:
         )
         raise TypeError(msg)
 
-    return (
-        freeze(name, path=f"coords[{name!r}].name"),
-        freeze(tuple(coordinate.dims), path=f"coords[{name!r}].dims"),
-        freeze(coordinate.to_numpy(), path=f"coords[{name!r}].values"),
-        freeze(dict(coordinate.attrs), path=f"coords[{name!r}].attrs"),
-    )
+    _validate_static(name, path=f"coords[{name!r}].name")
+    _validate_static(tuple(coordinate.dims), path=f"coords[{name!r}].dims")
+    _validate_static(coordinate.to_numpy(), path=f"coords[{name!r}].values")
+    _validate_static(dict(coordinate.attrs), path=f"coords[{name!r}].attrs")
 
 
-def _coordinate_specs(container: xr.DataArray | xr.Dataset) -> tuple[tuple[Any, ...], ...]:
-    return tuple(
-        _coordinate_spec(name, coordinate) for name, coordinate in container.coords.items()
-    )
-
-
-def _coordinates_from_specs(specs: tuple[tuple[Any, ...], ...]) -> dict[Any, xr.Variable]:
-    coordinates: dict[Any, xr.Variable] = {}
-    for frozen_name, frozen_dims, frozen_values, frozen_attrs in specs:
-        name = thaw(frozen_name)
-        dims = thaw(frozen_dims)
-        values = thaw(frozen_values)
-        attrs = thaw(frozen_attrs)
-        coordinates[name] = xr.Variable(dims, values, attrs=attrs)
-    return coordinates
+def _validate_coordinates(container: xr.DataArray | xr.Dataset) -> None:
+    for name, coordinate in container.coords.items():
+        _validate_coordinate(name, coordinate)
 
 
 def _flatten_dataarray(tree: xr.DataArray) -> tuple[tuple[Any, ...], Any]:
     _require_differentiable_data(tree.data, path="DataArray.data")
-    metadata = (
-        freeze(tree.name, path="name"),
-        freeze(tuple(tree.dims), path="dims"),
-        freeze(dict(tree.attrs), path="attrs"),
-        _coordinate_specs(tree),
+    _validate_static(tree.name, path="name")
+    _validate_static(tuple(tree.dims), path="dims")
+    _validate_static(dict(tree.attrs), path="attrs")
+    _validate_coordinates(tree)
+    metadata = _Metadata(
+        template=tree.copy(deep=True, data=_dummy(tree.shape)),
+        order=tuple(tree.coords),
     )
     return (tree.data,), metadata
 
 
 def _unflatten_dataarray(aux_data: Any, children: tuple[Any, ...]) -> xr.DataArray:
-    if not isinstance(aux_data, tuple) or len(aux_data) != _DATAARRAY_AUX_SIZE:
+    if not isinstance(aux_data, _Metadata) or not isinstance(aux_data.template, xr.DataArray):
         msg = "Invalid xarray.DataArray pytree metadata"
         raise TypeError(msg)
     if len(children) != 1:
         msg = "xarray.DataArray pytree requires exactly one data leaf"
         raise ValueError(msg)
 
-    frozen_name, frozen_dims, frozen_attrs, coordinate_specs = aux_data
-    return xr.DataArray(
-        children[0],
-        dims=thaw(frozen_dims),
-        coords=_coordinates_from_specs(coordinate_specs),
-        name=thaw(frozen_name),
-        attrs=thaw(frozen_attrs),
-    )
+    return aux_data.template.copy(deep=True, data=children[0])
 
 
 def _flatten_dataset(tree: xr.Dataset) -> tuple[tuple[Any, ...], Any]:
-    leaves: list[Any] = []
-    variable_specs: list[tuple[Any, ...]] = []
-    for name, variable in tree.data_vars.items():
+    names = tuple(tree.data_vars)
+    for name in names:
+        variable = tree[name]
         _require_differentiable_data(
             variable.data,
             path=f"Dataset data variable {name!r}",
         )
-        leaves.append(variable.data)
-        variable_specs.append(
-            (
-                freeze(name, path=f"data_vars[{name!r}].name"),
-                freeze(tuple(variable.dims), path=f"data_vars[{name!r}].dims"),
-                freeze(dict(variable.attrs), path=f"data_vars[{name!r}].attrs"),
-            )
-        )
+        _validate_static(name, path=f"data_vars[{name!r}].name")
+        _validate_static(tuple(variable.dims), path=f"data_vars[{name!r}].dims")
+        _validate_static(dict(variable.attrs), path=f"data_vars[{name!r}].attrs")
 
-    metadata = (
-        tuple(variable_specs),
-        _coordinate_specs(tree),
-        freeze(dict(tree.attrs), path="attrs"),
+    _validate_coordinates(tree)
+    _validate_static(dict(tree.attrs), path="attrs")
+    metadata = _Metadata(
+        template=tree.copy(
+            deep=True,
+            data={name: _dummy(tree[name].shape) for name in names},
+        ),
+        order=(names, tuple(tree.coords)),
     )
-    return tuple(leaves), metadata
+    return tuple(tree[name].data for name in names), metadata
 
 
 def _unflatten_dataset(aux_data: Any, children: tuple[Any, ...]) -> xr.Dataset:
-    if not isinstance(aux_data, tuple) or len(aux_data) != _DATASET_AUX_SIZE:
+    if (
+        not isinstance(aux_data, _Metadata)
+        or not isinstance(aux_data.template, xr.Dataset)
+        or len(aux_data.order) != _DATASET_ORDER_SIZE
+        or not isinstance(aux_data.order[0], tuple)
+        or not isinstance(aux_data.order[1], tuple)
+    ):
         msg = "Invalid xarray.Dataset pytree metadata"
         raise TypeError(msg)
-    variable_specs, coordinate_specs, frozen_attrs = aux_data
-    if len(variable_specs) != len(children):
+    names = aux_data.order[0]
+    if len(names) != len(children):
         msg = "xarray.Dataset pytree data-variable count does not match its leaves"
         raise ValueError(msg)
 
-    data_vars: dict[Any, xr.Variable] = {}
-    for spec, data in zip(variable_specs, children, strict=True):
-        frozen_name, frozen_dims, frozen_variable_attrs = spec
-        data_vars[thaw(frozen_name)] = xr.Variable(
-            thaw(frozen_dims),
-            data,
-            attrs=thaw(frozen_variable_attrs),
-        )
-
-    return xr.Dataset(
-        data_vars=data_vars,
-        coords=_coordinates_from_specs(coordinate_specs),
-        attrs=thaw(frozen_attrs),
+    return aux_data.template.copy(
+        deep=True,
+        data=dict(zip(names, children, strict=True)),
     )
 
 

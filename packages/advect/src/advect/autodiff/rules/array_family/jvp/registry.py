@@ -26,8 +26,6 @@ from advect.autodiff.rules.array_family.jvp import (
 from advect.autodiff.rules.array_family.jvp.common import make_diagonal_jvp_from_partials
 from advect.core._array_family_ops import _canonical_array_family_op_name
 
-__all__ = ["jvp_rule_items"]
-
 _JVPFn = Callable[..., Any]
 
 

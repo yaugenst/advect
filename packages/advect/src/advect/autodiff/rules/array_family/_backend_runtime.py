@@ -47,7 +47,6 @@ _CURRENT_ARRAY_FAMILY_PROVIDER: _CurrentProvider = ContextVar(
     "advect_array_family_backend_provider",
     default=None,
 )
-_ARRAY_NAMESPACE_ATTR_CACHE: dict[tuple[str, int, int, str], object] = {}
 _ARRAY_FAMILY_JVP_RULE_ATTR = "__advect_array_family_jvp_rule__"
 _ARRAY_FAMILY_VJP_RULE_ATTR = "__advect_array_family_vjp_rule__"
 _SELECT_INPUTS_VJP_ATTR = "__advect_vjp_for_input_indices__"
@@ -294,15 +293,6 @@ class _ArrayNamespaceProxy:
     """Proxy object exposing the active backend namespace via ``xp``."""
 
     @staticmethod
-    def _provider_attr_cache_key(
-        provider: ArrayFamilyBackendProvider,
-        *,
-        attr_name: str,
-    ) -> tuple[str, int, int, str]:
-        ext_namespace = provider.namespace if provider.ext is None else provider.ext
-        return (provider.backend, id(provider.namespace), id(ext_namespace), attr_name)
-
-    @staticmethod
     def _resolve_provider_attribute(
         provider: ArrayFamilyBackendProvider,
         name: str,
@@ -336,17 +326,10 @@ class _ArrayNamespaceProxy:
                 provider.backend.split(".", 1)[0] != "numpy"
                 and getattr(namespace, "__array_api_version__", None) is not None
             ):
-                cache_key = self._provider_attr_cache_key(provider, attr_name=name)
-                cached = _ARRAY_NAMESPACE_ATTR_CACHE.get(cache_key)
-                if cached is None:
-                    if callable(resolved):
-                        cached = _InstanceAwareNamespaceCall(name, resolved)
-                    elif name in {"fft", "linalg"}:
-                        cached = _InstanceAwareSubnamespace(name, resolved)
-                    else:
-                        return resolved
-                    _ARRAY_NAMESPACE_ATTR_CACHE[cache_key] = cached
-                return cached
+                if callable(resolved):
+                    return _InstanceAwareNamespaceCall(name, resolved)
+                if name in {"fft", "linalg"}:
+                    return _InstanceAwareSubnamespace(name, resolved)
             return resolved
 
         try:
@@ -357,14 +340,7 @@ class _ArrayNamespaceProxy:
                 return fallback
             raise
 
-        cache_key = self._provider_attr_cache_key(provider, attr_name=name)
-        cached = _ARRAY_NAMESPACE_ATTR_CACHE.get(cache_key)
-        if cached is not None:
-            return cached
-
-        resolved = self._resolve_provider_attribute(provider, name)
-        _ARRAY_NAMESPACE_ATTR_CACHE[cache_key] = resolved
-        return resolved
+        return self._resolve_provider_attribute(provider, name)
 
 
 if not TYPE_CHECKING:
@@ -388,17 +364,11 @@ def run_with_array_family_backend_provider(
 
 def _resolve_provider_for_call(
     *values: object,
-    scalar_backend_hint: str | None = None,
 ) -> ArrayFamilyBackendProvider:
     active_provider = _CURRENT_ARRAY_FAMILY_PROVIDER.get()
     if active_provider is not None:
         return active_provider
-    if scalar_backend_hint is None:
-        return resolve_array_family_backend_provider(*values)
-    return resolve_array_family_backend_provider(
-        *values,
-        scalar_backend_hint=scalar_backend_hint,
-    )
+    return resolve_array_family_backend_provider(*values)
 
 
 def _maybe_unwrap_array_family_jvp_rule(rule: _JVPFn) -> _JVPFn | None:
@@ -417,8 +387,6 @@ def _maybe_unwrap_array_family_vjp_rule(rule: _VJPFn) -> _VJPFn | None:
 
 def wrap_array_family_jvp_rule(
     rule: _JVPFn,
-    *,
-    scalar_backend_hint: str | None = None,
 ) -> _JVPFn:
     """Wrap a JVP rule so it executes inside a resolved backend context."""
 
@@ -436,7 +404,6 @@ def wrap_array_family_jvp_rule(
             ans,
             *inputs,
             *tangents,
-            scalar_backend_hint=scalar_backend_hint,
         )
         token = _CURRENT_ARRAY_FAMILY_PROVIDER.set(provider)
         try:
@@ -450,8 +417,6 @@ def wrap_array_family_jvp_rule(
 
 def wrap_array_family_vjp_rule(
     rule: _VJPFn,
-    *,
-    scalar_backend_hint: str | None = None,
 ) -> _VJPFn:
     """Wrap a VJP rule so it executes inside a resolved backend context."""
 
@@ -469,7 +434,6 @@ def wrap_array_family_vjp_rule(
             ans,
             *inputs,
             g,
-            scalar_backend_hint=scalar_backend_hint,
         )
         token = _CURRENT_ARRAY_FAMILY_PROVIDER.set(provider)
         try:
@@ -501,7 +465,6 @@ def wrap_array_family_vjp_rule(
                 ans,
                 *inputs,
                 g,
-                scalar_backend_hint=scalar_backend_hint,
             )
             token = _CURRENT_ARRAY_FAMILY_PROVIDER.set(provider)
             try:
@@ -533,7 +496,6 @@ def wrap_array_family_vjp_rule(
                 ans,
                 *inputs,
                 g,
-                scalar_backend_hint=scalar_backend_hint,
             )
             bound = run_with_array_family_backend_provider(
                 provider,

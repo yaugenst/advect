@@ -26,7 +26,8 @@ amount of traceable numerical machinery.
 interceptor. The special-function set expands with complementary error,
 inverse-error, log-probability, inverse-normal, and softmax forms. A new
 `advect.scipy.ndimage` module supplies 27 named filters and morphology
-operations listed in the target API and runtime-derived support catalog.
+operations listed in the [public SciPy API](../../docs/api/scipy/index.md) and
+[runtime-derived support catalog](2026-07-31-runtime-derived-extension-catalogs.md).
 
 Atomic calls delegate concrete evaluation to SciPy and use the existing custom
 primitive contract for abstract evaluation and durable operation identity.

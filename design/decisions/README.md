@@ -13,10 +13,8 @@ an important current boundary.
 - [ADR: Implicit Differentiation and Scientific Frontends](2026-07-26-scientific-extension-contracts.md) - One dynamic implicit-root transform, a bounded SciPy primitive frontend, and dynamic labeled xarray pytrees
 - [ADR: One Python Distribution](2026-07-26-single-python-distribution.md) - One `advect` release artifact with dependency extras, retained internal modules and Rust crates, and explicitly imported provider adapters
 - [ADR: Primitive Conformance Testing](2026-07-27-primitive-conformance-testing.md) - Three test tiers from one declaration, a named law battery, registry-joined coverage, restored Hypothesis strategies and telemetry, and a test-internal harness
-- [ADR: Versioned Upstream Callable Contracts](2026-07-29-versioned-upstream-contracts.md) - Superseded parameter-level compatibility manifest
-- [ADR: Runtime-Derived Extension Catalogs](2026-07-31-runtime-derived-extension-catalogs.md) - Per-extension support modes discovered from live bindings and qualified end to end
+- [ADR: Runtime-Derived Extension Catalogs](2026-07-31-runtime-derived-extension-catalogs.md) - Per-extension support modes discovered from live bindings and qualified end to end, replacing parameter-level manifests and profiles
 - [ADR: Definition-Driven Operation Authoring](2026-07-31-definition-driven-operation-authoring.md) - Complete built-in operation records, generated conventional bindings, and no lazy registry repair
 - [ADR: Host Autodiff VJP Bridges](2026-08-01-host-autodiff-vjp-bridges.md) - Explicit first-order PyTorch, JAX, and HIPS Autograd boundaries without provider registration
 - [ADR: Bounded SciPy Filter Coverage](2026-08-01-scipy-filter-coverage.md) - Explicit high-value special and ndimage functions built from shared stencil and selection rules
 - [ADR: Concrete NumPy and provider-neutral Array API frontends](2026-08-01-concrete-numpy-frontend.md) - Concrete NumPy protocol ownership, provider-neutral Array API execution, and canonical-operation convergence
-- [ADR: Published Version Ranges and Qualified Upstream Profiles](2026-07-29-published-version-ranges.md) - Superseded proposal for broad ranges and parameter-level profiles

@@ -14,6 +14,7 @@ data-driven approach that automatically handles new ops.
 from __future__ import annotations
 
 from collections.abc import Callable
+from functools import partial
 from typing import Any, Literal, cast
 
 import numpy as np
@@ -379,147 +380,43 @@ def _eval_einsum(inputs: tuple[np.ndarray, ...], attrs: dict[str, Any]) -> Any:
     )
 
 
-def _parse_unique_eval_attrs(attrs: dict[str, Any]) -> tuple[int | None, bool, bool]:
-    """Parse shared numpy.unique keyword attrs from graph metadata."""
+def _eval_unique(
+    inputs: tuple[np.ndarray, ...],
+    attrs: dict[str, Any],
+    *,
+    op: str,
+    returns: tuple[bool, bool, bool],
+) -> Any:
+    """Evaluate one canonical numpy.unique result selection."""
+    if len(inputs) != 1:
+        msg = f"{op} evaluator expects exactly one input (got {len(inputs)})"
+        raise ValueError(msg)
     axis_raw = attrs.get("axis")
-    axis = None if axis_raw is None else int(cast("Any", axis_raw))
-    equal_nan = bool(attrs.get("equal_nan", True))
-    sorted_values = bool(attrs.get("sorted", True))
-    return axis, equal_nan, sorted_values
-
-
-@_evaluator("numpy.unique")
-def _eval_unique(inputs: tuple[np.ndarray, ...], attrs: dict[str, Any]) -> Any:
-    """Evaluate numpy.unique."""
-    if len(inputs) != 1:
-        msg = f"numpy.unique evaluator expects exactly one input (got {len(inputs)})"
-        raise ValueError(msg)
-    axis, equal_nan, sorted_values = _parse_unique_eval_attrs(attrs)
+    return_index, return_inverse, return_counts = returns
     return np.unique(
         inputs[0],
-        axis=axis,
-        equal_nan=equal_nan,
-        sorted=sorted_values,
+        return_index=return_index,
+        return_inverse=return_inverse,
+        return_counts=return_counts,
+        axis=None if axis_raw is None else int(cast("Any", axis_raw)),
+        equal_nan=bool(attrs.get("equal_nan", True)),
+        sorted=bool(attrs.get("sorted", True)),
     )
 
 
-@_evaluator("numpy.unique_index")
-def _eval_unique_index(inputs: tuple[np.ndarray, ...], attrs: dict[str, Any]) -> Any:
-    """Evaluate numpy.unique(return_index=True)."""
-    if len(inputs) != 1:
-        msg = f"numpy.unique_index evaluator expects exactly one input (got {len(inputs)})"
-        raise ValueError(msg)
-    axis, equal_nan, sorted_values = _parse_unique_eval_attrs(attrs)
-    return np.unique(
-        inputs[0],
-        return_index=True,
-        axis=axis,
-        equal_nan=equal_nan,
-        sorted=sorted_values,
-    )
-
-
-@_evaluator("numpy.unique_inverse")
-def _eval_unique_inverse(inputs: tuple[np.ndarray, ...], attrs: dict[str, Any]) -> Any:
-    """Evaluate numpy.unique(return_inverse=True)."""
-    if len(inputs) != 1:
-        msg = f"numpy.unique_inverse evaluator expects exactly one input (got {len(inputs)})"
-        raise ValueError(msg)
-    axis, equal_nan, sorted_values = _parse_unique_eval_attrs(attrs)
-    return np.unique(
-        inputs[0],
-        return_inverse=True,
-        axis=axis,
-        equal_nan=equal_nan,
-        sorted=sorted_values,
-    )
-
-
-@_evaluator("numpy.unique_counts")
-def _eval_unique_counts(inputs: tuple[np.ndarray, ...], attrs: dict[str, Any]) -> Any:
-    """Evaluate numpy.unique(return_counts=True)."""
-    if len(inputs) != 1:
-        msg = f"numpy.unique_counts evaluator expects exactly one input (got {len(inputs)})"
-        raise ValueError(msg)
-    axis, equal_nan, sorted_values = _parse_unique_eval_attrs(attrs)
-    return np.unique(
-        inputs[0],
-        return_counts=True,
-        axis=axis,
-        equal_nan=equal_nan,
-        sorted=sorted_values,
-    )
-
-
-@_evaluator("numpy.unique_index_inverse")
-def _eval_unique_index_inverse(inputs: tuple[np.ndarray, ...], attrs: dict[str, Any]) -> Any:
-    """Evaluate numpy.unique(return_index=True, return_inverse=True)."""
-    if len(inputs) != 1:
-        msg = f"numpy.unique_index_inverse evaluator expects exactly one input (got {len(inputs)})"
-        raise ValueError(msg)
-    axis, equal_nan, sorted_values = _parse_unique_eval_attrs(attrs)
-    return np.unique(
-        inputs[0],
-        return_index=True,
-        return_inverse=True,
-        axis=axis,
-        equal_nan=equal_nan,
-        sorted=sorted_values,
-    )
-
-
-@_evaluator("numpy.unique_index_counts")
-def _eval_unique_index_counts(inputs: tuple[np.ndarray, ...], attrs: dict[str, Any]) -> Any:
-    """Evaluate numpy.unique(return_index=True, return_counts=True)."""
-    if len(inputs) != 1:
-        msg = f"numpy.unique_index_counts evaluator expects exactly one input (got {len(inputs)})"
-        raise ValueError(msg)
-    axis, equal_nan, sorted_values = _parse_unique_eval_attrs(attrs)
-    return np.unique(
-        inputs[0],
-        return_index=True,
-        return_counts=True,
-        axis=axis,
-        equal_nan=equal_nan,
-        sorted=sorted_values,
-    )
-
-
-@_evaluator("numpy.unique_inverse_counts")
-def _eval_unique_inverse_counts(inputs: tuple[np.ndarray, ...], attrs: dict[str, Any]) -> Any:
-    """Evaluate numpy.unique(return_inverse=True, return_counts=True)."""
-    if len(inputs) != 1:
-        msg = f"numpy.unique_inverse_counts evaluator expects exactly one input (got {len(inputs)})"
-        raise ValueError(msg)
-    axis, equal_nan, sorted_values = _parse_unique_eval_attrs(attrs)
-    return np.unique(
-        inputs[0],
-        return_inverse=True,
-        return_counts=True,
-        axis=axis,
-        equal_nan=equal_nan,
-        sorted=sorted_values,
-    )
-
-
-@_evaluator("numpy.unique_index_inverse_counts")
-def _eval_unique_index_inverse_counts(inputs: tuple[np.ndarray, ...], attrs: dict[str, Any]) -> Any:
-    """Evaluate numpy.unique(return_index=True, return_inverse=True, return_counts=True)."""
-    if len(inputs) != 1:
-        msg = (
-            "numpy.unique_index_inverse_counts evaluator expects exactly one input "
-            f"(got {len(inputs)})"
-        )
-        raise ValueError(msg)
-    axis, equal_nan, sorted_values = _parse_unique_eval_attrs(attrs)
-    return np.unique(
-        inputs[0],
-        return_index=True,
-        return_inverse=True,
-        return_counts=True,
-        axis=axis,
-        equal_nan=equal_nan,
-        sorted=sorted_values,
+for _unique_op, _unique_returns in (
+    ("numpy.unique", (False, False, False)),
+    ("numpy.unique_index", (True, False, False)),
+    ("numpy.unique_inverse", (False, True, False)),
+    ("numpy.unique_counts", (False, False, True)),
+    ("numpy.unique_index_inverse", (True, True, False)),
+    ("numpy.unique_index_counts", (True, False, True)),
+    ("numpy.unique_inverse_counts", (False, True, True)),
+    ("numpy.unique_index_inverse_counts", (True, True, True)),
+):
+    _RUNTIME.register_evaluator(
+        _unique_op,
+        cast("Any", partial(_eval_unique, op=_unique_op, returns=_unique_returns)),
     )
 
 

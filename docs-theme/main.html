@@ -125,9 +125,9 @@ var base_url = "{{ base_url }}";
   </table>
 </div>
 
-<div class="overlay search-box" id="search" role="dialog" aria-label="Search">
-  <div class="search-in"><span class="ps">/</span><input id="searchq" spellcheck="false" autocomplete="off" aria-label="Search query" placeholder="search the manual…"></div>
-  <div class="search-hits" id="searchhits"></div>
+<div class="overlay search-box" id="search" role="dialog" aria-hidden="true" aria-label="Search">
+  <div class="search-in"><span class="ps">/</span><input type="search" id="mkdocs-search-query" spellcheck="false" autocomplete="off" aria-label="Search query" placeholder="search the manual…"></div>
+  <div class="search-hits" id="mkdocs-search-results" data-no-results-text="No manual entry found" aria-live="polite"></div>
 </div>
 
 <div class="bar">
@@ -136,7 +136,7 @@ var base_url = "{{ base_url }}";
   <span class="path hidesm">$ man advect{% if page and page.url and page.url != "." %}/{{ page.url.rstrip("/") }}{% endif %}</span>
   <span class="grow"></span>
   <button class="tbtn" id="treebtn" aria-label="Toggle documentation tree">[e] tree</button>
-  <button class="tbtn" id="searchbtn" aria-label="Search">[/] search</button>
+  <button class="tbtn" id="searchbtn" aria-label="Search" aria-controls="search" aria-expanded="false">[/] search</button>
   <button class="tbtn hidesm" id="helpbtn" aria-label="Keyboard help">[?] keys</button>
   <button class="tbtn" id="themeToggle" aria-label="Cycle display mode">[ mode: … ]</button>
 </div>

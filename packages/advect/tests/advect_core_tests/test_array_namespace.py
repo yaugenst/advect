@@ -89,19 +89,25 @@ def test_get_array_namespace_primitives_return_none() -> None:
     assert namespace_helpers._get_array_namespace("x") is None
 
 
-def test_infer_array_namespace_scans_args_and_kwargs() -> None:
-    tree = {"left": [1.0, _NamespaceLeaf()]}
-    assert namespace_helpers._infer_array_namespace_for_call(args=(tree,), kwargs={}) is np
-    assert (
-        namespace_helpers._infer_array_namespace_for_call(args=(), kwargs={"payload": tree}) is np
+def _negotiate(*, args: tuple[object, ...], kwargs: dict[str, object]) -> object | None:
+    resolution = namespace_helpers._negotiate_array_namespace_for_call(
+        args=args,
+        kwargs=kwargs,
     )
+    return None if resolution is None else resolution.raw_namespace
 
 
-def test_infer_array_namespace_handles_non_pytree_leaf() -> None:
-    assert namespace_helpers._infer_array_namespace_for_call(args=(1.0,), kwargs={}) is None
+def test_negotiate_array_namespace_scans_args_and_kwargs() -> None:
+    tree = {"left": [1.0, _NamespaceLeaf()]}
+    assert _negotiate(args=(tree,), kwargs={}) is np
+    assert _negotiate(args=(), kwargs={"payload": tree}) is np
 
 
-def test_infer_array_namespace_validates_later_pytree_branches() -> None:
+def test_negotiate_array_namespace_handles_non_pytree_leaf() -> None:
+    assert _negotiate(args=(1.0,), kwargs={}) is None
+
+
+def test_negotiate_array_namespace_validates_later_pytree_branches() -> None:
     calls = {"count": 0}
 
     class _LaterBranch:
@@ -125,7 +131,7 @@ def test_infer_array_namespace_validates_later_pytree_branches() -> None:
         unflatten_fn=_unflatten_later_branch,
     )
     tree = [_NamespaceLeaf(), _LaterBranch()]
-    assert namespace_helpers._infer_array_namespace_for_call(args=(tree,), kwargs={}) is np
+    assert _negotiate(args=(tree,), kwargs={}) is np
     assert calls["count"] == 1
 
 
@@ -141,12 +147,12 @@ _STATIC_TREE = st.recursive(
 
 
 @given(before=_STATIC_TREE, after=_STATIC_TREE)
-def test_infer_array_namespace_finds_array_after_arbitrary_static_trees(
+def test_negotiate_array_namespace_finds_array_after_arbitrary_static_trees(
     before: object,
     after: object,
 ) -> None:
     assert (
-        namespace_helpers._infer_array_namespace_for_call(
+        _negotiate(
             args=(before,),
             kwargs={"payload": [after, {"array": _NamespaceLeaf()}]},
         )
@@ -155,5 +161,5 @@ def test_infer_array_namespace_finds_array_after_arbitrary_static_trees(
 
 
 @given(tree=_STATIC_TREE)
-def test_infer_array_namespace_returns_none_for_static_pytrees(tree: object) -> None:
-    assert namespace_helpers._infer_array_namespace_for_call(args=(tree,), kwargs={}) is None
+def test_negotiate_array_namespace_returns_none_for_static_pytrees(tree: object) -> None:
+    assert _negotiate(args=(tree,), kwargs={}) is None

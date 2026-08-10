@@ -169,7 +169,6 @@ class GraphNode:
 class GraphBuilder:
     def __new__(
         cls,
-        version: str = "2.0",
         *,
         required_array_api_version: str = "2024.12",
     ) -> Self: ...

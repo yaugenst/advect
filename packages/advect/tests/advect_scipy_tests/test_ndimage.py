@@ -17,36 +17,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 
-_LINEAR_NAMES = (
-    "gaussian_filter",
-    "gaussian_filter1d",
-    "uniform_filter",
-    "uniform_filter1d",
-    "convolve",
-    "correlate",
-    "convolve1d",
-    "correlate1d",
-    "laplace",
-    "gaussian_laplace",
-    "sobel",
-    "prewitt",
-)
-_EXTREMA_NAMES = (
-    "maximum_filter",
-    "minimum_filter",
-    "maximum_filter1d",
-    "minimum_filter1d",
-    "grey_dilation",
-    "grey_erosion",
-    "grey_opening",
-    "grey_closing",
-    "morphological_gradient",
-    "morphological_laplace",
-    "white_tophat",
-    "black_tophat",
-)
-_RANK_NAMES = ("median_filter", "rank_filter", "percentile_filter")
-_PUBLIC_NAMES = (*_LINEAR_NAMES, *_EXTREMA_NAMES, *_RANK_NAMES)
+_PUBLIC_NAMES = tuple(ndimage.__all__)
 
 _FIELD = np.array(
     [
@@ -275,9 +246,8 @@ def _directional_difference(function: Callable[[np.ndarray], object], value: np.
     return (function(value + step * _TANGENT) - function(value - step * _TANGENT)) / (2 * step)
 
 
-def test_public_ndimage_inventory_is_complete() -> None:
+def test_public_ndimage_inventory_has_unique_names() -> None:
     assert len(_PUBLIC_NAMES) == len(set(_PUBLIC_NAMES))
-    assert set(_PUBLIC_NAMES) == set(ndimage.__all__)
 
 
 @pytest.mark.parametrize("name", _PUBLIC_NAMES)

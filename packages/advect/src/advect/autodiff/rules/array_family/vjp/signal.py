@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from functools import partial
 from typing import Any, cast
 
 from advect.autodiff.rules.array_family._backend_runtime import xp
@@ -62,14 +63,17 @@ def _full_signal_cotangent(
 
 
 def _vjp_signal_binary(
+    ans: xp.ndarray,
     left: xp.ndarray,
     right: xp.ndarray,
-    *,
+    *rest: xp.ndarray,
     g: xp.ndarray,
     mode: str,
     correlate: bool,
-    active_input_indices: tuple[int, ...] | None,
+    active_input_indices: tuple[int, ...] | None = None,
+    **attrs: Any,
 ) -> tuple[xp.ndarray | None, xp.ndarray | None]:
+    _ = ans, rest, attrs
     active = frozenset((0, 1)) if active_input_indices is None else frozenset(active_input_indices)
     if not active <= {0, 1}:
         msg = f"signal product active input indices are invalid: {sorted(active)}"
@@ -128,52 +132,9 @@ def _vjp_signal_binary(
     return grad_left, grad_right
 
 
-def _vjp_convolve(
-    ans: xp.ndarray,
-    left: xp.ndarray,
-    right: xp.ndarray,
-    *rest: xp.ndarray,
-    g: xp.ndarray,
-    mode: str = "full",
-    active_input_indices: tuple[int, ...] | None = None,
-    **attrs: Any,
-) -> tuple[xp.ndarray | None, xp.ndarray | None]:
-    """Transpose NumPy convolution with one native correlation per input."""
-    _ = ans, rest, attrs
-    return _vjp_signal_binary(
-        left,
-        right,
-        g=g,
-        mode=mode,
-        correlate=False,
-        active_input_indices=active_input_indices,
-    )
-
-
-def _vjp_correlate(
-    ans: xp.ndarray,
-    left: xp.ndarray,
-    right: xp.ndarray,
-    *rest: xp.ndarray,
-    g: xp.ndarray,
-    mode: str = "valid",
-    active_input_indices: tuple[int, ...] | None = None,
-    **attrs: Any,
-) -> tuple[xp.ndarray | None, xp.ndarray | None]:
-    """Transpose NumPy correlation under Advect's real inner product."""
-    _ = ans, rest, attrs
-    return _vjp_signal_binary(
-        left,
-        right,
-        g=g,
-        mode=mode,
-        correlate=True,
-        active_input_indices=active_input_indices,
-    )
+_vjp_convolve = partial(_vjp_signal_binary, mode="full", correlate=False)
+_vjp_correlate = partial(_vjp_signal_binary, mode="valid", correlate=True)
 
 
 for _selective_vjp in (_vjp_convolve, _vjp_correlate):
     cast("Any", _selective_vjp).__advect_vjp_for_input_indices__ = _selective_vjp
-
-
-__all__ = ["_vjp_convolve", "_vjp_correlate"]

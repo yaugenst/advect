@@ -66,7 +66,7 @@ def _with_backend_attrs(attrs: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
-def _add_backend_node(  # noqa: PLR0913 - one operation owns complete metadata
+def _add_backend_node(
     *,
     graph: DynamicTape,
     op: str,
@@ -75,12 +75,8 @@ def _add_backend_node(  # noqa: PLR0913 - one operation owns complete metadata
     attrs: dict[str, Any],
     shape: tuple[int, ...],
     dtype: object,
-    num_outputs: int = 1,
-    output_shapes: tuple[tuple[int, ...], ...] | None = None,
-    output_dtypes: tuple[object, ...] | None = None,
 ) -> int:
     native_attrs = _with_backend_attrs(attrs)
-    _ = (num_outputs, output_shapes, output_dtypes)
     parents = tuple(item for item in inputs if isinstance(item, int))
     literals = tuple(item.value for item in inputs if isinstance(item, _LiteralOperand))
     source_location = get_source_location()

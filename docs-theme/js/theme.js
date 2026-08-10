@@ -60,84 +60,29 @@ for (const pre of document.querySelectorAll(".md pre")) {
 
 /* ---------------- search ---------------- */
 const searchBox = document.getElementById("search");
-const searchQ = document.getElementById("searchq");
-const searchHits = document.getElementById("searchhits");
+const searchQ = document.getElementById("mkdocs-search-query");
+const searchButton = document.getElementById("searchbtn");
 const base = document.body.dataset.base ? `${document.body.dataset.base}/` : "";
-let index = null;
-let hits = [];
-let selHit = 0;
-
-async function loadIndex() {
-  if (index) return index;
-  const res = await fetch(`${base}search/search_index.json`);
-  index = (await res.json()).docs.map((d) => ({
-    ...d,
-    ltitle: d.title ? d.title.toLowerCase() : "",
-    ltext: d.text ? d.text.toLowerCase() : "",
-  }));
-  return index;
-}
-const escHtml = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;");
-function snippet(text, term) {
-  const at = text.toLowerCase().indexOf(term);
-  if (at < 0) return escHtml(text.slice(0, 90));
-  const s = Math.max(0, at - 36);
-  const raw = text.slice(s, at) + "\u0001" + text.slice(at, at + term.length) + "\u0002" +
-    text.slice(at + term.length, at + term.length + 54);
-  return (s > 0 ? "…" : "") + escHtml(raw).replace("\u0001", "<mark>").replace("\u0002", "</mark>") + "…";
-}
-function runSearch() {
-  const q = searchQ.value.trim().toLowerCase();
-  selHit = 0;
-  if (!q || !index) { searchHits.innerHTML = ""; hits = []; return; }
-  const terms = q.split(/\s+/);
-  hits = index
-    .map((d) => {
-      let score = 0;
-      for (const t of terms) {
-        if (d.ltitle.includes(t)) score += 4;
-        if (d.ltext.includes(t)) score += 1;
-      }
-      return { d, score };
-    })
-    .filter((h) => h.score >= terms.length)
-    .sort((a, b) => b.score - a.score || a.d.location.length - b.d.location.length)
-    .slice(0, 12);
-  if (!hits.length) {
-    searchHits.innerHTML = `<div class="search-none">No manual entry for "${escHtml(q)}"</div>`;
-    return;
-  }
-  searchHits.innerHTML = hits
-    .map((h, i) => `<a class="search-hit${i === selHit ? " selq" : ""}" href="${base}${h.d.location}">` +
-      `<span class="h-title">${escHtml(h.d.title || h.d.location)}</span> ` +
-      `<span class="h-loc">${escHtml(h.d.location.split("#")[0] || "index")}</span><br>` +
-      `${snippet(h.d.text || "", terms[0])}</a>`)
-    .join("");
-}
-function moveSel(dir) {
-  if (!hits.length) return;
-  selHit = (selHit + dir + hits.length) % hits.length;
-  const els = searchHits.querySelectorAll(".search-hit");
-  els.forEach((el, i) => el.classList.toggle("selq", i === selHit));
-  els[selHit].scrollIntoView({ block: "nearest" });
-}
 function openSearch() {
   searchBox.classList.add("on");
+  searchBox.setAttribute("aria-hidden", "false");
+  searchButton.setAttribute("aria-expanded", "true");
   searchQ.select();
-  loadIndex().then(runSearch).catch(() => {
-    searchHits.innerHTML = '<div class="search-none">search index unavailable</div>';
-  });
 }
-const closeSearch = () => searchBox.classList.remove("on");
-searchQ.addEventListener("input", runSearch);
+function closeSearch() {
+  searchBox.classList.remove("on");
+  searchBox.setAttribute("aria-hidden", "true");
+  searchButton.setAttribute("aria-expanded", "false");
+}
 searchQ.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") { closeSearch(); return; }
-  if (e.key === "ArrowDown") { moveSel(1); e.preventDefault(); return; }
-  if (e.key === "ArrowUp") { moveSel(-1); e.preventDefault(); return; }
-  if (e.key === "Enter" && hits.length) window.location.href = `${base}${hits[selHit].d.location}`;
+  if (e.key === "Escape") {
+    closeSearch();
+    searchButton.focus();
+    e.preventDefault();
+  }
   e.stopPropagation();
 });
-document.getElementById("searchbtn").addEventListener("click", openSearch);
+searchButton.addEventListener("click", openSearch);
 
 /* ---------------- keyboard ---------------- */
 const help = document.getElementById("help");

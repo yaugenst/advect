@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import math
 import operator
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
@@ -27,26 +26,6 @@ if TYPE_CHECKING:
     from advect.core import AbstractValue
     from advect.core._primitive import Primitive
 
-
-@dataclass(frozen=True, slots=True)
-class _SpecialPrimitives:
-    gammaln: Primitive[..., Any]
-    digamma: Primitive[..., Any]
-    polygamma: Primitive[..., Any]
-    erf: Primitive[..., Any]
-    erfc: Primitive[..., Any]
-    erfcx: Primitive[..., Any]
-    erfinv: Primitive[..., Any]
-    expit: Primitive[..., Any]
-    log_expit: Primitive[..., Any]
-    ndtr: Primitive[..., Any]
-    log_ndtr: Primitive[..., Any]
-    ndtri: Primitive[..., Any]
-    logsumexp: Primitive[..., Any]
-    softmax: Primitive[..., Any]
-    log_softmax: Primitive[..., Any]
-
-
 _UFUNC_OPTION_NAMES = frozenset({"casting", "dtype", "order", "sig", "signature", "subok", "where"})
 type _UfuncOptions = tuple[
     str | bytes,
@@ -65,7 +44,7 @@ def gammaln(x: object, /, out: object = None, **kwargs: object) -> object:
     return _call_unary(
         name="gammaln",
         function=_scipy_special.gammaln,
-        primitive=_special_primitives.gammaln,
+        primitive=_gammaln_primitive,
         x=x,
         out=out,
         kwargs=kwargs,
@@ -77,7 +56,7 @@ def digamma(x: object, /, out: object = None, **kwargs: object) -> object:
     return _call_unary(
         name="digamma",
         function=_scipy_special.digamma,
-        primitive=_special_primitives.digamma,
+        primitive=_digamma_primitive,
         x=x,
         out=out,
         kwargs=kwargs,
@@ -89,7 +68,7 @@ def polygamma(n: object, x: object) -> object:
     if not is_tracing():
         _require_numpy_values("polygamma", n, x)
         return _scipy_special.polygamma(n, x)
-    return _special_primitives.polygamma(n=_array_operand(n), x=_array_operand(x))
+    return _polygamma_primitive(n=_array_operand(n), x=_array_operand(x))
 
 
 def erf(x: object, /, out: object = None, **kwargs: object) -> object:
@@ -97,7 +76,7 @@ def erf(x: object, /, out: object = None, **kwargs: object) -> object:
     return _call_unary(
         name="erf",
         function=_scipy_special.erf,
-        primitive=_special_primitives.erf,
+        primitive=_erf_primitive,
         x=x,
         out=out,
         kwargs=kwargs,
@@ -109,7 +88,7 @@ def erfc(x: object, /, out: object = None, **kwargs: object) -> object:
     return _call_unary(
         name="erfc",
         function=_scipy_special.erfc,
-        primitive=_special_primitives.erfc,
+        primitive=_erfc_primitive,
         x=x,
         out=out,
         kwargs=kwargs,
@@ -121,7 +100,7 @@ def erfcx(x: object, /, out: object = None, **kwargs: object) -> object:
     return _call_unary(
         name="erfcx",
         function=_scipy_special.erfcx,
-        primitive=_special_primitives.erfcx,
+        primitive=_erfcx_primitive,
         x=x,
         out=out,
         kwargs=kwargs,
@@ -133,7 +112,7 @@ def erfinv(y: object, /, out: object = None, **kwargs: object) -> object:
     return _call_unary(
         name="erfinv",
         function=_scipy_special.erfinv,
-        primitive=_special_primitives.erfinv,
+        primitive=_erfinv_primitive,
         x=y,
         out=out,
         kwargs=kwargs,
@@ -145,7 +124,7 @@ def expit(x: object, /, out: object = None, **kwargs: object) -> object:
     return _call_unary(
         name="expit",
         function=_scipy_special.expit,
-        primitive=_special_primitives.expit,
+        primitive=_expit_primitive,
         x=x,
         out=out,
         kwargs=kwargs,
@@ -157,7 +136,7 @@ def log_expit(x: object, /, out: object = None, **kwargs: object) -> object:
     return _call_unary(
         name="log_expit",
         function=_scipy_special.log_expit,
-        primitive=_special_primitives.log_expit,
+        primitive=_log_expit_primitive,
         x=x,
         out=out,
         kwargs=kwargs,
@@ -169,7 +148,7 @@ def ndtr(x: object, /, out: object = None, **kwargs: object) -> object:
     return _call_unary(
         name="ndtr",
         function=_scipy_special.ndtr,
-        primitive=_special_primitives.ndtr,
+        primitive=_ndtr_primitive,
         x=x,
         out=out,
         kwargs=kwargs,
@@ -181,7 +160,7 @@ def log_ndtr(x: object, /, out: object = None, **kwargs: object) -> object:
     return _call_unary(
         name="log_ndtr",
         function=_scipy_special.log_ndtr,
-        primitive=_special_primitives.log_ndtr,
+        primitive=_log_ndtr_primitive,
         x=x,
         out=out,
         kwargs=kwargs,
@@ -193,7 +172,7 @@ def ndtri(p: object, /, out: object = None, **kwargs: object) -> object:
     return _call_unary(
         name="ndtri",
         function=_scipy_special.ndtri,
-        primitive=_special_primitives.ndtri,
+        primitive=_ndtri_primitive,
         x=p,
         out=out,
         kwargs=kwargs,
@@ -218,7 +197,7 @@ def logsumexp(
             return_sign=return_sign,
         )
     has_b = b is not None
-    result, sign = _special_primitives.logsumexp(
+    result, sign = _logsumexp_primitive(
         a=_array_operand(a),
         b=1.0 if b is None else _array_operand(b),
         axis=_static_axis(axis),
@@ -234,7 +213,7 @@ def softmax(x: object, axis: object = None) -> object:
     if not is_tracing():
         _require_numpy_values("softmax", x)
         return _scipy_special.softmax(x, axis=axis)
-    return _special_primitives.softmax(
+    return _softmax_primitive(
         x=_array_operand(x),
         axis=_static_axis(axis, name="softmax"),
     )
@@ -245,7 +224,7 @@ def log_softmax(x: object, axis: object = None) -> object:
     if not is_tracing():
         _require_numpy_values("log_softmax", x)
         return _scipy_special.log_softmax(x, axis=axis)
-    return _special_primitives.log_softmax(
+    return _log_softmax_primitive(
         x=_array_operand(x),
         axis=_static_axis(axis, name="log_softmax"),
     )
@@ -1047,68 +1026,61 @@ def _install_normalization(
     return concrete
 
 
-def _build_primitives() -> _SpecialPrimitives:
-    polygamma_primitive = primitive(
-        _polygamma_impl,
-        name="scipy.special.polygamma",
-        nondiff_argnames=("n",),
-    )
-    polygamma_primitive.def_abstract(_polygamma_abstract)
-    polygamma_primitive.def_jvp(_polygamma_jvp)
-    polygamma_primitive.def_transpose(_polygamma_transpose)
+_polygamma_primitive = primitive(
+    _polygamma_impl,
+    name="scipy.special.polygamma",
+    nondiff_argnames=("n",),
+)
+_polygamma_primitive.def_abstract(_polygamma_abstract)
+_polygamma_primitive.def_jvp(_polygamma_jvp)
+_polygamma_primitive.def_transpose(_polygamma_transpose)
 
-    logsumexp_primitive = primitive(
-        _logsumexp_impl,
-        name="scipy.special.logsumexp",
-        static_argnames=("axis", "has_b", "keepdims", "return_sign"),
-    )
-    logsumexp_primitive.def_abstract(_logsumexp_abstract)
-    logsumexp_primitive.def_jvp(_logsumexp_jvp)
-    logsumexp_primitive.def_transpose(_logsumexp_transpose)
+_logsumexp_primitive = primitive(
+    _logsumexp_impl,
+    name="scipy.special.logsumexp",
+    static_argnames=("axis", "has_b", "keepdims", "return_sign"),
+)
+_logsumexp_primitive.def_abstract(_logsumexp_abstract)
+_logsumexp_primitive.def_jvp(_logsumexp_jvp)
+_logsumexp_primitive.def_transpose(_logsumexp_transpose)
 
-    def unary(name: str, derivative: Callable[[Any], Any]) -> Primitive[..., Any]:
-        return _install_unary(name, getattr(_scipy_special, name), derivative)
-
-    return _SpecialPrimitives(
-        gammaln=unary("gammaln", digamma),
-        digamma=unary("digamma", _complex_trigamma),
-        polygamma=polygamma_primitive,
-        erf=unary(
-            "erf",
-            lambda x: (2.0 / math.sqrt(math.pi)) * np.exp(-(x * x)),
-        ),
-        erfc=unary(
-            "erfc",
-            lambda x: (-2.0 / math.sqrt(math.pi)) * np.exp(-(x * x)),
-        ),
-        erfcx=unary("erfcx", _erfcx_derivative),
-        erfinv=unary("erfinv", _erfinv_derivative),
-        expit=unary("expit", _expit_derivative),
-        log_expit=unary(
-            "log_expit",
-            lambda x: cast("Any", expit(-x)),
-        ),
-        ndtr=unary(
-            "ndtr",
-            lambda x: np.exp(-0.5 * x * x) / math.sqrt(2.0 * math.pi),
-        ),
-        log_ndtr=unary("log_ndtr", _log_ndtr_derivative),
-        ndtri=unary("ndtri", _ndtri_derivative),
-        logsumexp=logsumexp_primitive,
-        softmax=_install_normalization(
-            "softmax",
-            _scipy_special.softmax,
-            logarithmic=False,
-        ),
-        log_softmax=_install_normalization(
-            "log_softmax",
-            _scipy_special.log_softmax,
-            logarithmic=True,
-        ),
-    )
-
-
-_special_primitives = _build_primitives()
+_gammaln_primitive = _install_unary("gammaln", _scipy_special.gammaln, digamma)
+_digamma_primitive = _install_unary("digamma", _scipy_special.digamma, _complex_trigamma)
+_erf_primitive = _install_unary(
+    "erf",
+    _scipy_special.erf,
+    lambda x: (2.0 / math.sqrt(math.pi)) * np.exp(-(x * x)),
+)
+_erfc_primitive = _install_unary(
+    "erfc",
+    _scipy_special.erfc,
+    lambda x: (-2.0 / math.sqrt(math.pi)) * np.exp(-(x * x)),
+)
+_erfcx_primitive = _install_unary("erfcx", _scipy_special.erfcx, _erfcx_derivative)
+_erfinv_primitive = _install_unary("erfinv", _scipy_special.erfinv, _erfinv_derivative)
+_expit_primitive = _install_unary("expit", _scipy_special.expit, _expit_derivative)
+_log_expit_primitive = _install_unary(
+    "log_expit",
+    _scipy_special.log_expit,
+    lambda x: cast("Any", expit(-x)),
+)
+_ndtr_primitive = _install_unary(
+    "ndtr",
+    _scipy_special.ndtr,
+    lambda x: np.exp(-0.5 * x * x) / math.sqrt(2.0 * math.pi),
+)
+_log_ndtr_primitive = _install_unary("log_ndtr", _scipy_special.log_ndtr, _log_ndtr_derivative)
+_ndtri_primitive = _install_unary("ndtri", _scipy_special.ndtri, _ndtri_derivative)
+_softmax_primitive = _install_normalization(
+    "softmax",
+    _scipy_special.softmax,
+    logarithmic=False,
+)
+_log_softmax_primitive = _install_normalization(
+    "log_softmax",
+    _scipy_special.log_softmax,
+    logarithmic=True,
+)
 
 
 __all__ = [

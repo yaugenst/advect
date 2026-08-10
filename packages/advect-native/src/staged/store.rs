@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use advect_runtime::{GraphArtifact, GraphStore as RuntimeGraphStore, NodeId};
+use advect_runtime::{GraphStore as RuntimeGraphStore, NodeId};
 use pyo3::exceptions::{PyKeyError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
@@ -75,7 +75,8 @@ impl GraphStore {
 
     /// Canonical portable graph JSON owned by `advect-runtime`.
     fn _to_json(&self) -> PyResult<String> {
-        GraphArtifact::store_to_json(&self.inner)
+        self.inner
+            .to_json()
             .map_err(|error| PyValueError::new_err(error.into_message()))
     }
 

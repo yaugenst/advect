@@ -27,6 +27,32 @@ _PAIR_WIDTH = 2
 _BINARY_ARG_COUNT = 2
 
 
+def _bind_optional_positionals(
+    *,
+    name: str,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+    required: int,
+    optional: tuple[str, ...],
+    keyword_only: frozenset[str] = frozenset(),
+) -> dict[str, Any]:
+    """Bind the repeated required-plus-optional NumPy call shape."""
+    if len(args) < required or len(args) > required + len(optional):
+        msg = f"numpy.{name} received an invalid positional signature during tracing"
+        raise TracingError(msg)
+    unsupported = set(kwargs) - (set(optional) | set(keyword_only))
+    if unsupported:
+        msg = f"numpy.{name} kwargs not supported during tracing: {sorted(unsupported)}"
+        raise TracingError(msg)
+    values = dict(kwargs)
+    for parameter, value in zip(optional, args[required:], strict=False):
+        if parameter in values:
+            msg = f"numpy.{name} received {parameter} twice"
+            raise TracingError(msg)
+        values[parameter] = value
+    return values
+
+
 def _normalize_axis(axis: int, ndim: int) -> int:
     axis_int = int(axis)
     if axis_int < 0:

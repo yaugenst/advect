@@ -258,7 +258,7 @@ impl Serialize for PortableConstant {
             shape: &self.shape,
             layout: CONSTANT_LAYOUT,
             byte_order: CONSTANT_BYTE_ORDER,
-            data: encode_hex(&self.data),
+            data: crate::hex::encode(&self.data),
             digest: &self.digest,
         }
         .serialize(serializer)
@@ -297,7 +297,9 @@ impl<'de> Deserialize<'de> for PortableConstant {
         }
         let kind = wire.kind.parse().map_err(serde::de::Error::custom)?;
         let dtype = wire.dtype.parse().map_err(serde::de::Error::custom)?;
-        let data = decode_hex(&wire.data).map_err(serde::de::Error::custom)?;
+        let data = crate::hex::decode(&wire.data).map_err(|message| {
+            serde::de::Error::custom(format!("staged constant data {message}"))
+        })?;
         validate_shape_and_bytes(kind, dtype, &wire.shape, &data)
             .map_err(serde::de::Error::custom)?;
         if wire.digest.len() != 64
@@ -371,7 +373,8 @@ fn digest_body(
     let mut hex_buffer = [0_u8; 8192];
     for chunk in data.chunks(hex_buffer.len() / 2) {
         for (encoded, &byte) in hex_buffer.chunks_exact_mut(2).zip(chunk) {
-            encoded.copy_from_slice(&[hex_digit_byte(byte >> 4), hex_digit_byte(byte & 0x0f)]);
+            encoded
+                .copy_from_slice(&[crate::hex::digit(byte >> 4), crate::hex::digit(byte & 0x0f)]);
         }
         let encoded_len = chunk
             .len()
@@ -391,63 +394,7 @@ fn digest_body(
         kind.name(),
     );
     digest.update(suffix.as_bytes());
-    Ok(encode_hex(&digest.finalize()))
-}
-
-fn encode_hex(bytes: &[u8]) -> String {
-    let mut encoded = String::with_capacity(bytes.len().saturating_mul(2));
-    for &byte in bytes {
-        encoded.push(hex_digit(byte >> 4));
-        encoded.push(hex_digit(byte & 0x0f));
-    }
-    encoded
-}
-
-fn decode_hex(encoded: &str) -> Result<Vec<u8>, ConstantError> {
-    if !encoded.len().is_multiple_of(2) {
-        return Err(ConstantError::new(
-            "staged constant data must contain an even number of hex characters",
-        ));
-    }
-    encoded
-        .as_bytes()
-        .chunks_exact(2)
-        .map(|pair| {
-            let high = decode_digit(
-                *pair
-                    .first()
-                    .ok_or_else(|| ConstantError::new("missing high hex digit"))?,
-            )?;
-            let low = decode_digit(
-                *pair
-                    .get(1)
-                    .ok_or_else(|| ConstantError::new("missing low hex digit"))?,
-            )?;
-            Ok((high << 4) | low)
-        })
-        .collect()
-}
-
-fn decode_digit(value: u8) -> Result<u8, ConstantError> {
-    match value {
-        b'0'..=b'9' => Ok(value - b'0'),
-        b'a'..=b'f' => Ok(value - b'a' + 10),
-        _ => Err(ConstantError::new(
-            "staged constant data must use lowercase hexadecimal",
-        )),
-    }
-}
-
-fn hex_digit(value: u8) -> char {
-    char::from(hex_digit_byte(value))
-}
-
-const fn hex_digit_byte(value: u8) -> u8 {
-    if value < 10 {
-        b'0' + value
-    } else {
-        b'a' + (value - 10)
-    }
+    Ok(crate::hex::encode(&digest.finalize()))
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

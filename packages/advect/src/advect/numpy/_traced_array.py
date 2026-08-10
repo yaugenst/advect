@@ -30,6 +30,7 @@ from advect.numpy._array_function.mutation import (
 )
 from advect.numpy._constructors import NOT_A_CONSTRUCTOR, handle_traced_constructor
 from advect.numpy._op_bindings import canonicalize_numpy_op, frontend_lowering
+from advect.numpy._protocol_runtime import NUMPY_PROTOCOL_RUNTIME
 from advect.numpy._traced_array_checks import require_active_trace
 from advect.numpy._traced_array_indexing import getitem as _getitem, setitem as _setitem
 from advect.numpy._traced_array_inplace import (
@@ -37,7 +38,6 @@ from advect.numpy._traced_array_inplace import (
     inplace_op as _inplace_op,
 )
 from advect.numpy._traced_array_protocols import (
-    _RUNTIME as _ARRAY_PROTOCOL_RUNTIME,
     NOT_HANDLED,
     run_ephemeral_simple_ufunc,
     run_ephemeral_sum,
@@ -100,8 +100,6 @@ class TracedArray(NDArrayOperatorsMixin):
         "_last_update_location",
         "_node_id",
         "_owned",
-        "_trace_frame_id",
-        "_trace_level",
         "_value",
         "_view_state",
         "recorder",
@@ -118,8 +116,6 @@ class TracedArray(NDArrayOperatorsMixin):
         *,
         owned: bool = True,
         view_state: ViewState | None = None,
-        trace_level: int | None = None,
-        trace_frame_id: int | None = None,
         deferred_getitem: tuple[TracedArray, dict[str, object]] | None = None,
     ) -> None:
         self._value: ArrayLike = value
@@ -130,9 +126,6 @@ class TracedArray(NDArrayOperatorsMixin):
         self._epoch = 0
         self._last_update_location: SourceLocation | None = None
         self._view_state = view_state
-        bound_level, bound_frame_id = recorder.runtime_trace_identity()
-        self._trace_level = bound_level if trace_level is None else trace_level
-        self._trace_frame_id = bound_frame_id if trace_frame_id is None else trace_frame_id
 
     @property
     def value(self) -> ArrayLike:
@@ -282,16 +275,6 @@ class TracedArray(NDArrayOperatorsMixin):
         """Backend-neutral protocol hook for committing a functional write."""
         self._require_mutable(operation=operation)
         self._commit_current(value=value, node_id=node_id)
-
-    @property
-    def trace_level(self) -> int | None:
-        """Trace nesting level where this array was created."""
-        return self._trace_level
-
-    @property
-    def trace_frame_id(self) -> int | None:
-        """Trace frame identifier where this array was created."""
-        return self._trace_frame_id
 
     @property
     def shape(self) -> tuple[int, ...]:
@@ -576,7 +559,7 @@ class TracedArray(NDArrayOperatorsMixin):
                 )
             return cast(
                 "TracedArray | tuple[TracedArray, ...] | NotImplementedType",
-                _ARRAY_PROTOCOL_RUNTIME.run_simple_ufunc(
+                NUMPY_PROTOCOL_RUNTIME.run_simple_ufunc(
                     self_arr=self,
                     ufunc=ufunc,
                     inputs=inputs,
@@ -584,7 +567,7 @@ class TracedArray(NDArrayOperatorsMixin):
             )
         return cast(
             "TracedArray | tuple[TracedArray, ...] | NotImplementedType",
-            _ARRAY_PROTOCOL_RUNTIME.array_ufunc(
+            NUMPY_PROTOCOL_RUNTIME.array_ufunc(
                 self,
                 ufunc,
                 method,
@@ -615,7 +598,7 @@ class TracedArray(NDArrayOperatorsMixin):
         fast_result = run_ephemeral_sum(self, func, args, kwargs)
         if fast_result is not NOT_HANDLED:
             return fast_result
-        result = _ARRAY_PROTOCOL_RUNTIME.array_function(self, func, types, args, kwargs)
+        result = NUMPY_PROTOCOL_RUNTIME.array_function(self, func, types, args, kwargs)
         if getattr(func, "__name__", None) not in _SEMANTIC_ALIAS_FUNCTIONS:
             return result
 

@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-import advect.autodiff as ad
+import advect as ad
 from advect.core._pytree import tree_flatten, tree_unflatten
 
 if TYPE_CHECKING:
@@ -29,14 +29,6 @@ def require_dependency(module_name: str) -> ModuleType:
             f"install it with 'advect[{module_name}]'"
         )
         raise ModuleNotFoundError(message, name=module_name) from error
-
-
-def differentiable_argnums(count: int) -> tuple[int, ...]:
-    """Select every positional argument while preserving tuple-shaped gradients."""
-    if count == 0:
-        message = "Advect framework bridges require at least one positional argument"
-        raise TypeError(message)
-    return tuple(range(count))
 
 
 def numeric_tree(value: Any, *, boundary: str) -> tuple[list[Any], TreeDef]:
@@ -63,11 +55,9 @@ def numeric_tree(value: Any, *, boundary: str) -> tuple[list[Any], TreeDef]:
 def validated_vjp(
     function: Callable[..., Any],
     values: tuple[Any, ...],
-    *,
-    argnums: tuple[int, ...],
 ) -> tuple[list[Any], TreeDef, ad.Pullback]:
     """Retain one Advect pullback after validating its public output."""
-    value, pullback = ad.vjp(function, argnums=argnums)(*values)
+    value, pullback = ad.vjp(function, argnums=tuple(range(len(values))))(*values)
     try:
         output_leaves, output_treedef = numeric_tree(value, boundary="Advect output")
     except BaseException:

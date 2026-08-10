@@ -6,28 +6,25 @@ from typing import Any, cast
 
 from advect.autodiff.rules.array_family._backend_runtime import (
     _scalar_like,
-    current_array_backend_provider,
     xp,
+)
+from advect.autodiff.rules.array_family._transpose_utils import (
+    _lower_triangular_halfdiag,
+    _right_solve,
+    _uses_standard_linalg_contract,
 )
 from advect.autodiff.rules.array_family.vjp.linalg.common import (
     _broadcast_eye,
     _dtype_of,
     _h,
     _hermitian_triangle_adjoint,
-    _lower_triangular_halfdiag,
     _merge_multioutput_cotangent,
     _qr_skew_pullback,
-    _right_solve,
     _shape_of,
 )
 
 _QR_OUTPUT_COUNT = 2
 _SVD_OUTPUT_COUNT = 3
-
-
-def _uses_standard_linalg_contract() -> bool:
-    provider = current_array_backend_provider()
-    return provider is not None and provider.backend.split(".", 1)[0] != "numpy"
 
 
 def _vjp_cholesky(
@@ -276,12 +273,3 @@ def _vjp_svd(
         grad = grad + (eye_m - u @ u_h) @ gu @ _h(v / singular_values[..., None, :])
 
     return (cast("xp.ndarray", grad),)
-
-
-__all__ = [
-    "_vjp_cholesky",
-    "_vjp_pinv",
-    "_vjp_qr",
-    "_vjp_svd",
-    "_vjp_svdvals",
-]

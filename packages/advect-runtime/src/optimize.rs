@@ -116,8 +116,6 @@ pub fn optimize(store: GraphStore) -> Result<OptimizationOutcome, GraphError> {
 
 struct WorkingGraph {
     store: GraphStore,
-    active: Vec<bool>,
-    active_count: usize,
     aliases: Vec<Option<NodeId>>,
     output_mask: Vec<bool>,
 }
@@ -137,22 +135,27 @@ impl WorkingGraph {
         }
         Ok(Self {
             store,
-            active: vec![true; node_count],
-            active_count: node_count,
             aliases,
             output_mask,
         })
     }
 
-    const fn node_count(&self) -> usize {
-        self.active_count
+    fn node_count(&self) -> usize {
+        self.aliases
+            .iter()
+            .enumerate()
+            .filter(|&(index, alias)| NodeId::try_from(index).ok().as_ref() == alias.as_ref())
+            .count()
     }
 
     fn node_ids(&self) -> impl Iterator<Item = NodeId> + '_ {
-        self.active
+        self.aliases
             .iter()
             .enumerate()
-            .filter_map(|(index, &active)| active.then(|| NodeId::try_from(index).ok()).flatten())
+            .filter_map(|(index, &alias)| {
+                let node_id = NodeId::try_from(index).ok()?;
+                (alias == Some(node_id)).then_some(node_id)
+            })
     }
 
     fn node(&self, node_id: NodeId) -> Result<NodeCore, GraphError> {
@@ -222,12 +225,7 @@ impl WorkingGraph {
             let index = node_index(node_id).ok()?;
             let next = self.aliases.get(index).copied().flatten()?;
             if next == node_id {
-                return self
-                    .active
-                    .get(index)
-                    .copied()
-                    .unwrap_or(false)
-                    .then_some(node_id);
+                return Some(node_id);
             }
             node_id = next;
         }
@@ -242,42 +240,25 @@ impl WorkingGraph {
             return Ok(());
         }
         let index = node_index(node_id)?;
-        let active = self
-            .active
-            .get_mut(index)
-            .ok_or_else(|| GraphError::at_node(node_id, "activity slot is unavailable"))?;
-        if !*active {
-            return Err(GraphError::at_node(node_id, "node is already inactive"));
-        }
-        *active = false;
-        self.active_count = self
-            .active_count
-            .checked_sub(1)
-            .ok_or_else(|| GraphError::new("optimizer active-node count underflowed"))?;
-        *self
+        let alias = self
             .aliases
             .get_mut(index)
-            .ok_or_else(|| GraphError::at_node(node_id, "alias slot is unavailable"))? =
-            Some(replacement_id);
+            .ok_or_else(|| GraphError::at_node(node_id, "alias slot is unavailable"))?;
+        if *alias != Some(node_id) {
+            return Err(GraphError::at_node(node_id, "node is already inactive"));
+        }
+        *alias = Some(replacement_id);
         Ok(())
     }
 
     fn prune_unreachable(&mut self) -> Result<usize, GraphError> {
         let before = self.node_count();
         let reachable = self.reachable_mask()?;
-        for index in 0..self.active.len() {
-            if self.active.get(index).copied().unwrap_or(false)
+        for index in 0..self.aliases.len() {
+            let node_id = node_id(index)?;
+            if self.aliases.get(index) == Some(&Some(node_id))
                 && !reachable.get(index).copied().unwrap_or(false)
             {
-                *self
-                    .active
-                    .get_mut(index)
-                    .ok_or_else(|| GraphError::new("optimizer activity slot is unavailable"))? =
-                    false;
-                self.active_count = self
-                    .active_count
-                    .checked_sub(1)
-                    .ok_or_else(|| GraphError::new("optimizer active-node count underflowed"))?;
                 *self
                     .aliases
                     .get_mut(index)
@@ -288,7 +269,7 @@ impl WorkingGraph {
     }
 
     fn reachable_mask(&self) -> Result<Vec<bool>, GraphError> {
-        let mut reachable = vec![false; self.active.len()];
+        let mut reachable = vec![false; self.aliases.len()];
         let mut pending =
             Vec::with_capacity(self.store.inputs().len() + self.store.outputs().len());
         pending.extend(self.store.inputs().iter().copied());
@@ -315,7 +296,7 @@ impl WorkingGraph {
     }
 
     fn effect_ancestors(&self) -> Result<Vec<bool>, GraphError> {
-        let mut observed = vec![false; self.active.len()];
+        let mut observed = vec![false; self.aliases.len()];
         let mut pending = Vec::new();
         for node_id in self.node_ids() {
             if !is_known_pure(self.op(node_id)?) {
@@ -340,22 +321,21 @@ impl WorkingGraph {
 
     fn finish(self) -> Result<(GraphStore, Vec<Option<NodeId>>), GraphError> {
         let old_to_new = self.old_to_new()?;
-        let unchanged = self.active_count == self.active.len()
-            && old_to_new
-                .iter()
-                .enumerate()
-                .all(|(index, mapped)| *mapped == NodeId::try_from(index).ok());
+        let unchanged = old_to_new
+            .iter()
+            .enumerate()
+            .all(|(index, mapped)| *mapped == NodeId::try_from(index).ok());
         if unchanged {
             return Ok((self.store, old_to_new));
         }
-        materialize(self.store, &self.active, &old_to_new)
+        materialize(self.store, &self.aliases, &old_to_new)
     }
 
     fn old_to_new(&self) -> Result<Vec<Option<NodeId>>, GraphError> {
-        let mut active_to_new = vec![None; self.active.len()];
+        let mut active_to_new = vec![None; self.aliases.len()];
         let mut next_id = 0_usize;
-        for (index, &active) in self.active.iter().enumerate() {
-            if active {
+        for (index, &alias) in self.aliases.iter().enumerate() {
+            if alias == NodeId::try_from(index).ok() {
                 *active_to_new
                     .get_mut(index)
                     .ok_or_else(|| GraphError::new("optimizer dense-ID slot is unavailable"))? =
@@ -365,7 +345,7 @@ impl WorkingGraph {
                     .ok_or_else(|| GraphError::new("optimizer node count overflowed"))?;
             }
         }
-        (0..self.active.len())
+        (0..self.aliases.len())
             .map(|index| {
                 let original_id = node_id(index)?;
                 Ok(self
@@ -427,7 +407,6 @@ fn transpose_replacement(
     if transpose_backend(outer_metadata.attrs()) != transpose_backend(inner_metadata.attrs())
         || !safe_transpose_attrs(outer_metadata.attrs())
         || !safe_transpose_attrs(inner_metadata.attrs())
-        || outer_metadata.value_spec() != replacement_metadata.value_spec()
         || outer_metadata.outputs() != replacement_metadata.outputs()
     {
         return Ok(None);
@@ -568,11 +547,10 @@ fn is_known_pure(op: &str) -> bool {
 
 fn materialize(
     store: GraphStore,
-    active: &[bool],
+    aliases: &[Option<NodeId>],
     old_to_new: &[Option<NodeId>],
 ) -> Result<(GraphStore, Vec<Option<NodeId>>), GraphError> {
     let (
-        version,
         required_array_api_version,
         source_arena,
         source_metadata,
@@ -581,14 +559,19 @@ fn materialize(
         source_constants,
     ) = store.into_parts();
     let mut arena = RawArena::default();
-    preserve_op_table(&source_arena, &mut arena)?;
     let mut metadata = source_metadata
         .into_iter()
         .map(Some)
         .collect::<Vec<Option<NodeMetadata>>>();
-    let mut retained_metadata = Vec::with_capacity(active.iter().filter(|&&keep| keep).count());
-    for (index, &keep) in active.iter().enumerate() {
-        if !keep {
+    let mut retained_metadata = Vec::with_capacity(
+        aliases
+            .iter()
+            .enumerate()
+            .filter(|&(index, alias)| NodeId::try_from(index).ok().as_ref() == alias.as_ref())
+            .count(),
+    );
+    for (index, &alias) in aliases.iter().enumerate() {
+        if alias != NodeId::try_from(index).ok() {
             continue;
         }
         let old_id = node_id(index)?;
@@ -612,8 +595,16 @@ fn materialize(
                     })
             })
             .collect::<Result<Vec<_>, _>>()?;
+        let schema = source_arena.op_schema(source_node.op()).ok_or_else(|| {
+            GraphError::at_node(old_id, "optimizer operation schema is unavailable")
+        })?;
         arena
-            .append_op(source_node.op(), &new_parents, source_node.flags())
+            .append(
+                schema.name(),
+                schema.schema_version(),
+                &new_parents,
+                source_node.flags(),
+            )
             .map_err(|error| GraphError::new(error.into_message()))?;
         retained_metadata.push(
             metadata
@@ -626,7 +617,6 @@ fn materialize(
     let outputs = remap_endpoints(&source_outputs, old_to_new, "output")?;
     let constants = remap_constants(source_constants, old_to_new);
     let store = GraphStore::from_parts(
-        version,
         required_array_api_version,
         arena,
         retained_metadata,
@@ -635,25 +625,6 @@ fn materialize(
         constants,
     )?;
     Ok((store, old_to_new.to_vec()))
-}
-
-fn preserve_op_table(source: &RawArena, destination: &mut RawArena) -> Result<(), GraphError> {
-    for raw_op_id in 0..source.op_count() {
-        let op_id = u16::try_from(raw_op_id)
-            .map_err(|_| GraphError::new("optimizer operation ID overflowed"))?;
-        let schema = source
-            .op_schema(op_id)
-            .ok_or_else(|| GraphError::new("optimizer operation table is inconsistent"))?;
-        let inserted = destination
-            .intern_op(schema.name(), schema.schema_version())
-            .map_err(|error| GraphError::new(error.into_message()))?;
-        if inserted != op_id {
-            return Err(GraphError::new(
-                "optimizer changed operation table ordering",
-            ));
-        }
-    }
-    Ok(())
 }
 
 fn remap_endpoints(
@@ -703,7 +674,7 @@ fn node_index(node_id: NodeId) -> Result<usize, GraphError> {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
-    use crate::{AttrMap, DTypeDescriptor, GRAPH_FORMAT_VERSION, GraphBuilder, NodeFlags};
+    use crate::{AttrMap, DTypeDescriptor, GraphBuilder, NodeFlags};
 
     fn metadata() -> NodeMetadata {
         NodeMetadata::new(
@@ -721,7 +692,7 @@ mod tests {
 
     #[test]
     fn fixed_pipeline_runs_three_passes_and_cses() {
-        let mut builder = GraphBuilder::new(GRAPH_FORMAT_VERSION).unwrap();
+        let mut builder = GraphBuilder::new();
         let input = builder.append_input(metadata()).unwrap();
         let first = builder
             .append_operation("array.sin", 1, &[input], NodeFlags::NONE, metadata())

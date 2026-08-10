@@ -6,6 +6,7 @@ from __future__ import annotations
 import binascii
 import hashlib
 import json
+import math
 import struct
 import sys
 from dataclasses import dataclass
@@ -439,7 +440,4 @@ def _item_size(dtype: str) -> int:
 
 
 def _element_count(shape: tuple[int, ...]) -> int:
-    count = 1
-    for size in shape:
-        count *= size
-    return count
+    return math.prod(shape)

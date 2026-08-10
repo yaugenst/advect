@@ -1,12 +1,11 @@
 # Runtime and Performance
 
-Advect has two execution lifetimes and three distinct evidence products.
+Advect has two execution lifetimes and two distinct evidence products.
 
 | Product | Purpose | Gate |
 | --- | --- | :---: |
 | Advect regression | Detect a candidate regression against an exact reference Advect artifact | yes |
 | Runtime memory | Establish named lifetime and memory invariants in isolated workers | yes |
-| Ecosystem comparison | Give historical context against HIPS Autograd and future peer systems | no |
 
 Provider qualification is correctness evidence. It does not publish launch-heavy
 microtimings or allocator snapshots; provider performance belongs in a named
@@ -73,29 +72,6 @@ uv run python -m scripts.bench_advect_regression \
 The wildcard above is illustrative; pass one resolved wheel path to the
 harness. Acceptance requires at least five warmed replicates and release native
 extensions with shipping diagnostics.
-
-## Ecosystem comparison
-
-The HIPS Autograd report remains useful historical context:
-
-```bash
-uv run --with autograd python -m scripts.bench_autodiff_runtime \
-  --suite all \
-  --warmed-replicates 3 \
-  --phases \
-  --format json \
-  --output artifacts/benchmarks/dynamic-ecosystem-comparison.json
-```
-
-It validates results, warms both implementations, disables GC while timing,
-and alternates Advect/HIPS blocks. Replicates share one process and are named
-accordingly. The report is explicitly non-gating. It contains no same-process
-memory measurement; isolated runtime-memory workers are the memory authority.
-
-A future Advect/HIPS/PyTorch/JAX table remains a separate non-gating product.
-It must distinguish eager from compiled execution, compile cost from steady
-state, primal from derivative work, and CPU from GPU rather than collapsing
-those contracts into one rank.
 
 ## Memory acceptance
 

@@ -7,7 +7,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from scripts._support.report_extension_support import (
+from scripts.report_extension_support import (
     _render_frontend_table,
     render_pages,
 )

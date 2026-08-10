@@ -17,120 +17,52 @@ env:
 
 jobs:
   wheelhouse:
-    name: ${{ matrix.name }}
-    runs-on: ${{ matrix.runner }}
+    name: ${{ matrix.platform.name }} / Python ${{ matrix.python.version }}
+    runs-on: ${{ matrix.platform.runner }}
     env:
-      PYTHON_VERSION: ${{ matrix.python-version }}
+      PYTHON_VERSION: ${{ matrix.python.version }}
     defaults:
       run:
         shell: bash
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - name: Linux x86-64 / Python 3.12
-            artifact: linux-x86_64-py312
+        python:
+          - version: "3.12"
+            artifact: py312
+          - version: "3.13"
+            artifact: py313
+          - version: "3.14"
+            artifact: py314
+        platform:
+          - name: Linux x86-64
+            artifact: linux-x86_64
             runner: ubuntu-22.04
             target: x86_64
-            python-version: "3.12"
-            interpreter: python3.12
+            interpreter: versioned
             manylinux: "2_17"
-          - name: Linux x86-64 / Python 3.13
-            artifact: linux-x86_64-py313
-            runner: ubuntu-22.04
-            target: x86_64
-            python-version: "3.13"
-            interpreter: python3.13
-            manylinux: "2_17"
-          - name: Linux x86-64 / Python 3.14
-            artifact: linux-x86_64-py314
-            runner: ubuntu-22.04
-            target: x86_64
-            python-version: "3.14"
-            interpreter: python3.14
-            manylinux: "2_17"
-          - name: Linux arm64 / Python 3.12
-            artifact: linux-aarch64-py312
+          - name: Linux arm64
+            artifact: linux-aarch64
             runner: ubuntu-24.04-arm
             target: aarch64
-            python-version: "3.12"
-            interpreter: python3.12
+            interpreter: versioned
             manylinux: "2_17"
-          - name: Linux arm64 / Python 3.13
-            artifact: linux-aarch64-py313
-            runner: ubuntu-24.04-arm
-            target: aarch64
-            python-version: "3.13"
-            interpreter: python3.13
-            manylinux: "2_17"
-          - name: Linux arm64 / Python 3.14
-            artifact: linux-aarch64-py314
-            runner: ubuntu-24.04-arm
-            target: aarch64
-            python-version: "3.14"
-            interpreter: python3.14
-            manylinux: "2_17"
-          - name: macOS Intel / Python 3.12
-            artifact: macos-x86_64-py312
+          - name: macOS Intel
+            artifact: macos-x86_64
             runner: macos-15-intel
             target: x86_64
-            python-version: "3.12"
             interpreter: python
             manylinux: auto
-          - name: macOS Intel / Python 3.13
-            artifact: macos-x86_64-py313
-            runner: macos-15-intel
-            target: x86_64
-            python-version: "3.13"
-            interpreter: python
-            manylinux: auto
-          - name: macOS Intel / Python 3.14
-            artifact: macos-x86_64-py314
-            runner: macos-15-intel
-            target: x86_64
-            python-version: "3.14"
-            interpreter: python
-            manylinux: auto
-          - name: macOS Apple silicon / Python 3.12
-            artifact: macos-arm64-py312
+          - name: macOS Apple silicon
+            artifact: macos-arm64
             runner: macos-latest
             target: aarch64
-            python-version: "3.12"
             interpreter: python
             manylinux: auto
-          - name: macOS Apple silicon / Python 3.13
-            artifact: macos-arm64-py313
-            runner: macos-latest
-            target: aarch64
-            python-version: "3.13"
-            interpreter: python
-            manylinux: auto
-          - name: macOS Apple silicon / Python 3.14
-            artifact: macos-arm64-py314
-            runner: macos-latest
-            target: aarch64
-            python-version: "3.14"
-            interpreter: python
-            manylinux: auto
-          - name: Windows x86-64 / Python 3.12
-            artifact: windows-x86_64-py312
+          - name: Windows x86-64
+            artifact: windows-x86_64
             runner: windows-latest
             target: x64
-            python-version: "3.12"
-            interpreter: python
-            manylinux: auto
-          - name: Windows x86-64 / Python 3.13
-            artifact: windows-x86_64-py313
-            runner: windows-latest
-            target: x64
-            python-version: "3.13"
-            interpreter: python
-            manylinux: auto
-          - name: Windows x86-64 / Python 3.14
-            artifact: windows-x86_64-py314
-            runner: windows-latest
-            target: x64
-            python-version: "3.14"
             interpreter: python
             manylinux: auto
 
@@ -141,7 +73,7 @@ jobs:
 
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version: ${{ matrix.python.version }}
 
       - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
         with:
@@ -150,8 +82,8 @@ jobs:
       - name: Build portable wheel
         uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
         with:
-          target: ${{ matrix.target }}
-          manylinux: ${{ matrix.manylinux }}
+          target: ${{ matrix.platform.target }}
+          manylinux: ${{ matrix.platform.manylinux }}
           maturin-version: v1.14.1
           rust-toolchain: 1.94.0
           args: >-
@@ -159,7 +91,7 @@ jobs:
             --locked
             --compatibility pypi
             --out dist/wheelhouse
-            --interpreter ${{ matrix.interpreter }}
+            --interpreter ${{ matrix.platform.interpreter == 'versioned' && format('python{0}', matrix.python.version) || matrix.platform.interpreter }}
             --manifest-path packages/advect-native/Cargo.toml
 
       - name: Smoke-test installed wheel
@@ -195,7 +127,7 @@ jobs:
       - name: Upload wheel
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
-          name: advect-distribution-${{ matrix.artifact }}
+          name: advect-distribution-${{ matrix.platform.artifact }}-${{ matrix.python.artifact }}
           path: dist/wheelhouse/advect-*.whl
           if-no-files-found: error
 

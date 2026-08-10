@@ -344,6 +344,3 @@ def _vjp_bincount(
         "xp.ndarray",
         _astype_preserving_trace(gathered, dtype=cast("Any", weights).dtype),
     )
-
-
-__all__ = ["_vjp_bincount", "_vjp_take", "_vjp_take_along_axis"]

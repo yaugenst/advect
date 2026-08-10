@@ -214,18 +214,6 @@ def _astype(
     )
 
 
-def _clip(
-    specs: Sequence[ArraySpec],
-    _attrs: Mapping[str, Any],
-) -> tuple[ArraySpec, ...]:
-    return (
-        ArraySpec(
-            broadcast_shape(*(spec.shape for spec in specs)),
-            promote_dtype(specs),
-        ),
-    )
-
-
 EVALUATORS: dict[str, ResultEvaluator] = {
     "same": _same,
     "real": _real,
@@ -235,5 +223,5 @@ EVALUATORS: dict[str, ResultEvaluator] = {
     "true_divide": _true_divide,
     "where": _where,
     "astype": _astype,
-    "clip": _clip,
+    "clip": _broadcast,
 }

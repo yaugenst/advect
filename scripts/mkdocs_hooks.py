@@ -77,40 +77,29 @@ def on_config(config: MkDocsConfig) -> None:
     config.extra["theme_css_version"] = hashlib.sha256(stylesheet.read_bytes()).hexdigest()[:12]
 
 
-def on_pre_build(config: object) -> None:
-    """Stage the playground adapter and the browser wheel."""
-    del config
-    assets = _ROOT / "docs" / "assets"
+def _stage_browser_assets(site_dir: Path) -> None:
+    """Copy the playground adapter and current browser wheel into the built site."""
+    assets = site_dir / "assets"
     assets.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(
         _ROOT / "docs-theme" / "playground_runtime.py",
         assets / "playground_runtime.py",
     )
 
-    # the pyodide wheel: prefer a fresh build, else keep the staged copy
     wheel_pattern = f"advect-{_package_version()}-*.whl"
     wheels = list((_ROOT / "dist" / "pyodide").glob(wheel_pattern))
-    staged_wheels = list(assets.glob(wheel_pattern))
-    if wheels:
-        if len(wheels) != 1:
-            message = f"expected one current browser wheel, found {len(wheels)}"
-            raise RuntimeError(message)
-        wheel = wheels[0]
-        for stale_wheel in assets.glob("advect-*.whl"):
-            stale_wheel.unlink()
-        shutil.copyfile(wheel, assets / wheel.name)
-    elif not staged_wheels:
+    if not wheels:
         message = (
             "no browser wheel: run `mkdir -p dist && "
             "uvx --from pyodide-build==0.36.0 pyodide build . "
             "--outdir dist/pyodide` first"
         )
         raise FileNotFoundError(message)
-    else:
-        if len(staged_wheels) != 1:
-            message = f"expected one staged current browser wheel, found {len(staged_wheels)}"
-            raise RuntimeError(message)
-        wheel = staged_wheels[0]
+    if len(wheels) != 1:
+        message = f"expected one current browser wheel, found {len(wheels)}"
+        raise RuntimeError(message)
+    wheel = wheels[0]
+    shutil.copyfile(wheel, assets / wheel.name)
 
     (assets / "advect-browser-wheel.json").write_text(
         json.dumps({"filename": wheel.name}, indent=2) + "\n",
@@ -120,8 +109,9 @@ def on_pre_build(config: object) -> None:
 
 @event_priority(-100)
 def on_post_build(config: MkDocsConfig) -> None:
-    """Validate the version-local agent documentation after plugins finish."""
+    """Stage browser assets and validate agent documentation after plugins finish."""
     site_dir = Path(config.site_dir)
+    _stage_browser_assets(site_dir)
     site_url = str(config.site_url).rstrip("/") + "/"
     index_html = (site_dir / "index.html").read_text(encoding="utf-8")
     llms_text = (site_dir / "llms.txt").read_text(encoding="utf-8")
@@ -187,7 +177,6 @@ def on_post_build(config: MkDocsConfig) -> None:
         "scipy/special": ("### gammaln", "### log_softmax"),
         "scipy/ndimage": ("### gaussian_filter", "### black_tophat"),
         "scipy/solvers": ("### root_solver", "### gmres_solver"),
-        "xarray": ("### register",),
         "interop": ("All three bridges are first-order reverse-mode boundaries",),
         "interop/torch": ("first-order PyTorch operation",),
         "interop/jax": ("first-order JAX operation",),

@@ -60,10 +60,3 @@ use_self = "allow"
 lto = "thin"
 codegen-units = 1
 overflow-checks = true
-
-[profile.bench]
-debug = true
-
-[profile.profiling]
-inherits = "release"
-debug = "line-tables-only"

@@ -19,58 +19,10 @@ const PRODUCER: &str = "advect";
 const COMPILER_VERSION: u32 = 1;
 const OPTIMIZER_VERSION: u32 = 2;
 
-/// Validated portable graph artifact.
-#[derive(Debug)]
-pub struct GraphArtifact {
-    store: GraphStore,
-}
-
-impl GraphArtifact {
-    /// Validate and wrap one immutable graph for serialization.
-    pub fn from_store(store: GraphStore) -> Result<Self, ArtifactError> {
-        if store.version() != GRAPH_FORMAT_VERSION {
-            return Err(ArtifactError::new(format!(
-                "Unsupported graph version {:?}; expected {:?}",
-                store.version(),
-                GRAPH_FORMAT_VERSION
-            )));
-        }
-        store
-            .validate()
-            .map_err(|error| ArtifactError::new(error.to_string()))?;
-        Ok(Self { store })
-    }
-
-    /// Borrow the validated graph.
-    #[must_use]
-    pub const fn store(&self) -> &GraphStore {
-        &self.store
-    }
-
-    /// Consume into the immutable graph.
-    #[must_use]
-    pub fn into_store(self) -> GraphStore {
-        self.store
-    }
-
-    /// Serialize canonical compact JSON.
+impl GraphStore {
+    /// Serialize this validated graph as canonical compact JSON.
     pub fn to_json(&self) -> Result<String, ArtifactError> {
-        Self::store_to_json(&self.store)
-    }
-
-    /// Serialize a borrowed validated graph without transferring ownership.
-    pub fn store_to_json(store: &GraphStore) -> Result<String, ArtifactError> {
-        if store.version() != GRAPH_FORMAT_VERSION {
-            return Err(ArtifactError::new(format!(
-                "Unsupported graph version {:?}; expected {:?}",
-                store.version(),
-                GRAPH_FORMAT_VERSION
-            )));
-        }
-        store
-            .validate()
-            .map_err(|error| ArtifactError::new(error.to_string()))?;
-        serde_json::to_string(&GraphWireRef::from_store(store)?)
+        serde_json::to_string(&GraphWireRef::from_store(self)?)
             .map_err(|error| ArtifactError::new(format!("graph serialization failed: {error}")))
     }
 
@@ -80,8 +32,7 @@ impl GraphArtifact {
             ArtifactError::new(format!("graph deserialization failed: {error}"))
         })?;
         wire.validate_header()?;
-        let store = wire.into_store()?;
-        Self::from_store(store)
+        wire.into_store()
     }
 }
 
@@ -256,8 +207,7 @@ impl GraphWire {
             }
         }
         GraphStore::from_parts(
-            self.version,
-            self.required_array_api_version,
+            &self.required_array_api_version,
             arena,
             metadata,
             self.inputs,
@@ -350,7 +300,7 @@ mod tests {
     }
 
     fn canonical_graph_json() -> String {
-        let mut builder = GraphBuilder::new(GRAPH_FORMAT_VERSION).unwrap();
+        let mut builder = GraphBuilder::new();
         let input = builder.append_input(metadata(vec![], "float64")).unwrap();
         let constant = PortableConstant::new(
             ConstantKind::Scalar,
@@ -383,8 +333,7 @@ mod tests {
             )
             .unwrap();
         builder.append_output(output).unwrap();
-        let artifact = GraphArtifact::from_store(builder.finish().unwrap().store).unwrap();
-        artifact.to_json().unwrap()
+        builder.finish().unwrap().store.to_json().unwrap()
     }
 
     fn replaced(payload: &Value, pointer: &str, value: Value) -> Value {
@@ -407,7 +356,7 @@ mod tests {
     #[test]
     fn graph_round_trip_is_byte_identical() {
         let encoded = canonical_graph_json();
-        let restored = GraphArtifact::from_json(&encoded).unwrap();
+        let restored = GraphStore::from_json(&encoded).unwrap();
         assert_eq!(restored.to_json().unwrap(), encoded);
     }
 
@@ -441,6 +390,15 @@ mod tests {
                 replaced(&valid, "/constants/1/digest", json!("0".repeat(64))),
             ),
             (
+                "constant for missing node",
+                inserted(
+                    &valid,
+                    "/constants",
+                    "99",
+                    valid.pointer("/constants/1").unwrap().clone(),
+                ),
+            ),
+            (
                 "wrong header",
                 replaced(&valid, "/format", json!("not.advect.graph")),
             ),
@@ -464,7 +422,7 @@ mod tests {
 
         for (label, payload) in cases {
             assert!(
-                GraphArtifact::from_json(&payload.to_string()).is_err(),
+                GraphStore::from_json(&payload.to_string()).is_err(),
                 "{label} unexpectedly loaded"
             );
         }

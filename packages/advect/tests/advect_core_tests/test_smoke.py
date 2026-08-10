@@ -4,11 +4,9 @@ from __future__ import annotations
 
 import subprocess
 import sys
+from importlib import import_module
 
 import advect as ad
-from advect import autodiff
-from advect._autodiff_exports import AUTODIFF_EXPORT_MODULES
-from advect.autodiff import api as autodiff_api
 
 
 def test_import_and_version() -> None:
@@ -17,14 +15,11 @@ def test_import_and_version() -> None:
     assert ad.__version__
 
 
-def test_public_autodiff_facades_share_one_export_inventory() -> None:
-    names = list(AUTODIFF_EXPORT_MODULES)
-    assert autodiff.__all__ == names
-    assert autodiff_api.__all__ == names
-    assert set(names) <= set(ad.__all__)
-    for name in names:
-        assert getattr(ad, name) is getattr(autodiff, name)
-        assert getattr(autodiff, name) is getattr(autodiff_api, name)
+def test_public_autodiff_exports_resolve_from_root() -> None:
+    assert set(ad._AUTODIFF_EXPORT_MODULES) <= set(ad.__all__)
+    for name, module in ad._AUTODIFF_EXPORT_MODULES.items():
+        leaf = import_module(f"advect.autodiff.api.{module}")
+        assert getattr(ad, name) is getattr(leaf, name)
 
 
 def test_root_import_keeps_autodiff_lazy() -> None:

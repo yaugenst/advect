@@ -91,41 +91,11 @@ class ArrayProtocolEvalRuntime:
         inputs: tuple[object, ...],
         attrs: dict[str, object],
     ) -> object:
-        op_legacy = decanonicalize_array_op(op)
-        if op in self.special_evaluators:
-            return self.special_evaluators[op](inputs, attrs)
-        if op_legacy in self.special_evaluators:
-            return self.special_evaluators[op_legacy](inputs, attrs)
-
-        func_info = self._get_backend_func(op)
-        if func_info is None:
+        evaluator = self.bind_evaluator(op, attrs)
+        if evaluator is None:
             msg = f"Unknown operation: {op}"
             raise ValueError(msg)
-
-        func, valid_params, accepts_var_keyword = func_info
-        if self._looks_like_ufunc(func):
-            allowed_ufunc_kwargs = {
-                "casting",
-                "dtype",
-                "order",
-                "signature",
-                "subok",
-                "where",
-            }
-            user_kwargs = {
-                k: v
-                for k, v in attrs.items()
-                if (not k.startswith("_advect_")) and (k in allowed_ufunc_kwargs)
-            }
-
-            return func(*inputs, **user_kwargs)
-
-        filtered_attrs = self._filter_attrs(
-            attrs,
-            valid_params,
-            accepts_var_keyword=accepts_var_keyword,
-        )
-        return func(*inputs, **filtered_attrs)
+        return evaluator(inputs)
 
     def bind_evaluator(
         self,

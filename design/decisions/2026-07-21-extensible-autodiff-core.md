@@ -8,9 +8,7 @@
 
 The original Axon implementation proved that a reusable native graph can execute differentiated programs
 quickly, but its default dynamic path became a durable-graph construction path.
-Checked-in measurements show that warmed reusable programs beat HIPS Autograd,
-while one-shot tracing is commonly two to four times slower. The implementation
-also accumulated several overlapping concepts:
+The implementation also accumulated several overlapping concepts:
 
 - storage mutation and version validation in the compute IR;
 - dynamic and static behavior selected through `cache=` arguments;
@@ -353,8 +351,8 @@ not retain compatibility authority over this reset.
 
 The replacement core is accepted only when it demonstrates:
 
-1. Dynamic trace/gradient latency near HIPS Autograd on the agreed small-op and
-   scientific kernels, measured with shipping diagnostics.
+1. Dynamic trace/gradient latency remains within the reference-versus-candidate
+   regression gate on the agreed small-op and scientific kernels.
 2. Peak live payload memory and post-backward release competitive with the
    reference, including a field/stencil workload.
 3. The mutation matrix: aliases, copies, input rejection, basic indexed

@@ -192,23 +192,14 @@ class UfuncRuntime:
     def handle_ufunc(
         self,
         ufunc: UfuncLike,
-        method: str,
         recorder: DynamicTape,
         traced_type: type[TracedArrayLike],
         inputs: tuple[ArrayLike | float | TracedArrayLike, ...],
-        out: tuple[TracedArrayLike, ...] | None,
         kwargs: dict[str, object],
     ) -> tuple[UfuncValue, UfuncNodeIDs]:
         """Handle one ufunc call and emit graph node(s)."""
-        if method != "__call__":
-            msg = "Only __call__ is supported in Phase 1"
-            raise UfuncNotSupportedError(msg)
-
         if ufunc not in self.supported_ufuncs:
             msg = f"Unsupported ufunc: {ufunc.__name__}"
-            raise UfuncNotSupportedError(msg)
-        if out is not None:
-            msg = "ufunc out= must be functionalized by the traced-array protocol"
             raise UfuncNotSupportedError(msg)
 
         unsupported_kwargs = set(kwargs) - _SUPPORTED_CALL_KWARGS

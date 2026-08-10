@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal, cast
+from typing import Any
 
-from advect.autodiff.rules.array_family._backend_runtime import (
-    current_array_backend_provider,
-    xp,
+from advect.autodiff.rules.array_family._backend_runtime import xp
+from advect.autodiff.rules.array_family._transpose_utils import (
+    _diagonal_matrix as _diag_matrix,
+    _normalize_uplo,
+    _uses_standard_linalg_contract,
 )
 from advect.autodiff.rules.array_family.vjp.linalg.common import (
     _dtype_of,
@@ -17,24 +19,6 @@ from advect.autodiff.rules.array_family.vjp.linalg.common import (
 )
 
 _EIGH_OUTPUT_COUNT = 2
-
-
-def _uses_standard_linalg_contract() -> bool:
-    provider = current_array_backend_provider()
-    return provider is not None and provider.backend.split(".", 1)[0] != "numpy"
-
-
-def _diag_matrix(values: xp.ndarray, *, dtype: xp.dtype[Any]) -> xp.ndarray:
-    size = _shape_of(values)[-1]
-    return cast("xp.ndarray", xp.eye(size, dtype=dtype) * values[..., None, :])
-
-
-def _normalize_uplo(value: str) -> Literal["L", "U"]:
-    normalized = str(value).upper()
-    if normalized not in {"L", "U"}:
-        msg = f"expected UPLO='L' or 'U', got {value!r}"
-        raise ValueError(msg)
-    return cast("Literal['L', 'U']", normalized)
 
 
 def _vjp_eigvalsh(
@@ -91,6 +75,3 @@ def _vjp_eigh(
 
     natural = eigenvectors @ local @ _h(eigenvectors)
     return (_hermitian_triangle_adjoint(natural, uplo=uplo),)
-
-
-__all__ = ["_vjp_eigh", "_vjp_eigvalsh"]

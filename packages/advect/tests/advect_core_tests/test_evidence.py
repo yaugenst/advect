@@ -60,7 +60,7 @@ def test_evidence_report_header_has_a_shared_contract(
 def test_official_suite_report_uses_the_shared_evidence_contract(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from scripts._support import run_array_api_conformance  # noqa: PLC0415
+    from scripts import run_array_api_conformance  # noqa: PLC0415
 
     monkeypatch.setenv("ADVECT_SOURCE_REVISION", "source-state")
 

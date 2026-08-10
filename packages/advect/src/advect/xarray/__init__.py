@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 try:
-    from advect.xarray._pytree import register_xarray_pytrees
+    from advect.xarray._pytree import register_xarray_pytrees as _register_xarray_pytrees
 except ModuleNotFoundError as error:
     if error.name != "xarray":
         raise
@@ -13,12 +13,7 @@ except ModuleNotFoundError as error:
     )
     raise ModuleNotFoundError(msg) from None
 
-__all__ = ["register"]
+__all__: list[str]
+__all__ = []
 
-
-def register() -> None:
-    """Register xarray's two labeled containers with Advect's pytree core."""
-    register_xarray_pytrees()
-
-
-register()
+_register_xarray_pytrees()

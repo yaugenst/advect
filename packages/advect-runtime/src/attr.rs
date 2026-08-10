@@ -93,11 +93,13 @@ impl<'de> Deserialize<'de> for ExactFloat {
 mod hex_bytes {
     use serde::{Deserialize, Deserializer, Serializer};
 
+    use crate::hex;
+
     pub(super) fn serialize<S>(bytes: &[u8], serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        serializer.serialize_str(&encode(bytes))
+        serializer.serialize_str(&hex::encode(bytes))
     }
 
     pub(super) fn deserialize<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
@@ -105,47 +107,8 @@ mod hex_bytes {
         D: Deserializer<'de>,
     {
         let encoded = String::deserialize(deserializer)?;
-        decode(&encoded).map_err(serde::de::Error::custom)
-    }
-
-    fn encode(bytes: &[u8]) -> String {
-        let mut encoded = String::with_capacity(bytes.len().saturating_mul(2));
-        for &byte in bytes {
-            encoded.push(hex_digit(byte >> 4));
-            encoded.push(hex_digit(byte & 0x0f));
-        }
-        encoded
-    }
-
-    fn decode(encoded: &str) -> Result<Vec<u8>, &'static str> {
-        if !encoded.len().is_multiple_of(2) {
-            return Err("hex byte string must contain an even number of characters");
-        }
-        encoded
-            .as_bytes()
-            .chunks_exact(2)
-            .map(|pair| {
-                let high = digit(*pair.first().ok_or("missing high hex digit")?)?;
-                let low = digit(*pair.get(1).ok_or("missing low hex digit")?)?;
-                Ok((high << 4) | low)
-            })
-            .collect()
-    }
-
-    fn digit(value: u8) -> Result<u8, &'static str> {
-        match value {
-            b'0'..=b'9' => Ok(value - b'0'),
-            b'a'..=b'f' => Ok(value - b'a' + 10),
-            _ => Err("hex byte string must use lowercase hexadecimal"),
-        }
-    }
-
-    fn hex_digit(value: u8) -> char {
-        char::from(if value < 10 {
-            b'0' + value
-        } else {
-            b'a' + (value - 10)
-        })
+        hex::decode(&encoded)
+            .map_err(|message| serde::de::Error::custom(format!("hex byte string {message}")))
     }
 }
 

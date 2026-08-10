@@ -3,8 +3,7 @@
 use std::collections::BTreeMap;
 
 use crate::{
-    GRAPH_FORMAT_VERSION, GraphError, NodeFlags, NodeId, NodeMetadata, NodeRecord,
-    PortableConstant, RawArena, Topology, optimize,
+    GraphError, NodeFlags, NodeId, NodeMetadata, NodeRecord, PortableConstant, RawArena, optimize,
 };
 
 /// Array API revisions which may be required by a durable graph.
@@ -12,20 +11,22 @@ pub const SUPPORTED_ARRAY_API_VERSIONS: &[&str] = &["2022.12", "2023.12", "2024.
 /// Default portable contract for newly constructed graphs.
 pub const LATEST_ARRAY_API_VERSION: &str = "2024.12";
 
-fn validate_array_api_version(version: &str) -> Result<(), GraphError> {
-    if SUPPORTED_ARRAY_API_VERSIONS.contains(&version) {
-        return Ok(());
-    }
-    Err(GraphError::new(format!(
-        "Unsupported required Array API version {version:?}"
-    )))
+fn validate_array_api_version(version: &str) -> Result<&'static str, GraphError> {
+    SUPPORTED_ARRAY_API_VERSIONS
+        .iter()
+        .copied()
+        .find(|candidate| *candidate == version)
+        .ok_or_else(|| {
+            GraphError::new(format!(
+                "Unsupported required Array API version {version:?}"
+            ))
+        })
 }
 
 /// Mutable append-topological construction state.
 #[derive(Debug)]
 pub struct GraphBuilder {
-    version: String,
-    required_array_api_version: String,
+    required_array_api_version: &'static str,
     arena: RawArena,
     metadata: Vec<NodeMetadata>,
     inputs: Vec<NodeId>,
@@ -35,26 +36,22 @@ pub struct GraphBuilder {
 
 impl GraphBuilder {
     /// Create an empty graph builder.
-    pub fn new(version: impl Into<String>) -> Result<Self, GraphError> {
-        Self::new_for_array_api(version, LATEST_ARRAY_API_VERSION)
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            required_array_api_version: LATEST_ARRAY_API_VERSION,
+            arena: RawArena::default(),
+            metadata: Vec::new(),
+            inputs: Vec::new(),
+            outputs: Vec::new(),
+            constants: BTreeMap::new(),
+        }
     }
 
     /// Create an empty builder for one explicit portable Array API contract.
-    pub fn new_for_array_api(
-        version: impl Into<String>,
-        required_array_api_version: impl Into<String>,
-    ) -> Result<Self, GraphError> {
-        let version = version.into();
-        if version != GRAPH_FORMAT_VERSION {
-            return Err(GraphError::new(format!(
-                "Unsupported graph version {version:?}; expected {GRAPH_FORMAT_VERSION:?}"
-            )));
-        }
-        let required_array_api_version = required_array_api_version.into();
-        validate_array_api_version(&required_array_api_version)?;
+    pub fn new_for_array_api(required_array_api_version: &str) -> Result<Self, GraphError> {
         Ok(Self {
-            version,
-            required_array_api_version,
+            required_array_api_version: validate_array_api_version(required_array_api_version)?,
             arena: RawArena::default(),
             metadata: Vec::new(),
             inputs: Vec::new(),
@@ -145,7 +142,6 @@ impl GraphBuilder {
     /// [`optimize`] themselves; [`Self::finish`] composes the two.
     pub fn finish_unoptimized(self) -> Result<GraphStore, GraphError> {
         GraphStore::from_parts(
-            self.version,
             self.required_array_api_version,
             self.arena,
             self.metadata,
@@ -168,22 +164,25 @@ impl GraphBuilder {
     }
 }
 
+impl Default for GraphBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Finalized immutable compute graph.
 #[derive(Debug)]
 pub struct GraphStore {
-    version: String,
-    required_array_api_version: String,
+    required_array_api_version: &'static str,
     arena: RawArena,
     metadata: Vec<NodeMetadata>,
     inputs: Vec<NodeId>,
     outputs: Vec<NodeId>,
     constants: BTreeMap<NodeId, PortableConstant>,
-    topology: Topology,
 }
 
 pub(crate) type GraphParts = (
-    String,
-    String,
+    &'static str,
     RawArena,
     Vec<NodeMetadata>,
     Vec<NodeId>,
@@ -193,62 +192,46 @@ pub(crate) type GraphParts = (
 
 impl GraphStore {
     pub(crate) fn from_parts(
-        version: String,
-        required_array_api_version: String,
+        required_array_api_version: &str,
         arena: RawArena,
         metadata: Vec<NodeMetadata>,
         inputs: Vec<NodeId>,
         outputs: Vec<NodeId>,
         constants: BTreeMap<NodeId, PortableConstant>,
     ) -> Result<Self, GraphError> {
-        if version != GRAPH_FORMAT_VERSION {
-            return Err(GraphError::new(format!(
-                "Unsupported graph version {version:?}; expected {GRAPH_FORMAT_VERSION:?}"
-            )));
-        }
-        validate_array_api_version(&required_array_api_version)?;
+        let required_array_api_version = validate_array_api_version(required_array_api_version)?;
         if metadata.len() != arena.node_count() {
             return Err(GraphError::new(
                 "graph metadata does not match the structural arena",
             ));
         }
-        let topology = Topology::build(&arena, &inputs, &outputs)
-            .map_err(|error| GraphError::new(error.into_message()))?;
         let store = Self {
-            version,
             required_array_api_version,
             arena,
             metadata,
             inputs,
             outputs,
             constants,
-            topology,
         };
         store.validate()?;
         Ok(store)
     }
 
-    /// Graph-format version string.
-    #[must_use]
-    pub fn version(&self) -> &str {
-        &self.version
-    }
-
     /// Minimum Array API revision required to execute this graph.
     #[must_use]
-    pub fn required_array_api_version(&self) -> &str {
-        &self.required_array_api_version
+    pub const fn required_array_api_version(&self) -> &'static str {
+        self.required_array_api_version
     }
 
     /// Structural arena.
     #[must_use]
-    pub const fn arena(&self) -> &RawArena {
+    pub(crate) const fn arena(&self) -> &RawArena {
         &self.arena
     }
 
     /// Dense metadata aligned with arena nodes.
     #[must_use]
-    pub fn metadata(&self) -> &[NodeMetadata] {
+    pub(crate) fn metadata(&self) -> &[NodeMetadata] {
         &self.metadata
     }
 
@@ -279,7 +262,9 @@ impl GraphStore {
     /// Dense append order.
     #[must_use]
     pub fn topological_order(&self) -> Vec<NodeId> {
-        self.topology.topological_order()
+        (0..self.node_count())
+            .map_while(|index| NodeId::try_from(index).ok())
+            .collect()
     }
 
     /// Inspect one immutable node snapshot.
@@ -294,16 +279,19 @@ impl GraphStore {
     }
 
     /// Validate all closed graph invariants.
-    pub fn validate(&self) -> Result<(), GraphError> {
-        let topology_matches = self.topology.node_count() == self.arena.node_count();
-        let metadata_matches = self.metadata.len() == self.arena.node_count();
-        if !topology_matches || !metadata_matches {
-            return Err(GraphError::new(
-                "finalized topology does not match the graph arena",
-            ));
+    fn validate(&self) -> Result<(), GraphError> {
+        validate_endpoints(self.node_count(), &self.outputs, "output", false)?;
+        for &constant_id in self.constants.keys() {
+            validate_endpoint(self.node_count(), constant_id, "constant", None)?;
         }
         let mut declared_inputs = vec![false; self.arena.node_count()];
         for &input_id in &self.inputs {
+            validate_endpoint(
+                self.node_count(),
+                input_id,
+                "input",
+                Some(&mut declared_inputs),
+            )?;
             let record = self.get_node(input_id)?;
             if record.op != "advect.input"
                 || record.schema_version != 1
@@ -315,12 +303,6 @@ impl GraphStore {
                     "declared input is not a single-output schema-1 operand-free advect.input node",
                 ));
             }
-            let input_index = usize::try_from(input_id)
-                .map_err(|_| GraphError::at_node(input_id, "input ID exceeds host range"))?;
-            *declared_inputs
-                .get_mut(input_index)
-                .ok_or_else(|| GraphError::at_node(input_id, "declared input does not exist"))? =
-                true;
         }
         for (node_index, node) in self.arena.nodes().iter().copied().enumerate() {
             let node_id = NodeId::try_from(node_index)
@@ -385,7 +367,6 @@ impl GraphStore {
 
     pub(crate) fn into_parts(self) -> GraphParts {
         (
-            self.version,
             self.required_array_api_version,
             self.arena,
             self.metadata,
@@ -394,4 +375,46 @@ impl GraphStore {
             self.constants,
         )
     }
+}
+
+fn validate_endpoints(
+    node_count: usize,
+    node_ids: &[NodeId],
+    label: &str,
+    require_unique: bool,
+) -> Result<(), GraphError> {
+    let mut seen = require_unique.then(|| vec![false; node_count]);
+    for &node_id in node_ids {
+        validate_endpoint(node_count, node_id, label, seen.as_mut())?;
+    }
+    Ok(())
+}
+
+fn validate_endpoint(
+    node_count: usize,
+    node_id: NodeId,
+    label: &str,
+    seen: Option<&mut Vec<bool>>,
+) -> Result<(), GraphError> {
+    let index = usize::try_from(node_id).map_err(|_| {
+        GraphError::at_node(node_id, format!("graph {label} ID exceeded its range"))
+    })?;
+    if index >= node_count {
+        return Err(GraphError::at_node(
+            node_id,
+            format!("graph {label} does not exist"),
+        ));
+    }
+    if let Some(seen) = seen {
+        let duplicate = seen
+            .get_mut(index)
+            .ok_or_else(|| GraphError::at_node(node_id, format!("graph {label} does not exist")))?;
+        if *duplicate {
+            return Err(GraphError::new(format!(
+                "graph {label}s contain duplicate node IDs"
+            )));
+        }
+        *duplicate = true;
+    }
+    Ok(())
 }

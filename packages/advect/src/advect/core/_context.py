@@ -347,10 +347,6 @@ def is_debug() -> bool:
     bool
         True if debug mode is enabled, False otherwise.
 
-    See Also
-    --------
-    set_debug : Enable or disable debug mode.
-
     """
     return getattr(_thread_local, "debug", False)
 
@@ -383,25 +379,6 @@ def _numerics_context(phase: str, source_location: str | None) -> Iterator[None]
         _thread_local.numerics_context = previous
 
 
-def set_debug(*, enabled: bool) -> None:
-    """Enable or disable debug mode.
-
-    Debug mode enables additional trace diagnostics.
-
-    Parameters
-    ----------
-    enabled
-        True to enable debug mode, False to disable.
-
-    Notes
-    -----
-    Debug mode adds diagnostic overhead and should normally be disabled in hot
-    paths.
-
-    """
-    _thread_local.debug = enabled
-
-
 @contextmanager
 def debug(*, numerics: bool = False) -> Iterator[None]:
     """Enable scoped trace diagnostics.
@@ -415,12 +392,12 @@ def debug(*, numerics: bool = False) -> Iterator[None]:
         bool(getattr(_thread_local, "debug", False)),
         bool(getattr(_thread_local, "debug_numerics", False)),
     )
-    set_debug(enabled=True)
+    _thread_local.debug = True
     _thread_local.debug_numerics = bool(numerics)
     try:
         yield
     finally:
-        set_debug(enabled=previous[0])
+        _thread_local.debug = previous[0]
         _thread_local.debug_numerics = previous[1]
 
 

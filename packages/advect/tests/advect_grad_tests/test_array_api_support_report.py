@@ -7,7 +7,7 @@ from collections import Counter
 from typing import TYPE_CHECKING
 
 import pytest
-from scripts._support import report_array_api_support, run_array_api_conformance
+from scripts import report_array_api_support, run_array_api_conformance
 
 from advect.core._array_api.frontend import _ARRAY_API_META_FUNCTIONS
 from advect.core._array_api.profiles import (

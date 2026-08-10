@@ -1,9 +1,6 @@
 # Taplo TOML formatter configuration
 # https://taplo.tamasfe.dev/configuration/formatter-options.html
 
-include = [ "*.toml", "**/*.toml" ]
-exclude = [ "uv.lock" ]
-
 [formatting]
 align_comments = true
 align_entries = false

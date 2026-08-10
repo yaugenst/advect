@@ -13,37 +13,20 @@ from advect.autodiff.rules.array_family.jvp.common import (
 )
 
 
-def _jvp_zeros_like(
+def _constant_tangent(
     ans: xp.ndarray,
     *inputs: xp.ndarray,
     tangents: tuple[xp.ndarray | None, ...],
     **attrs: Any,
 ) -> xp.ndarray:
-    """JVP for numpy.zeros_like."""
+    """Return the zero tangent shared by constant creation operations."""
     _ = inputs, attrs
     return _zeros_output_tangent(ans, tangents)
 
 
-def _jvp_ones_like(
-    ans: xp.ndarray,
-    *inputs: xp.ndarray,
-    tangents: tuple[xp.ndarray | None, ...],
-    **attrs: Any,
-) -> xp.ndarray:
-    """JVP for numpy.ones_like."""
-    _ = inputs, attrs
-    return _zeros_output_tangent(ans, tangents)
-
-
-def _jvp_empty_like(
-    ans: xp.ndarray,
-    *inputs: xp.ndarray,
-    tangents: tuple[xp.ndarray | None, ...],
-    **attrs: Any,
-) -> xp.ndarray:
-    """JVP for numpy.empty_like."""
-    _ = inputs, attrs
-    return _zeros_output_tangent(ans, tangents)
+_jvp_zeros_like = _constant_tangent
+_jvp_ones_like = _constant_tangent
+_jvp_empty_like = _constant_tangent
 
 
 def _jvp_full(

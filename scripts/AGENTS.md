@@ -4,7 +4,7 @@
 
 - Qualification, support reporting, evidence assembly, benchmarks, release
   checks, smoke tests, documentation hooks, and documentation snippet tooling.
-- Thin command entry points over reusable private script support.
+- Importable command modules shared by CLI invocations and focused tests.
 
 ## Must not own
 

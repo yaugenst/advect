@@ -1111,10 +1111,11 @@ def _default_array_namespace(*, array_api_version: str) -> Any:
     return namespace
 
 
-def _mark_weak_output_tree(
+def _restore_staged_output_tree(
     value: Any,
     *,
     output_specs: Sequence[ArraySpec],
+    restore_scalars: bool,
 ) -> Any:
     leaves, treedef = tree_flatten(value)
     if len(leaves) != len(output_specs):
@@ -1123,33 +1124,18 @@ def _mark_weak_output_tree(
             f"expected {len(output_specs)} leaves, got {len(leaves)}"
         )
         raise RuntimeError(msg)
+    restored: list[Any] = []
     for leaf, spec in zip(leaves, output_specs, strict=True):
-        if not spec.weak:
-            continue
-        mark_weak = getattr(leaf, "_advect_mark_weak", None)
-        if callable(mark_weak):
-            mark_weak()
-    return tree_unflatten(treedef, leaves)
-
-
-def _unlift_rank_zero_tree(
-    value: Any,
-    *,
-    output_specs: Sequence[ArraySpec],
-) -> Any:
-    leaves, treedef = tree_flatten(value)
-    if len(leaves) != len(output_specs):
-        msg = (
-            "Staged output specifications do not match the runtime output pytree: "
-            f"expected {len(output_specs)} leaves, got {len(leaves)}"
-        )
-        raise RuntimeError(msg)
-    unlifted: list[Any] = []
-    for leaf, spec in zip(leaves, output_specs, strict=True):
+        if spec.weak:
+            mark_weak = getattr(leaf, "_advect_mark_weak", None)
+            if callable(mark_weak):
+                mark_weak()
         item = getattr(leaf, "item", None)
-        should_unlift = spec.weak and getattr(leaf, "shape", None) == () and callable(item)
-        unlifted.append(item() if should_unlift else leaf)
-    return tree_unflatten(treedef, unlifted)
+        should_unlift = (
+            restore_scalars and spec.weak and getattr(leaf, "shape", None) == () and callable(item)
+        )
+        restored.append(item() if should_unlift else leaf)
+    return tree_unflatten(treedef, restored)
 
 
 def _validate_runtime_namespace_profile(
@@ -1639,12 +1625,10 @@ class StagedProgram:
             for spec, is_scalar in zip(runtime_specs, scalar_runtime_inputs, strict=True)
         )
 
-        result = _execute_staged(artifact, self._execution_state, runtime_inputs)
-        result = _mark_weak_output_tree(result, output_specs=artifact.output_specs)
-        return (
-            _unlift_rank_zero_tree(result, output_specs=artifact.output_specs)
-            if restore_scalar_outputs
-            else result
+        return _restore_staged_output_tree(
+            _execute_staged(artifact, self._execution_state, runtime_inputs),
+            output_specs=artifact.output_specs,
+            restore_scalars=restore_scalar_outputs,
         )
 
 

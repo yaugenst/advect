@@ -139,11 +139,6 @@ def test_finish_runs_fixed_optimizer_and_reports_dense_remap() -> None:
     }
 
 
-def test_builder_rejects_unsupported_graph_version() -> None:
-    with pytest.raises(ValueError, match="Unsupported graph version"):
-        advect_native.GraphBuilder(version="1.0")
-
-
 def test_builder_assigns_dense_ids_and_rejects_forward_references() -> None:
     builder = advect_native.GraphBuilder()
     first = builder.append_input_node([2], "float32")
@@ -600,52 +595,3 @@ def test_native_staged_execution_donates_only_owned_unaliased_last_uses() -> Non
     assert donations == [None]
     np.testing.assert_array_equal(update_result, original + 1)
     np.testing.assert_array_equal(preserved_alias, original)
-
-
-def test_native_surface_exposes_only_append_only_graph_construction() -> None:
-    builder = advect_native.GraphBuilder()
-    node_id = builder.append_input_node([], "float64")
-
-    for removed in (
-        "append_input",
-        "constant_ids",
-        "get_node",
-        "insert_node",
-        "inputs",
-        "is_finished",
-        "node_count",
-        "node_ids",
-        "outputs",
-        "revision",
-        "set_constant",
-        "set_inputs",
-        "set_node_attrs",
-        "set_node_name",
-        "set_outputs",
-        "topological_order",
-        "validate",
-        "version",
-        "all_nodes_pure",
-        "has_any_node_attr_keys",
-        "get_constant",
-        "to_dict",
-    ):
-        assert not hasattr(builder, removed)
-
-    builder.append_output(node_id)
-    store, _, _ = _finish(builder)
-    node = store.get_node(node_id)
-    assert not hasattr(node, "array_format")
-    assert not hasattr(node, "is_pure")
-    for removed in (
-        "all_nodes_pure",
-        "get_constant",
-        "has_any_node_attr_keys",
-        "revision",
-        "resolve_constant_payload",
-        "topological_order",
-        "to_dict",
-        "validate",
-        "version",
-    ):
-        assert not hasattr(store, removed)
