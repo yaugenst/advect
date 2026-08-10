@@ -10,6 +10,7 @@ import pytest
 import advect as ad
 from advect.autodiff._ephemeral import trace_call
 from advect.core._array_api.profiles import (
+    LATEST_ARRAY_API_VERSION,
     SUPPORTED_ARRAY_API_VERSIONS,
     materialize_array_api_profile,
     minimum_array_api_version,
@@ -131,7 +132,7 @@ def test_negotiation_reports_every_attempted_revision() -> None:
 
 
 def test_dynamic_numpy_negotiation_uses_provider_declared_revision() -> None:
-    expected_array_api_version = np.__array_api_version__
+    expected_array_api_version = min(np.__array_api_version__, LATEST_ARRAY_API_VERSION)
     value = np.asarray([1.0, 2.0])
 
     traced = trace_call(

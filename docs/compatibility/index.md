@@ -8,7 +8,7 @@ Every listed function works in dynamic transforms. **Stage/save** says whether t
 
 | Integration | Contract |
 |---|---|
-| [NumPy](numpy.md) | 393 callable forms; NumPy 2.0-2.4 (2.4.6 in this build) |
+| [NumPy](numpy.md) | 392 callable forms; NumPy 2.0-2.5 (2.5.2 in this build) |
 | [Array API](array-api.md) | 169 namespace functions across revisions 2022.12-2024.12 |
 | [CuPy](cupy.md) | Array API provider path; pre-release qualification only |
 | [SciPy](scipy.md) | 42 functions and 2 solver adapters behind `advect[scipy]` |

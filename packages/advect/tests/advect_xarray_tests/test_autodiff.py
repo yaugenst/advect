@@ -84,7 +84,7 @@ def test_linearize_reuses_labeled_forward_and_reverse_map() -> None:
     output, linear = ad.linearize(project, field)
     try:
         first_tangent = linear(xr.ones_like(field))
-        second_tangent = linear(2.0 * xr.ones_like(field))
+        second_tangent = linear(xr.full_like(field, 2.0))
         input_cotangent = linear.pullback(xr.ones_like(output))
     finally:
         linear.close()
@@ -92,7 +92,7 @@ def test_linearize_reuses_labeled_forward_and_reverse_map() -> None:
     xr.testing.assert_identical(output, project(field))
     xr.testing.assert_identical(first_tangent, 3.0 * xr.ones_like(output))
     xr.testing.assert_identical(second_tangent, 6.0 * xr.ones_like(output))
-    xr.testing.assert_identical(input_cotangent, 3.0 * xr.ones_like(field))
+    xr.testing.assert_identical(input_cotangent, xr.full_like(field, 3.0))
 
 
 def test_dataset_gradient_differentiates_each_data_variable() -> None:
@@ -175,11 +175,8 @@ def test_staging_rejects_xarray_until_custom_pytree_codecs_exist() -> None:
 
 def test_stage_raw_data_and_reattach_labels_outside_program() -> None:
     field = _field()
-    program = ad.stage(
-        lambda data: 2.0 * data,
-        specs=(ad.ArraySpec(field.shape, field.dtype),),
-    )
+    program = ad.stage(lambda data: 2.0 * data, field.data)
 
     transformed = field.copy(data=program(field.data))
 
-    xr.testing.assert_identical(transformed, 2.0 * field)
+    xr.testing.assert_identical(transformed, field.copy(data=2.0 * field.data))

@@ -11,11 +11,10 @@ signature into a reusable, serializable array program.
 
 ## Install
 
-Advect requires Python 3.12 or newer. Until the first package release, install
-it from a checkout:
+Advect supports Python 3.12 through 3.14:
 
 ```bash
-python -m pip install .
+python -m pip install advect
 ```
 
 [SciPy](api/scipy/index.md) and [xarray](api/xarray.md) integrations are

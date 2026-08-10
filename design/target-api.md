@@ -375,9 +375,9 @@ Differences between the concrete NumPy frontend and the provider-neutral Array
 API frontend are explicit and tested. They share canonical operations and
 derivative semantics, not foreign calling conventions.
 
-NumPy 2.0 through 2.4 use a separate first-class profile selected from the
+NumPy 2.0 through 2.5 use a separate first-class profile selected from the
 installed minor. NumPy 2.0 defaults to Array API 2022.12, 2.1-2.2 to 2023.12,
-and 2.3-2.4 to 2024.12. A registered single-output array function with an
+and 2.3-2.5 to 2024.12. A registered single-output array function with an
 upstream `out=` parameter updates one owned tracer through pure SSA. The
 dynamic path asks that installed NumPy minor to validate the exact
 function-specific shape and casting rules against a private destination, then

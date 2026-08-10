@@ -6,7 +6,7 @@ draft pull request before committing to an implementation.
 
 ## Set up the repository
 
-Advect requires Python 3.12 or newer and Rust 1.94 or newer:
+Advect supports Python 3.12 through 3.14 and requires Rust 1.94 or newer:
 
 ```bash
 uv sync --all-groups

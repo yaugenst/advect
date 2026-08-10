@@ -351,7 +351,13 @@ def _composite_cases() -> tuple[NumpySupportCase, ...]:
         _unary("round", modes=_ALL_MODES),
         _unary("round", kwargs=(("decimals", 1),), variant="decimals"),
         _unary("around", kwargs=(("decimals", 1),)),
-        _unary("fix"),
+        _case(
+            "fix",
+            (_REAL,),
+            (Input(0),),
+            ((0,),),
+            expected_deprecation=r"numpy\.fix is deprecated",
+        ),
         _binary("vdot", _COMPLEX, _COMPLEX),
         _case(
             "linalg.multi_dot",
@@ -448,6 +454,11 @@ def _polynomial_cases() -> tuple[NumpySupportCase, ...]:
         _case("polyint", (coefficients,), (Input(0),), ((0,),), (("m", 1),)),
         _case("polyval", (coefficients, _REAL), (Input(0), Input(1)), ((0,), (1,), (0, 1))),
         _unary("roots", coefficients),
+        _unary(
+            "roots",
+            ArrayInput([1.0, 0.25, 1.0], "float64"),
+            variant="complex-output",
+        ),
     )
 
 

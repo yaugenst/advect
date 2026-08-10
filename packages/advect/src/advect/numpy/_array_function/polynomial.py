@@ -440,7 +440,10 @@ def _roots_handler(
     first_row = -coefficients[1:] / coefficients[0]
     companion = np.eye(degree, k=-1, dtype=coefficients.dtype) + np.sum(coefficients) * 0
     companion[0, :] = first_row
-    return _finish(np.linalg.eigvals(companion), traced_type=traced_type)
+    roots = np.linalg.eigvals(companion)
+    if not np.iscomplexobj(np.roots(concrete_array)):
+        roots = np.real(roots)
+    return _finish(roots, traced_type=traced_type)
 
 
 def register_polynomial_handlers(

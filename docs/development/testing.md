@@ -24,7 +24,7 @@ lifetime evidence required for a new public form.
 
 ## Python gates
 
-Set up the locked development environment with Python 3.12 or newer:
+Set up the locked development environment with Python 3.12 through 3.14:
 
 ```bash
 uv sync --all-groups
@@ -107,7 +107,7 @@ wheel and run the browser lane described in the [documentation guide](documentat
 
 - NumPy surface changes run
   `uv run pytest packages/advect/tests/advect_numpy_tests/test_support_evidence.py`
-  locally. NumPy 2.0–2.4 range evidence is owned by the `numpy-compatibility`
+  locally. NumPy 2.0–2.5 range evidence is owned by the `numpy-compatibility`
   matrix in `.github/workflows/ci.yml`; one locally installed minor is not
   range qualification.
 - Array API operation changes run

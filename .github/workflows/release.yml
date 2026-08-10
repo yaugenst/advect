@@ -81,6 +81,8 @@ jobs:
           python-version: "3.12"
 
       - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+        with:
+          enable-cache: false
 
       - name: Download candidate distributions
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -185,3 +187,27 @@ jobs:
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # release/v1
         with:
           packages-dir: dist
+
+  verify-pypi:
+    name: Verify public installation
+    needs: [validate, pypi]
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+        with:
+          enable-cache: false
+
+      - name: Install the published package
+        env:
+          RELEASE_VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          uv venv .pypi-smoke --python 3.14
+          uv pip install \
+            --python .pypi-smoke/bin/python \
+            --no-cache \
+            "advect==$RELEASE_VERSION"
+          .pypi-smoke/bin/python scripts/smoke_wheel_install.py base

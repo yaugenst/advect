@@ -11,6 +11,7 @@ import pytest
 
 import advect as ad
 import advect.numpy._stage_lifecycle as stage_lifecycle
+from advect.core._array_api.profiles import LATEST_ARRAY_API_VERSION
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -135,7 +136,7 @@ def test_stage_allows_deterministic_nested_autodiff() -> None:
     program = ad.stage(
         nested_gradient,
         specs=(ad.ArraySpec((2,), "float32"),),
-        array_api_version=np.__array_api_version__,
+        array_api_version=min(np.__array_api_version__, LATEST_ARRAY_API_VERSION),
     )
 
     np.testing.assert_array_equal(
@@ -193,7 +194,7 @@ def test_staging_rng_tripwire_does_not_affect_other_threads() -> None:
             ad.stage,
             blocking_identity,
             specs=(ad.ArraySpec((2,), "float32"),),
-            array_api_version=np.__array_api_version__,
+            array_api_version=min(np.__array_api_version__, LATEST_ARRAY_API_VERSION),
         )
         assert entered.wait(timeout=5)
         try:

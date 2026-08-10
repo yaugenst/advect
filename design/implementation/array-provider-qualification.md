@@ -6,7 +6,7 @@
 
 Advect's backend-neutral transform path is automatically qualified against
 Array API 2022.12, 2023.12, and 2024.12 on `array-api-strict`, plus the
-corresponding NumPy 2.0-2.4 profiles. One representative scientific program
+corresponding NumPy 2.0-2.5 profiles. One representative scientific program
 uses a shared source body, complex64 FFTs, a complex linear solve, a real
 scalar loss, three differentiated arguments, and a Python weak scalar. The
 qualification covers:
@@ -46,7 +46,7 @@ published evidence.
 
 ## Supported qualification matrix
 
-| Path | NumPy 2.0-2.4 | `array-api-strict` 2022.12-2024.12 | CuPy through compat |
+| Path | NumPy 2.0-2.5 | `array-api-strict` 2022.12-2024.12 | CuPy through compat |
 | --- | --- | --- | --- |
 | Dynamic value and multi-argument gradient | Pass | Pass | Local pass |
 | Dynamic JVP and VJP | Pass | Pass | Local pass |

@@ -3,9 +3,15 @@ name = "advect"
 dynamic = [ "version" ]
 description = "Extensible array tracing and automatic differentiation for Python"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.12,<3.15"
 license = "MIT"
-license-files = [ "LICENSE" ]
+license-files = [
+  "LICENSE",
+  "RUST_STDLIB_COPYRIGHT.html",
+  "RUST_STDLIB_LICENSE_MIT.txt",
+  "RUST_STDLIB_LICENSE_UNICODE_3_0.txt",
+  "THIRD_PARTY_LICENSES.txt",
+]
 authors = [ { name = "Yannick Augenstein" } ]
 keywords = [
   "tracing",
@@ -21,6 +27,7 @@ classifiers = [
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
   "Programming Language :: Rust",
   "Topic :: Scientific/Engineering",
   "Topic :: Scientific/Engineering :: Artificial Intelligence",
@@ -30,7 +37,7 @@ classifiers = [
 
 dependencies = [
   "array-api-compat>=1.11.2,<2",
-  "numpy>=2.0,<2.5",
+  "numpy>=2.0,<2.6",
 ]
 
 [project.urls]
@@ -44,10 +51,10 @@ jax = [ "jax>=0.11,<0.12" ]
 scipy = [ "scipy>=1.18,<1.19" ]
 scientific = [
   "scipy>=1.18,<1.19",
-  "xarray>=2026.7,<2026.8",
+  "xarray>=2024.6",
 ]
 torch = [ "torch>=2.13.0,<2.14" ]
-xarray = [ "xarray>=2026.7,<2026.8" ]
+xarray = [ "xarray>=2024.6" ]
 
 [dependency-groups]
 dev = [
@@ -59,7 +66,7 @@ dev = [
   "pytest>=9.0.3",
   "ruff>=0.14.6",
   "scipy>=1.18,<1.19",
-  "xarray>=2026.7,<2026.8",
+  "xarray>=2024.6",
 ]
 docs = [
   "mike>=2.1",

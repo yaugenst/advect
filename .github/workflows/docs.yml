@@ -79,6 +79,13 @@ jobs:
           mkdir -p dist
           pyodide build . --outdir dist/pyodide
 
+      - name: Test the Advect browser wheel
+        run: |
+          pyodide venv .venv-pyodide
+          .venv-pyodide/bin/python -m pip install dist/pyodide/advect-*.whl
+          .venv-pyodide/bin/python scripts/smoke_pyodide.py
+          .venv-pyodide/bin/python scripts/run_doc_snippets.py docs
+
       - name: Run the documentation snippets natively
         run: uv run python scripts/run_doc_snippets.py docs
 

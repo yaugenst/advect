@@ -19,8 +19,14 @@ env:
 
 jobs:
   python:
-    name: Python
+    name: Python ${{ matrix.python-version }}
     runs-on: ubuntu-latest
+    env:
+      PYTHON_VERSION: ${{ matrix.python-version }}
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13", "3.14"]
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -35,25 +41,32 @@ jobs:
           enable-cache: true
 
       - name: Set up Python
-        run: uv python install 3.12
+        run: uv python install "$PYTHON_VERSION"
 
       - name: Install dependencies
-        run: uv sync --all-groups --frozen
+        run: uv sync --all-groups --frozen --python "$PYTHON_VERSION"
+
+      - name: Check lockfile freshness
+        if: matrix.python-version == '3.12'
+        run: uv lock --check
 
       - name: Run repository hooks
+        if: matrix.python-version == '3.12'
         env:
           SKIP: no-commit-to-branch
         run: uv run pre-commit run --all-files --show-diff-on-failure
 
       - name: Check types
+        if: matrix.python-version == '3.12'
         run: >-
           uv run pyrefly check --config pyproject.toml --preset strict
           packages/advect/src
 
       - name: Test
-        run: uv run pytest --maxfail=1
+        run: .venv/bin/python -m pytest --maxfail=1
 
       - name: Search primitive conformance thoroughly
+        if: matrix.python-version == '3.12'
         run: >-
           uv run pytest packages/advect/tests/advect_conformance_tests
           --hypothesis-profile=thorough
@@ -64,7 +77,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        numpy-version: ["2.0.*", "2.1.*", "2.2.*", "2.3.*", "2.4.*"]
+        numpy-version: ["2.0.*", "2.1.*", "2.2.*", "2.3.*", "2.4.*", "2.5.*"]
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -87,7 +100,7 @@ jobs:
       - name: Select NumPy ${{ matrix.numpy-version }}
         env:
           NUMPY_VERSION: ${{ matrix.numpy-version }}
-        run: uv pip install --python .venv/bin/python "numpy==$NUMPY_VERSION"
+        run: uv pip install --python .venv/bin/python --upgrade "numpy==$NUMPY_VERSION"
 
       - name: Test the qualified NumPy surface
         run: >-
@@ -97,6 +110,8 @@ jobs:
           packages/advect/tests/advect_numpy_tests/test_registration.py
           packages/advect/tests/advect_numpy_tests/test_stage_rng.py
           packages/advect/tests/advect_numpy_tests/test_op_bindings.py
+          packages/advect/tests/advect_numpy_tests/dispatch/array_functions/test_out_param.py::test_staged_take_out_matches_numpy_casting_policy
+          packages/advect/tests/advect_numpy_tests/dispatch/array_functions/test_out_param.py::test_compress_out_matches_numpy_casting_policy
           packages/advect/tests/advect_grad_tests/test_numpy_autodiff.py
           packages/advect/tests/advect_grad_tests/test_jvp_api.py
 
@@ -133,12 +148,64 @@ jobs:
       - name: Select ${{ matrix.requirement }}
         env:
           ARRAY_API_COMPAT_REQUIREMENT: ${{ matrix.requirement }}
-        run: uv pip install --python .venv/bin/python "$ARRAY_API_COMPAT_REQUIREMENT"
+        run: >-
+          uv pip install --python .venv/bin/python
+          --upgrade "$ARRAY_API_COMPAT_REQUIREMENT"
 
       - name: Test every supported revision request
         run: >-
           .venv/bin/python -m pytest
           packages/advect/tests/advect_array_api_compat_tests/test_provider.py
+
+  xarray-compatibility:
+    name: xarray ${{ matrix.label }}
+    runs-on: ubuntu-latest
+    env:
+      PYTHON_VERSION: ${{ matrix.python-version }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: 2024.6 / NumPy 2.0
+            python-version: "3.12"
+            numpy-requirement: numpy==2.0.*
+            xarray-requirement: xarray==2024.6.0
+          - label: latest
+            python-version: "3.14"
+            numpy-requirement: numpy>=2.0,<2.6
+            xarray-requirement: xarray>=2024.6
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+        with:
+          toolchain: 1.94.0
+
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install "$PYTHON_VERSION"
+
+      - name: Install locked environment
+        run: uv sync --all-groups --frozen --python "$PYTHON_VERSION"
+
+      - name: Select xarray compatibility pair
+        env:
+          NUMPY_REQUIREMENT: ${{ matrix.numpy-requirement }}
+          XARRAY_REQUIREMENT: ${{ matrix.xarray-requirement }}
+        run: >-
+          uv pip install --python .venv/bin/python
+          --upgrade
+          "$NUMPY_REQUIREMENT" "$XARRAY_REQUIREMENT"
+
+      - name: Test the xarray boundary
+        run: >-
+          .venv/bin/python -m pytest
+          packages/advect/tests/advect_xarray_tests
 
   host-autodiff-interop:
     name: Host Autodiff Interop
@@ -335,6 +402,7 @@ jobs:
       - python
       - numpy-compatibility
       - array-api-compatibility
+      - xarray-compatibility
       - host-autodiff-interop
       - pyodide
       - docs
@@ -349,6 +417,7 @@ jobs:
           PYTHON_RESULT: ${{ needs.python.result }}
           NUMPY_RESULT: ${{ needs.numpy-compatibility.result }}
           ARRAY_API_COMPAT_RESULT: ${{ needs.array-api-compatibility.result }}
+          XARRAY_RESULT: ${{ needs.xarray-compatibility.result }}
           HOST_INTEROP_RESULT: ${{ needs.host-autodiff-interop.result }}
           PYODIDE_RESULT: ${{ needs.pyodide.result }}
           DOCS_RESULT: ${{ needs.docs.result }}
@@ -360,6 +429,7 @@ jobs:
             "$PYTHON_RESULT" \
             "$NUMPY_RESULT" \
             "$ARRAY_API_COMPAT_RESULT" \
+            "$XARRAY_RESULT" \
             "$HOST_INTEROP_RESULT" \
             "$PYODIDE_RESULT" \
             "$DOCS_RESULT" \

@@ -284,9 +284,9 @@ There is no `holomorphic=True` promise in the initial API.
 
 - NumPy remains a first-class frontend through `__array_ufunc__` and
   `__array_function__`.
-- Durable execution accepts NumPy 2.0 through 2.4 under `advect-array-1`. The
+- Durable execution accepts NumPy 2.0 through 2.5 under `advect-array-1`. The
   Array API target is 2022.12 for NumPy 2.0, 2023.12 for NumPy 2.1-2.2, and
-  2024.12 for NumPy 2.3-2.4.
+  2024.12 for NumPy 2.3-2.5.
 - Live NumPy handlers remain the lowering authority. Data-only executable
   invocation cases own advertised dynamic, staged, and serialized lifetimes;
   registration or abstract-rule presence alone cannot promote a mode. The

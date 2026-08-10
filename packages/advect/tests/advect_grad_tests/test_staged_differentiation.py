@@ -8,6 +8,7 @@ import pytest
 from numpy.testing import assert_allclose
 
 import advect as ad
+from advect.core._array_api.profiles import LATEST_ARRAY_API_VERSION
 
 
 def test_grad_preserves_staged_lifetime_and_round_trips() -> None:
@@ -196,7 +197,7 @@ def test_vjp_program_roundtrip_preserves_numpy_full_dispatch_anchor() -> None:
     primal = ad.stage(
         fill,
         specs=(ad.ArraySpec((), "float32"),),
-        array_api_version=np.__array_api_version__,
+        array_api_version=min(np.__array_api_version__, LATEST_ARRAY_API_VERSION),
     )
     pullback = ad.vjp_program(primal)
     restored = ad.StagedProgram.from_dict(pullback.to_dict())
@@ -220,7 +221,7 @@ def test_vjp_program_roundtrip_preserves_extreme_ldexp_scaling() -> None:
             ad.ArraySpec((4,), "float64"),
             ad.ArraySpec((4,), "int32"),
         ),
-        array_api_version=np.__array_api_version__,
+        array_api_version=min(np.__array_api_version__, LATEST_ARRAY_API_VERSION),
     )
     pullback = ad.vjp_program(primal, argnums=0)
     restored = ad.StagedProgram.from_dict(pullback.to_dict())

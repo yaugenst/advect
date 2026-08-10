@@ -248,8 +248,9 @@ def _raw_numerical_derivative(
         _shift_operands(operands, tangents, -step),
         captured.attrs,
     )
-    positive = _align_eigen_output(case.op, reference, positive)
-    negative = _align_eigen_output(case.op, reference, negative)
+    input_is_real = not np.iscomplexobj(operands[0])
+    positive = _align_eigen_output(case.op, reference, positive, input_is_real=input_is_real)
+    negative = _align_eigen_output(case.op, reference, negative, input_is_real=input_is_real)
     return [
         (to_numpy(upper) - to_numpy(lower)) / (2.0 * step)
         for upper, lower in zip(

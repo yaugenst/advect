@@ -84,12 +84,13 @@ that minor; they are not one cross-version invariant.
 | 2.2.6 | 395 | 395 | 254 | 84 |
 | 2.3.5 | 395 | 395 | 254 | 84 |
 | 2.4.6 | 393 | 393 | 252 | 84 |
+| 2.5.2 | — | 392 | 251 | 84 |
 
-No callable, handler, or ufunc call was removed in a same-minor comparison.
+No callable, handler, or ufunc call was removed in the same-minor comparisons.
 NumPy 2.1 adds `cumulative_prod`, `cumulative_sum`, and `unstack`; NumPy 2.2
-adds `matvec` and `vecmat`; NumPy 2.4 removes `in1d` and `trapz`. The candidate
-restores the nine `numpy.lib.scimath` rows missing from the baseline catalog on
-NumPy 2.0 and 2.1.
+adds `matvec` and `vecmat`; NumPy 2.4 removes `in1d` and `trapz`; NumPy 2.5
+removes `row_stack`. The candidate restores the nine `numpy.lib.scimath` rows
+missing from the baseline catalog on NumPy 2.0 and 2.1.
 
 The audit also preserves 44 root exports, 154 direct generated Array API
 bindings, 169 public Array API rows, and 224 built-in registry IDs. The full
@@ -105,7 +106,7 @@ the lane that matches the change:
 | Change | Implementation authority | Required executable evidence |
 |---|---|---|
 | Canonical differentiable operation | Complete `OpDef` and its JVP; an explicit VJP only when required | Conformance invocation for every material frontend/signature form, or a raw-rule case when no frontend reaches it |
-| NumPy function, ufunc form, or ndarray method | NumPy handler or method implementation plus compact support declaration | Test-only `NumpySupportCase` for every materially different static form and every claimed lifetime; retained contract on NumPy 2.0-2.4 |
+| NumPy function, ufunc form, or ndarray method | NumPy handler or method implementation plus compact support declaration | Test-only `NumpySupportCase` for every materially different static form and every claimed lifetime; retained contract on NumPy 2.0-2.5 |
 | Array API operation or signature | Generated binding plus canonical operation | Data-only Array API operation case covering each live/static parameter and claimed lifetime on admitted revisions/providers |
 | Non-differentiable form | Complete registry reason and frontend implementation | Primal, dtype, input-immutability, and staged/serialized execution when claimed |
 
@@ -114,8 +115,8 @@ requires every declaration to have an executable case and every case to name a
 declaration; registration or an abstract rule cannot promote a callable. Every
 marked staged mode executes both the compiled program and its
 serialized/restored artifact.
-The locked development environment uses NumPy 2.4 and runs the full suite; the
-NumPy 2.0-2.4 matrix repeats the focused executable support contract on every
+The locked development environment uses NumPy 2.5 and runs the full suite; the
+NumPy 2.0-2.5 matrix repeats the focused executable support contract on every
 retained minor.
 
 Benchmarking is selective. A new spelling or ordinary formula needs no
@@ -147,11 +148,11 @@ still owns NumPy keyword spelling, mutation controls, and calling conventions.
 
 | Component | Bound | Boundary |
 |---|---|---|
-| NumPy | `>=2.0,<2.5` | Required first-class protocol frontend |
+| NumPy | `>=2.0,<2.6` | Required first-class protocol frontend |
 | Python Array API | 2022.12, 2023.12, 2024.12 | Provider-neutral namespace profiles |
 | SciPy | `>=1.18,<1.19` | Optional explicit `advect.scipy` extension |
 | `array-api-compat` | `>=1.11.2,<2` | Required provider-discovery fallback |
-| xarray | `>=2026.7,<2026.8` | Dynamic pytree containers |
+| xarray | `>=2024.6` | Dynamic pytree containers |
 | `array-api-strict` | 2.4.1 | Reference Array API qualification provider |
 | CuPy | separately installed | Manual single-device GPU qualification |
 
@@ -169,7 +170,7 @@ default portable target:
 |---|---|
 | 2.0 | 2022.12 |
 | 2.1-2.2 | 2023.12 |
-| 2.3-2.4 | 2024.12 |
+| 2.3-2.5 | 2024.12 |
 
 The target is a compatibility default, not a reduction of NumPy's richer API
 to the standard. NumPy-only call forms retain NumPy's own frontend semantics.

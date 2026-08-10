@@ -1,7 +1,6 @@
-/* Subset webfonts committed under docs-theme/fonts/ (see scripts/subset_docs_fonts.py).
-   Source Code Pro © Adobe (OFL 1.1); Adwaita Mono © GNOME (OFL 1.1) — license texts
-   ship next to the font files. "Braille Mono" carries only U+2800-28FF for the
-   playground's dot-matrix plots and loads only when those glyphs render. */
+/* Source Code Pro is an unmodified Adobe release (OFL 1.1). "Braille Mono" is
+   an Adwaita Mono subset (OFL 1.1) carrying only U+2800-28FF for the
+   playground's dot-matrix plots. License texts ship next to the font files. */
 @font-face {
   font-family: "Source Code Pro";
   font-weight: 400;

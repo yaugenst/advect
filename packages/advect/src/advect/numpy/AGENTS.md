@@ -33,6 +33,6 @@
 - `uv run pytest packages/advect/tests/advect_numpy_tests/test_support_evidence.py`
 - Run the full Python suite for a public support declaration. Also run
   conformance if a canonical operation or derivative changes; require the CI
-  NumPy 2.0-2.4 matrix for a range claim.
+  NumPy 2.0-2.5 matrix for a range claim.
 - Regenerate compatibility pages as described in the
   [documentation guide](../../../../../docs/development/documentation.md).

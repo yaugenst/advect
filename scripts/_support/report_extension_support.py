@@ -171,7 +171,7 @@ def _render_index(catalog: dict[str, object]) -> str:
         "| Integration | Contract |",
         "|---|---|",
         (
-            f"| [NumPy](numpy.md) | {len(numpy)} callable forms; NumPy 2.0-2.4 "
+            f"| [NumPy](numpy.md) | {len(numpy)} callable forms; NumPy 2.0-2.5 "
             f"({numpy_version} in this build) |"
         ),
         (
@@ -206,9 +206,10 @@ def _render_numpy(catalog: dict[str, object]) -> str:
         (
             "NumPy is Advect's first-class frontend, intercepted through NumPy's own "
             "protocols (`__array_ufunc__`, `__array_function__`, and constructor "
-            "`like=` dispatch). The qualified range is NumPy 2.0-2.4. This build uses "
-            f"NumPy {extension['version']} and its Array API {extension['array_api_version']} "
-            "contract. Only the forms listed below are qualified."
+            "`like=` dispatch). The qualified range is NumPy 2.0-2.5. This build uses "
+            f"NumPy {extension['version']} against Advect's Array API "
+            f"{extension['array_api_version']} target. Only the forms listed below "
+            "are qualified."
         ),
         "",
         *_table_semantics(),

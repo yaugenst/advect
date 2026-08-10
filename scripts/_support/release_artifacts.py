@@ -16,16 +16,32 @@ _EXPECTED_WHEELS = frozenset(
     {
         ("cp312", "cp312", "linux-x86_64"),
         ("cp313", "cp313", "linux-x86_64"),
+        ("cp314", "cp314", "linux-x86_64"),
+        ("cp312", "cp312", "linux-aarch64"),
+        ("cp313", "cp313", "linux-aarch64"),
+        ("cp314", "cp314", "linux-aarch64"),
         ("cp312", "cp312", "macos-x86_64"),
         ("cp313", "cp313", "macos-x86_64"),
+        ("cp314", "cp314", "macos-x86_64"),
         ("cp312", "cp312", "macos-arm64"),
         ("cp313", "cp313", "macos-arm64"),
+        ("cp314", "cp314", "macos-arm64"),
         ("cp312", "cp312", "windows-x86_64"),
         ("cp313", "cp313", "windows-x86_64"),
+        ("cp314", "cp314", "windows-x86_64"),
     }
 )
 _SOURCE_REVISION = re.compile(r"[0-9a-f]{40}")
 _WHEEL_NAME_PARTS = 5
+_REQUIRED_LICENSE_FILES = frozenset(
+    {
+        "LICENSE",
+        "RUST_STDLIB_COPYRIGHT.html",
+        "RUST_STDLIB_LICENSE_MIT.txt",
+        "RUST_STDLIB_LICENSE_UNICODE_3_0.txt",
+        "THIRD_PARTY_LICENSES.txt",
+    }
+)
 
 
 class ReleaseArtifactError(ValueError):
@@ -54,6 +70,8 @@ def _platform_family(platform_tag: str) -> str:
     tags = set(platform_tag.split("."))
     if tags & {"manylinux_2_17_x86_64", "manylinux2014_x86_64"}:
         return "linux-x86_64"
+    if tags & {"manylinux_2_17_aarch64", "manylinux2014_aarch64"}:
+        return "linux-aarch64"
     if platform_tag.startswith("macosx_") and platform_tag.endswith("_x86_64"):
         return "macos-x86_64"
     if platform_tag.startswith("macosx_") and platform_tag.endswith("_arm64"):
@@ -84,16 +102,26 @@ def _validate_wheel(path: Path, *, version: str) -> ArtifactRecord:
 
     try:
         with zipfile.ZipFile(path) as archive:
-            names = archive.namelist()
+            names = set(archive.namelist())
             metadata_names = [name for name in names if name.endswith(".dist-info/METADATA")]
-            license_names = [name for name in names if name.endswith(".dist-info/licenses/LICENSE")]
             if len(metadata_names) != 1:
                 message = f"{path.name} must contain exactly one METADATA file"
                 raise ReleaseArtifactError(message)
-            if len(license_names) != 1:
-                message = f"{path.name} must contain exactly one packaged LICENSE"
+            metadata_name = metadata_names[0]
+            license_root = metadata_name.removesuffix("METADATA") + "licenses/"
+            packaged_licenses = {
+                name.removeprefix(license_root) for name in names if name.startswith(license_root)
+            }
+            if missing := sorted(_REQUIRED_LICENSE_FILES - packaged_licenses):
+                message = f"{path.name} is missing packaged license files: {', '.join(missing)}"
                 raise ReleaseArtifactError(message)
-            metadata = BytesParser().parsebytes(archive.read(metadata_names[0]))
+            metadata = BytesParser().parsebytes(archive.read(metadata_name))
+            declared_licenses = set(metadata.get_all("License-File") or ())
+            if missing := sorted(_REQUIRED_LICENSE_FILES - declared_licenses):
+                message = (
+                    f"{path.name} metadata is missing License-File entries: {', '.join(missing)}"
+                )
+                raise ReleaseArtifactError(message)
     except zipfile.BadZipFile as error:
         message = f"{path.name} is not a readable wheel"
         raise ReleaseArtifactError(message) from error
@@ -129,9 +157,9 @@ def _validate_sdist(path: Path, *, version: str) -> ArtifactRecord:
 
     required = {
         f"{root}/Cargo.toml",
-        f"{root}/LICENSE",
         f"{root}/pyproject.toml",
         f"{root}/packages/advect-native/Cargo.toml",
+        *(f"{root}/{name}" for name in _REQUIRED_LICENSE_FILES),
     }
     if missing := sorted(required - names):
         message = f"{path.name} is missing required source files: {', '.join(missing)}"

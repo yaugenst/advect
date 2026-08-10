@@ -8,6 +8,7 @@ from numpy.testing import assert_allclose
 
 import advect as ad
 from advect.autodiff._ephemeral import trace_call
+from advect.core._array_api.profiles import LATEST_ARRAY_API_VERSION
 from advect.numpy._array_function.registry import ARRAY_FUNCTION_RUNTIME
 from advect.numpy._profiles import numpy_minor
 from advect.numpy._support_contract import numpy_support_declarations
@@ -16,7 +17,7 @@ _UPSTREAM_REMOVED_IN_NUMPY_24 = ("in1d", "trapz")
 
 
 def test_installed_numpy_minor_runs_dynamic_staged_and_serialized_derivatives() -> None:
-    array_api_version = np.__array_api_version__
+    array_api_version = min(np.__array_api_version__, LATEST_ARRAY_API_VERSION)
     value = np.asarray([0.2, -0.3, 0.5], dtype=np.float64)
 
     def loss(x: object) -> object:
@@ -37,11 +38,7 @@ def test_installed_numpy_minor_runs_dynamic_staged_and_serialized_derivatives() 
     finally:
         trace.tape.release_payloads()
 
-    primal = ad.stage(
-        loss,
-        specs=(ad.ArraySpec(value.shape, value.dtype),),
-        array_api_version=array_api_version,
-    )
+    primal = ad.stage(loss, value)
     gradient = ad.grad(primal)
     pullback = ad.vjp_program(primal)
     restored_primal = ad.StagedProgram.from_dict(primal.to_dict())
@@ -78,7 +75,7 @@ def test_legacy_alias_registration_and_publication_follow_installed_numpy(name: 
 
 @pytest.mark.skipif(
     not all(callable(np.__dict__.get(name)) for name in _UPSTREAM_REMOVED_IN_NUMPY_24),
-    reason="NumPy 2.4 removed in1d and trapz",
+    reason="NumPy 2.4 and newer removed in1d and trapz",
 )
 def test_numpy_20_to_23_legacy_aliases_execute_through_the_tracer() -> None:
     in1d = np.__dict__["in1d"]
@@ -98,7 +95,7 @@ def test_numpy_20_to_23_legacy_aliases_execute_through_the_tracer() -> None:
     assert_allclose(trapz_tangent, 2.0)
 
 
-@pytest.mark.parametrize("version", ["1.26.4", "2.5.0", "3.0.0"])
+@pytest.mark.parametrize("version", ["1.26.4", "2.6.0", "3.0.0"])
 def test_numpy_minor_rejects_unsupported_versions(version: str) -> None:
-    with pytest.raises(TypeError, match=r"supports NumPy >=2\.0,<2\.5"):
+    with pytest.raises(TypeError, match=r"supports NumPy >=2\.0,<2\.6"):
         numpy_minor(version)

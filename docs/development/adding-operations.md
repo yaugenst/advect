@@ -202,7 +202,7 @@ uv run pytest \
 ```
 
 Changes sensitive to NumPy-minor behavior also require the repository's NumPy
-2.0–2.4 compatibility matrix. That matrix is owned by the
+2.0–2.5 compatibility matrix. That matrix is owned by the
 `numpy-compatibility` job in `.github/workflows/ci.yml`; the locked local
 environment proves only its installed NumPy minor. Do not report range-wide
 qualification until that CI matrix passes.

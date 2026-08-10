@@ -274,6 +274,7 @@ def _numerical_directional_derivative(
     directions: tuple[Any, ...],
 ) -> list[Any]:
     indices = case.differentiable_indices
+    input_is_real = not np.iscomplexobj(values[0])
     reference = _invoke(case, values)
     if case.numerical_reference is NumericalReference.COMPLEX_STEP:
         oracle_values = tuple(_promote_numerical_reference(value) for value in values)
@@ -285,7 +286,7 @@ def _numerical_directional_derivative(
             case,
             _perturbed(oracle_values, oracle_directions, indices, 1j * step),
         )
-        shifted = _align_eigen_output(case.op, reference, shifted)
+        shifted = _align_eigen_output(case.op, reference, shifted, input_is_real=input_is_real)
         return [np.imag(to_numpy(leaf)) / step for leaf in _leaves(shifted)]
 
     oracle_values = tuple(_promote_numerical_reference(value) for value in values)
@@ -300,8 +301,8 @@ def _numerical_directional_derivative(
         case,
         _perturbed(oracle_values, oracle_directions, indices, -step),
     )
-    forward = _align_eigen_output(case.op, reference, forward)
-    backward = _align_eigen_output(case.op, reference, backward)
+    forward = _align_eigen_output(case.op, reference, forward, input_is_real=input_is_real)
+    backward = _align_eigen_output(case.op, reference, backward, input_is_real=input_is_real)
     return [
         (to_numpy(upper) - to_numpy(lower)) / (2.0 * step)
         for upper, lower in zip(_leaves(forward), _leaves(backward), strict=True)
@@ -356,7 +357,13 @@ def _align_svd_output(reference: Any, candidate: Any) -> Any:
     return aligned_u, candidate_s, aligned_vh
 
 
-def _align_eigen_output(op: str, reference: Any, candidate: Any) -> Any:
+def _align_eigen_output(
+    op: str,
+    reference: Any,
+    candidate: Any,
+    *,
+    input_is_real: bool,
+) -> Any:
     """Match unordered eigenpairs and align their arbitrary vector phase."""
     if op == "array_ext.linalg.svd":
         return _align_svd_output(reference, candidate)
@@ -389,10 +396,7 @@ def _align_eigen_output(op: str, reference: Any, candidate: Any) -> Any:
 
     reference_vectors = np.asarray(reference[1])
     assert aligned_vectors is not None
-    if op == "array_ext.linalg.eigh" or not np.issubdtype(
-        reference_vectors.dtype,
-        np.complexfloating,
-    ):
+    if op == "array_ext.linalg.eigh" or (op == "array_ext.linalg.eig" and input_is_real):
         aligned_vectors = _align_eigenvectors(reference_vectors, aligned_vectors)
     return aligned_values, aligned_vectors
 

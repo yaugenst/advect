@@ -16,36 +16,54 @@ from scripts._support.release_artifacts import ReleaseArtifactError, assemble_re
 
 _VERSION = "0.1.0"
 _REVISION = "a" * 40
+_LICENSE_FILES = (
+    "LICENSE",
+    "RUST_STDLIB_COPYRIGHT.html",
+    "RUST_STDLIB_LICENSE_MIT.txt",
+    "RUST_STDLIB_LICENSE_UNICODE_3_0.txt",
+    "THIRD_PARTY_LICENSES.txt",
+)
 _WHEELS = (
     ("cp312", "cp312", "manylinux_2_17_x86_64.manylinux2014_x86_64"),
     ("cp313", "cp313", "manylinux_2_17_x86_64.manylinux2014_x86_64"),
+    ("cp314", "cp314", "manylinux_2_17_x86_64.manylinux2014_x86_64"),
+    ("cp312", "cp312", "manylinux_2_17_aarch64.manylinux2014_aarch64"),
+    ("cp313", "cp313", "manylinux_2_17_aarch64.manylinux2014_aarch64"),
+    ("cp314", "cp314", "manylinux_2_17_aarch64.manylinux2014_aarch64"),
     ("cp312", "cp312", "macosx_10_12_x86_64"),
     ("cp313", "cp313", "macosx_10_12_x86_64"),
+    ("cp314", "cp314", "macosx_10_12_x86_64"),
     ("cp312", "cp312", "macosx_11_0_arm64"),
     ("cp313", "cp313", "macosx_11_0_arm64"),
+    ("cp314", "cp314", "macosx_11_0_arm64"),
     ("cp312", "cp312", "win_amd64"),
     ("cp313", "cp313", "win_amd64"),
+    ("cp314", "cp314", "win_amd64"),
 )
 
 
-def _write_wheel(path: Path) -> None:
+def _write_wheel(path: Path, *, license_files: tuple[str, ...] = _LICENSE_FILES) -> None:
     dist_info = f"advect-{_VERSION}.dist-info"
     with zipfile.ZipFile(path, "w") as archive:
         archive.writestr(
             f"{dist_info}/METADATA",
-            f"Metadata-Version: 2.4\nName: advect\nVersion: {_VERSION}\n",
+            (
+                f"Metadata-Version: 2.4\nName: advect\nVersion: {_VERSION}\n"
+                + "".join(f"License-File: {name}\n" for name in license_files)
+            ),
         )
-        archive.writestr(f"{dist_info}/licenses/LICENSE", "MIT\n")
+        for name in license_files:
+            archive.writestr(f"{dist_info}/licenses/{name}", "license fixture\n")
 
 
-def _write_sdist(path: Path) -> None:
+def _write_sdist(path: Path, *, license_files: tuple[str, ...] = _LICENSE_FILES) -> None:
     root = f"advect-{_VERSION}"
     with tarfile.open(path, "w:gz") as archive:
         for relative in (
             "Cargo.toml",
-            "LICENSE",
             "pyproject.toml",
             "packages/advect-native/Cargo.toml",
+            *license_files,
         ):
             payload = b"release fixture\n"
             info = tarfile.TarInfo(f"{root}/{relative}")
@@ -74,7 +92,7 @@ def test_assemble_release_artifacts_validates_and_hashes_complete_set(tmp_path: 
         checksums_path=checksums_path,
     )
 
-    assert len(records) == 9
+    assert len(records) == 16
     manifest = json.loads(manifest_path.read_text())
     assert manifest["source_revision"] == _REVISION
     assert manifest["package_version"] == _VERSION
@@ -92,6 +110,36 @@ def test_assemble_release_artifacts_rejects_an_incomplete_wheel_family(tmp_path:
     next(dist_dir.glob("*win_amd64.whl")).unlink()
 
     with pytest.raises(ReleaseArtifactError, match="release wheel family mismatch"):
+        assemble_release_artifacts(
+            dist_dir,
+            version=_VERSION,
+            source_revision=_REVISION,
+            manifest_path=tmp_path / "RELEASE-PROVENANCE.json",
+            checksums_path=tmp_path / "SHA256SUMS",
+        )
+
+
+def test_assemble_release_artifacts_rejects_missing_wheel_notices(tmp_path: Path) -> None:
+    dist_dir = tmp_path / "dist"
+    _write_release_set(dist_dir)
+    _write_wheel(next(dist_dir.glob("*.whl")), license_files=("LICENSE",))
+
+    with pytest.raises(ReleaseArtifactError, match="missing packaged license files"):
+        assemble_release_artifacts(
+            dist_dir,
+            version=_VERSION,
+            source_revision=_REVISION,
+            manifest_path=tmp_path / "RELEASE-PROVENANCE.json",
+            checksums_path=tmp_path / "SHA256SUMS",
+        )
+
+
+def test_assemble_release_artifacts_rejects_missing_sdist_notices(tmp_path: Path) -> None:
+    dist_dir = tmp_path / "dist"
+    _write_release_set(dist_dir)
+    _write_sdist(dist_dir / f"advect-{_VERSION}.tar.gz", license_files=("LICENSE",))
+
+    with pytest.raises(ReleaseArtifactError, match="missing required source files"):
         assemble_release_artifacts(
             dist_dir,
             version=_VERSION,

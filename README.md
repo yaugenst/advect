@@ -9,11 +9,10 @@ before the first stable release.
 
 ## Try it
 
-Advect requires Python 3.12 or newer. The first package release is still being
-prepared, so install the current source from a checkout:
+Advect supports Python 3.12 through 3.14:
 
 ```bash
-python -m pip install .
+python -m pip install advect
 ```
 
 ```python

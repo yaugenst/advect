@@ -42,6 +42,34 @@ jobs:
             python-version: "3.13"
             interpreter: python3.13
             manylinux: "2_17"
+          - name: Linux x86-64 / Python 3.14
+            artifact: linux-x86_64-py314
+            runner: ubuntu-22.04
+            target: x86_64
+            python-version: "3.14"
+            interpreter: python3.14
+            manylinux: "2_17"
+          - name: Linux arm64 / Python 3.12
+            artifact: linux-aarch64-py312
+            runner: ubuntu-24.04-arm
+            target: aarch64
+            python-version: "3.12"
+            interpreter: python3.12
+            manylinux: "2_17"
+          - name: Linux arm64 / Python 3.13
+            artifact: linux-aarch64-py313
+            runner: ubuntu-24.04-arm
+            target: aarch64
+            python-version: "3.13"
+            interpreter: python3.13
+            manylinux: "2_17"
+          - name: Linux arm64 / Python 3.14
+            artifact: linux-aarch64-py314
+            runner: ubuntu-24.04-arm
+            target: aarch64
+            python-version: "3.14"
+            interpreter: python3.14
+            manylinux: "2_17"
           - name: macOS Intel / Python 3.12
             artifact: macos-x86_64-py312
             runner: macos-15-intel
@@ -54,6 +82,13 @@ jobs:
             runner: macos-15-intel
             target: x86_64
             python-version: "3.13"
+            interpreter: python
+            manylinux: auto
+          - name: macOS Intel / Python 3.14
+            artifact: macos-x86_64-py314
+            runner: macos-15-intel
+            target: x86_64
+            python-version: "3.14"
             interpreter: python
             manylinux: auto
           - name: macOS Apple silicon / Python 3.12
@@ -70,6 +105,13 @@ jobs:
             python-version: "3.13"
             interpreter: python
             manylinux: auto
+          - name: macOS Apple silicon / Python 3.14
+            artifact: macos-arm64-py314
+            runner: macos-latest
+            target: aarch64
+            python-version: "3.14"
+            interpreter: python
+            manylinux: auto
           - name: Windows x86-64 / Python 3.12
             artifact: windows-x86_64-py312
             runner: windows-latest
@@ -82,6 +124,13 @@ jobs:
             runner: windows-latest
             target: x64
             python-version: "3.13"
+            interpreter: python
+            manylinux: auto
+          - name: Windows x86-64 / Python 3.14
+            artifact: windows-x86_64-py314
+            runner: windows-latest
+            target: x64
+            python-version: "3.14"
             interpreter: python
             manylinux: auto
 
@@ -125,12 +174,12 @@ jobs:
             else
               smoke_python="$environment/bin/python"
             fi
-            dependencies=('numpy>=2.0,<2.5' 'array-api-compat>=1.11.2,<2')
+            dependencies=('numpy>=2.0,<2.6' 'array-api-compat>=1.11.2,<2')
             requirement=advect
             if [[ "$profile" == "array-api" ]]; then
               dependencies+=(array-api-strict==2.4.1)
             elif [[ "$profile" == "scientific" ]]; then
-              dependencies+=('scipy>=1.18,<1.19' 'xarray>=2026.7,<2026.8')
+              dependencies+=('scipy>=1.18,<1.19' 'xarray>=2024.6')
               requirement='advect[scientific]'
             fi
             uv pip install --python "$smoke_python" "${dependencies[@]}"
@@ -203,7 +252,7 @@ jobs:
           uv venv .sdist-smoke --python 3.12
           uv pip install \
             --python .sdist-smoke/bin/python \
-            'numpy>=2.0,<2.5' \
+            'numpy>=2.0,<2.6' \
             'array-api-compat>=1.11.2,<2'
           uv pip install \
             --python .sdist-smoke/bin/python \

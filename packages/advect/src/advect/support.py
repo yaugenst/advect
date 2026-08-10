@@ -477,6 +477,7 @@ def _validate_numpy_bindings() -> None:
 def _numpy_extension(array_api_ops: frozenset[str]) -> dict[str, object]:
     import numpy as np  # noqa: PLC0415
 
+    from advect.core._array_api.profiles import LATEST_ARRAY_API_VERSION  # noqa: PLC0415
     from advect.numpy._profiles import numpy_minor  # noqa: PLC0415
     from advect.numpy._supported_ufuncs import _SUPPORTED_UFUNCS  # noqa: PLC0415
 
@@ -491,7 +492,7 @@ def _numpy_extension(array_api_ops: frozenset[str]) -> dict[str, object]:
     supported_method_count = sum(row["kind"] == "ufunc_method" for row in rows)
     return {
         "available": True,
-        "array_api_version": np.__array_api_version__,
+        "array_api_version": min(np.__array_api_version__, LATEST_ARRAY_API_VERSION),
         "functions": rows,
         "minor": numpy_minor(np.__version__),
         "unsupported_ufunc_methods": len(_SUPPORTED_UFUNCS) * 5 - supported_method_count,

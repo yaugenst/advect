@@ -462,7 +462,7 @@ artifact version 2 validation and serialization. Compiler and optimizer
 versions are artifact provenance; loading an artifact does not rerun the
 optimizer.
 The `advect-array-1` semantic profile records one required Array API revision
-from 2022.12, 2023.12, or 2024.12 while retaining the separate NumPy 2.0-2.4
+from 2022.12, 2023.12, or 2024.12 while retaining the separate NumPy 2.0-2.5
 frontend contract. `array_api_version` exposes the graph-owned execution
 requirement; derived staged programs preserve it.
 

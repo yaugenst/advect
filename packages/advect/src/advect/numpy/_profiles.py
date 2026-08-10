@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 _VERSION_COMPONENTS = 2
-_SUPPORTED_MINORS = frozenset({"2.0", "2.1", "2.2", "2.3", "2.4"})
+_SUPPORTED_MINORS = frozenset({"2.0", "2.1", "2.2", "2.3", "2.4", "2.5"})
 
 
 def numpy_minor(version: str) -> str:
@@ -15,7 +15,7 @@ def numpy_minor(version: str) -> str:
     minor = f"{int(parts[0])}.{int(parts[1])}"
     if minor not in _SUPPORTED_MINORS:
         message = (
-            f"Advect supports NumPy >=2.0,<2.5; installed version {version!r} is outside that range"
+            f"Advect supports NumPy >=2.0,<2.6; installed version {version!r} is outside that range"
         )
         raise TypeError(message)
     return minor

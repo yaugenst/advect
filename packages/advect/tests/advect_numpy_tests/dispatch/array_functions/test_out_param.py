@@ -464,7 +464,7 @@ def test_staged_dot_out_requires_exact_dtype_and_c_layout() -> None:
         ad.stage(wrong_layout, specs=(ad.ArraySpec(matrix.shape, matrix.dtype),))
 
 
-def test_staged_take_out_uses_numpy_reverse_safe_casting_policy() -> None:
+def test_staged_take_out_matches_numpy_casting_policy() -> None:
     def narrowing(x: Any) -> Any:
         destination = np.empty((2,), dtype=np.float16, like=x)
         result = np.take(x, [0, 2], out=destination)
@@ -474,7 +474,7 @@ def test_staged_take_out_uses_numpy_reverse_safe_casting_policy() -> None:
     value = np.arange(4, dtype=np.float32)
     dynamic, _tangent = ad.jvp(narrowing)(value, tangents=np.ones_like(value))
     np.testing.assert_allclose(dynamic, np.take(value, [0, 2]).astype(np.float16))
-    program = ad.stage(narrowing, specs=(ad.ArraySpec(value.shape, value.dtype),))
+    program = ad.stage(narrowing, value)
     restored = ad.StagedProgram.from_dict(program.to_dict())
     for staged in (program, restored):
         actual = staged(value)
@@ -485,13 +485,23 @@ def test_staged_take_out_uses_numpy_reverse_safe_casting_policy() -> None:
         destination = np.empty((2,), dtype=np.float64, like=x)
         return np.take(x, [0, 2], out=destination)
 
-    with pytest.raises(TypeError, match="according to the rule 'safe'"):
-        ad.jvp(widening)(value, tangents=np.ones_like(value))
-    with pytest.raises(TypeError, match="according to the rule 'safe'"):
-        ad.stage(widening, specs=(ad.ArraySpec(value.shape, value.dtype),))
+    try:
+        expected = np.take(value, [0, 2], out=np.empty((2,), dtype=np.float64))
+    except TypeError:
+        with pytest.raises(TypeError, match="according to the rule 'safe'"):
+            ad.jvp(widening)(value, tangents=np.ones_like(value))
+        with pytest.raises(TypeError, match="according to the rule 'safe'"):
+            ad.stage(widening, value)
+    else:
+        dynamic, _tangent = ad.jvp(widening)(value, tangents=np.ones_like(value))
+        np.testing.assert_allclose(dynamic, expected)
+        staged = ad.stage(widening, value)(value)
+        np.testing.assert_allclose(staged, expected)
+        assert dynamic.dtype == expected.dtype
+        assert staged.dtype == expected.dtype
 
 
-def test_compress_out_uses_numpy_reverse_safe_casting_policy() -> None:
+def test_compress_out_matches_numpy_casting_policy() -> None:
     value = np.arange(4, dtype=np.float32)
     condition = np.array([True, False, True, False])
 
@@ -504,17 +514,27 @@ def test_compress_out_uses_numpy_reverse_safe_casting_policy() -> None:
     expected = np.compress(condition, value).astype(np.float16)
     dynamic, _tangent = ad.jvp(narrowing)(value, tangents=np.ones_like(value))
     np.testing.assert_allclose(dynamic, expected)
-    program = ad.stage(narrowing, specs=(ad.ArraySpec(value.shape, value.dtype),))
+    program = ad.stage(narrowing, value)
     np.testing.assert_allclose(program(value), expected)
 
     def widening(x: Any) -> Any:
         destination = np.empty((2,), dtype=np.float64, like=x)
         return np.compress(condition, x, out=destination)
 
-    with pytest.raises(TypeError, match="according to the rule 'safe'"):
-        ad.jvp(widening)(value, tangents=np.ones_like(value))
-    with pytest.raises(TypeError, match="according to the rule 'safe'"):
-        ad.stage(widening, specs=(ad.ArraySpec(value.shape, value.dtype),))
+    try:
+        expected = np.compress(condition, value, out=np.empty((2,), dtype=np.float64))
+    except TypeError:
+        with pytest.raises(TypeError, match="according to the rule 'safe'"):
+            ad.jvp(widening)(value, tangents=np.ones_like(value))
+        with pytest.raises(TypeError, match="according to the rule 'safe'"):
+            ad.stage(widening, value)
+    else:
+        dynamic, _tangent = ad.jvp(widening)(value, tangents=np.ones_like(value))
+        np.testing.assert_allclose(dynamic, expected)
+        staged = ad.stage(widening, value)(value)
+        np.testing.assert_allclose(staged, expected)
+        assert dynamic.dtype == expected.dtype
+        assert staged.dtype == expected.dtype
 
 
 def test_staged_out_tuple_matches_numpy_function_category() -> None:

@@ -205,11 +205,12 @@ normalized outputs, errors, and semantics in both lifetimes and extraction
 removes more production decision code than it adds.
 
 The public preservation audit compares exact baseline and candidate wheels
-under each supported NumPy minor. It finds no removed callable, array-function
-handler, or ufunc call. Candidate NumPy row totals are 390, 393, 395, 395, and
-393 on NumPy 2.0.2 through 2.4.6; the changing count follows NumPy's installed
-surface. Root exports (44), direct generated Array API bindings (154), public
-Array API rows (169), and built-in registry IDs (224) are exact. The nine
+through NumPy 2.4 and records the candidate inventory on NumPy 2.5. It finds no
+removed callable, array-function handler, or ufunc call in a same-minor
+comparison. Candidate NumPy row totals are 390, 393, 395, 395, 393, and 392 on
+NumPy 2.0.2 through 2.5.2; the changing count follows NumPy's installed surface.
+Root exports (44), direct generated Array API bindings (154), public Array API
+rows (169), and built-in registry IDs (224) are exact. The nine
 `numpy.lib.scimath` rows remain dynamic-only, and `register_backend` is the sole
 intentional public-looking symbol removal because it was a mutable test reset,
 not a backend extension contract.
@@ -236,13 +237,13 @@ as a deletion target:
 | Dependencies | -5 |
 | Whole repository | **+2,288** |
 
-Qualification uses exact release wheels and retained reports. The blocking
-lanes cover default and thorough conformance, NumPy 2.0-2.4, all three Array API
+Qualification uses exact release wheels and retained reports. Automated lanes
+cover default and thorough conformance, NumPy 2.0-2.5, all three Array API
 revisions through dynamic, staged, and restored execution, native and browser
-wheels, documentation, CPU regression and memory acceptance, and the
-designated single-device CuPy gate. The GPU lane records the wheel, revision,
-device, driver, CUDA runtime, CuPy version, reports, and digests rather than
-treating a source-only historical run as current evidence.
+wheels, and documentation. CPU regression and memory acceptance remain manual
+pre-tag evidence until the release workflow has a stable non-self reference.
+CuPy is not a release claim; making it one requires retained evidence for the
+exact wheel, revision, device, driver, CUDA runtime, and CuPy version.
 
 ## Intentional exclusions
 

@@ -1,6 +1,5 @@
 [files]
 extend-exclude = [
-  "docs-theme/fonts/LICENSE-source-code-pro.md",
   "uv.lock",
 ]
 

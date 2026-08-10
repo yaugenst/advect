@@ -10,6 +10,7 @@ import pytest
 
 import advect as ad
 from advect.autodiff._ephemeral import trace_call
+from advect.core._array_api.profiles import LATEST_ARRAY_API_VERSION
 from advect.core._pytree import tree_flatten, tree_map
 from advect.numpy._support_contract import numpy_support_declarations
 from advect_numpy_tests._support_cases import (
@@ -260,7 +261,7 @@ def test_published_numpy_lifetimes_execute(case: NumpySupportCase) -> None:
         program = ad.stage(
             call,
             specs=specs,
-            array_api_version=np.__array_api_version__,
+            array_api_version=min(np.__array_api_version__, LATEST_ARRAY_API_VERSION),
         )
         outputs["staged"] = program(*inputs)
         _assert_inputs_unchanged(inputs, snapshots)
