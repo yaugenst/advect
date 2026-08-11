@@ -247,7 +247,7 @@ def test_compact_table_preserves_asymmetric_capabilities() -> None:
 def test_cupy_page_is_honest_without_duplicating_the_array_api_catalog() -> None:
     page = render_pages(ad.support_catalog())["cupy.md"]
 
-    assert "not yet a release claim" in page
+    assert "does not maintain a second CuPy inventory" in page
     assert "## Functions" not in page
     assert "| Function | Stage/save | Differentiate |" not in page
 

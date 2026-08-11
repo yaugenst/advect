@@ -1,7 +1,8 @@
 # Errors
 
-Advect fails loudly at the offending line rather than returning a silently
-wrong derivative. All exceptions derive from
+When Advect cannot differentiate a call safely, it raises an error at the
+offending line instead of returning a plausible but wrong derivative. All
+exceptions derive from
 [`AdvectError`](errors.md#advect.AdvectError).
 The [troubleshooting guide](../tutorials/debugging.md) shows how to use
 [`debug`](errors.md#advect.debug) and act on the common tracing, numerical, and

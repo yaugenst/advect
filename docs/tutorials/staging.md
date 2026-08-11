@@ -1,8 +1,9 @@
 # Staging and Serialization
 
-Dynamic transforms trace each concrete call.
-[`stage`](../api/staging.md#advect.stage) instead compiles one exact input
-signature, optimizes the graph once, and returns an immutable
+Dynamic transforms follow every call through Python. When the same computation
+will run repeatedly with matching inputs,
+[`stage`](../api/staging.md#advect.stage) compiles that input signature,
+optimizes the graph once, and returns an immutable
 [`StagedProgram`](../api/staging.md#advect.StagedProgram) for repeated execution.
 
 ## Stage once, call many times
@@ -123,5 +124,4 @@ staged against an explicit
 [Array API revision](../compatibility/array-api.md) and replayed by a compatible
 provider. NumPy-authored functions retain the separate
 [NumPy frontend](../api/numpy.md) contract.
-Serialized formats may change before 1.0, so matching Advect versions are the
-safest choice for saved programs.
+Save and load a program with the same Advect version.

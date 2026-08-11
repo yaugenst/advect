@@ -1,12 +1,12 @@
 # Host Autodiff Interop
 
-Advect can expose a NumPy-backed callable as one differentiable operation
-inside [PyTorch](https://pytorch.org/), [JAX](https://docs.jax.dev/), or
-[HIPS Autograd](https://github.com/HIPS/autograd). These adapters carry
-Advect's [VJP](../transforms.md#advect.vjp) into the host framework; they do not
-make host arrays into Advect providers. The
-[host-framework tutorial](../../tutorials/host-frameworks.md) shows the boundary
-in one complete example.
+Advect can wrap a NumPy-backed function as one differentiable operation inside
+[PyTorch](https://pytorch.org/), [JAX](https://docs.jax.dev/), or
+[HIPS Autograd](https://github.com/HIPS/autograd). The outer framework keeps
+its arrays and computation graph, while Advect supplies the wrapped function's
+[VJP](../transforms.md#advect.vjp). The
+[host-framework tutorial](../../tutorials/host-frameworks.md) shows the pattern
+in a complete example.
 
 ## Install and import
 

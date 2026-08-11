@@ -4,7 +4,7 @@
 
 CuPy uses Advect's single-device [Array API](array-api.md) path. Pass CuPy arrays to a transform and write numerical code against the namespace returned by `x.__array_namespace__()`; this does not intercept arbitrary `cupy.*` calls.
 
-CuPy support is not yet a release claim. The generated [Array API table](array-api.md) is the candidate callable set, not evidence that a final CuPy release gate has passed; Advect does not maintain a duplicate CuPy inventory.
+The generated [Array API table](array-api.md) defines the callable set for this path. CuPy exercises that shared contract through `__array_namespace__()`; Advect does not maintain a second CuPy inventory.
 
 ## Install
 

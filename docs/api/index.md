@@ -1,8 +1,9 @@
 # API Reference
 
-Advect's public API has a small root namespace and a few explicit modules. The
-[tutorials](../tutorials/index.md) teach complete workflows; these pages render
-the installed signatures and docstrings.
+Most work begins with functions imported directly from `advect`. Optional
+NumPy, SciPy, xarray, and host-framework integrations live in their own
+modules. The [tutorials](../tutorials/index.md) teach complete workflows; these
+pages collect the installed signatures and exact API contracts.
 
 | Public API | Responsibility |
 | --- | --- |
@@ -32,9 +33,7 @@ outputs use [pytrees](pytree.md). Complex differentiation is real-linear; use
 [`jvp`](transforms.md#advect.jvp), [`vjp`](transforms.md#advect.vjp), or
 [`linearize`](transforms.md#advect.linearize) when the output is complex.
 
-The root `advect` import installs the required NumPy frontend and Array API
-compatibility bridge. SciPy, xarray, and host-framework integrations remain
-explicit optional imports. Consult the generated
-[compatibility catalog](../compatibility/index.md) for exact callable and
-lifetime coverage; the presence of an internal registered operation is not a
-public support claim.
+Importing `advect` is enough for NumPy and Array API code. SciPy, xarray, and
+host-framework integrations use their own optional imports. The generated
+[compatibility catalog](../compatibility/index.md) lists which calls can run
+dynamically, be staged, be saved, and be differentiated.

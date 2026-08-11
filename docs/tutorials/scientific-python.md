@@ -1,10 +1,10 @@
 # Arrays and Scientific Python
 
-Advect meets the scientific Python stack at three different boundaries. Array
-providers execute numerical operations, [`advect.scipy`](../api/scipy/index.md)
-supplies explicit differentiable SciPy functions, and
-[`advect.xarray`](../api/xarray.md) teaches pytrees how to preserve labeled
-containers.
+Advect works with the scientific Python stack in three complementary ways.
+NumPy and other Array API providers execute the numerical operations,
+[`advect.scipy`](../api/scipy/index.md) supplies differentiable versions of
+selected SciPy functions, and [`advect.xarray`](../api/xarray.md) preserves
+labels and coordinates around derivative results.
 
 ## Write provider-neutral array code
 
@@ -50,14 +50,13 @@ print(ad.grad(centered_energy)(x))
 # Array([-2.6666667, -0.6666667, 3.3333333], dtype=array_api_strict.float32)
 ```
 
-[NumPy remains the first-class frontend](../api/numpy.md), so ordinary
-`numpy.*` calls use NumPy's protocols directly. When a constructor contains
+[With NumPy, write ordinary `numpy.*` calls](../api/numpy.md); its own protocols
+route them through Advect. When a constructor contains
 traced values, give it a live dispatch anchor with `like=` or use
 [`ad.array`](../api/arrays.md#advect.array) or
 [`ad.asarray`](../api/arrays.md#advect.asarray). CuPy follows the
-provider-neutral path; consult its
-[current compatibility status](../compatibility/cupy.md) before treating GPU
-support as a release claim.
+Array API path; its [compatibility page](../compatibility/cupy.md) describes the
+supported boundary.
 
 ## Use the differentiable SciPy namespace
 

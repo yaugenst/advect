@@ -1,8 +1,9 @@
 # Staging
 
-Compile one signature into one immutable, optimized, serializable program.
-The [staging tutorial](../tutorials/staging.md) develops the complete workflow
-from a first call through differentiation and serialization.
+[`stage`](staging.md#advect.stage) compiles one input signature into an
+immutable, optimized program that can be called repeatedly, differentiated,
+saved, and loaded. The [staging tutorial](../tutorials/staging.md) develops the
+complete workflow.
 
 Advect stages against one explicit
 [Array API contract](https://data-apis.org/array-api/latest/). The supported

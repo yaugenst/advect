@@ -1,7 +1,7 @@
 [project]
 name = "advect"
 dynamic = [ "version" ]
-description = "Extensible array tracing and automatic differentiation for Python"
+description = "Automatic differentiation for the NumPy code you already write"
 readme = "README.md"
 requires-python = ">=3.12,<3.15"
 license = "MIT"

@@ -173,7 +173,7 @@ def _render_index(catalog: dict[str, object]) -> str:
             f"| [Array API](array-api.md) | {len(array_api)} namespace functions "
             "across revisions 2022.12-2024.12 |"
         ),
-        "| [CuPy](cupy.md) | Array API provider path; pre-release qualification only |",
+        "| [CuPy](cupy.md) | Single-device Array API provider path |",
         (
             f"| [SciPy](scipy.md) | {scipy_functions} functions and {scipy_adapters} "
             "solver adapters behind `advect[scipy]` |"
@@ -268,10 +268,10 @@ def _render_cupy(_catalog: dict[str, object]) -> str:
         ),
         "",
         (
-            "CuPy support is not yet a release claim. The generated "
-            "[Array API table](array-api.md) is the candidate callable set, not evidence "
-            "that a final CuPy release gate has passed; Advect does not maintain a "
-            "duplicate CuPy inventory."
+            "The generated [Array API table](array-api.md) defines the callable set "
+            "for this path. CuPy exercises that shared contract through "
+            "`__array_namespace__()`; Advect does not maintain a second CuPy "
+            "inventory."
         ),
         "",
         "## Install",
@@ -336,10 +336,7 @@ def _render_array_api(catalog: dict[str, object]) -> str:
             "| `array-api-strict` | Qualified through `__array_namespace__()` for all "
             "three revisions below |"
         ),
-        (
-            "| CuPy | Built-in compatibility path; not yet a release support claim. "
-            "See [CuPy](cupy.md) |"
-        ),
+        "| CuPy | Built-in single-device compatibility path; see [CuPy](cupy.md) |",
         "",
         (
             "The fallback handles raw provider arrays at Advect's input boundary; "

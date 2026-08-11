@@ -1,15 +1,15 @@
 # Implicit Differentiation
 
-Some algorithms iterate only to find a state that satisfies an equation. In
-that case, differentiating every solver step makes the derivative depend on the
-implementation of the solver.
+Many algorithms iterate only to find a state that satisfies an equation.
+Differentiating every iteration then ties the derivative to the particular
+solver rather than the equation being solved.
 [`implicit_root`](../api/transforms.md#advect.implicit_root) differentiates the
 converged equation instead.
 
 ## Differentiate the equation, not the iterations
 
-Suppose `solution**2 - parameters == 0`. The nonlinear callback finds a root;
-the linear callback solves with the
+Suppose the solution is defined by `solution**2 - parameters == 0`. The
+nonlinear callback finds a root; the linear callback solves with the
 [state Jacobian](linear-maps.md#materialize-the-jacobian-only-when-useful)
 needed by the implicit derivative.
 

@@ -1,9 +1,8 @@
 # Dynamic Control Flow and Mutation
 
-[Dynamic transforms](../api/transforms.md) are *define by run*: every call
-executes the Python function with its current inputs and differentiates the
-path that actually ran. There is no special API for conditions, loops, or
-helper functions.
+[Dynamic transforms](../api/transforms.md) execute the Python function for
+every call and differentiate the path its inputs take. Conditions, loops, and
+helper functions remain ordinary Python.
 
 ## Follow data-dependent branches
 

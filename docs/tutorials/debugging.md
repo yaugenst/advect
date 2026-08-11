@@ -1,9 +1,9 @@
 # Troubleshooting
 
-[`debug()`](../api/errors.md#advect.debug) does not change a computation. It
-makes one trace more observable: live tracers show bounded value previews, and
-recorded operations keep the user source location that produced them. This
-side-by-side trace makes the first difference visible.
+[`debug()`](../api/errors.md#advect.debug) keeps more context during one trace.
+Live tracers show bounded value previews, and recorded operations remember the
+source location that produced them. The extra context helps locate the first
+value or operation that differs from what you expected.
 
 ```{.python .run}
 import numpy as np

@@ -1,9 +1,9 @@
 # Support Catalog
 
-The support catalog is the machine-readable authority behind the generated
-[compatibility pages](../compatibility/index.md). It reports canonical primitive
-capabilities and public Array API, NumPy, and SciPy forms. Dynamic, staged, and
-serialized are separate lifetime claims; registration alone does not create a
-public claim.
+The support catalog supplies the data behind the generated
+[compatibility pages](../compatibility/index.md). It reports which Array API,
+NumPy, and SciPy calls can run dynamically, be staged, be saved, and be
+differentiated, together with the capabilities of Advect's internal
+operations.
 
 ::: advect.support_catalog

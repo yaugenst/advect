@@ -2,9 +2,8 @@
 
 ## Supported versions
 
-Advect is pre-1.0 software. Security fixes target the newest tagged release;
-older releases and untagged source snapshots do not receive separate
-maintenance.
+Security fixes target the newest tagged release. Older releases and untagged
+source snapshots do not receive separate maintenance.
 
 ## Report a vulnerability
 

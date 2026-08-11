@@ -1,8 +1,8 @@
 # Gradients and Pytrees
 
-Advect transforms ordinary Python callables. Start with a function that returns
-one real scalar, then call [`grad`](../api/transforms.md#advect.grad) with the
-same inputs you would pass to the original function.
+Start with the NumPy function you want to differentiate. If it returns one real
+scalar, [`grad`](../api/transforms.md#advect.grad) produces a new function that
+accepts the same inputs and returns the gradient.
 
 ## Differentiate a NumPy function
 

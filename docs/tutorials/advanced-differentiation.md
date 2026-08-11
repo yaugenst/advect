@@ -1,8 +1,9 @@
 # Higher-Order Differentiation
 
-Derivative functions remain differentiable. This lets the same transforms
-produce higher-order derivatives, Hessian products, and exact curvature. For
-large reverse traces, checkpointing trades extra computation for lower memory.
+Advect can differentiate the functions returned by its own transforms. The
+same small API therefore produces higher-order derivatives, Hessian products,
+and exact curvature. For large reverse traces, checkpointing trades extra
+computation for lower memory use.
 
 ## Compose transforms
 

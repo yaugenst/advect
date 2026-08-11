@@ -10,7 +10,7 @@ Any array whose namespace implements the Array API standard reaches Advect throu
 |---|---|
 | NumPy | Qualified through its first-class frontend; see [NumPy](numpy.md) for the minor-to-revision mapping |
 | `array-api-strict` | Qualified through `__array_namespace__()` for all three revisions below |
-| CuPy | Built-in compatibility path; not yet a release support claim. See [CuPy](cupy.md) |
+| CuPy | Built-in single-device compatibility path; see [CuPy](cupy.md) |
 
 The fallback handles raw provider arrays at Advect's input boundary; it does not make an array traceable when its namespace does not implement the standard.
 

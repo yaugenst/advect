@@ -1,13 +1,13 @@
 # SciPy
 
-`advect.scipy` is a bounded, NumPy-backed optional frontend installed with the
-`advect[scipy]` extra. Its public functions follow their documented
-[SciPy](https://docs.scipy.org/doc/scipy/reference/) signatures; direct calls to
-`scipy.*` are not intercepted. The
+`advect.scipy` provides differentiable, NumPy-backed versions of selected
+[SciPy](https://docs.scipy.org/doc/scipy/reference/) functions. Install it with
+the `advect[scipy]` extra and import the functions from `advect.scipy`; direct
+calls to `scipy.*` continue to use SciPy itself. The
 [Scientific Python tutorial](../../tutorials/scientific-python.md#use-the-differentiable-scipy-namespace)
-shows the import boundary in a complete derivative. The generated
-[SciPy compatibility page](../../compatibility/scipy.md) is the exact callable
-and lifetime inventory.
+shows the pattern in a complete derivative. The generated
+[SciPy compatibility page](../../compatibility/scipy.md) lists the available
+functions and where they can run.
 
 Special functions and image processing may participate in dynamic transforms and
 in the staged lifetimes declared by the catalog. The root and GMRES factories

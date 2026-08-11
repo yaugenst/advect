@@ -1,8 +1,9 @@
 # Tutorials
 
-Start with a gradient, then build one mental model at a time: dynamic Python,
-local linear maps, higher-order derivatives, implicit equations, and reusable
-staged programs. These six pages form the core path.
+Start with one NumPy gradient, then build the model a piece at a time: how
+Advect follows Python, how derivatives act as linear maps, and when to use
+higher-order, implicit, or staged differentiation. These six pages form the
+main path through the library.
 
 Most examples can run directly in the browser. Each page is one Python session,
 so pressing `[ run ]` also runs any earlier runnable blocks on that page.

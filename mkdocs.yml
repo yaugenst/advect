@@ -1,7 +1,7 @@
 # yaml-language-server: $schema=https://json.schemastore.org/mkdocs-1.6.json
 
 site_name: Advect
-site_description: A small extensible automatic-differentiation core for Python
+site_description: Automatic differentiation for the NumPy code you already write
 site_url: https://yaugenst.github.io/advect/
 repo_url: https://github.com/yaugenst/advect
 exclude_docs: AGENTS.md

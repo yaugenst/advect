@@ -1,11 +1,11 @@
 # NumPy Frontend
 
-[`advect.numpy`](numpy.md#advect.numpy) is a transparent companion namespace for
-ordinary [NumPy](https://numpy.org/doc/stable/) code. It overrides only
-constructors that must preserve live Advect values and forwards other
-attributes to the installed NumPy module. NumPy's own
+Most code can keep importing [NumPy](https://numpy.org/doc/stable/) as usual.
+Its own
 [ufunc and array-function protocols](https://numpy.org/doc/stable/user/basics.dispatch.html)
-perform tracing; users do not register operations in this namespace. The
+route traced calls through Advect. [`advect.numpy`](numpy.md#advect.numpy) is a
+companion namespace for constructors that need to preserve live Advect values;
+it forwards everything else to the installed NumPy module. The
 [first tutorial](../tutorials/gradients.md#differentiate-a-numpy-function)
 shows that path with ordinary NumPy code.
 

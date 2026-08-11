@@ -1,40 +1,28 @@
 # Advect
 
-Differentiate the NumPy you already write. Advect follows ordinary Python
-control flow during dynamic transforms, and it can compile one fixed input
-signature into a reusable, serializable array program.
+Advect brings automatic differentiation to NumPy code. Write a numerical
+function with familiar array operations and Python control flow, then ask for
+its value, gradient, or another derivative without maintaining the derivative
+by hand.
 
-!!! warning "Pre-release"
-
-    Advect is under active development. Public APIs and serialized programs
-    may change before 1.0.
+Dynamic transforms follow the branches and loops taken by each call. When the
+same kinds of inputs will run repeatedly, `stage` turns the function into a
+reusable program that can be saved and loaded.
 
 ## Install
-
-Advect publishes wheels for CPython 3.12 through 3.14 on manylinux_2_17
-(glibc 2.17+) Linux x86-64 and AArch64, macOS x86-64 and Apple silicon, and
-Windows x86-64:
 
 ```bash
 python -m pip install advect
 ```
 
-The first release does not support musllinux, Windows ARM64, free-threaded
-CPython, PyPy, or abi3. If no compatible wheel exists, `pip` may fall back to
-the source distribution, which requires Rust 1.94 or newer to build.
-
-The wheel includes every integration module. Extras install the corresponding
-third-party dependencies: [SciPy](api/scipy/index.md) with `advect[scipy]`,
-[xarray](api/xarray.md) with `advect[xarray]`, or both with
-`advect[scipy,xarray]`. [JAX](api/interop/jax.md),
-[PyTorch](api/interop/torch.md), and [HIPS Autograd](api/interop/autograd.md)
-use their own matching extras.
+Add optional integrations with extras such as `advect[scipy]`,
+`advect[xarray]`, `advect[jax]`, `advect[torch]`, or `advect[autograd]`.
 
 ## Your first gradient
 
 [`value_and_grad`](api/transforms.md#advect.value_and_grad) evaluates a scalar
-function and differentiates it in one call. Press `[ run ]` to execute the
-example in your browser:
+function and returns its gradient in the same call. Press `[ run ]` to execute
+the example in your browser:
 
 ```{.python .run}
 import numpy as np
@@ -52,7 +40,7 @@ print(f"loss: {value:.6f}")
 print("gradient:", np.round(gradient, 6))
 ```
 
-Each call traces the path its concrete inputs take, so
+Advect differentiates the path its inputs take, so
 [Python branches, loops, helper functions, and supported local mutation](tutorials/control-flow.md)
 keep their normal meaning.
 

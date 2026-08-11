@@ -1,8 +1,8 @@
 # Primitives
 
-[primitive](primitives.md#advect.primitive) makes one closed implementation
-atomic to Advect. The decorator returns a callable authoring handle that owns
-its abstract, JVP, and optional transpose rules. Prefer a
+[`primitive`](primitives.md#advect.primitive) makes one function appear as a
+single operation to Advect. The decorator returns the callable with methods for
+adding its abstract, JVP, and optional transpose rules. Prefer a
 [JVP](transforms.md#advect.jvp) because it supports forward mode and structural
 transposition. An explicit transpose can instead provide
 [reverse mode](transforms.md#advect.vjp) when no JVP is available.
