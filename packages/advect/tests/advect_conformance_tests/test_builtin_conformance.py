@@ -80,6 +80,31 @@ def test_nanprod_matrix_float32_adjoint_regression() -> None:
     check_law(case, Law.ADJOINT, values, variant=variant)
 
 
+def test_divide_broadcast_float32_adjoint_regression() -> None:
+    """Scale a cancellation-heavy adjoint comparison by its contributions."""
+    case = INVOCATIONS_BY_ID["array.divide[numpy]"]
+    variant = case.variant_ids.index("broadcast-float32")
+    values = (
+        np.array(
+            [
+                [[0.0, 1.75, -1.5]],
+                [[1.125, -1.4375, 0.0]],
+            ],
+            dtype=np.float32,
+        ),
+        np.array(
+            [[[-1.0], [-1.0], [0.25], [-1.0]]],
+            dtype=np.float32,
+        ),
+    )
+
+    resolved = case.resolve_variant(variant)
+    assert resolved.tolerance.adjoint_atol + resolved.tolerance.adjoint_rtol == pytest.approx(
+        2e-6,
+    )
+    check_law(case, Law.ADJOINT, values, variant=variant)
+
+
 def test_prod_matrix_float32_adjoint_regression() -> None:
     """Keep the thorough-search product example inside its local ulp bound."""
     case = INVOCATIONS_BY_ID["array.prod[numpy]"]

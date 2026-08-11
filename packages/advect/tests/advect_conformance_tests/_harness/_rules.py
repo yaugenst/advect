@@ -12,7 +12,7 @@ import advect as ad
 from advect.core._eval_dispatch import _evaluate_array_op, evaluate_node_value
 from advect.core._pytree import tree_flatten, tree_map
 from advect.core._registry import get_registry
-from advect.testing import _real_inner_product
+from advect.testing import _real_inner_product, _real_inner_product_magnitude
 from advect_conformance_tests._harness._cases import Law, NumericalReference
 from advect_conformance_tests._harness._frontends import to_numpy
 from advect_conformance_tests._harness._laws import (
@@ -322,12 +322,17 @@ def check_registered_vjp(
             g=cotangent,
             **captured.attrs,
         )
-        left = _real_inner_product(_numpy_leaves(cotangent), _numpy_leaves(tangent))
-        right = _real_inner_product(
-            _pairing_leaves(contributions),
-            _pairing_leaves(captured.tangents),
+        cotangent_leaves = _numpy_leaves(cotangent)
+        tangent_leaves = _numpy_leaves(tangent)
+        contribution_leaves = _pairing_leaves(contributions)
+        captured_tangent_leaves = _pairing_leaves(captured.tangents)
+        left = _real_inner_product(cotangent_leaves, tangent_leaves)
+        right = _real_inner_product(contribution_leaves, captured_tangent_leaves)
+        scale = max(
+            _real_inner_product_magnitude(cotangent_leaves, tangent_leaves),
+            _real_inner_product_magnitude(contribution_leaves, captured_tangent_leaves),
+            1.0,
         )
-        scale = max(abs(left), abs(right), 1.0)
         tolerance = case.tolerance.adjoint_atol + case.tolerance.adjoint_rtol * scale
         if abs(left - right) > tolerance:
             msg = (
@@ -401,12 +406,17 @@ def check_raw_vjp(case: RawRuleCase) -> None:
         g=cotangent,
         **case.attrs,
     )
-    left = _real_inner_product(_pairing_leaves(cotangent), _pairing_leaves(tangent))
-    right = _real_inner_product(
-        _pairing_leaves(contributions),
-        _pairing_leaves(case.tangents),
+    cotangent_leaves = _pairing_leaves(cotangent)
+    tangent_leaves = _pairing_leaves(tangent)
+    contribution_leaves = _pairing_leaves(contributions)
+    case_tangent_leaves = _pairing_leaves(case.tangents)
+    left = _real_inner_product(cotangent_leaves, tangent_leaves)
+    right = _real_inner_product(contribution_leaves, case_tangent_leaves)
+    scale = max(
+        _real_inner_product_magnitude(cotangent_leaves, tangent_leaves),
+        _real_inner_product_magnitude(contribution_leaves, case_tangent_leaves),
+        1.0,
     )
-    scale = max(abs(left), abs(right), 1.0)
     if abs(left - right) > case.tolerance * scale:
         msg = (
             f"{case.op}: raw registered VJP violates the adjoint identity: "

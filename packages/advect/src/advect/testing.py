@@ -142,6 +142,14 @@ def _real_inner_product(left: Sequence[Any], right: Sequence[Any]) -> float:
     return total
 
 
+def _real_inner_product_magnitude(left: Sequence[Any], right: Sequence[Any]) -> float:
+    """Return the absolute contribution scale of a real inner product."""
+    return _real_inner_product(
+        [None if value is None else abs(value) for value in left],
+        [None if value is None else abs(value) for value in right],
+    )
+
+
 def _check_output_specs(primitive: Primitive[Any, Any], concrete: Any, abstract: Any) -> None:
     concrete_leaves, concrete_treedef = tree_flatten(concrete)
     abstract_leaves, abstract_treedef = tree_flatten(abstract)
@@ -303,7 +311,12 @@ def check_gradient(
     left = _real_inner_product([1.0], directional_leaves)
     right = _real_inner_product(gradient_leaves, tangent_leaves)
     adjoint_error = abs(left - right)
-    adjoint_passed = adjoint_error <= atol + rtol * abs(left)
+    adjoint_scale = max(
+        _real_inner_product_magnitude([1.0], directional_leaves),
+        _real_inner_product_magnitude(gradient_leaves, tangent_leaves),
+        1.0,
+    )
+    adjoint_passed = adjoint_error <= atol + rtol * adjoint_scale
     failures: list[str] = []
     if not finite_difference_passed:
         failures.append(
@@ -570,7 +583,12 @@ def check_primitive(  # noqa: C901, PLR0912, PLR0913, PLR0915
 
         left = _real_inner_product(output_cotangent_leaves, directional_leaves)
         right = _real_inner_product(contribution_leaves, tangent_leaves)
-        if abs(left - right) > atol + rtol * abs(left):
+        scale = max(
+            _real_inner_product_magnitude(output_cotangent_leaves, directional_leaves),
+            _real_inner_product_magnitude(contribution_leaves, tangent_leaves),
+            1.0,
+        )
+        if abs(left - right) > atol + rtol * scale:
             msg = (
                 f"Primitive '{primitive.name}' transpose violates the real-adjoint identity: "
                 f"left={left}, right={right}"
