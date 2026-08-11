@@ -18,7 +18,8 @@ hooks:
   - scripts/mkdocs_hooks.py
 
 plugins:
-  - search
+  - search:
+      separator: '[\s\-._/()[\],:]+'
   - llmstxt:
       markdown_description: |
         Advect has two explicit execution lifetimes. Dynamic transforms trace

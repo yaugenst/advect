@@ -11,7 +11,7 @@
 (function () {
   var m = null;
   try { m = localStorage.getItem("advect-mode"); } catch (e) { /* private mode */ }
-  if (m) document.documentElement.dataset.theme = m;
+  if (m === "light" || m === "dark") document.documentElement.dataset.theme = m;
 })();
 </script>
 </head>

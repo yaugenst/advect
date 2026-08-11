@@ -97,6 +97,9 @@ jobs:
           ADVECT_REQUIRE_BROWSER_WHEEL: "1"
         run: uv run mkdocs build --strict
 
+      - name: Check documentation search
+        run: node scripts/check_docs_search.cjs
+
       - name: Configure git identity
         if: inputs.version != ''
         run: |

@@ -34,6 +34,17 @@ index
     {%- endif -%}
   {%- endfor -%}
 {%- endmacro -%}
+{#- ---- page outline: use MkDocs' rendered table of contents ------------ -#}
+{%- macro outline_children(items) -%}
+  {%- for item in items -%}
+    {%- if item.level == 2 or item.level == 3 -%}
+      {%- set anchor = item.url.split("#")[-1] -%}
+      {%- set label = anchor.split(".")[-2:]|join(".") if item.level == 3 and "." in anchor else item.title -%}
+<a href="{{ item.url }}"{% if item.level == 3 %} class="outline-sub"{% endif %}>{{ label }}</a>
+    {%- endif -%}
+    {{- outline_children(item.children) -}}
+  {%- endfor -%}
+{%- endmacro -%}
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -54,17 +65,20 @@ index
 {%- endfor %}
 <script>
 var base_url = "{{ base_url }}";
-/* pre-paint: apply persisted display mode and tree state to avoid a theme
-   flash and the tree pane animating open on every navigation */
+/* pre-paint: apply persisted display mode and pane state to avoid a theme
+   flash and the panes animating open on every navigation */
 (function () {
-  var m = null, t = null;
+  var m = null, t = null, o = null;
   try {
     m = localStorage.getItem("advect-mode");
     t = localStorage.getItem("advect-tree");
+    o = localStorage.getItem("advect-outline");
   } catch (e) { /* private mode */ }
-  if (m) document.documentElement.dataset.theme = m;
+  if (m === "light" || m === "dark") document.documentElement.dataset.theme = m;
   var open = t === null ? window.innerWidth > 1100 : t === "1";
   if (open) document.documentElement.classList.add("tree-open");
+  open = o === null ? window.innerWidth > 1500 : o === "1";
+  if (open) document.documentElement.classList.add("outline-open");
 })();
 </script>
 {% block head %}{% endblock %}
@@ -109,6 +123,11 @@ var base_url = "{{ base_url }}";
       <p class="prompt">$ <span class="cursor">█</span></p>
     </div></div>
   </article>
+
+  <aside class="tile outlinetile" id="outlinetile" aria-label="Page outline" aria-hidden="true">
+    <span class="ptitle"><span class="pn">outline</span> this-page</span>
+    <nav class="outlinelinks" id="outlinelinks">{{ outline_children(page.toc) if page else "" }}</nav>
+  </aside>
 {% endblock -%}
 </div>
 
@@ -118,9 +137,10 @@ var base_url = "{{ base_url }}";
     <tr><td class="kk">j k d u g G</td><td>scroll the page</td></tr>
     <tr><td class="kk">n / p</td><td>next / previous page</td></tr>
     <tr><td class="kk">e</td><td>toggle the docs tree pane</td></tr>
+    <tr><td class="kk">o</td><td>toggle the page outline</td></tr>
     <tr><td class="kk">/</td><td>search the manual</td></tr>
     <tr><td class="kk">2</td><td>open the playground</td></tr>
-    <tr><td class="kk">t</td><td>lp0 → dark → crt</td></tr>
+    <tr><td class="kk">t</td><td>system → light → dark</td></tr>
     <tr><td class="kk">?</td><td>close this help</td></tr>
   </table>
 </div>
@@ -130,15 +150,23 @@ var base_url = "{{ base_url }}";
   <div class="search-hits" id="mkdocs-search-results" data-no-results-text="No manual entry found" aria-live="polite"></div>
 </div>
 
+<aside class="link-preview" id="linkpreview" role="tooltip" aria-hidden="true">
+  <div class="preview-path" id="previewpath"></div>
+  <strong class="preview-title" id="previewtitle"></strong>
+  <pre class="preview-signature" id="previewsignature"><code></code></pre>
+  <p class="preview-description" id="previewdescription"></p>
+</aside>
+
 <div class="bar">
-  <a href="{{ '.'|url }}" class="b"{% if not (page and page.url.startswith('playground')) %} aria-current="true"{% endif %}>[1:docs]</a>
-  <a href="{{ 'playground/'|url }}" class="b" id="wsplay"{% if page and page.url.startswith('playground') %} aria-current="true"{% endif %}>[2:playground]</a>
+  <a href="{{ '.'|url }}" class="b" data-short="[1]"{% if not (page and page.url.startswith('playground')) %} aria-current="true"{% endif %}>[1:docs]</a>
+  <a href="{{ 'playground/'|url }}" class="b" id="wsplay" data-short="[2]"{% if page and page.url.startswith('playground') %} aria-current="true"{% endif %}>[2:playground]</a>
   <span class="path hidesm">$ man advect{% if page and page.url and page.url != "." %}/{{ page.url.rstrip("/") }}{% endif %}</span>
   <span class="grow"></span>
-  <button class="tbtn" id="treebtn" aria-label="Toggle documentation tree">[e] tree</button>
-  <button class="tbtn" id="searchbtn" aria-label="Search" aria-controls="search" aria-expanded="false">[/] search</button>
+  <button class="tbtn" id="treebtn" data-short="[e]" aria-label="Toggle documentation tree">[e] tree</button>
+  <button class="tbtn" id="outlinebtn" data-short="[o]" aria-label="Toggle page outline" aria-controls="outlinetile" aria-expanded="false">[o] outline</button>
+  <button class="tbtn" id="searchbtn" data-short="[/]" aria-label="Search" aria-controls="search" aria-expanded="false">[/] search</button>
   <button class="tbtn hidesm" id="helpbtn" aria-label="Keyboard help">[?] keys</button>
-  <button class="tbtn" id="themeToggle" aria-label="Cycle display mode">[ mode: … ]</button>
+  <button class="tbtn" id="themeToggle" data-short="[mode]" aria-label="Cycle system, light, and dark display modes">[ mode: … ]</button>
 </div>
 
 <script src="{{ 'js/theme.js'|url }}"></script>
