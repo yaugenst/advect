@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>404 · advect</title>
+<link rel="icon" href="/advect/0.1.0/img/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/advect/0.1.0/css/fonts.css">
+<link rel="stylesheet" href="/advect/0.1.0/css/theme.css?v=bf544137efc8">
+<script>
+(function () {
+  var m = null;
+  try { m = localStorage.getItem("advect-mode"); } catch (e) { /* private mode */ }
+  if (m === "light" || m === "dark") document.documentElement.dataset.theme = m;
+})();
+</script>
+</head>
+<body>
+<div class="desktop">
+  <article class="tile manwin" aria-label="Not found">
+    <span class="ptitle"><span class="pn">man</span> ?</span>
+    <div class="manscroll"><div class="mancol">
+      <div class="manhead"><span>ADVECT(1)</span><span class="mid">User Commands</span><span>ADVECT(1)</span></div>
+      <div class="rule">────────────────────────────────────────────────────────────────────────────────────────</div>
+      <div class="md">
+        <p>$ man <span id="miss">advect/…</span></p>
+        <p><span class="acc b">No manual entry</span> for that page.</p>
+        <p class="dim"># exit 16 — try the index, or search from there with /</p>
+        <p><a href="/advect/0.1.0/.">← advect(1)</a></p>
+      </div>
+      <p class="prompt">$ <span class="cursor">█</span></p>
+    </div></div>
+  </article>
+</div>
+<script>
+document.getElementById("miss").textContent = window.location.pathname;
+</script>
+</body>
+</html>

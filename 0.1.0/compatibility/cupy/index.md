@@ -1,0 +1,14 @@
+# CuPy
+
+CuPy uses Advect's single-device [Array API](https://yaugenst.github.io/advect/0.1.0/compatibility/array-api/index.md) path. Pass CuPy arrays to a transform and write numerical code against the namespace returned by `x.__array_namespace__()`; this does not intercept arbitrary `cupy.*` calls.
+
+The generated [Array API table](https://yaugenst.github.io/advect/0.1.0/compatibility/array-api/index.md) defines the callable set for this path. CuPy exercises that shared contract through `__array_namespace__()`; Advect does not maintain a second CuPy inventory.
+
+## Install
+
+Install the CuPy wheel family matching the CUDA generation available to the host. Advect does not select the CUDA package, and no Advect extra or registration import is required.
+
+## Boundaries
+
+- One process and one device; multi-GPU placement and stream control are not claimed.
+- Arrays attached to another autodiff system (`requires_grad=True`) are rejected instead of composing two derivative tapes.
