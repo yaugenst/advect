@@ -10,7 +10,7 @@ import numpy as np
 import advect as ad
 from advect.core._pytree import tree_flatten, tree_unflatten
 from advect.core._registry import get_registry
-from advect.testing import _real_inner_product
+from advect.testing import _real_inner_product, _real_inner_product_magnitude
 from advect_conformance_tests._harness._cases import Law, NumericalReference
 from advect_conformance_tests._harness._frontends import is_python_number, to_numpy, wrap_for
 
@@ -443,15 +443,17 @@ def _law_adjoint(
 
     for label, probe_directions in _direction_variants(case, values, directions):
         _value, tangent = _jvp(case, values, probe_directions)
-        forward_pairing = _real_inner_product(
-            _numpy_leaves(cotangent),
-            _numpy_leaves(tangent),
+        cotangent_leaves = _numpy_leaves(cotangent)
+        tangent_leaves = _numpy_leaves(tangent)
+        input_cotangent_leaves = _numpy_leaves(input_cotangent)
+        direction_leaves = [to_numpy(direction) for direction in probe_directions]
+        forward_pairing = _real_inner_product(cotangent_leaves, tangent_leaves)
+        reverse_pairing = _real_inner_product(input_cotangent_leaves, direction_leaves)
+        scale = max(
+            _real_inner_product_magnitude(cotangent_leaves, tangent_leaves),
+            _real_inner_product_magnitude(input_cotangent_leaves, direction_leaves),
+            1.0,
         )
-        reverse_pairing = _real_inner_product(
-            _numpy_leaves(input_cotangent),
-            [to_numpy(direction) for direction in probe_directions],
-        )
-        scale = max(abs(forward_pairing), abs(reverse_pairing), 1.0)
         deviation = abs(forward_pairing - reverse_pairing)
         tolerance = case.tolerance.adjoint_atol + case.tolerance.adjoint_rtol * scale
         if deviation > tolerance:
