@@ -133,7 +133,7 @@ def test_autograd_bridge_reuses_and_releases_the_exact_forward_linearization() -
 
 
 def test_autograd_bridge_rejects_integer_input_leaves() -> None:
-    bridged = wrap(lambda value: np.sum(value))
+    bridged = wrap(lambda value: np.sum(value))  # noqa: PLW0108 - bridge boundary
     with pytest.raises(TypeError, match="only NumPy floating and complex leaves"):
         bridged(np.asarray([1, 2], dtype=np.int64))
 

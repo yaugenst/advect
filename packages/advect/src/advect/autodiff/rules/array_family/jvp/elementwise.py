@@ -372,7 +372,7 @@ def _jvp_sign(
     safe = xp.where(magnitude == 0, 1.0, magnitude)
     magnitude_tangent = xp.real(xp.conjugate(x_arr) * tangent_arr) / safe
     result = tangent_arr / safe - x_arr * magnitude_tangent / (safe * safe)
-    return cast("xp.ndarray", xp.where(magnitude == 0, 0.0, result))
+    return xp.where(magnitude == 0, 0.0, result)
 
 
 def _jvp_astype(

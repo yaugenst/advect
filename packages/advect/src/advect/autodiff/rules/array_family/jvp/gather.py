@@ -24,13 +24,13 @@ def _jvp_take(
     tangent = tangents[0] if tangents else None
     if tangent is None:
         return _zeros_output_tangent(ans, tangents)
-    axis_size = int(tangent.size) if axis is None else int(tangent.shape[int(axis)])
+    axis_size = tangent.size if axis is None else tangent.shape[axis]
     normalized = indices
     if mode == "wrap":
         normalized = xp.remainder(indices, axis_size)
     elif mode == "clip":
         normalized = xp.clip(indices, 0, axis_size - 1)
-    return cast("xp.ndarray", xp.take(tangent, normalized, axis=axis))
+    return xp.take(tangent, normalized, axis=axis)
 
 
 def _jvp_take_along_axis(
@@ -46,10 +46,7 @@ def _jvp_take_along_axis(
     tangent = tangents[0] if tangents else None
     if tangent is None:
         return _zeros_output_tangent(ans, tangents)
-    return cast(
-        "xp.ndarray",
-        _take_along_axis(tangent, indices, axis=int(axis)),
-    )
+    return _take_along_axis(tangent, indices, axis=axis)
 
 
 def _jvp_bincount(
@@ -68,5 +65,5 @@ def _jvp_bincount(
         return _zeros_output_tangent(ans, tangents)
     return cast(
         "xp.ndarray",
-        xp.bincount(indices, weights=tangent, minlength=int(minlength)),
+        xp.bincount(indices, weights=tangent, minlength=minlength),
     )

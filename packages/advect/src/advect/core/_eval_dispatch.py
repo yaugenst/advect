@@ -1,4 +1,4 @@
-# ruff: noqa: ANN401, C901, EM101, EM102, PLR0911, PLR2004, TRY003
+# ruff: noqa: ANN401, C901, PLR0911, PLR2004
 """Shared concrete evaluator binding for staged replay and autodiff."""
 
 from __future__ import annotations

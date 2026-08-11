@@ -152,7 +152,7 @@ def _resolve_wrapped_namespace(value: Any, *, api_version: str | None) -> Any | 
 def _get_array_namespace(
     value: Any,
     *,
-    api_version: str | None | object = _DEFAULT_API_VERSION,
+    api_version: str | object | None = _DEFAULT_API_VERSION,
 ) -> Any | None:
     if value is None or type(value) in _PRIMITIVE_TYPES:
         return None

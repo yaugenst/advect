@@ -37,7 +37,8 @@ assert not loaded, loaded
 
 @pytest.mark.parametrize("framework", _FRAMEWORKS)
 def test_bridge_preserves_the_wrapped_signature(framework: str) -> None:
-    pytest.importorskip(framework)
+    if framework != "autograd":
+        pytest.importorskip(framework)
     completed = _run(
         f"""
 import inspect

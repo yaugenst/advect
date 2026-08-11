@@ -279,7 +279,7 @@ def test_scipy_special_residual_composes_with_implicit_solver_callbacks() -> Non
 def test_scipy_callbacks_drive_float32_implicit_root_end_to_end() -> None:
     solve_root = ad.implicit_root(
         lambda solution, params: solution * solution - params,
-        solve=lambda residual, initial: (initial - residual(initial) / (2 * initial)),
+        solve=lambda residual, initial: initial - residual(initial) / (2 * initial),
         linear_solve=gmres_solver(rtol=1e-6, atol=1e-7),
     )
     params = np.array([2.0, 3.0, 5.0], dtype=np.float32)

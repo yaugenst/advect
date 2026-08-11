@@ -105,7 +105,10 @@ impl Host for VectorHost {
 }
 
 #[test]
-#[allow(clippy::unwrap_used)]
+#[expect(
+    clippy::unwrap_used,
+    reason = "the checked-in fixture is required to be complete and valid"
+)]
 fn python_staged_fixture_round_trips_and_executes_in_pure_rust() {
     let envelope: serde_json::Value = serde_json::from_str(FIXTURE.trim()).unwrap();
     assert_eq!(envelope.get("format").unwrap(), "advect.ssa-program");

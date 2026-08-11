@@ -99,7 +99,10 @@ def test_stage_rejects_captured_numpy_rng_entrypoint_aliases(entrypoint: object)
 @pytest.mark.parametrize(
     "random_call",
     [
-        pytest.param(lambda shape: np.random.random(shape), id="legacy-draw"),  # noqa: NPY002
+        pytest.param(
+            lambda shape: np.random.random(shape),  # noqa: NPY002, PLW0108 - probe
+            id="legacy-draw",
+        ),
         pytest.param(
             lambda shape: np.random.laplace(size=shape),  # noqa: NPY002
             id="previously-omitted-draw",

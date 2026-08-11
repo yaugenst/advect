@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, cast
 
 from advect.autodiff.api._scalar_boundary import _is_real_python_scalar
 from advect.core._backends import dispatch_input
@@ -16,13 +16,13 @@ _LEAF_TREEDEF = TreeDef(node_type=None, aux_data=None, children=(), num_leaves=1
 
 
 def _wrap_input(
-    value: Any,
+    value: object,
     recorder: DynamicTape,
     *,
     name: str | None = None,
     active: bool = True,
     weak: bool = False,
-) -> tuple[Any, int]:
+) -> tuple[object, int]:
     """Wrap an input value for tracing.
 
     Returns the traced wrapper and its node ID.
@@ -35,8 +35,8 @@ def _wrap_input(
     )
     snapshot = getattr(traced, "_advect_snapshot_in_active_trace", None)
     if callable(snapshot):
-        node_id, _value = cast("tuple[int, Any]", snapshot())
-        resolved_id = int(node_id)
+        node_id, _value = cast("tuple[int, object]", snapshot())
+        resolved_id = node_id
         if weak:
             recorder.mark_weak(resolved_id)
         return traced, resolved_id
@@ -52,7 +52,7 @@ def _wrap_input(
     raise TypeError(msg)
 
 
-def _output_node_id(result: Any, recorder: DynamicTape) -> int:
+def _output_node_id(result: object, recorder: DynamicTape) -> int:
     """Resolve an output leaf to a node ID.
 
     Outputs can be traced arrays or constants.
@@ -61,8 +61,8 @@ def _output_node_id(result: Any, recorder: DynamicTape) -> int:
     """
     active_snapshot = getattr(result, "_advect_snapshot_in_active_trace", None)
     if callable(active_snapshot):
-        node_id, _value = cast("tuple[int, Any]", active_snapshot())
-        return int(node_id)
+        node_id, _value = cast("tuple[int, object]", active_snapshot())
+        return node_id
     if hasattr(result, "node_id"):
         return int(result.node_id)
 
@@ -108,7 +108,7 @@ def _output_node_id(result: Any, recorder: DynamicTape) -> int:
     raise TypeError(msg)
 
 
-def _mark_outputs(result: Any, recorder: DynamicTape) -> tuple[TreeDef, list[int]]:
+def _mark_outputs(result: object, recorder: DynamicTape) -> tuple[TreeDef, list[int]]:
     """Mark pytree leaves as graph outputs, returning (treedef, output_node_ids)."""
     if callable(getattr(result, "_advect_snapshot", None)):
         treedef, leaves = _LEAF_TREEDEF, (result,)

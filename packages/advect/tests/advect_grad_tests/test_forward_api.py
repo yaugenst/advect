@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
+import array_api_strict as strict
+import numpy as np
 import pytest
 from numpy.testing import assert_allclose
 
 import advect as ad
 import advect.autodiff._ephemeral as ephemeral
 from advect.autodiff._ephemeral import LinearMap
-
-np = pytest.importorskip("numpy")
 
 
 def test_jacobian_scalar_input_preserves_scalar_shape() -> None:
@@ -142,7 +142,6 @@ def test_jacobian_of_restored_staged_program_remains_shape_preserving() -> None:
 
 
 def test_jacobian_remains_array_api_provider_neutral() -> None:
-    strict = pytest.importorskip("array_api_strict")
     value = strict.asarray([1.0, 2.0, 3.0], dtype=strict.float32)
 
     actual = ad.jacobian(lambda x: x * x)(value)
@@ -154,7 +153,6 @@ def test_jacobian_remains_array_api_provider_neutral() -> None:
 
 
 def test_forward_selected_jacobian_remains_array_api_provider_neutral() -> None:
-    strict = pytest.importorskip("array_api_strict")
     value = strict.asarray(2.0, dtype=strict.float64)
     coefficients = strict.asarray([1.0, 2.0, 3.0], dtype=strict.float64)
 
@@ -218,7 +216,7 @@ def test_jacobian_chooses_modes_by_shape_and_square_trace_capabilities(
     assert calls == {"forward": 1, "reverse": 0}
 
     calls.update(forward=0, reverse=0)
-    tall = ad.jacobian(lambda x: np.sum(x))(np.arange(8.0))
+    tall = ad.jacobian(np.sum)(np.arange(8.0))
     assert_allclose(tall, np.ones(8))
     assert calls == {"forward": 0, "reverse": 1}
 

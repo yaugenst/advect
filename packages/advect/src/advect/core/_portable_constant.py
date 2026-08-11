@@ -1,4 +1,4 @@
-# ruff: noqa: ANN401, C901, EM101, EM102, PLR0912, TRY003
+# ruff: noqa: ANN401, C901, PLR0912
 """Portable numeric constants at the Python/native graph boundary."""
 
 from __future__ import annotations

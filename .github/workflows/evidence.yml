@@ -19,7 +19,6 @@ concurrency:
 env:
   ADVECT_SOURCE_REVISION: ${{ github.sha }}
   FORCE_COLOR: "1"
-  UV_SYSTEM_PYTHON: "1"
 
 jobs:
   cpu-evidence:
@@ -44,12 +43,13 @@ jobs:
       - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
         with:
           enable-cache: true
+          version-file: pyproject.toml
 
       - name: Set up Python
         run: uv python install 3.12
 
       - name: Install dependencies
-        run: uv sync --all-groups --frozen
+        run: uv sync --all-groups --locked
 
       - name: Resolve exact evidence revisions
         id: revisions

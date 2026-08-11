@@ -310,7 +310,9 @@ def test_logsumexp_has_a_traceable_second_derivative() -> None:
     weights = np.exp(sample - scipy_special.logsumexp(sample))
     expected = np.diag(weights) - np.outer(weights, weights)
 
-    actual = ad.hessian(lambda x: special.logsumexp(x))(sample)
+    actual = ad.hessian(
+        lambda x: special.logsumexp(x)  # noqa: PLW0108 - Hessian boundary
+    )(sample)
 
     assert_allclose(actual, expected, rtol=2e-10, atol=2e-10)
 
@@ -820,7 +822,7 @@ def test_polygamma_array_orders_stage_serialize_and_differentiate_x() -> None:
     orders = np.array([[0], [1], [3]], dtype=np.int64)
     sample = np.array([[0.7, 1.4, 2.8, 4.1]])
     program = ad.stage(
-        lambda n, x: special.polygamma(n, x),
+        lambda n, x: special.polygamma(n, x),  # noqa: PLW0108 - trace boundary
         specs=(
             ad.ArraySpec(orders.shape, orders.dtype),
             ad.ArraySpec(sample.shape, sample.dtype),

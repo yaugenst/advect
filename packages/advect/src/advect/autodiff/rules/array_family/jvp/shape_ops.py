@@ -230,7 +230,7 @@ def _jvp_rot90(
     tangent = tangents[0] if tangents else None
     if tangent is None:
         return _zeros_output_tangent(ans, tangents)
-    return xp.rot90(_asarray_preserving_trace(tangent), k=int(k), axes=axes)
+    return xp.rot90(_asarray_preserving_trace(tangent), k=k, axes=axes)
 
 
 def _jvp_rollaxis(
@@ -263,7 +263,7 @@ def _jvp_triu(
     tangent = tangents[0] if tangents else None
     if tangent is None:
         return _zeros_output_tangent(ans, tangents)
-    return xp.triu(_asarray_preserving_trace(tangent), k=int(k))
+    return xp.triu(_asarray_preserving_trace(tangent), k=k)
 
 
 def _jvp_tril(
@@ -279,7 +279,7 @@ def _jvp_tril(
     tangent = tangents[0] if tangents else None
     if tangent is None:
         return _zeros_output_tangent(ans, tangents)
-    return xp.tril(_asarray_preserving_trace(tangent), k=int(k))
+    return xp.tril(_asarray_preserving_trace(tangent), k=k)
 
 
 def _jvp_atleast_1d(

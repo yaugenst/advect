@@ -148,7 +148,7 @@ def _execute_selected(
         decoded_kwargs = _decode(encoded.kwargs, runtime_inputs)
         return function(
             *decoded_args,  # type: ignore[arg-type]
-            **decoded_kwargs,  # type: ignore[arg-type]
+            **decoded_kwargs,
         )
 
     mode = os.environ.get("ADVECT_ARRAY_API_QUALIFICATION_MODE", "dynamic")

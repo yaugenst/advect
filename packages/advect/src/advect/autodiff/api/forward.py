@@ -5,7 +5,7 @@ from __future__ import annotations
 import functools
 import math
 from itertools import batched
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, cast
 
 from advect.autodiff._ephemeral import (
     _PULLBACK_MANY_BATCH_SIZE,
@@ -25,14 +25,28 @@ from advect.core._registry import get_registry
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from typing import Protocol
+
+    from advect.autodiff.api._input_trace import _LeafTraceSpec, _TracedInputSpec
+    from advect.core._pytree import TreeDef
+
+    class _DTypeValue(Protocol):
+        """Array-like value exposing a dtype."""
+
+        dtype: object
+
+    class _RowCollection(Protocol):
+        """Provider basis rows supporting scalar or tuple indexing."""
+
+        def __getitem__(self, key: object, /) -> object: ...
 
 
-def linearize(
-    f: Callable[..., Any],
-    *primals: Any,
+def linearize[R](
+    f: Callable[..., R],
+    *primals: object,
     argnums: int | tuple[int, ...] = 0,
-    **kwargs: Any,
-) -> tuple[Any, LinearMap]:
+    **kwargs: object,
+) -> tuple[R, LinearMap]:
     """Linearize one concrete call and return its reusable real-linear map.
 
     The call is traced immediately from ``primals`` and ``kwargs``. The
@@ -113,13 +127,13 @@ def linearize(
         argnames=None,
         single_argnum=single_argnum,
     )
-    return linear._unlift_outputs(value), linear  # noqa: SLF001
+    return cast("R", linear._unlift_outputs(value)), linear  # noqa: SLF001
 
 
-def jvp(
-    f: Callable[..., Any],
+def jvp[R](
+    f: Callable[..., R],
     argnums: int | tuple[int, ...] = 0,
-) -> Callable[..., tuple[Any, Any]]:
+) -> Callable[..., tuple[R, object]]:
     """Return a concrete-tracing Jacobian-vector product transform.
 
     Parameters
@@ -173,7 +187,11 @@ def jvp(
     argnums_tuple, single_argnum = _normalize_argnums_spec(argnums)
 
     @functools.wraps(f)
-    def jvp_fn(*args: Any, tangents: Any, **kwargs: Any) -> tuple[Any, Any]:
+    def jvp_fn(
+        *args: object,
+        tangents: object,
+        **kwargs: object,
+    ) -> tuple[R, object]:
         value, linear = linearize_call(
             f,
             args=args,
@@ -183,12 +201,15 @@ def jvp(
             single_argnum=single_argnum,
         )
         tangent = linear._consume(tangents)  # noqa: SLF001
-        return linear._unlift_outputs(value), linear._unlift_outputs(tangent)  # noqa: SLF001
+        return (
+            cast("R", linear._unlift_outputs(value)),  # noqa: SLF001
+            linear._unlift_outputs(tangent),  # noqa: SLF001
+        )
 
     return jvp_fn
 
 
-def _is_complex_array(value: Any) -> bool:
+def _is_complex_array(value: object) -> bool:
     if isinstance(value, complex):
         return True
     dtype = getattr(value, "dtype", None)
@@ -203,11 +224,11 @@ def _jacobian_selection(
     return _normalize_argnums_spec(resolved)
 
 
-def _shape(value: Any) -> tuple[int, ...]:
+def _shape(value: object) -> tuple[int, ...]:
     return tuple(int(dimension) for dimension in getattr(value, "shape", ()))
 
 
-def _basis_cotangent(value: Any, index: int) -> Any:
+def _basis_cotangent(value: object, index: int) -> object:
     shape = _shape(value)
     namespace = _get_array_namespace(value)
     if namespace is None:
@@ -223,11 +244,11 @@ def _basis_cotangent(value: Any, index: int) -> Any:
     return namespace.reshape(flattened, shape)
 
 
-def _basis_tangent(value: Any, index: int) -> Any:
+def _basis_tangent(value: object, index: int) -> object:
     return _basis_cotangent(value, index)
 
 
-def _basis_cotangent_rows(value: Any) -> Any:
+def _basis_cotangent_rows(value: object) -> object:
     """Allocate every standard-basis cotangent as rows of one provider array."""
     shape = _shape(value)
     size = _flat_size(value)
@@ -238,7 +259,7 @@ def _basis_cotangent_rows(value: Any) -> Any:
             raise RuntimeError(msg)
         return (1.0,)
 
-    kwargs: dict[str, Any] = {"dtype": value.dtype}
+    kwargs: dict[str, object] = {"dtype": cast("_DTypeValue", value).dtype}
     device = getattr(value, "device", None)
     if device is not None:
         kwargs["device"] = device
@@ -246,23 +267,23 @@ def _basis_cotangent_rows(value: Any) -> Any:
     return namespace.reshape(identity, (size, *shape))
 
 
-def _basis_cotangent_row(rows: Any, index: int) -> Any:
+def _basis_cotangent_row(rows: object, index: int) -> object:
     if isinstance(rows, tuple):
         return rows[index]
-    return rows[(index, ...)]
+    return cast("_RowCollection", rows)[(index, ...)]
 
 
-def _flat_size(value: Any) -> int:
+def _flat_size(value: object) -> int:
     shape = _shape(value)
     return math.prod(shape) if shape else 1
 
 
 def _stack_jacobian_rows(
-    rows: list[Any],
+    rows: list[object],
     *,
     output_shape: tuple[int, ...],
-    output_like: Any,
-) -> Any:
+    output_like: object,
+) -> object:
     if not rows:
         msg = "jacobian row stack cannot be empty"
         raise ValueError(msg)
@@ -286,11 +307,11 @@ def _stack_jacobian_rows(
 
 
 def _empty_jacobian_block(
-    zero_gradient: Any,
+    zero_gradient: object,
     *,
     output_shape: tuple[int, ...],
-    output_like: Any,
-) -> Any:
+    output_like: object,
+) -> object:
     if zero_gradient is None:
         return None
     namespace = _get_array_namespace(zero_gradient) or _get_array_namespace(output_like)
@@ -308,7 +329,7 @@ def _empty_jacobian_block(
     return namespace.broadcast_to(expanded, (*output_shape, *_shape(zero_gradient)))
 
 
-def _validate_real_jacobian(linear: LinearMap, output_leaves: list[Any]) -> None:
+def _validate_real_jacobian(linear: LinearMap, output_leaves: list[object]) -> None:
     if any(_is_complex_array(leaf) for leaf in output_leaves):
         msg = "jacobian requires real outputs; use linearize() for complex real-linear maps"
         raise ValueError(msg)
@@ -325,7 +346,10 @@ def _validate_real_jacobian(linear: LinearMap, output_leaves: list[Any]) -> None
         raise ValueError(msg)
 
 
-def _input_gradient_leaf(leaf_spec: Any, gradients: dict[int, Any]) -> Any:
+def _input_gradient_leaf(
+    leaf_spec: _LeafTraceSpec,
+    gradients: dict[int, object],
+) -> object:
     node_id = leaf_spec.node_id
     if node_id is None:
         return None
@@ -336,16 +360,16 @@ def _input_gradient_leaf(leaf_spec: Any, gradients: dict[int, Any]) -> Any:
     return _unlift_scalar_array(gradient) if leaf_spec.restore_python_scalar else gradient
 
 
-def _zero_input_gradient_leaf(leaf_spec: Any) -> Any:
+def _zero_input_gradient_leaf(leaf_spec: _LeafTraceSpec) -> object:
     return _input_gradient_leaf(leaf_spec, {})
 
 
 def _jacobian_reverse(
     linear: LinearMap,
     *,
-    output_leaves: list[Any],
-    output_treedef: Any,
-) -> Any:
+    output_leaves: list[object],
+    output_treedef: TreeDef,
+) -> object:
     if not output_leaves:
         return tree_unflatten(output_treedef, [])
 
@@ -355,7 +379,7 @@ def _jacobian_reverse(
         for spec in (*positional_specs, *(spec for _name, spec in named_specs))
         for leaf_spec in spec.leaf_specs
     ]
-    rows_by_output: list[list[list[Any]]] = [
+    rows_by_output: list[list[list[object]]] = [
         [[] for _leaf_spec in leaf_specs] for _output_leaf in output_leaves
     ]
     basis_rows = tuple(_basis_cotangent_rows(output_leaf) for output_leaf in output_leaves)
@@ -391,7 +415,7 @@ def _jacobian_reverse(
                 rows.append(_input_gradient_leaf(leaf_spec, gradients))
 
     has_empty_output = any(_flat_size(output_leaf) == 0 for output_leaf in output_leaves)
-    zero_gradient_leaves: list[Any] = (
+    zero_gradient_leaves: list[object] = (
         [_zero_input_gradient_leaf(leaf_spec) for leaf_spec in leaf_specs]
         if has_empty_output
         else []
@@ -429,7 +453,9 @@ def _jacobian_reverse(
     return tree_unflatten(output_treedef, output_blocks)
 
 
-def _selected_input_specs(linear: LinearMap) -> tuple[tuple[Any, ...], tuple[tuple[str, Any], ...]]:
+def _selected_input_specs(
+    linear: LinearMap,
+) -> tuple[tuple[_TracedInputSpec, ...], tuple[tuple[str, _TracedInputSpec], ...]]:
     positional = tuple(linear._trace.positional_specs)  # noqa: SLF001
     named = tuple(linear._trace.named_specs.items())  # noqa: SLF001
     return positional, named
@@ -463,13 +489,13 @@ def _trace_requires_reverse(linear: LinearMap) -> bool:
 
 
 def _stack_jacobian_columns(
-    columns: list[Any],
+    columns: list[object],
     *,
     output_shape: tuple[int, ...],
     input_shape: tuple[int, ...],
-    output_like: Any,
-    input_like: Any,
-) -> Any:
+    output_like: object,
+    input_like: object,
+) -> object:
     expected = math.prod(input_shape) if input_shape else 1
     if len(columns) != expected:
         msg = f"jacobian JVP produced {len(columns)} columns for an input of size {expected}"
@@ -495,7 +521,7 @@ def _stack_jacobian_columns(
     return _cast_jacobian_block_like_input(block, input_like)
 
 
-def _cast_jacobian_block_like_input(block: Any, input_like: Any) -> Any:
+def _cast_jacobian_block_like_input(block: object, input_like: object) -> object:
     """Represent each dense block in its input tangent-space dtype."""
     input_dtype = getattr(input_like, "dtype", None)
     if input_dtype is None or getattr(block, "dtype", None) == input_dtype:
@@ -512,8 +538,8 @@ def _cast_jacobian_block_like_input(block: Any, input_like: Any) -> Any:
 
 def _format_forward_input_blocks(
     linear: LinearMap,
-    flat_blocks: list[Any],
-) -> Any:
+    flat_blocks: list[object],
+) -> object:
     positional_specs, named_specs = _selected_input_specs(linear)
     offset = 0
     positional = []
@@ -539,16 +565,16 @@ def _format_forward_input_blocks(
 def _jacobian_forward(
     linear: LinearMap,
     *,
-    output_leaves: list[Any],
-    output_treedef: Any,
-) -> Any:
+    output_leaves: list[object],
+    output_treedef: TreeDef,
+) -> object:
     positional_specs, named_specs = _selected_input_specs(linear)
     leaf_specs = [
         leaf_spec
         for spec in (*positional_specs, *(spec for _name, spec in named_specs))
         for leaf_spec in spec.leaf_specs
     ]
-    columns_by_output: list[list[list[Any]]] = [
+    columns_by_output: list[list[list[object]]] = [
         [[] for _leaf_spec in leaf_specs] for _output_leaf in output_leaves
     ]
 
@@ -615,12 +641,12 @@ def _jacobian_forward(
     return tree_unflatten(output_treedef, output_blocks)
 
 
-def jacobian(
-    f: Callable[..., Any],
+def jacobian[**P](
+    f: Callable[P, object],
     argnums: int | tuple[int, ...] | None = None,
     *,
     argnames: tuple[str, ...] | None = None,
-) -> Callable[..., Any]:
+) -> Callable[P, object]:
     """Return a shape-preserving dense Jacobian for real pytree inputs and outputs.
 
     Parameters
@@ -695,7 +721,7 @@ def jacobian(
     argnums_tuple, single_argnum = _jacobian_selection(argnums, argnames)
 
     @functools.wraps(f)
-    def jacobian_fn(*args: Any, **kwargs: Any) -> Any:
+    def jacobian_fn(*args: P.args, **kwargs: P.kwargs) -> object:
         value, linear = linearize_call(
             f,
             args=args,

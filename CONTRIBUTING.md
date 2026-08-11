@@ -9,8 +9,7 @@ draft pull request before committing to an implementation.
 Advect supports Python 3.12 through 3.14 and requires Rust 1.94 or newer:
 
 ```bash
-uv sync --all-groups
-uv lock --check
+uv sync --all-groups --locked
 uv run pre-commit install --install-hooks
 rustup toolchain install stable --component clippy rustfmt
 ```

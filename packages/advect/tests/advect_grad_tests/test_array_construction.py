@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+import array_api_strict as strict
 import numpy as np
 import pytest
 from numpy.testing import assert_allclose
@@ -235,13 +236,15 @@ def test_numpy_like_constructors_survive_staged_differentiation(
     value = np.array([1.0, 2.0])
     spec = ad.ArraySpec(value.shape, value.dtype)
     program = ad.stage(
-        lambda x: constructor(
-            [[x[0], x[1]], [x[1], 2 * x[0]]],
-            dtype=np.float32,
-            like=x,
-        )
-        .sum()
-        .item(),
+        lambda x: (
+            constructor(
+                [[x[0], x[1]], [x[1], 2 * x[0]]],
+                dtype=np.float32,
+                like=x,
+            )
+            .sum()
+            .item()
+        ),
         specs=(spec,),
     )
     gradient_program = ad.grad(program)
@@ -277,7 +280,6 @@ def test_coordinate_item_survives_staged_differentiation() -> None:
 
 
 def test_array_and_item_remain_array_api_provider_neutral() -> None:
-    strict = pytest.importorskip("array_api_strict")
     value = strict.asarray([1.0, 2.0], dtype=strict.float32)
 
     gradient = ad.grad(
@@ -324,7 +326,7 @@ def test_stop_gradient_preserves_registered_pytree_structure() -> None:
 def test_stop_gradient_rejects_abstract_staging() -> None:
     with pytest.raises(TracingError, match="abstract staged values"):
         ad.stage(
-            lambda x: ad.stop_gradient(x),
+            ad.stop_gradient,
             specs=(ad.ArraySpec((2,), "float64"),),
         )
 

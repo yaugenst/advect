@@ -2,15 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from advect.autodiff.rules.array_family._backend_runtime import _take_along_axis, xp
 from advect.autodiff.rules.array_family._transpose_utils import (
     zeros_output_tangent_structure as _zeros_output_tangent_structure,
 )
 from advect.autodiff.rules.array_family.jvp.common import (
-    PartitionKind,
-    SortKind,
     _asarray_preserving_trace,
     _asarray_unwrapped,
     _coerce_tangent_or_zeros,
@@ -18,6 +16,9 @@ from advect.autodiff.rules.array_family.jvp.common import (
     _shape_unwrapped,
     _zeros_output_tangent,
 )
+
+if TYPE_CHECKING:
+    from advect.autodiff.rules.array_family.jvp.common import PartitionKind, SortKind
 
 
 def _jvp_diagonal(
@@ -38,7 +39,7 @@ def _jvp_diagonal(
         "xp.ndarray[Any, Any]",
         xp.diagonal(
             _asarray_preserving_trace(tangent),
-            offset=int(offset),
+            offset=offset,
             axis1=axis1,
             axis2=axis2,
         ),
@@ -63,7 +64,7 @@ def _jvp_trace(
         "xp.ndarray[Any, Any]",
         xp.trace(
             _asarray_preserving_trace(tangent),
-            offset=int(offset),
+            offset=offset,
             axis1=axis1,
             axis2=axis2,
         ),
@@ -82,7 +83,7 @@ def _jvp_diag(
     tangent = tangents[0] if tangents else None
     if tangent is None:
         return _zeros_output_tangent(ans, tangents)
-    return cast("xp.ndarray[Any, Any]", xp.diag(_asarray_preserving_trace(tangent), k=int(k)))
+    return cast("xp.ndarray[Any, Any]", xp.diag(_asarray_preserving_trace(tangent), k=k))
 
 
 def _jvp_diff(
@@ -106,10 +107,10 @@ def _jvp_diff(
         primal=x,
         dtype=dtype,
     )
-    if int(n) == 0:
+    if n == 0:
         return cast("xp.ndarray[Any, Any]", tangent_arr)
 
-    axis_norm = int(axis)
+    axis_norm = axis
     x_shape = _shape_unwrapped(x)
     if axis_norm < 0:
         axis_norm += len(x_shape)
@@ -118,7 +119,7 @@ def _jvp_diff(
 
     def boundary_tangent(value: xp.ndarray) -> xp.ndarray:
         if len(_shape_unwrapped(value)) == 0:
-            return cast("xp.ndarray", xp.broadcast_to(value, tuple(boundary_shape)))
+            return xp.broadcast_to(value, tuple(boundary_shape))
         return value
 
     parts: list[xp.ndarray] = []
@@ -153,7 +154,7 @@ def _jvp_diff(
     elif append is not None:
         parts.append(boundary_tangent(xp.zeros_like(xp.asarray(append), dtype=dtype)))
     joined = tangent_arr if len(parts) == 1 else xp.concatenate(parts, axis=axis_norm)
-    return cast("xp.ndarray[Any, Any]", xp.diff(joined, n=int(n), axis=axis_norm))
+    return cast("xp.ndarray[Any, Any]", xp.diff(joined, n=n, axis=axis_norm))
 
 
 def _jvp_repeat(
@@ -171,7 +172,7 @@ def _jvp_repeat(
         return _zeros_output_tangent(ans, tangents)
     return cast(
         "xp.ndarray[Any, Any]",
-        xp.repeat(_asarray_preserving_trace(tangent), int(repeats), axis=axis),
+        xp.repeat(_asarray_preserving_trace(tangent), repeats, axis=axis),
     )
 
 
@@ -210,7 +211,7 @@ def _jvp_sort(
     if tangent is None:
         return _zeros_output_tangent(ans, tangents)
     x_arr = _asarray_unwrapped(x)
-    axis_norm = int(axis)
+    axis_norm = axis
     if axis_norm < 0:
         axis_norm += x_arr.ndim
     if descending is not None or stable is not None:
@@ -218,7 +219,7 @@ def _jvp_sort(
             x_arr,
             axis=axis_norm,
             descending=bool(descending),
-            stable=True if stable is None else bool(stable),
+            stable=True if stable is None else stable,
         )
     else:
         perm = xp.argsort(x_arr, axis=axis_norm, kind=kind, order=order)
@@ -241,7 +242,7 @@ def _jvp_partition(
     if tangent is None:
         return _zeros_output_tangent(ans, tangents)
     x_arr = _asarray_unwrapped(x)
-    axis_norm = int(axis)
+    axis_norm = axis
     if axis_norm < 0:
         axis_norm += x_arr.ndim
     perm = xp.argpartition(x_arr, kth=kth, axis=axis_norm, kind=kind, order=order)
@@ -267,14 +268,11 @@ def _jvp_pad(
     if tangent is None:
         return _zeros_output_tangent(ans, tangents)
     pad_mode = cast("Literal['constant']", mode)
-    return cast(
-        "xp.ndarray[Any, Any]",
-        xp.pad(
-            _asarray_preserving_trace(tangent),
-            pad_width,
-            mode=pad_mode,
-            constant_values=0,
-        ),
+    return xp.pad(
+        _asarray_preserving_trace(tangent),
+        pad_width,
+        mode=pad_mode,
+        constant_values=0,
     )
 
 

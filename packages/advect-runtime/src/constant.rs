@@ -416,7 +416,11 @@ impl Display for ConstantError {
 impl std::error::Error for ConstantError {}
 
 #[cfg(test)]
-#[allow(clippy::indexing_slicing, clippy::unwrap_used)]
+#[expect(
+    clippy::indexing_slicing,
+    clippy::unwrap_used,
+    reason = "tests use direct fixture access and unwrap to fail immediately"
+)]
 mod tests {
     use super::*;
     use serde_json::Value;

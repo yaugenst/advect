@@ -1,9 +1,10 @@
-# ruff: noqa: EM101, EM102, PLR2004, TRY003
+# ruff: noqa: PLR2004
 """Shape, axis, and dtype helpers shared by abstract-evaluation domains."""
 
 from __future__ import annotations
 
 import math
+from collections.abc import Iterable
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -159,7 +160,12 @@ def normalize_axes(axis: object, ndim: int) -> tuple[int, ...]:
     """Normalize an optional axis collection and reject duplicates."""
     if axis is None:
         return tuple(range(ndim))
-    raw = (axis,) if isinstance(axis, int) else tuple(axis)  # type: ignore[arg-type]
+    if isinstance(axis, int):
+        raw = (axis,)
+    elif isinstance(axis, Iterable):
+        raw = tuple(axis)
+    else:
+        raise TypeError(f"Axis must be an integer or iterable of integers, got {axis!r}")
     normalized = tuple(normalize_axis(item, ndim) for item in raw)
     if len(set(normalized)) != len(normalized):
         raise ValueError(f"Repeated axis in {axis!r}")
@@ -203,7 +209,12 @@ def matmul_shape(left: tuple[int, ...], right: tuple[int, ...]) -> tuple[int, ..
 
 def shape_tuple(value: object) -> tuple[int, ...]:
     """Normalize shape-like static metadata."""
-    raw = (value,) if isinstance(value, int) else tuple(value)  # type: ignore[arg-type]
+    if isinstance(value, int):
+        raw = (value,)
+    elif isinstance(value, Iterable):
+        raw = tuple(value)
+    else:
+        raise TypeError(f"Shape must be an integer or iterable of integers, got {value!r}")
     if any(isinstance(size, bool) or not isinstance(size, int) for size in raw):
         raise TypeError(f"Shape must contain integers, got {value!r}")
     return raw
@@ -322,7 +333,9 @@ def tensordot_shape(
         left_axes = tuple(range(len(left) - axes_value, len(left)))
         right_axes = tuple(range(axes_value))
     else:
-        raw = tuple(axes_value)  # type: ignore[arg-type]
+        if not isinstance(axes_value, Iterable):
+            raise TypeError("tensordot axes must be an integer or a pair of axis sequences")
+        raw = tuple(axes_value)
         if len(raw) != 2:
             raise ValueError("tensordot axes must contain two axis sequences")
         left_axes = normalize_axes(raw[0], len(left))

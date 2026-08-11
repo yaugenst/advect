@@ -120,7 +120,7 @@ def _stencil_loss(field: object) -> object:
     namespace = field.__array_namespace__()  # type: ignore[attr-defined]
     updated = field.copy()  # type: ignore[attr-defined]
     laplacian = field[2:] - 2 * field[1:-1] + field[:-2]  # type: ignore[index,operator]
-    updated[1:-1] += 0.1 * laplacian  # type: ignore[index,operator]
+    updated[1:-1] += 0.1 * laplacian
     return namespace.sum(updated * updated)
 
 
@@ -338,12 +338,10 @@ def _qualify_provider(
 
     epsilon = 1e-3
     plus = tuple(
-        primal + epsilon * tangent
-        for primal, tangent in zip(inputs, tangents, strict=True)  # type: ignore[operator]
+        primal + epsilon * tangent for primal, tangent in zip(inputs, tangents, strict=True)
     )
     minus = tuple(
-        primal - epsilon * tangent
-        for primal, tangent in zip(inputs, tangents, strict=True)  # type: ignore[operator]
+        primal - epsilon * tangent for primal, tangent in zip(inputs, tangents, strict=True)
     )
     finite_difference = (
         provider.to_numpy(programs.primal(*plus)) - provider.to_numpy(programs.primal(*minus))
@@ -390,7 +388,7 @@ def _qualify_provider(
     weak_complex = programs.weak_complex(weak_input)
     weak_gradient = programs.weak_gradient(weak_input)
     if weak_complex.dtype != namespace.complex64:  # type: ignore[attr-defined]
-        msg = f"1j * float32 produced {weak_complex.dtype}, not complex64"  # type: ignore[attr-defined]
+        msg = f"1j * float32 produced {weak_complex.dtype}, not complex64"
         raise AssertionError(msg)
     _check_array_contract(weak_gradient, weak_input)
 

@@ -1,4 +1,4 @@
-# ruff: noqa: ANN401, E501, EM101, EM102, PLR2004, SLF001, TC001, TRY003
+# ruff: noqa: ANN401, PLR2004, SLF001
 """Orchestrate Python staging across abstract tracing and the durable runtime.
 
 This module owns call-signature validation, snapshots static inputs, drives an
@@ -67,7 +67,6 @@ from advect.core._primitive_call import (
     _split_primitive_attrs,
 )
 from advect.core._pytree import (
-    TreeDef,
     _get_node_impl,
     tree_flatten,
     tree_flatten_with_paths,
@@ -85,6 +84,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterator, Sequence
 
     from advect.core._native import GraphBuilder, GraphExecutionPlan, GraphStore
+    from advect.core._pytree import TreeDef
 
 _ADVECT_ARRAY_SEMANTIC_PROFILE = "advect-array-1"
 
@@ -673,11 +673,10 @@ class _StageBuilder:
             raise ValueError("Staged constant parts do not match their abstract specification")
         node_id, native_digest = self._builder.append_constant(
             stored_value.data,
-            [int(dimension) for dimension in spec.shape],
+            spec.shape,
             dtype,
             kind=stored_value.kind,
         )
-        node_id = int(node_id)
         if native_digest != stored_value.digest:
             raise RuntimeError("Python and native staged constant digests disagree")
 
@@ -744,7 +743,7 @@ def _scalar_output_mask(
         if node_id in weak:
             continue
         node = graph.get_node(node_id)
-        if not node.inputs or tuple(int(size) for size in node.shape) != ():
+        if not node.inputs or node.shape:
             continue
         if all(parent in weak for parent in node.inputs):
             weak.add(node_id)
@@ -774,7 +773,7 @@ def _with_scalar_output_mask(
                 f"output {index} has shape {spec.shape}"
             )
             raise RuntimeError(msg)
-        output_specs[index] = replace(spec, weak=bool(weak))
+        output_specs[index] = replace(spec, weak=weak)
     return replace(artifact, output_specs=tuple(output_specs))
 
 
@@ -806,16 +805,19 @@ def _compile_stage(
             traced_leaves.append(_snapshot_static_value(spec.value))
             continue
         if not isinstance(spec, ArraySpec):
-            msg = f"stage specs must contain ArraySpec or StaticSpec leaves, got {type(spec).__name__}"
+            msg = (
+                "stage specs must contain ArraySpec or StaticSpec leaves, "
+                f"got {type(spec).__name__}"
+            )
             raise TypeError(msg)
         node_id = graph_builder.append_input_node(
-            [int(dimension) for dimension in spec.shape],
+            spec.shape,
             spec.dtype,
             name=f"arg{index}",
         )
         if spec.weak:
-            weak_input_ids.add(int(node_id))
-        traced_leaves.append(_new_abstract_array(trace, int(node_id), spec, owned=False))
+            weak_input_ids.add(node_id)
+        traced_leaves.append(_new_abstract_array(trace, node_id, spec, owned=False))
 
     traced_args, traced_kwargs = tree_unflatten(call_treedef, traced_leaves)
     _set_active_recorder(
@@ -838,12 +840,10 @@ def _compile_stage(
     graph, old_to_new, raw_optimization, raw_trace = graph_builder.finish()
     trace = StagedTrace(
         nodes=tuple(
-            TracedNode(
-                id=int(node_id), op=op, inputs=tuple(int(item) for item in inputs), name=name
-            )
+            TracedNode(id=node_id, op=op, inputs=tuple(inputs), name=name)
             for node_id, op, inputs, name in raw_trace
         ),
-        old_to_new=tuple(None if target is None else int(target) for target in old_to_new),
+        old_to_new=tuple(old_to_new),
         constants=tuple(stage_builder.constants),
     )
     constants: list[ConstantRecord] = []
@@ -856,7 +856,7 @@ def _compile_stage(
             continue
         constants.append(
             ConstantRecord(
-                value_id=int(remapped_id),
+                value_id=remapped_id,
                 origin=record.origin,
                 location=record.location,
                 shape=record.shape,
@@ -874,7 +874,7 @@ def _compile_stage(
         except IndexError as error:
             raise RuntimeError("Staged optimizer returned an incomplete ID remap") from error
         if remapped_id is not None:
-            weak_source_ids.add(int(remapped_id))
+            weak_source_ids.add(remapped_id)
     scalar_output_mask = _scalar_output_mask(graph, weak_source_ids)
     output_specs = tuple(
         replace(spec, weak=restore and spec.shape == ())
@@ -1863,7 +1863,7 @@ def call_primitive_abstract(
     if len(normalized) == 1:
         return tree_unflatten(
             output_treedef,
-            [_new_abstract_array(trace, int(node_id), normalized[0])],
+            [_new_abstract_array(trace, node_id, normalized[0])],
         )
     outputs: list[AbstractArray] = []
     for index, spec in enumerate(normalized):
@@ -1875,7 +1875,7 @@ def call_primitive_abstract(
             shape=spec.shape,
             dtype=spec.dtype,
         )
-        outputs.append(_new_abstract_array(trace, int(output_id), spec))
+        outputs.append(_new_abstract_array(trace, output_id, spec))
     return tree_unflatten(output_treedef, outputs)
 
 

@@ -191,7 +191,7 @@ def _arange_handler(
         (start, stop, step, values.get("like")),
         traced_type=traced_type,
     )
-    if anchor is None:  # pragma: no cover - NumPy dispatch requires a tracer
+    if anchor is None:
         msg = "numpy.arange requires a traced bound, step, or like= operand"
         raise TracingError(msg)
     call_kwargs: dict[str, Any] = {}
@@ -249,7 +249,7 @@ def _block_handler(
     depth = _block_depth(arrays)
     leaves = _block_leaves(arrays)
     anchor = _first_traced(leaves, traced_type=traced_type)
-    if anchor is None:  # pragma: no cover - NumPy dispatch requires a tracer
+    if anchor is None:
         msg = "numpy.block requires a traced operand"
         raise TracingError(msg)
     result_ndim = max(depth, *(_ndim(item) for item in leaves))
@@ -388,7 +388,7 @@ def _geomspace_handler(
     dtype = values.get("dtype")
     axis = int(values.get("axis", 0))
     anchor = _first_traced((start, stop), traced_type=traced_type)
-    if anchor is None:  # pragma: no cover - NumPy dispatch requires a tracer
+    if anchor is None:
         msg = "numpy.geomspace requires a traced endpoint"
         raise TracingError(msg)
     computation_dtype = np.result_type(start, stop, float(num))
@@ -579,7 +579,7 @@ def _bincount_handler(
     )
     indices = args[0]
     anchor = _first_traced((indices, values.get("weights")), traced_type=traced_type)
-    if anchor is None:  # pragma: no cover - NumPy dispatch requires a tracer
+    if anchor is None:
         msg = "numpy.bincount requires a traced indices or weights operand"
         raise TracingError(msg)
     concrete_indices = (
@@ -626,7 +626,7 @@ def _bincount_handler(
     )
     node_id = graph.record_operation_with_literals(
         "array_ext.bincount",
-        (int(weight_node_id),),
+        (weight_node_id,),
         (1,),
         (concrete_indices,),
         result,
@@ -634,7 +634,7 @@ def _bincount_handler(
         result.shape,
         result.dtype,
     )
-    return result, int(node_id)
+    return result, node_id
 
 
 def _insert_handler(
@@ -655,7 +655,7 @@ def _insert_handler(
         msg = "numpy.insert obj= must be static because it controls output shape"
         raise TracingError(msg)
     anchor = _first_traced((array_raw, inserted_raw), traced_type=traced_type)
-    if anchor is None:  # pragma: no cover - NumPy dispatch requires a tracer
+    if anchor is None:
         msg = "numpy.insert requires a traced array or values operand"
         raise TracingError(msg)
     array: Any = (
@@ -792,7 +792,7 @@ def _histogram_handler(
         (samples, weights, bins, histogram_range),
         traced_type=traced_type,
     )
-    if anchor is None:  # pragma: no cover - NumPy dispatch requires a tracer
+    if anchor is None:
         msg = "numpy.histogram requires a traced samples, bins, range, or weights operand"
         raise TracingError(msg)
     concrete_array = np.asarray(_concrete_value(samples, traced_type))
@@ -862,7 +862,7 @@ def _histogram_bin_edges_handler(
         (samples, bins, histogram_range, weights),
         traced_type=traced_type,
     )
-    if anchor is None:  # pragma: no cover - NumPy dispatch requires a tracer
+    if anchor is None:
         msg = "numpy.histogram_bin_edges requires a traced operand"
         raise TracingError(msg)
     if isinstance(bins, str):
@@ -922,7 +922,7 @@ def _histogram2d_handler(
         (x, y, bins, histogram_range, weights),
         traced_type=traced_type,
     )
-    if anchor is None:  # pragma: no cover - NumPy dispatch requires a tracer
+    if anchor is None:
         msg = "numpy.histogram2d requires a traced operand"
         raise TracingError(msg)
     concrete_x = np.asarray(_concrete_value(x, traced_type))
@@ -1028,7 +1028,7 @@ def _histogramdd_handler(  # noqa: PLR0912, PLR0915
         (raw_columns, bins, histogram_range, weights),
         traced_type=traced_type,
     )
-    if anchor is None:  # pragma: no cover - NumPy dispatch requires a tracer
+    if anchor is None:
         msg = "numpy.histogramdd requires a traced operand"
         raise TracingError(msg)
 
@@ -1132,7 +1132,7 @@ def _histogramdd_handler(  # noqa: PLR0912, PLR0915
         histogram = histogram / np.sum(histogram)
         for dimension, edge in enumerate(edges):
             width_shape = [1] * dimensions
-            width_shape[dimension] = int(bin_shape[dimension])
+            width_shape[dimension] = bin_shape[dimension]
             histogram = histogram / np.reshape(np.diff(edge), tuple(width_shape))
     return _finish((histogram, edges), traced_type=traced_type)
 

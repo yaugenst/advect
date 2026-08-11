@@ -127,7 +127,7 @@ def _instance_namespace_callable(
         except (AttributeError, NotImplementedError):
             continue
         if callable(target):
-            return cast("Callable[..., object]", target)
+            return target
     return None
 
 
@@ -482,7 +482,7 @@ def wrap_array_family_vjp_rule(
 
     prebind_rule = getattr(rule, _PREBIND_VJP_ATTR, None)
     if callable(prebind_rule):
-        prebind_vjp = cast("_JVPFn", prebind_rule)
+        prebind_vjp = prebind_rule
 
         def _wrapped_prebind_vjp(
             *,
@@ -524,7 +524,7 @@ def wrap_array_family_vjp_rule(
 
             execute_prebound = getattr(bound_vjp, _EXECUTE_PREBOUND_ATTR, None)
             if callable(execute_prebound):
-                execute = cast("_JVPFn", execute_prebound)
+                execute = execute_prebound
 
                 def _wrapped_execute_prebound(runtime_g: object) -> _VJPResult:
                     return cast(

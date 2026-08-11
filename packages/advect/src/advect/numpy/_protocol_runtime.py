@@ -65,7 +65,7 @@ class ArrayProtocolRuntime(_ArrayFunctionProtocolMixin):
         normalized_inputs = list(inputs)
         normalized_kwargs = dict(kwargs)
 
-        for index in range(int(ufunc.nin)):
+        for index in range(ufunc.nin):
             position = index + 1
             aliases = _UFUNC_OPERAND_KEY_ALIASES.get(position, (f"x{position}",))
             if index < len(normalized_inputs):
@@ -195,8 +195,8 @@ class ArrayProtocolRuntime(_ArrayFunctionProtocolMixin):
         if method == "outer":
             if (
                 len(inputs) != _BINARY_ARITY
-                or int(ufunc.nin) != _BINARY_ARITY
-                or int(ufunc.nout) != _SINGLE_OUTPUT_ARITY
+                or ufunc.nin != _BINARY_ARITY
+                or ufunc.nout != _SINGLE_OUTPUT_ARITY
                 or getattr(ufunc, "signature", None) is not None
             ):
                 msg = (
@@ -315,7 +315,7 @@ class ArrayProtocolRuntime(_ArrayFunctionProtocolMixin):
         replacement_node_id, replacement_value = _snapshot_traced(replacement)
         out_arr.advect_replace(
             value=replacement_value if validated_out is None else validated_out,
-            node_id=int(replacement_node_id),
+            node_id=replacement_node_id,
             operation="ufunc out=",
         )
         return out_arr
@@ -338,9 +338,7 @@ class ArrayProtocolRuntime(_ArrayFunctionProtocolMixin):
                 kwargs=dict(kwargs),
             )
 
-        simple_call = (
-            out is None and not kwargs and len(inputs) == int(ufunc.nin) and int(ufunc.nout) == 1
-        )
+        simple_call = out is None and not kwargs and len(inputs) == ufunc.nin and ufunc.nout == 1
         if simple_call:
             return self.run_simple_ufunc(
                 self_arr=self_arr,

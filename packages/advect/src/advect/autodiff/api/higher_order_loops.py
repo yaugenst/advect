@@ -40,8 +40,8 @@ def _hessian_reverse_loop(
     *,
     context: _HessianLoopContext,
     linear: LinearMap,
-    grad_value: Any,
-) -> Any:
+    grad_value: object,
+) -> object:
     hess_blocks_flat = _allocate_hessian_blocks_flat(
         array_ns=context.array_ns,
         primal_flat_sizes=context.primal_flat_sizes,
@@ -79,7 +79,7 @@ def _hessian_reverse_loop(
     )
 
 
-def _reshape_hessian_diagonals(*, context: _HessianLoopContext, diagonals: list[Any]) -> Any:
+def _reshape_hessian_diagonals(*, context: _HessianLoopContext, diagonals: list[Any]) -> object:
     reshaped = tuple(
         diagonal.reshape(shape)
         for diagonal, shape in zip(diagonals, context.primal_shapes, strict=True)
@@ -91,8 +91,8 @@ def _hessian_diag_reverse_loop(
     *,
     context: _HessianLoopContext,
     linear: LinearMap,
-    grad_value: Any,
-) -> Any:
+    grad_value: object,
+) -> object:
     diagonals = [
         context.array_ns.zeros(size, dtype=dtype)
         for size, dtype in zip(
@@ -132,9 +132,9 @@ def _hessian_diag_reverse_loop(
 def _build_basis_cotangent_batch(
     *,
     context: _HessianLoopContext,
-    grad_value: Any,
+    grad_value: object,
     positions: tuple[tuple[int, int], ...],
-) -> tuple[Any, ...]:
+) -> tuple[object, ...]:
     """Build basis pytrees as row views over one allocation per gradient entry."""
     grad_entries = _normalize_hvp_output(
         hvp_value=grad_value,
@@ -170,7 +170,7 @@ def _build_basis_cotangent_batch(
 def _gradient_entry_layout(
     *,
     context: _HessianLoopContext,
-    entry: Any,
+    entry: object,
     block: int,
 ) -> _GradientEntryLayout:
     """Validate and flatten one dense array or registered array-container gradient."""
@@ -204,7 +204,7 @@ def _assign_hessian_column(
     hess_blocks_flat: list[list[Any]],
     col_block: int,
     column: int,
-    hvp_value: Any,
+    hvp_value: object,
 ) -> None:
     hvp_entries = _normalize_hvp_output(
         hvp_value=hvp_value,

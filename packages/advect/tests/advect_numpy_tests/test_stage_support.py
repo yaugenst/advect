@@ -45,8 +45,10 @@ def test_special_abstract_composites_round_trip() -> None:
         specs=(ad.ArraySpec(matrix.shape, matrix.dtype),),
     )
     average_program = ad.stage(
-        lambda value: value * np.size(value, axis=1)
-        + np.average(value, axis=1, weights=np.array([1.0, 2.0, 3.0]))[:, None],
+        lambda value: (
+            value * np.size(value, axis=1)
+            + np.average(value, axis=1, weights=np.array([1.0, 2.0, 3.0]))[:, None]
+        ),
         specs=(ad.ArraySpec(vector.shape, vector.dtype),),
     )
     cumulative_program = ad.stage(

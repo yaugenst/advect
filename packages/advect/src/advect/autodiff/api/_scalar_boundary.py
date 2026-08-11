@@ -34,7 +34,7 @@ def _is_real_python_scalar(value: object) -> TypeGuard[int | float]:
     return type(value) in {int, float}
 
 
-def _lift_scalar_to_array(value: object, *, namespace: Any | None) -> Any:
+def _lift_scalar_to_array(value: object, *, namespace: object | None) -> object:
     """Create a provider-backed rank-zero float64 array for one scalar primal."""
     if not _is_real_python_scalar(value):
         msg = f"Cannot lift {type(value).__name__} as a real scalar primal"
@@ -57,7 +57,7 @@ def _lift_scalar_to_array(value: object, *, namespace: Any | None) -> Any:
     return lifted
 
 
-def _coerce_scalar_tangent_like(tangent: object, primal: object) -> Any:
+def _coerce_scalar_tangent_like(tangent: object, primal: object) -> float:
     """Normalize a scalar-boundary tangent through the primal's provider."""
     if _is_boolean_numeric(tangent) or _is_complex_numeric(tangent):
         msg = "Scalar JVP tangents must be real numbers or rank-zero real arrays"
@@ -80,7 +80,7 @@ def _coerce_scalar_tangent_like(tangent: object, primal: object) -> Any:
     return float(cast("Any", scalar))
 
 
-def _unlift_scalar_array(value: Any) -> Any:
+def _unlift_scalar_array(value: object) -> object:
     """Return a Python scalar for a concrete rank-zero array when possible."""
     if callable(getattr(value, "_advect_snapshot", None)):
         return value
@@ -95,13 +95,13 @@ def _unlift_scalar_array(value: Any) -> Any:
     dtype = getattr(value, "dtype", None)
     if getattr(dtype, "kind", None) == "c" or "complex" in str(dtype).lower():
         with suppress(Exception):
-            return complex(value)
+            return complex(cast("Any", value))
     with suppress(Exception):
-        return float(value)
+        return float(cast("Any", value))
     return value
 
 
-def _unlift_scalar_tree_by_mask(value: Any, *, mask: tuple[bool, ...]) -> Any:
+def _unlift_scalar_tree_by_mask(value: object, *, mask: tuple[bool, ...]) -> object:
     """Unlift only output leaves that depend on lifted scalar primals."""
     if not any(mask):
         return value

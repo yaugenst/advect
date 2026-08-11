@@ -2,7 +2,14 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+import pytest
+from scripts import mkdocs_hooks
 from scripts.mkdocs_hooks import _api_rendering_errors, _malformed_markdown_table_lines
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def test_generated_markdown_rejects_union_that_splits_a_table_cell() -> None:
@@ -43,3 +50,20 @@ Returned by :func:`advect.vjp`.
         "transforms: raw Sphinx role",
         "transforms: malformed Markdown table rows 7",
     )
+
+
+def test_browser_wheel_is_required_only_when_requested(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(mkdocs_hooks, "_ROOT", tmp_path)
+    monkeypatch.setattr(mkdocs_hooks, "_package_version", lambda: "0.1.0")
+    monkeypatch.delenv("ADVECT_REQUIRE_BROWSER_WHEEL", raising=False)
+    adapter = tmp_path / "docs-theme" / "playground_runtime.py"
+    adapter.parent.mkdir(parents=True)
+    adapter.touch()
+
+    mkdocs_hooks._stage_browser_assets(tmp_path / "site")
+
+    monkeypatch.setenv("ADVECT_REQUIRE_BROWSER_WHEEL", "1")
+    with pytest.raises(FileNotFoundError, match="no browser wheel"):
+        mkdocs_hooks._stage_browser_assets(tmp_path / "site")

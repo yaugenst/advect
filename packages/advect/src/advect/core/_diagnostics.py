@@ -105,10 +105,7 @@ def check_tape_numerics(tape: DynamicTape) -> None:
     if trace_level != 0:
         return
     phase, origin = _get_numerics_context()
-    rows = cast(
-        "list[tuple[str, str | None, object]]",
-        tape._diagnostic_snapshot(),  # noqa: SLF001 - private native debug ABI
-    )
+    rows = tape._diagnostic_snapshot()  # noqa: SLF001 - private native debug ABI
     for op, source_location, value in rows:
         raise_if_nonfinite(
             value,

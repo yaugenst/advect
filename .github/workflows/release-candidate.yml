@@ -1,0 +1,173 @@
+name: Release candidate
+
+on:
+  workflow_call:
+    inputs:
+      release_tag:
+        description: Candidate version tag, for example v1.2.3
+        required: true
+        type: string
+      target:
+        description: Qualified package index target
+        required: true
+        type: string
+    outputs:
+      release_tag:
+        description: Validated version tag
+        value: ${{ jobs.validate.outputs.release_tag }}
+      source_revision:
+        description: Qualified immutable source commit
+        value: ${{ jobs.validate.outputs.source_revision }}
+      target:
+        description: Validated package index target
+        value: ${{ jobs.validate.outputs.target }}
+      version:
+        description: Validated package version
+        value: ${{ jobs.validate.outputs.version }}
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate release identity
+    runs-on: ubuntu-22.04
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      release_tag: ${{ steps.source.outputs.release_tag }}
+      source_revision: ${{ steps.source.outputs.source_revision }}
+      target: ${{ steps.source.outputs.target }}
+      version: ${{ steps.identity.outputs.version }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.sha }}
+
+      - name: Resolve and qualify release source
+        id: source
+        env:
+          DISPATCH_REF_NAME: ${{ github.ref_name }}
+          DISPATCH_REF_TYPE: ${{ github.ref_type }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          RELEASE_TARGET: ${{ inputs.target }}
+          SOURCE_REVISION: ${{ github.sha }}
+        run: |
+          if [[ "$DISPATCH_REF_TYPE" != "branch" || "$DISPATCH_REF_NAME" != "main" ]]; then
+            echo "Release workflows must run from main" >&2
+            exit 1
+          fi
+          source_revision="$(
+            bash .github/scripts/verify-release-state.sh \
+              "$SOURCE_REVISION" "$GH_REPO" "$RELEASE_TARGET" "$RELEASE_TAG"
+          )"
+          {
+            echo "release_tag=$RELEASE_TAG"
+            echo "source_revision=$source_revision"
+            echo "target=$RELEASE_TARGET"
+          } >> "$GITHUB_OUTPUT"
+          git checkout --detach "$source_revision"
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+
+      - name: Check tag and package metadata
+        id: identity
+        env:
+          RELEASE_TAG: ${{ steps.source.outputs.release_tag }}
+        run: |
+          python - <<'PY'
+          import os
+          import re
+          import tomllib
+          from pathlib import Path
+
+          cargo = tomllib.loads(Path("Cargo.toml").read_text())
+          pyproject = tomllib.loads(Path("pyproject.toml").read_text())
+          version = cargo["workspace"]["package"]["version"]
+          if re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", version) is None:
+              raise SystemExit("the release path accepts stable semantic versions only")
+          project = pyproject["project"]
+          if "version" in project or "version" not in project.get("dynamic", []):
+              raise SystemExit("pyproject.toml must derive its version from Cargo metadata")
+          expected_tag = f"v{version}"
+          if os.environ["RELEASE_TAG"] != expected_tag:
+              raise SystemExit(
+                  f"release tag {os.environ['RELEASE_TAG']!r} must be {expected_tag!r}"
+              )
+          with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as output:
+              print(f"version={version}", file=output)
+          PY
+
+  distributions:
+    name: Build and smoke-test distributions
+    needs: validate
+    uses: ./.github/workflows/native-wheels.yml
+    with:
+      source_revision: ${{ needs.validate.outputs.source_revision }}
+    permissions:
+      contents: read
+
+  assemble:
+    name: Assemble release bundle
+    needs: [validate, distributions]
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+          ref: ${{ needs.validate.outputs.source_revision }}
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+        with:
+          enable-cache: false
+          version-file: pyproject.toml
+
+      - name: Download candidate distributions
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: advect-distribution-*
+          path: dist
+          merge-multiple: true
+
+      - name: Validate and record release provenance
+        env:
+          RELEASE_VERSION: ${{ needs.validate.outputs.version }}
+          SOURCE_REVISION: ${{ needs.validate.outputs.source_revision }}
+        run: |
+          uv run --script scripts/assemble_release_artifacts.py \
+            --dist-dir dist \
+            --version "$RELEASE_VERSION" \
+            --source-revision "$SOURCE_REVISION" \
+            --manifest-path provenance/RELEASE-PROVENANCE.json \
+            --checksums-path provenance/SHA256SUMS
+          (cd dist && sha256sum --check ../provenance/SHA256SUMS)
+
+      - name: Validate package metadata and rendered README
+        run: uvx --from twine==7.0.0 twine check dist/advect-*
+
+      - name: Upload release distributions
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: advect-release-distributions-${{ needs.validate.outputs.version }}
+          path: |
+            dist/advect-*.whl
+            dist/advect-*.tar.gz
+          if-no-files-found: error
+
+      - name: Upload release provenance
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: advect-release-provenance-${{ needs.validate.outputs.version }}
+          path: provenance
+          if-no-files-found: error

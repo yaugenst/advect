@@ -42,7 +42,7 @@ def test_fallback_preserves_a_compatible_future_namespace(
     namespace = SimpleNamespace(
         __name__="array_api_compat.cupy",
         __array_api_version__="2025.12",
-        __array_namespace_info__=lambda: object(),
+        __array_namespace_info__=object,
         asarray=lambda item: item,
     )
     monkeypatch.setattr(provider.array_api_compat, "is_numpy_array", lambda _value: False)
@@ -85,7 +85,7 @@ def test_fallback_requests_each_supported_revision_without_relabeling(
     namespace = SimpleNamespace(
         __name__="array_api_compat.cupy",
         __array_api_version__="2025.12",
-        __array_namespace_info__=lambda: object(),
+        __array_namespace_info__=object,
         asarray=lambda item: item,
     )
     requests: list[str | None] = []
@@ -132,7 +132,7 @@ def test_generic_frontend_applies_requested_2022_accumulation_dtype(
     namespace = SimpleNamespace(
         __name__="array_api_compat.cupy",
         __array_api_version__="2025.12",
-        __array_namespace_info__=lambda: object(),
+        __array_namespace_info__=object,
         asarray=lambda item: item,
         float32="float32",
         float64="float64",
@@ -172,7 +172,7 @@ def test_cupy_arrays_are_qualified_for_donation_without_a_namespace_proxy(
     namespace = SimpleNamespace(
         __name__="array_api_compat.cupy",
         __array_api_version__="2025.12",
-        __array_namespace_info__=lambda: object(),
+        __array_namespace_info__=object,
         asarray=lambda item: item,
     )
     monkeypatch.setattr(provider.array_api_compat, "is_numpy_array", lambda _value: False)

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 from importlib import import_module
-from typing import TYPE_CHECKING, NoReturn
+from typing import TYPE_CHECKING, NoReturn, Protocol, cast
 
 from advect.autodiff.api.inputs import _normalize_argnums_for_call
 from advect.autodiff.rules.array_family.providers import resolve_array_family_backend_provider
@@ -23,12 +23,38 @@ _HIGHER_ORDER_NAMESPACE_ATTRS = (
 )
 
 
+class _HigherOrderArray(Protocol):
+    shape: tuple[int, ...]
+    dtype: object
+
+    def reshape(self, shape: tuple[int, ...]) -> _HigherOrderArray:
+        """Return a view with ``shape``."""
+
+
+class _HigherOrderNamespace(Protocol):
+    float64: object
+
+    def asarray(self, value: object) -> _HigherOrderArray:
+        """Convert ``value`` to an array."""
+
+    def result_type(self, *dtypes: object) -> object:
+        """Resolve a common dtype."""
+
+    def zeros(
+        self,
+        shape: tuple[int, int],
+        *,
+        dtype: object,
+    ) -> _HigherOrderArray:
+        """Allocate a zero-filled array."""
+
+
 def _require_array_namespace_for_higher_order(
     *,
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
     scalar_fallback_values: tuple[Any, ...] | None = None,
-) -> Any:
+) -> _HigherOrderNamespace:
     values: tuple[Any, ...] = args + tuple(kwargs.values())
     try:
         provider = resolve_array_family_backend_provider(*values)
@@ -41,7 +67,7 @@ def _require_array_namespace_for_higher_order(
             import numpy as np  # noqa: PLC0415 - scalar Hessians use the default provider
 
             import_module("advect.numpy")
-            return np
+            return cast("_HigherOrderNamespace", np)
         msg = (
             "Higher-order autodiff APIs require a runtime array namespace for dense "
             "Hessian assembly. Pass arrays implementing __array_namespace__."
@@ -62,7 +88,7 @@ def _require_array_namespace_for_higher_order(
             f"{missing_joined}."
         )
         raise HigherOrderNotSupportedError(msg)
-    return namespace
+    return cast("_HigherOrderNamespace", namespace)
 
 
 def _resolve_selected_argnums(
@@ -79,7 +105,7 @@ def _resolve_selected_argnums(
 
 def _normalize_hvp_output(
     *,
-    hvp_value: Any,
+    hvp_value: object,
     expected_selected_args: int,
     single_argnum: bool,
 ) -> tuple[Any, ...]:
@@ -104,14 +130,14 @@ def _normalize_hvp_output(
 
 def _prepare_higher_order_inputs(
     *,
-    array_ns: Any,
+    array_ns: _HigherOrderNamespace,
     args: tuple[Any, ...],
     argnums: tuple[int, ...],
 ) -> tuple[list[tuple[int, ...]], list[int], list[Any]]:
     resolved_argnums = _resolve_selected_argnums(argnums=argnums, nargs=len(args))
     selected_values = [args[arg_index] for arg_index in resolved_argnums]
     primal_arrays = [array_ns.asarray(primal) for primal in selected_values]
-    primal_shapes = [tuple(int(d) for d in primal.shape) for primal in primal_arrays]
+    primal_shapes = [primal.shape for primal in primal_arrays]
     primal_flat_sizes = [math.prod(shape) for shape in primal_shapes]
     primal_dtypes = [
         array_ns.result_type(primal.dtype, array_ns.float64) for primal in primal_arrays
@@ -121,7 +147,7 @@ def _prepare_higher_order_inputs(
 
 def _allocate_hessian_blocks_flat(
     *,
-    array_ns: Any,
+    array_ns: _HigherOrderNamespace,
     primal_flat_sizes: list[int],
     primal_dtypes: list[Any],
 ) -> list[list[Any]]:
@@ -143,7 +169,7 @@ def _reshape_hessian_blocks(
     hessian_blocks_flat: list[list[Any]],
     primal_shapes: list[tuple[int, ...]],
     single_argnum: bool,
-) -> Any:
+) -> object:
     hess_blocks = tuple(
         tuple(
             hessian_blocks_flat[row][col].reshape(primal_shapes[row] + primal_shapes[col])

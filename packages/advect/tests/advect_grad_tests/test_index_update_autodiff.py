@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import warnings
+from types import SimpleNamespace
 from typing import Any
 
 import numpy as np
+import pytest
 from numpy.testing import assert_allclose
 
 from advect import grad, jacobian, jvp, vjp
 from advect.autodiff._ephemeral import trace_call
+from advect.autodiff.rules.array_family.vjp import reductions_indexing
 
 _INDEX = (slice(1, None), slice(1, 3))
 
@@ -262,6 +265,28 @@ def test_basic_getitem_pullback_remains_traceable_in_its_cotangent() -> None:
 
     assert_allclose(gradient, np.array([0.0, 2.0, 3.0, 0.0]))
     assert_allclose(gradient_tangent, np.array([0.0, 5.0, 7.0, 0.0]))
+
+
+def test_advanced_getitem_pullback_propagates_scatter_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_scatter(*_args: object) -> None:
+        raise ValueError("provider scatter failed")
+
+    namespace = SimpleNamespace(
+        add=SimpleNamespace(at=fail_scatter),
+        asarray=np.asarray,
+        zeros_like=np.zeros_like,
+    )
+    monkeypatch.setattr(reductions_indexing, "xp", namespace)
+
+    with pytest.raises(ValueError, match="provider scatter failed"):
+        reductions_indexing._vjp_getitem(
+            np.array([1.0]),
+            np.array([1.0]),
+            g=np.array([2.0]),
+            index=np.array([0]),
+        )
 
 
 def test_stencil_augmented_slice_supports_jvp_of_grad() -> None:

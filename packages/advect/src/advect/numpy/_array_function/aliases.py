@@ -216,7 +216,7 @@ def _cumulative_alias_handler(
         initial = np.zeros_like(seed) if is_sum else np.ones_like(seed)
         result = np.concatenate((initial, base), axis=0 if axis is None else int(axis))
         node_id, concrete = _snapshot_traced(result)
-        return concrete, int(node_id)
+        return concrete, node_id
 
     call_kwargs: dict[str, Any] = {"axis": axis, "include_initial": False}
     if dtype is not None:
@@ -494,26 +494,22 @@ def register_alias_handlers(
         allowed_kwargs=frozenset({"axis"}),
     )
     handlers[np.linalg.matrix_transpose] = _matrix_transpose_handler
-    handlers[np.linalg.matrix_norm] = lambda graph, traced_type, args, kwargs: (
-        _linalg_norm_handler(
-            function=np.linalg.matrix_norm,
-            op_name=canonicalize_numpy_op("numpy.linalg.matrix_norm"),
-            allowed_kwargs=frozenset({"keepdims", "ord"}),
-            graph=graph,
-            traced_type=traced_type,
-            args=args,
-            kwargs=kwargs,
-        )
+    handlers[np.linalg.matrix_norm] = lambda graph, traced_type, args, kwargs: _linalg_norm_handler(
+        function=np.linalg.matrix_norm,
+        op_name=canonicalize_numpy_op("numpy.linalg.matrix_norm"),
+        allowed_kwargs=frozenset({"keepdims", "ord"}),
+        graph=graph,
+        traced_type=traced_type,
+        args=args,
+        kwargs=kwargs,
     )
-    handlers[np.linalg.vector_norm] = lambda graph, traced_type, args, kwargs: (
-        _linalg_norm_handler(
-            function=np.linalg.vector_norm,
-            op_name=canonicalize_numpy_op("numpy.linalg.vector_norm"),
-            allowed_kwargs=frozenset({"axis", "keepdims", "ord"}),
-            graph=graph,
-            traced_type=traced_type,
-            args=args,
-            kwargs=kwargs,
-        )
+    handlers[np.linalg.vector_norm] = lambda graph, traced_type, args, kwargs: _linalg_norm_handler(
+        function=np.linalg.vector_norm,
+        op_name=canonicalize_numpy_op("numpy.linalg.vector_norm"),
+        allowed_kwargs=frozenset({"axis", "keepdims", "ord"}),
+        graph=graph,
+        traced_type=traced_type,
+        args=args,
+        kwargs=kwargs,
     )
     handlers[np.linalg.trace] = _linalg_trace_handler

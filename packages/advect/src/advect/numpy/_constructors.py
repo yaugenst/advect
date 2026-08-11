@@ -206,7 +206,7 @@ def array(
         dtype=dtype,
         order=normalized_order,
         copy=copy if direct else (False if copy is False else None),
-        subok=bool(subok),
+        subok=subok,
         direct=direct,
     )
 

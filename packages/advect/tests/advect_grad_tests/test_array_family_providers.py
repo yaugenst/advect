@@ -27,7 +27,7 @@ def _nonstandard_runtime_namespace(name: str) -> SimpleNamespace:
     return SimpleNamespace(
         __name__=name,
         __array_api_version__="2024.12",
-        __array_namespace_info__=lambda: object(),
+        __array_namespace_info__=object,
         asarray=lambda value: value,
     )
 

@@ -12,7 +12,7 @@ the graph format, validation, and scheduling.
 from __future__ import annotations
 
 import functools
-from typing import TYPE_CHECKING, Any, Self, cast
+from typing import TYPE_CHECKING, Any, Self, cast, overload
 
 from advect.autodiff._ephemeral import (
     LinearMap,
@@ -43,6 +43,7 @@ from advect.core._stage import StagedProgram
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from typing import Literal
 
 
 _CACHE_MISS = object()
@@ -63,7 +64,7 @@ class Pullback:
     def __init__(self, linear: LinearMap) -> None:
         self._linear = linear
 
-    def __call__(self, cotangent: Any) -> Any:
+    def __call__(self, cotangent: object) -> object:
         """Apply the pullback once and release its retained trace."""
         return self._linear._consume_pullback(cotangent)  # noqa: SLF001
 
@@ -182,7 +183,7 @@ def _staged_gradient_scalar_mask(
     return tuple(bool(leaf) for leaf in leaves)
 
 
-def _reject_complex_grad_output(out_leaf: Any) -> None:
+def _reject_complex_grad_output(out_leaf: object) -> None:
     if _is_complex_numeric(out_leaf):
         msg = (
             "grad requires a real scalar output. For complex outputs use "
@@ -191,7 +192,7 @@ def _reject_complex_grad_output(out_leaf: Any) -> None:
         raise ValueError(msg)
 
 
-def _materialize_aux(aux: Any) -> Any:
+def _materialize_aux[AuxT](aux: AuxT) -> AuxT:
     """Snapshot auxiliary tracer leaves while their trace is active."""
     leaves, treedef = tree_flatten(aux)
     concrete: list[Any] = []
@@ -204,7 +205,7 @@ def _materialize_aux(aux: Any) -> Any:
                 break
             value = next_value
         concrete.append(_unlift_scalar_array(value) if restore_python_scalar else value)
-    return tree_unflatten(treedef, concrete)
+    return cast("AuxT", tree_unflatten(treedef, concrete))
 
 
 def _unary_array_fast_path(
@@ -262,11 +263,11 @@ def _try_unary_array_value_and_grad(
 
 
 def _real_scalar_seed(
-    output: Any,
+    output: object,
     *,
     output_is_leaf: bool,
     transform_name: str,
-) -> Any:
+) -> object:
     """Validate and seed the common concrete rank-zero output directly."""
     if output_is_leaf and getattr(output, "shape", None) == ():
         dtype = getattr(output, "dtype", None)
@@ -285,10 +286,10 @@ def _real_scalar_seed(
     return _scalar_cotangent_leaf(out_leaf)
 
 
-def vjp(
-    f: Callable[..., Any],
+def vjp[**CallP, ResultT](
+    f: Callable[CallP, ResultT],
     argnums: int | tuple[int, ...] = 0,
-) -> Callable[..., tuple[Any, Pullback]]:
+) -> Callable[CallP, tuple[ResultT, Pullback]]:
     """Return a concrete value and a one-shot reverse pullback.
 
     `vjp` is always a dynamic transform. Each call traces the selected concrete
@@ -349,7 +350,7 @@ def vjp(
     argnums_tuple, single_argnum = _normalize_argnums_spec(argnums)
 
     @functools.wraps(f)
-    def vjp_fn(*args: Any, **kwargs: Any) -> tuple[Any, Pullback]:
+    def vjp_fn(*args: CallP.args, **kwargs: CallP.kwargs) -> tuple[ResultT, Pullback]:
         value, linear = linearize_call(
             f,
             args=args,
@@ -361,7 +362,7 @@ def vjp(
         )
 
         pullback = Pullback(linear)
-        return linear._unlift_outputs(value), pullback  # noqa: SLF001
+        return cast("ResultT", linear._unlift_outputs(value)), pullback  # noqa: SLF001
 
     return vjp_fn
 
@@ -439,7 +440,7 @@ def vjp_program(
         argnames=argnames,
     )
 
-    def pullback_program(*args: Any, cotangent: Any, **kwargs: Any) -> Any:
+    def pullback_program(*args: object, cotangent: object, **kwargs: object) -> object:
         _value, linear = linearize_call(
             f,
             args=args,
@@ -462,13 +463,13 @@ def vjp_program(
     )
 
 
-def _dynamic_grad(
-    f: Callable[..., Any],
+def _dynamic_grad[**CallP](
+    f: Callable[CallP, object],
     argnums: int | tuple[int, ...] | None = None,
     *,
     argnames: tuple[str, ...] | None = None,
     has_aux: bool = False,
-) -> Callable[..., Any]:
+) -> Callable[CallP, object]:
     """Project the gradient from the shared concrete reverse transform."""
     transformed = _dynamic_value_and_grad(
         f,
@@ -478,7 +479,7 @@ def _dynamic_grad(
         transform_name="grad",
     )
 
-    def grad_fn(*args: Any, **kwargs: Any) -> Any:
+    def grad_fn(*args: CallP.args, **kwargs: CallP.kwargs) -> object:
         result = transformed(*args, **kwargs)
         if has_aux:
             _value, gradients, aux = result
@@ -491,14 +492,14 @@ def _dynamic_grad(
     return grad_fn
 
 
-def _dynamic_value_and_grad(
-    f: Callable[..., Any],
+def _dynamic_value_and_grad[**CallP](
+    f: Callable[CallP, object],
     argnums: int | tuple[int, ...] | None = None,
     *,
     argnames: tuple[str, ...] | None = None,
     has_aux: bool = False,
     transform_name: str = "value_and_grad",
-) -> Callable[..., tuple[Any, ...]]:
+) -> Callable[CallP, tuple[object, ...]]:
     """Build the concrete value-and-gradient transform for either lifetime."""
     argnums_tuple, single_argnum = _selected_arguments(
         f,
@@ -514,7 +515,10 @@ def _dynamic_value_and_grad(
     )
     provider_cache = _UnaryArrayProviderCache()
 
-    def value_and_grad_fn(*args: Any, **kwargs: Any) -> tuple[Any, ...]:
+    def value_and_grad_fn(
+        *args: CallP.args,
+        **kwargs: CallP.kwargs,
+    ) -> tuple[object, ...]:
         if use_unary_fast_path:
             fast_result = _try_unary_array_value_and_grad(
                 f,
@@ -531,8 +535,11 @@ def _dynamic_value_and_grad(
         trace_target = f
         if has_aux:
 
-            def trace_target(*inner_args: Any, **inner_kwargs: Any) -> Any:
-                value, aux = f(*inner_args, **inner_kwargs)
+            def trace_target(
+                *inner_args: CallP.args,
+                **inner_kwargs: CallP.kwargs,
+            ) -> object:
+                value, aux = cast("tuple[object, object]", f(*inner_args, **inner_kwargs))
                 aux_box.append(_materialize_aux(aux))
                 return value
 
@@ -572,13 +579,53 @@ def _dynamic_value_and_grad(
     return value_and_grad_fn
 
 
+@overload
 def grad(
-    f: Callable[..., Any],
+    f: StagedProgram,
     argnums: int | tuple[int, ...] | None = None,
     *,
     argnames: tuple[str, ...] | None = None,
     has_aux: bool = False,
-) -> Callable[..., Any]:
+) -> StagedProgram: ...
+
+
+@overload
+def grad[**CallP, AuxT](
+    f: Callable[CallP, tuple[object, AuxT]],
+    argnums: int | tuple[int, ...] | None = None,
+    *,
+    argnames: tuple[str, ...] | None = None,
+    has_aux: Literal[True],
+) -> Callable[CallP, tuple[object, AuxT]]: ...
+
+
+@overload
+def grad[**CallP](
+    f: Callable[CallP, object],
+    argnums: int | tuple[int, ...] | None = None,
+    *,
+    argnames: tuple[str, ...] | None = None,
+    has_aux: Literal[False] = False,
+) -> Callable[CallP, object]: ...
+
+
+@overload
+def grad[**CallP](
+    f: Callable[CallP, object],
+    argnums: int | tuple[int, ...] | None = None,
+    *,
+    argnames: tuple[str, ...] | None = None,
+    has_aux: bool,
+) -> Callable[CallP, object]: ...
+
+
+def grad[**CallP](
+    f: Callable[CallP, object],
+    argnums: int | tuple[int, ...] | None = None,
+    *,
+    argnames: tuple[str, ...] | None = None,
+    has_aux: bool = False,
+) -> Callable[CallP, object] | StagedProgram:
     """Differentiate a scalar-valued function with reverse mode.
 
     An ordinary callable is traced from concrete inputs on every invocation;
@@ -669,13 +716,53 @@ def grad(
     return transformed
 
 
+@overload
 def value_and_grad(
-    f: Callable[..., Any],
+    f: StagedProgram,
     argnums: int | tuple[int, ...] | None = None,
     *,
     argnames: tuple[str, ...] | None = None,
     has_aux: bool = False,
-) -> Callable[..., tuple[Any, ...]]:
+) -> StagedProgram: ...
+
+
+@overload
+def value_and_grad[**CallP, ResultT](
+    f: Callable[CallP, ResultT],
+    argnums: int | tuple[int, ...] | None = None,
+    *,
+    argnames: tuple[str, ...] | None = None,
+    has_aux: Literal[False] = False,
+) -> Callable[CallP, tuple[ResultT, object]]: ...
+
+
+@overload
+def value_and_grad[**CallP, ResultT, AuxT](
+    f: Callable[CallP, tuple[ResultT, AuxT]],
+    argnums: int | tuple[int, ...] | None = None,
+    *,
+    argnames: tuple[str, ...] | None = None,
+    has_aux: Literal[True],
+) -> Callable[CallP, tuple[ResultT, object, AuxT]]: ...
+
+
+@overload
+def value_and_grad[**CallP](
+    f: Callable[CallP, object],
+    argnums: int | tuple[int, ...] | None = None,
+    *,
+    argnames: tuple[str, ...] | None = None,
+    has_aux: bool,
+) -> Callable[CallP, tuple[object, ...]]: ...
+
+
+def value_and_grad[**CallP](
+    f: Callable[CallP, object],
+    argnums: int | tuple[int, ...] | None = None,
+    *,
+    argnames: tuple[str, ...] | None = None,
+    has_aux: bool = False,
+) -> Callable[CallP, tuple[object, ...]] | StagedProgram:
     """Compute a scalar value and its reverse-mode gradient together.
 
     An ordinary callable is traced from concrete inputs on every invocation;

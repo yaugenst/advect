@@ -2,30 +2,33 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING
 
 from advect.autodiff.api._pullback_values import _ones_like
 from advect.autodiff.api._scalar_boundary import _is_real_python_scalar
 from advect.core._pytree import tree_flatten, tree_unflatten
 
+if TYPE_CHECKING:
+    from advect.core._pytree import TreeDef
 
-def _is_scalar_value(value: Any) -> bool:
+
+def _is_scalar_value(value: object) -> bool:
     """Recognize concrete Python scalar values."""
     return _is_real_python_scalar(value) or type(value) is complex
 
 
 def _scalar_cotangent_for_output(
     *,
-    out_leaf: Any,
-    out_treedef: Any,
-) -> Any:
+    out_leaf: object,
+    out_treedef: TreeDef,
+) -> object:
     g_leaf = _scalar_cotangent_leaf(out_leaf)
     if out_treedef.node_type is None:
         return g_leaf
     return tree_unflatten(out_treedef, [g_leaf])
 
 
-def _scalar_cotangent_leaf(out_leaf: Any) -> Any:
+def _scalar_cotangent_leaf(out_leaf: object) -> object:
     """Construct the scalar seed without rebuilding output pytree structure."""
     if _is_scalar_value(out_leaf):
         return 1.0
@@ -41,7 +44,7 @@ def _scalar_cotangent_leaf(out_leaf: Any) -> Any:
     return _ones_like(out_leaf)
 
 
-def _extract_scalar_output(value: Any, *, transform_name: str) -> tuple[Any, Any]:
+def _extract_scalar_output(value: object, *, transform_name: str) -> tuple[object, TreeDef]:
     leaves, out_treedef = tree_flatten(value)
     if out_treedef.node_type is None:
         out_leaf = value

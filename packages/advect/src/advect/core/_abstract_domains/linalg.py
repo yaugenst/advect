@@ -1,4 +1,4 @@
-# ruff: noqa: EM101, EM102, PLR2004, TRY003
+# ruff: noqa: PLR2004
 """Abstract registrations and evaluators for linear algebra."""
 
 from __future__ import annotations

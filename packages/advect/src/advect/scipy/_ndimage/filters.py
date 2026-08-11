@@ -1,4 +1,4 @@
-# ruff: noqa: A001, A002, ANN401, EM101, PLR0913, PLR2004, RUF059, TRY003
+# ruff: noqa: A001, A002, ANN401, PLR0913, PLR2004
 # SciPy-compatible names/signatures and primitive rule schemas intentionally trigger these rules.
 """Install the Gaussian, uniform, convolution, and correlation primitives.
 
@@ -187,7 +187,7 @@ def _install_gaussian(name: str, *, one_dimensional: bool) -> Primitive[..., Any
         output_dtype: str | None,
     ) -> Any:
         del output_dtype
-        input, cval = primals
+        input, _cval = primals
         input_tangent, cval_tangent = tangents
         if input_tangent is None and cval_tangent is None:
             return np.zeros_like(output)
@@ -692,7 +692,7 @@ _correlate1d_primitive = _install_correlation(
 )
 
 
-def _correlation_call(
+def _correlation_call(  # noqa: PLR0917 - mirrors the SciPy call signature
     name: str,
     primitive_function: Primitive[..., Any],
     input: object,

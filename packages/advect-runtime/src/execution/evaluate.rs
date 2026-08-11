@@ -6,6 +6,10 @@ use crate::ExecutionError;
 
 impl<T> LinkedExecutionPlan<T> {
     /// Execute once with invocation-local dense storage.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "the execution loop keeps one linear view of value lifetime state"
+    )]
     pub fn execute<H>(
         &self,
         host: &mut H,

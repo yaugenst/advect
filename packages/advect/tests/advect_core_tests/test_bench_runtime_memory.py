@@ -285,8 +285,10 @@ def test_acceptance_requires_every_profile_worker_to_succeed() -> None:
     )
 
     assert violations == [
-        "allocation_probe:python:allocate:host requires exactly 5 successful memory runs; "
-        "recorded=5, successful=4"
+        (
+            "allocation_probe:python:allocate:host requires exactly 5 successful memory runs; "
+            "recorded=5, successful=4"
+        )
     ]
 
 
@@ -321,8 +323,10 @@ def test_acceptance_requires_each_lifetime_metric_in_each_run() -> None:
     )
 
     assert violations == [
-        "linear_map:advect:reusable:numpy memory run 5 is missing "
-        "reverse_retained.provider_owned_live_bytes"
+        (
+            "linear_map:advect:reusable:numpy memory run 5 is missing "
+            "reverse_retained.provider_owned_live_bytes"
+        )
     ]
 
 
@@ -432,7 +436,7 @@ def test_partitioned_checkpoint_reports_four_recomputations() -> None:
 
 
 def test_json_smoke_reports_separate_memory_metrics() -> None:
-    completed = subprocess.run(  # noqa: S603 - fixed current interpreter and repository module
+    completed = subprocess.run(
         [
             sys.executable,
             "-m",
@@ -468,7 +472,7 @@ def test_json_smoke_reports_separate_memory_metrics() -> None:
 
 
 def test_controller_requires_a_named_profile() -> None:
-    completed = subprocess.run(  # noqa: S603 - fixed current interpreter and repository module
+    completed = subprocess.run(
         [sys.executable, "-m", "scripts.bench_runtime_memory", "--smoke"],
         check=False,
         capture_output=True,

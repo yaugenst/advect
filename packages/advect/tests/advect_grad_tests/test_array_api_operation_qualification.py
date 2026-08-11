@@ -364,7 +364,7 @@ def _real_pairing(left: object, right: object) -> float:
 @pytest.mark.parametrize(
     ("array_api_version", "path", "parameter", "argnums"),
     _DERIVATIVE_CASES,
-    ids=lambda value: str(value),
+    ids=str,
 )
 @pytest.mark.parametrize("scale", [-0.75, 0.5, 1.5])
 def test_each_differentiable_parameter_executes_jvp_and_vjp(

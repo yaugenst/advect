@@ -671,7 +671,10 @@ fn node_index(node_id: NodeId) -> Result<usize, GraphError> {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
+#[expect(
+    clippy::unwrap_used,
+    reason = "test setup unwraps values whose absence should fail the test"
+)]
 mod tests {
     use super::*;
     use crate::{AttrMap, DTypeDescriptor, GraphBuilder, NodeFlags};

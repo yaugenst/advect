@@ -27,7 +27,7 @@ def _shape(value: object) -> tuple[int, ...]:
 
 
 def _normalize_axis(axis: int, *, ndim: int) -> int:
-    normalized = int(axis)
+    normalized = axis
     if normalized < 0:
         normalized += ndim
     if normalized < 0 or normalized >= ndim:
@@ -151,9 +151,7 @@ def _vjp_roll(
 ) -> tuple[xp.ndarray]:
     """Roll by the inverse displacement."""
     _ = ans, inputs, attrs
-    inverse_shift = (
-        tuple(-int(component) for component in shift) if isinstance(shift, tuple) else -int(shift)
-    )
+    inverse_shift = tuple(-component for component in shift) if isinstance(shift, tuple) else -shift
     return (xp.roll(g, shift=inverse_shift, axis=axis),)
 
 
@@ -166,7 +164,7 @@ def _vjp_rot90(
     **attrs: Any,
 ) -> tuple[xp.ndarray]:
     _ = ans, inputs, attrs
-    return (xp.rot90(g, k=-int(k), axes=axes),)
+    return (xp.rot90(g, k=-k, axes=axes),)
 
 
 def _vjp_rollaxis(
@@ -180,7 +178,7 @@ def _vjp_rollaxis(
     """Move the rolled output axis back to its source position."""
     _ = ans, inputs, attrs
     source_axis = _normalize_axis(axis, ndim=g.ndim)
-    destination = int(start)
+    destination = start
     if destination < 0:
         destination += g.ndim
     if destination < 0 or destination > g.ndim:
@@ -217,7 +215,7 @@ def _vjp_diag(
 ) -> tuple[xp.ndarray]:
     """Apply the adjoint diagonal map."""
     _ = ans, inputs, attrs
-    return (xp.diag(g, k=int(k)),)
+    return (xp.diag(g, k=k),)
 
 
 def _diagonal_positions(
@@ -253,7 +251,7 @@ def _vjp_diagonal(
     positions = _diagonal_positions(
         first_length=int(x.shape[first_axis]),
         second_length=int(x.shape[second_axis]),
-        offset=int(offset),
+        offset=offset,
     )
     for diagonal_index, (first_index, second_index) in enumerate(positions):
         destination: list[int | slice] = [slice(None)] * x.ndim
@@ -262,7 +260,7 @@ def _vjp_diagonal(
         source: list[int | slice] = [slice(None)] * g.ndim
         source[-1] = diagonal_index
         result[tuple(destination)] += g[tuple(source)]
-    return (cast("xp.ndarray", result),)
+    return (result,)
 
 
 def _vjp_trace(
@@ -286,14 +284,14 @@ def _vjp_trace(
     positions = _diagonal_positions(
         first_length=int(x.shape[first_axis]),
         second_length=int(x.shape[second_axis]),
-        offset=int(offset),
+        offset=offset,
     )
     for first_index, second_index in positions:
         destination: list[int | slice] = [slice(None)] * x.ndim
         destination[first_axis] = first_index
         destination[second_axis] = second_index
         result[tuple(destination)] += g
-    return (cast("xp.ndarray", result),)
+    return (result,)
 
 
 def _vjp_cumsum(
@@ -325,11 +323,11 @@ def _normalized_pad_width(
     ndim: int,
 ) -> tuple[tuple[int, int], ...]:
     if isinstance(pad_width, int):
-        return ((int(pad_width), int(pad_width)),) * ndim
+        return ((pad_width, pad_width),) * ndim
     raw = tuple(pad_width)
     if len(raw) == _PAD_PAIR_LENGTH and all(isinstance(value, int) for value in raw):
         before, after = cast("tuple[int, int]", raw)
-        return ((int(before), int(after)),) * ndim
+        return ((before, after),) * ndim
     result = tuple((int(pair[0]), int(pair[1])) for pair in cast("tuple[Any, ...]", raw))
     if len(result) != ndim:
         msg = f"pad_width has {len(result)} axes for rank {ndim}"
@@ -383,7 +381,7 @@ def _vjp_diff(
 ) -> tuple[xp.ndarray]:
     """Transpose finite differences, including static prepend/append values."""
     _ = ans, rest, attrs
-    order = int(n)
+    order = n
     if order < 0:
         msg = f"numpy.diff transpose requires n >= 0 (got {n})"
         raise ValueError(msg)
@@ -421,7 +419,7 @@ def _vjp_diff(
             stop=source_stop,
         )
         result[destination] += coefficient * g[source]
-    return (cast("xp.ndarray", result),)
+    return (result,)
 
 
 def _vjp_repeat(
@@ -435,7 +433,7 @@ def _vjp_repeat(
 ) -> tuple[xp.ndarray]:
     """Sum cotangents from each repeated copy."""
     _ = ans, rest, attrs
-    repeat_count = int(repeats)
+    repeat_count = repeats
     if repeat_count < 0:
         msg = f"repeat transpose requires repeats >= 0 (got {repeats})"
         raise ValueError(msg)
@@ -468,7 +466,7 @@ def _vjp_tile(
 ) -> tuple[xp.ndarray]:
     """Sum cotangents over every tiled copy."""
     _ = ans, rest, attrs
-    repetitions = (int(reps),) if isinstance(reps, int) else tuple(int(value) for value in reps)
+    repetitions = (reps,) if isinstance(reps, int) else tuple(reps)
     if any(value < 0 for value in repetitions):
         msg = f"tile transpose requires non-negative reps (got {reps!r})"
         raise ValueError(msg)
@@ -503,7 +501,7 @@ def _vjp_gradient(
 ) -> tuple[xp.ndarray]:
     """Transpose NumPy's unit-spacing first-order finite-difference stencil."""
     _ = ans, rest, attrs
-    order = int(edge_order)
+    order = edge_order
     if order not in {1, 2}:
         msg = f"gradient transpose only supports edge_order=1 or 2 (got {edge_order})"
         raise NotImplementedError(msg)
@@ -560,7 +558,7 @@ def _vjp_gradient(
         )
         result[before] += -0.5 * g[interior]
         result[after] += 0.5 * g[interior]
-    return (cast("xp.ndarray", result),)
+    return (result,)
 
 
 def _vjp_inner(
@@ -587,7 +585,7 @@ def _vjp_inner(
     b_grad = xp.tensordot(xp.conj(a), g, axes=(a_prefix_axes, g_a_axes))
     if b_prefix_rank:
         b_grad = _moveaxis(b_grad, 0, -1)
-    return cast("xp.ndarray", a_grad), cast("xp.ndarray", b_grad)
+    return a_grad, b_grad
 
 
 def _vjp_outer(
@@ -604,7 +602,7 @@ def _vjp_outer(
     b_flat = xp.reshape(b, (-1,))
     a_grad = xp.reshape(xp.matmul(g, xp.conj(b_flat)), _shape(a))
     b_grad = xp.reshape(xp.matmul(xp.conj(a_flat), g), _shape(b))
-    return cast("xp.ndarray", a_grad), cast("xp.ndarray", b_grad)
+    return a_grad, b_grad
 
 
 def _vjp_cross(
@@ -643,7 +641,7 @@ def _vjp_cross(
         axisc=b_axis,
         axis=axis,
     )
-    return cast("xp.ndarray", a_grad), cast("xp.ndarray", b_grad)
+    return a_grad, b_grad
 
 
 def _vjp_kron(
@@ -695,7 +693,7 @@ def _vjp_linspace(
 ) -> tuple[xp.ndarray, xp.ndarray]:
     """Transpose the affine interpolation from start and stop."""
     _ = ans, inputs, attrs
-    sample_count = int(num)
+    sample_count = num
     normalized_axis = _normalize_axis(axis, ndim=g.ndim)
     denominator = sample_count - 1 if endpoint and sample_count > 1 else max(sample_count, 1)
     positions = xp.arange(sample_count, dtype=xp.real(g).dtype) / denominator

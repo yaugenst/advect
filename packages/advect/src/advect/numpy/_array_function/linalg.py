@@ -845,7 +845,7 @@ def _lstsq_handler(
     )
     matrix, right = args[:2]
     anchor = _first_traced((matrix, right), traced_type=traced_type)
-    if anchor is None:  # pragma: no cover - NumPy dispatch requires a tracer
+    if anchor is None:
         msg = "numpy.linalg.lstsq requires a traced matrix or right-hand side"
         raise TracingError(msg)
     if int(matrix.ndim) != _MATRIX_RANK:
@@ -1077,7 +1077,7 @@ def _normalize_einsum_syntax(
         parser_name = "_parse_einsum_input"
         parse_einsum_input = getattr(einsum_module, parser_name)
         in_subscripts, out_subscripts, _ = parse_einsum_input(einsum_operands)
-    except Exception as exc:  # pragma: no cover - defensive normalization path
+    except Exception as exc:
         msg = f"numpy.einsum syntax parsing failed: {exc}"
         raise TracingError(msg) from exc
 

@@ -130,7 +130,10 @@ impl DynamicTape {
         Ok((index, node))
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "arguments mirror the dynamic tape node record"
+    )]
     fn append_operation(
         &mut self,
         op: &str,
@@ -489,7 +492,14 @@ impl DynamicTape {
         op, inputs, value, attrs, shape, dtype, *,
         schema_version=DEFAULT_OP_SCHEMA_VERSION, name=None, source_location=None
     ))]
-    #[allow(clippy::needless_pass_by_value, clippy::too_many_arguments)]
+    #[expect(
+        clippy::needless_pass_by_value,
+        reason = "PyO3 extracts owned arguments at the Python boundary"
+    )]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "arguments mirror the public Python tape-recording signature"
+    )]
     fn record_operation(
         &mut self,
         op: &str,
@@ -526,7 +536,14 @@ impl DynamicTape {
         schema_version=DEFAULT_OP_SCHEMA_VERSION, name=None, source_location=None,
         literal_weak=false
     ))]
-    #[allow(clippy::needless_pass_by_value, clippy::too_many_arguments)]
+    #[expect(
+        clippy::needless_pass_by_value,
+        reason = "PyO3 extracts owned arguments at the Python boundary"
+    )]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "arguments mirror the public Python literal-recording signature"
+    )]
     fn record_operation_with_literals(
         &mut self,
         op: &str,
@@ -705,7 +722,10 @@ impl DynamicTape {
         self.rebuild_reverse_value_uses()
     }
 
-    #[allow(clippy::needless_pass_by_value)]
+    #[expect(
+        clippy::needless_pass_by_value,
+        reason = "PyO3 extracts owned arguments at the Python boundary"
+    )]
     fn analyze_real_linearity(
         &self,
         py: Python<'_>,
@@ -788,6 +808,10 @@ impl DynamicTape {
         self.consumed
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "the flat diagnostics table is clearest as one inventory"
+    )]
     fn stats(&self, py: Python<'_>) -> PyResult<Py<PyDict>> {
         let result = PyDict::new(py);
         result.set_item("node_count", self.arena.node_count())?;
@@ -894,7 +918,6 @@ impl DynamicTape {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn add_structural_table(
     py: Python<'_>,
     tables: &Bound<'_, PyDict>,
@@ -913,6 +936,10 @@ fn add_structural_table(
     Ok(())
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "one pass preserves the validated positional operand layout"
+)]
 pub(super) fn snapshot_operands(
     py: Python<'_>,
     state: &DynamicTape,

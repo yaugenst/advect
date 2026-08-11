@@ -10,6 +10,7 @@ import pytest
 from numpy.testing import assert_allclose
 
 from advect import ImplicitSolveError, grad, implicit_root, jvp, linearize, vjp
+from advect.autodiff.api.implicit import _validate_same_spec
 from advect.core import ArraySpec, TracingError, primitive, stage
 from advect.core._registry import get_registry
 
@@ -27,6 +28,22 @@ def _newton(
 def _diagonal_solve(operator: Any, rhs: Any) -> Any:
     ones = np.ones_like(rhs)
     return rhs / operator(ones)
+
+
+def test_numpy_scalars_without_device_match_zero_dimensional_arrays() -> None:
+    class NumpyScalarWithoutDevice:
+        shape = ()
+        dtype = np.dtype("float64")
+
+        def __array_namespace__(self, *, api_version: str | None = None) -> Any:
+            del api_version
+            return np
+
+    _validate_same_spec(
+        NumpyScalarWithoutDevice(),
+        np.array(1.0),
+        label="NumPy 2.0 scalar",
+    )
 
 
 def test_scalar_root_gradient_does_not_trace_newton_iterations() -> None:

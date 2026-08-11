@@ -173,7 +173,7 @@ def _leaf_to_dynamic_operand(
         leaf_recorder = getattr(leaf, "recorder", None)
         if leaf_recorder is recorder:
             node_id, value = _snapshot_traced(leaf)
-            return int(node_id), weak_scalar_runtime_value(leaf, value)
+            return node_id, weak_scalar_runtime_value(leaf, value)
         if leaf_recorder is None or not _is_recorder_in_active_trace_stack(leaf_recorder):
             msg = "Cannot mix traced values from unrelated or expired trace contexts"
             raise TracingError(msg)
@@ -434,7 +434,7 @@ def _trace_call_arguments(
 
 def _output_shape_and_dtype(value: Any) -> tuple[tuple[int, ...], Any]:
     if isinstance(value, ArrayLike):
-        return tuple(int(size) for size in value.shape), value.dtype
+        return value.shape, value.dtype
     return (
         (),
         {

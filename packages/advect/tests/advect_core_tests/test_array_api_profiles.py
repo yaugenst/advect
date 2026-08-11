@@ -72,7 +72,7 @@ class _VersionedArray:
             asarray=lambda value: value,
         )
         if self.namespace_info:
-            namespace.__array_namespace_info__ = lambda: object()
+            namespace.__array_namespace_info__ = object
         return namespace
 
 

@@ -1,11 +1,11 @@
-# ruff: noqa: ANN401, UP046  # Public primitive rules are backend-generic.
+# ruff: noqa: ANN401  # Public primitive rules are backend-generic.
 """Unified user-authored primitive contract."""
 
 from __future__ import annotations
 
 import functools
 import inspect
-from typing import TYPE_CHECKING, Any, Generic, ParamSpec, TypeVar, cast, overload
+from typing import TYPE_CHECKING, Any, cast, overload
 
 from advect.core._context import (
     _get_active_recorder,
@@ -34,9 +34,6 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
     from advect.core._residual import _PrimitiveExecution
-
-P = ParamSpec("P")
-R = TypeVar("R")
 
 
 class MissingPrimitiveRuleError(TracingError):
@@ -109,7 +106,7 @@ def _contains_tracer(value: Any) -> bool:
     return _tree_contains_tracer(value)
 
 
-class Primitive(Generic[P, R]):
+class Primitive[**P, R]:
     """Callable authoring handle returned by ``advect.primitive``.
 
     The handle preserves the implementation's signature and exposes
@@ -333,7 +330,7 @@ class Primitive(Generic[P, R]):
 
         def forward(*inner_args: Any, **inner_kwargs: Any) -> _PrimitiveExecution:
             normalized = self._bind_call(
-                cast("tuple[Any, ...]", inner_args),
+                inner_args,
                 {**inner_kwargs, **static_arguments},
             )
             return self._dispatch_normalized(normalized)

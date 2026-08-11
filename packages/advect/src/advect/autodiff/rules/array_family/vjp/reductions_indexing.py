@@ -118,7 +118,7 @@ def _reduction_axes(
     raw_axes = (axis,) if isinstance(axis, int) else tuple(axis)
     normalized: list[int] = []
     for raw_axis in raw_axes:
-        item = int(raw_axis)
+        item = raw_axis
         if item < 0:
             item += ndim
         if item < 0 or item >= ndim:
@@ -173,10 +173,11 @@ def _vjp_getitem(
     if _is_basic_index(idx):
         grad[idx] = grad_contrib
         return (grad,)
-    try:
-        xp.add.at(grad, idx, grad_contrib)
-    except Exception:  # noqa: BLE001 - fall back to assignment semantics
+    scatter_add = getattr(xp.add, "at", None)
+    if scatter_add is None:
         grad[idx] = grad[idx] + grad_contrib
+    else:
+        scatter_add(grad, idx, grad_contrib)
     return (grad,)
 
 

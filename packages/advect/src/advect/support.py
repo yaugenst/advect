@@ -361,8 +361,8 @@ def _numpy_ufunc_method_rows(array_api_ops: frozenset[str]) -> list[dict[str, ob
             lowering = canonicalize_numpy_op(f"numpy.{accumulation}")
             methods.append(("accumulate", lowering))
         ordinary_outer = (
-            int(ufunc.nin) == _BINARY_ARITY
-            and int(ufunc.nout) == _SINGLE_OUTPUT_ARITY
+            ufunc.nin == _BINARY_ARITY
+            and ufunc.nout == _SINGLE_OUTPUT_ARITY
             and ufunc.signature is None
         )
         if ordinary_outer:

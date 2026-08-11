@@ -191,7 +191,7 @@ class TracedArray(NDArrayOperatorsMixin):
             return node_id
 
         deferred = self._deferred_getitem
-        if deferred is None:  # pragma: no cover - constructor invariant
+        if deferred is None:  # Constructor invariant.
             msg = "Traced array has neither an SSA node nor a deferred getitem"
             raise RuntimeError(msg)
         source, attrs = deferred
@@ -253,7 +253,7 @@ class TracedArray(NDArrayOperatorsMixin):
     def _refresh_direct_view(self, *, key: object, index_spec: object) -> None:
         """Refresh the one view that performed a functional root update."""
         view_state = self._view_state
-        if view_state is None or view_state.index_spec is None:  # pragma: no cover - caller guard
+        if view_state is None or view_state.index_spec is None:
             msg = "Only a direct basic view can be refreshed"
             raise RuntimeError(msg)
         root = view_state.root
@@ -280,18 +280,18 @@ class TracedArray(NDArrayOperatorsMixin):
     def shape(self) -> tuple[int, ...]:
         """Return the shape of the underlying array."""
         _node_id, value = self._advect_snapshot()
-        return tuple(int(dimension) for dimension in value.shape)
+        return tuple(value.shape)
 
     @property
     def dtype(self) -> np.dtype[Any]:
         """Return the dtype of the underlying array."""
         _node_id, value = self._advect_snapshot()
-        return cast("np.dtype[Any]", np.dtype(value.dtype))
+        return np.dtype(value.dtype)
 
     @property
     def _advect_weak(self) -> bool:
         """Return the weak-scalar category of the current SSA value."""
-        return bool(self.recorder.is_weak(self.node_id))
+        return self.recorder.is_weak(self.node_id)
 
     def _advect_mark_weak(self) -> None:
         """Mark this rank-zero SSA value as a weak scalar."""
@@ -547,8 +547,8 @@ class TracedArray(NDArrayOperatorsMixin):
             method == "__call__"
             and out is None
             and not kwargs
-            and len(inputs) == int(ufunc.nin)
-            and int(ufunc.nout) == 1
+            and len(inputs) == ufunc.nin
+            and ufunc.nout == 1
         )
         if simple_call:
             fast_result = run_ephemeral_simple_ufunc(self, ufunc, inputs)

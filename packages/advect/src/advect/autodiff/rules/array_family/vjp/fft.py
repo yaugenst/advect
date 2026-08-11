@@ -3,17 +3,17 @@
 from __future__ import annotations
 
 from functools import partial
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any
 
 from advect.autodiff.rules.array_family._backend_runtime import _array_constructor_like, xp
-from advect.autodiff.rules.array_family._transpose_utils import (
-    FFTNorm,
-    _adjoint_fft_norm as _adjoint_norm,
-)
+from advect.autodiff.rules.array_family._transpose_utils import _adjoint_fft_norm as _adjoint_norm
+
+if TYPE_CHECKING:
+    from advect.autodiff.rules.array_family._transpose_utils import FFTNorm
 
 
 def _normalize_axis(axis: int, *, ndim: int) -> int:
-    normalized = int(axis)
+    normalized = axis
     if normalized < 0:
         normalized += ndim
     if normalized < 0 or normalized >= ndim:
@@ -55,10 +55,7 @@ def _resize_axis_adjoint(
         ]
     pad_width = [(0, 0)] * value.ndim
     pad_width[normalized_axis] = (0, target_length - current_length)
-    return cast(
-        "xp.ndarray",
-        xp.pad(value, tuple(pad_width), mode="constant", constant_values=0),
-    )
+    return xp.pad(value, tuple(pad_width), mode="constant", constant_values=0)
 
 
 def _resize_axes_adjoint(
@@ -195,7 +192,7 @@ def _vjp_rfft(
     """Embed the half spectrum, then apply the full complex FFT adjoint."""
     _ = ans, rest, attrs
     normalized_axis = _normalize_axis(axis, ndim=x.ndim)
-    transform_length = int(x.shape[normalized_axis]) if n is None else int(n)
+    transform_length = int(x.shape[normalized_axis]) if n is None else n
     half_length = int(g.shape[normalized_axis])
     missing_length = transform_length - half_length
     if missing_length < 0:
@@ -247,9 +244,7 @@ def _vjp_rfftn(
         msg = "rfftn transpose requires at least one transform axis"
         raise ValueError(msg)
     transform_shape = (
-        tuple(int(x.shape[axis]) for axis in normalized_axes)
-        if s is None
-        else tuple(int(length) for length in s)
+        tuple(int(x.shape[axis]) for axis in normalized_axes) if s is None else tuple(s)
     )
     real_axis = normalized_axes[-1]
     missing_length = transform_shape[-1] - int(g.shape[real_axis])
@@ -302,7 +297,7 @@ def _vjp_irfft(
     """Apply the weighted half-spectrum adjoint of a real inverse FFT."""
     _ = ans, rest, attrs
     normalized_axis = _normalize_axis(axis, ndim=g.ndim)
-    transform_length = int(g.shape[normalized_axis]) if n is None else int(n)
+    transform_length = int(g.shape[normalized_axis]) if n is None else n
     spectrum = xp.fft.rfft(
         g,
         n=transform_length,
@@ -344,9 +339,7 @@ def _vjp_irfftn(
         msg = "irfftn transpose requires at least one transform axis"
         raise ValueError(msg)
     transform_shape = (
-        tuple(int(g.shape[axis]) for axis in normalized_axes)
-        if s is None
-        else tuple(int(length) for length in s)
+        tuple(int(g.shape[axis]) for axis in normalized_axes) if s is None else tuple(s)
     )
     spectrum = xp.fft.rfftn(
         g,

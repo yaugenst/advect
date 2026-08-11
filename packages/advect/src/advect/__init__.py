@@ -25,7 +25,7 @@ from __future__ import annotations
 
 from importlib import import_module
 from importlib.metadata import PackageNotFoundError, version
-from typing import Any
+from typing import TYPE_CHECKING
 
 from advect import pytree
 from advect._array import array, asarray, is_traced, stop_gradient
@@ -54,6 +54,13 @@ from advect.core import (
     stage,
 )
 from advect.support import support_catalog
+
+if TYPE_CHECKING:
+    from advect.autodiff.api.checkpoint import checkpoint
+    from advect.autodiff.api.forward import LinearMap, jacobian, jvp, linearize
+    from advect.autodiff.api.higher_order import hessian, hessian_diag, hvp
+    from advect.autodiff.api.implicit import ImplicitSolveError, implicit_root
+    from advect.autodiff.api.reverse import Pullback, grad, value_and_grad, vjp, vjp_program
 
 # NumPy is the required base frontend, so its handlers are deterministic
 # process state rather than an ambient plugin side effect. The Array API
@@ -86,7 +93,7 @@ _AUTODIFF_EXPORT_MODULES = {
 }
 
 
-def __getattr__(name: str) -> Any:  # noqa: ANN401 - lazy public transform
+def __getattr__(name: str) -> object:
     """Load automatic-differentiation transforms on first use."""
     module = _AUTODIFF_EXPORT_MODULES.get(name)
     if module is None:
@@ -108,6 +115,8 @@ __all__ = [
     "ArraySpec",
     "ConstantRecord",
     "EscapedTracerError",
+    "ImplicitSolveError",
+    "LinearMap",
     "MissingPrimitiveRuleError",
     "MutationError",
     "NoJVPError",
@@ -116,6 +125,7 @@ __all__ = [
     "OptimizationPass",
     "OptimizationReport",
     "PrimitiveResult",
+    "Pullback",
     "StagedProgram",
     "StagedTrace",
     "StaleViewError",
@@ -125,12 +135,23 @@ __all__ = [
     "__version__",
     "array",
     "asarray",
+    "checkpoint",
     "debug",
+    "grad",
+    "hessian",
+    "hessian_diag",
+    "hvp",
+    "implicit_root",
     "is_traced",
+    "jacobian",
+    "jvp",
+    "linearize",
     "primitive",
     "pytree",
     "stage",
     "stop_gradient",
     "support_catalog",
+    "value_and_grad",
+    "vjp",
+    "vjp_program",
 ]
-__all__ += list(_AUTODIFF_EXPORT_MODULES)

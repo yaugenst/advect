@@ -111,7 +111,10 @@ fn canonical_name(name: &str) -> String {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
+#[expect(
+    clippy::unwrap_used,
+    reason = "test setup unwraps values whose absence should fail the test"
+)]
 mod tests {
     use super::*;
 

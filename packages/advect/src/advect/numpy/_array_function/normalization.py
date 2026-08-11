@@ -54,7 +54,7 @@ def _bind_optional_positionals(
 
 
 def _normalize_axis(axis: int, ndim: int) -> int:
-    axis_int = int(axis)
+    axis_int = axis
     if axis_int < 0:
         axis_int += ndim
     if axis_int < 0 or axis_int >= ndim:
@@ -81,7 +81,7 @@ def _normalize_gradient_axes(*, axis: object, ndim: int) -> tuple[int, ...]:
 
     axis_value = _normalize_axis_value(axis)
     raw_axes = (axis_value,) if isinstance(axis_value, int) else axis_value
-    normalized = tuple(_normalize_axis(int(axis), ndim) for axis in raw_axes)
+    normalized = tuple(_normalize_axis(axis, ndim) for axis in raw_axes)
     if len(set(normalized)) != len(normalized):
         msg = f"numpy.gradient axis contains duplicates: {axis_value!r}"
         raise TracingError(msg)

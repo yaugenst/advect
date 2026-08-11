@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import functools
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, cast
 
 from advect.core._array_api.providers import _get_array_namespace
 from advect.core._context import (
@@ -18,32 +18,40 @@ from advect.core._pytree import tree_flatten, tree_unflatten
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from typing import Protocol
 
     from advect.core._primitive import Primitive
     from advect.core._pytree import TreeDef
 
+    class _SupportsMultiply(Protocol):
+        def __mul__(self, other: object, /) -> object: ...
+
 
 @dataclass(frozen=True, slots=True)
 class _CheckpointConfig:
-    function: Callable[..., Any]
+    function: Callable[..., object]
     treedef: TreeDef
 
 
-def _call_from_tree(function: Callable[..., Any], treedef: TreeDef, leaves: tuple[Any, ...]) -> Any:
+def _call_from_tree(
+    function: Callable[..., object],
+    treedef: TreeDef,
+    leaves: tuple[object, ...],
+) -> object:
     args, kwargs = tree_unflatten(treedef, list(leaves))
     with _rematerialization_region():
         return function(*args, **kwargs)
 
 
-def _zero_tangent_like(value: Any) -> Any:
+def _zero_tangent_like(value: object) -> object:
     namespace = _get_array_namespace(value)
     zeros_like = getattr(namespace, "zeros_like", None) if namespace is not None else None
     if callable(zeros_like):
         return zeros_like(value)
-    return value * 0
+    return cast("_SupportsMultiply", value) * 0
 
 
-def _restore_output_cotangent(output: Any, cotangent: Any) -> Any:
+def _restore_output_cotangent(output: object, cotangent: object) -> object:
     """Rebuild a primitive's flat multi-output cotangent as its output pytree."""
     _output_leaves, output_treedef = tree_flatten(output)
     _cotangent_leaves, cotangent_treedef = tree_flatten(cotangent)
@@ -54,7 +62,7 @@ def _restore_output_cotangent(output: Any, cotangent: Any) -> Any:
     return cotangent
 
 
-def _build_checkpoint_primitive() -> Primitive[..., Any]:
+def _build_checkpoint_primitive() -> Primitive[..., object]:
     @primitive(
         name="advect_internal.checkpoint",
         static_argnames=("config",),
@@ -62,7 +70,7 @@ def _build_checkpoint_primitive() -> Primitive[..., Any]:
     def implementation(
         payload: object,
         config: _CheckpointConfig,
-    ) -> Any:
+    ) -> object:
         leaves, actual_treedef = tree_flatten(payload)
         if actual_treedef != config.treedef:
             msg = "Checkpointed call structure changed while executing its concrete region"
@@ -83,20 +91,20 @@ def _build_checkpoint_primitive() -> Primitive[..., Any]:
 
     @implementation.def_jvp
     def jvp_rule(
-        output: Any,
-        primals: tuple[Any, ...],
-        tangents: tuple[Any | None, ...],
+        output: object,
+        primals: tuple[object, ...],
+        tangents: tuple[object | None, ...],
         *,
         config: _CheckpointConfig,
-    ) -> Any:
+    ) -> object:
         del output
         from advect.autodiff.api.forward import jvp  # noqa: PLC0415
 
-        def flat_function(*leaves: Any) -> Any:
+        def flat_function(*leaves: object) -> object:
             return _call_from_tree(
                 config.function,
                 config.treedef,
-                cast("tuple[Any, ...]", leaves),
+                leaves,
             )
 
         active_tangents = tuple(
@@ -114,20 +122,20 @@ def _build_checkpoint_primitive() -> Primitive[..., Any]:
 
     @implementation.def_transpose
     def transpose_rule(
-        cotangent: Any,
-        primals: tuple[Any, ...],
-        output: Any,
+        cotangent: object,
+        primals: tuple[object, ...],
+        output: object,
         *,
         config: _CheckpointConfig,
-    ) -> tuple[Any, ...]:
+    ) -> tuple[object, ...]:
         del output
         from advect.autodiff.api.reverse import vjp  # noqa: PLC0415
 
-        def flat_function(*leaves: Any) -> Any:
+        def flat_function(*leaves: object) -> object:
             return _call_from_tree(
                 config.function,
                 config.treedef,
-                cast("tuple[Any, ...]", leaves),
+                leaves,
             )
 
         value, pullback = vjp(
@@ -142,7 +150,7 @@ def _build_checkpoint_primitive() -> Primitive[..., Any]:
                 close()
         if not isinstance(result, tuple):
             return (result,)
-        return cast("tuple[Any, ...]", result)
+        return cast("tuple[object, ...]", result)
 
     return implementation
 
@@ -150,7 +158,7 @@ def _build_checkpoint_primitive() -> Primitive[..., Any]:
 _checkpoint_operation = _build_checkpoint_primitive()
 
 
-def checkpoint(function: Callable[..., Any]) -> Callable[..., Any]:
+def checkpoint[**P, R](function: Callable[P, R]) -> Callable[P, R]:
     """Return a dynamic rematerialization wrapper for ``function``.
 
     An ordinary call invokes ``function`` directly. During concrete autodiff,
@@ -210,7 +218,7 @@ def checkpoint(function: Callable[..., Any]) -> Callable[..., Any]:
         raise TypeError(msg)
 
     @functools.wraps(function)
-    def checkpointed(*args: Any, **kwargs: Any) -> Any:
+    def checkpointed(*args: P.args, **kwargs: P.kwargs) -> R:
         if not is_tracing():
             return function(*args, **kwargs)
         if _get_active_trace_kind() == "stage_abstract":
@@ -223,9 +231,12 @@ def checkpoint(function: Callable[..., Any]) -> Callable[..., Any]:
         leaves, treedef = tree_flatten(payload)
         if not leaves:
             return function(*args, **kwargs)
-        return _checkpoint_operation._call_dynamic_only(  # noqa: SLF001
-            payload=payload,
-            config=_CheckpointConfig(function, treedef),
+        return cast(
+            "R",
+            _checkpoint_operation._call_dynamic_only(  # noqa: SLF001
+                payload=payload,
+                config=_CheckpointConfig(function, treedef),
+            ),
         )
 
     return checkpointed

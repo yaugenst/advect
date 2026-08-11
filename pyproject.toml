@@ -23,11 +23,11 @@ classifiers = [
   "Development Status :: 3 - Alpha",
   "Intended Audience :: Developers",
   "Intended Audience :: Science/Research",
-  "License :: OSI Approved :: MIT License",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
   "Programming Language :: Python :: 3.14",
+  "Programming Language :: Python :: Implementation :: CPython",
   "Programming Language :: Rust",
   "Topic :: Scientific/Engineering",
   "Topic :: Scientific/Engineering :: Artificial Intelligence",
@@ -60,11 +60,12 @@ dev = [
   "pre-commit>=4.5,<5",
   "pyrefly==1.2.0",
   "pytest>=9.0.3",
-  "ruff>=0.14.6",
+  "ruff==0.16.2",
   "scipy>=1.18,<2",
   "xarray>=2024.6",
 ]
 docs = [
+  "click>=8.3.3",
   "mike>=2.1",
   "mkdocs>=1.6",
   "mkdocs-llmstxt>=0.5,<0.6",
@@ -75,9 +76,13 @@ docs = [
 requires = [ "maturin>=1.12,<2" ]
 build-backend = "maturin"
 
+[tool.uv]
+required-version = "==0.12.3"
+
 [tool.maturin]
-exclude = [ "**/AGENTS.md", "**/__pycache__/**" ]
+exclude = [ "**/AGENTS.md" ]
 features = [ "extension-module" ]
+locked = true
 manifest-path = "packages/advect-native/Cargo.toml"
 module-name = "advect._native_core"
 python-source = "packages/advect/src"
@@ -91,8 +96,9 @@ src = [
   "packages/advect/src",
   "packages/advect/tests",
 ]
-target-version = "py312"
+extend-exclude = [ "*.md" ]
 line-length = 100
+required-version = "==0.16.2"
 
 [tool.ruff.lint]
 # Enable ALL rules, then selectively disable problematic ones
@@ -110,16 +116,23 @@ ignore = [
   "Q001",   # bad-quotes-multiline-string
   "Q002",   # bad-quotes-docstring
   "Q003",   # avoidable-escaped-quote
+  "Q004",   # unnecessary-escaped-quote
   "COM812", # missing-trailing-comma (conflicts with formatter)
   "COM819", # prohibited-trailing-comma
-  "ISC001", # single-line-implicit-string-concatenation (conflicts with formatter)
-  "ISC002", # multi-line-implicit-string-concatenation
 
   # Opinionated rules we disagree with
   "D107",   # undocumented-public-init (we document in class docstring)
   "TD002",  # missing-todo-author
   "TD003",  # missing-todo-link
   "FIX002", # line-contains-todo (we allow TODOs)
+
+  # Exception-message indirection adds noise to local validation errors.
+  "EM101",  # raw-string-in-exception
+  "EM102",  # f-string-in-exception
+  "TRY003", # raise-vanilla-args
+
+  # Per-file copyright banners are not project policy.
+  "CPY001", # missing-copyright-notice
 ]
 
 [tool.ruff.lint.per-file-ignores]
@@ -134,48 +147,23 @@ ignore = [
   "D103",    # undocumented-public-function (test functions)
   "D101",    # undocumented-public-class (test classes)
   "ANN",     # type annotations (tests are less strict)
-  "ARG001",  # unused-function-argument (fixtures)
-  "ARG002",  # unused-method-argument
   "PLR0913", # too-many-arguments (test functions can have many fixtures)
   "SLF001",  # private-member-access (tests need to access internals)
 ]
 
-# __init__.py files can have unused imports (re-exports)
-"**/__init__.py" = [
-  "F401", # unused-import
-  "F403", # undefined-local-with-import-star
-]
-
-# Configuration files
-"conftest.py" = [
-  "D103", # undocumented-public-function
-]
-
-# Scripts can use print and shebangs
+# Scripts can print user-facing results.
 "scripts/**/*.py" = [
-  "T201",   # print (scripts need to output)
-  "EXE001", # shebang (run via uv run python, not directly)
+  "T201", # print
 ]
 
 "packages/advect/src/advect/autodiff/rules/array_family/jvp/*.py" = [
   "ANN401", # JVP rule signatures intentionally track runtime op contracts
   "ARG001", # many signatures mirror traced op contracts
-  "D103",   # internal rule helpers are intentionally minimal-doc
-  "TC001",  # typed alias imports are intentionally runtime-local
 ]
 "packages/advect/src/advect/autodiff/rules/array_family/vjp/**/*.py" = [
   "ANN401", # VJP rule signatures intentionally mirror runtime op contracts
   "ARG001", # many signatures mirror traced op contracts
-  "D103",   # internal rule helpers are intentionally minimal-doc
   "N803",   # NumPy keyword casing (e.g. UPLO) is runtime contract
-  "TC001",  # runtime-local type imports in helper modules
-  "TC003",  # runtime-local callable imports in helper modules
-]
-"packages/advect/src/advect/autodiff/api/*.py" = [
-  "ANN401", # autodiff API signatures accept generic pytrees/array leaves
-]
-"packages/advect/src/advect/interop/*.py" = [
-  "ANN401", # host-framework callbacks and pytrees are dynamically typed
 ]
 "packages/advect/src/advect/autodiff/rules/array_family/_transpose_utils.py" = [
   "ANN401", # transpose utilities operate on generic cotangent pytrees
@@ -223,15 +211,25 @@ docstring-code-format = true
 
 [tool.pyrefly]
 preset = "strict"
+min-severity = "warn"
 python-version = "3.12"
 use-ignore-files = false
 disable-search-path-heuristics = true
 disable-project-excludes-heuristics = true
 project-includes = [
+  "docs-theme/playground_runtime.py",
   "packages/advect/src",
+  "scripts/_support/release_artifacts.py",
+  "scripts/assemble_release_artifacts.py",
+  "scripts/griffe_lazy_exports.py",
+  "scripts/mkdocs_hooks.py",
+  "scripts/run_doc_snippets.py",
+  "scripts/smoke_pyodide.py",
+  "scripts/smoke_wheel_install.py",
 ]
 search-path = [
   "packages/advect/src",
+  "scripts",
 ]
 
 # ==============================================================================
@@ -249,5 +247,5 @@ addopts = [
   "-v",
   "--tb=short",
 ]
-filterwarnings = [ "error", "ignore::DeprecationWarning:hypothesis.*" ]
+filterwarnings = [ "error" ]
 xfail_strict = true

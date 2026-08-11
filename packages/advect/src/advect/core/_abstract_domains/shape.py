@@ -1,4 +1,3 @@
-# ruff: noqa: EM101, EM102, TRY003
 """Abstract registrations and evaluators for shape transformations."""
 
 from __future__ import annotations

@@ -1,4 +1,4 @@
-# ruff: noqa: A001, A002, ANN401, EM101, PLR0913, PLR2004, S101, TRY003
+# ruff: noqa: A001, A002, ANN401, PLR0913, PLR2004
 # SciPy-compatible names/signatures and primitive rule schemas intentionally trigger these rules.
 """Install rank, extrema, and grey-morphology selection primitives.
 
@@ -97,7 +97,8 @@ def _run_selection(
     )
     runtime_footprint = _runtime_footprint(footprint_shape, footprint_values)
     if one_dimensional:
-        assert sizes is not None
+        if sizes is None:
+            raise AssertionError("One-dimensional selection requires a size")
         return function(
             input,
             sizes[0],

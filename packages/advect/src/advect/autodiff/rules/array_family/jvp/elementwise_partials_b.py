@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from typing import Any, cast
+from typing import Any
 
 from advect.autodiff.rules.array_family._backend_runtime import _scalar_like, xp
 from advect.autodiff.rules.array_family.jvp.common import (
@@ -115,7 +115,7 @@ def _partials_power(
         positive_mask = _positive_domain_mask(x)
         safe_x = xp.where(positive_mask, x, _scalar_like(1.0, x))
     if isinstance(y, (bool, int, float, complex)):
-        dx = xp.zeros_like(x) if y == 0 else cast("xp.ndarray", y * xp.pow(x, y - 1))
+        dx = xp.zeros_like(x) if y == 0 else y * xp.pow(x, y - 1)
     else:
         zero_exponent = y == _scalar_like(0, y)
         safe_derivative_base = xp.where(zero_exponent, _scalar_like(1.0, x), x)
@@ -128,7 +128,7 @@ def _partials_power(
         dy = ans * xp.log(safe_x)
     else:
         dy = xp.where(_positive_domain_mask(x), ans * xp.log(safe_x), xp.zeros_like(ans))
-    return cast("xp.ndarray", dx), cast("xp.ndarray", dy)
+    return dx, dy
 
 
 def _partials_reciprocal(

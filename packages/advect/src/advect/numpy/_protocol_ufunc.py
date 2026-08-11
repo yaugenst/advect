@@ -164,7 +164,7 @@ class UfuncRuntime:
                     raise UfuncNotSupportedError(msg)
                 node_id, value = _snapshot_traced_in_active_trace(inp)
                 array_value = cast("ArrayLike", weak_scalar_runtime_value(inp, value))
-                operands.append((int(node_id), array_value))
+                operands.append((node_id, array_value))
                 input_values.append(array_value)
                 continue
 
@@ -220,7 +220,7 @@ class UfuncRuntime:
             )
             raise UfuncNotSupportedError(msg)
 
-        if not kwargs and int(ufunc.nout) == 1:
+        if not kwargs and ufunc.nout == 1:
             return self.handle_simple_ufunc(
                 ufunc=ufunc,
                 recorder=recorder,
@@ -240,7 +240,7 @@ class UfuncRuntime:
 
         result = ufunc(*input_values, **kwargs)
 
-        if int(ufunc.nout) == 1:
+        if ufunc.nout == 1:
             result_value = cast("ArrayLike", result)
             result_shape, result_dtype = _result_shape_and_dtype(result_value)
             node_id = _record_operation(
@@ -255,7 +255,7 @@ class UfuncRuntime:
             )
             return result_value, node_id
 
-        if not isinstance(result, tuple) or len(result) != int(ufunc.nout):
+        if not isinstance(result, tuple) or len(result) != ufunc.nout:
             msg = (
                 f"Expected ufunc '{ufunc.__name__}' to return {ufunc.nout} outputs, "
                 f"got {type(result).__name__}"

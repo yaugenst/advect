@@ -14,7 +14,7 @@ import numpy as np
 from advect.core._context import _has_active_trace_kind
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Mapping, Sequence
+    from collections.abc import Generator, Mapping, Sequence
     from contextlib import AbstractContextManager
 
 
@@ -137,7 +137,7 @@ def stage_context(
 
 
 @contextmanager
-def _ambient_rng_tripwire() -> Iterator[None]:
+def _ambient_rng_tripwire() -> Generator[None]:
     """Tripwire NumPy's ambient RNG only in threads that are staging."""
     global _RNG_PATCH_DEPTH  # noqa: PLW0603
     with _RNG_PATCH_LOCK:

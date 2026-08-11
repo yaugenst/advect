@@ -1,4 +1,3 @@
-# ruff: noqa: EM102, TRY003
 """Co-located schemas and evaluators for abstract array semantics."""
 
 from __future__ import annotations
@@ -19,10 +18,7 @@ from advect.core._abstract_domains import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
-    from typing import Any
-
-    from advect.core._abstract_model import AbstractRule, ArraySpec, ResultEvaluator
+    from advect.core._abstract_model import AbstractRule, ResultEvaluator
 
 
 def _merge_unique[T](

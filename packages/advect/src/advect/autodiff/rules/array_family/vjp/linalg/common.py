@@ -69,7 +69,7 @@ def _hermitian_triangle_adjoint(x: xp.ndarray, *, uplo: str) -> xp.ndarray:
 
 def _broadcast_eye(*, n: int, batch_ndim: int, dtype: xp.dtype[Any]) -> xp.ndarray:
     eye = xp.eye(n, dtype=dtype)
-    return cast("xp.ndarray", xp.reshape(eye, (1,) * batch_ndim + (n, n)))
+    return xp.reshape(eye, (1,) * batch_ndim + (n, n))
 
 
 def _qr_skew_pullback(
@@ -88,7 +88,7 @@ def _qr_skew_pullback(
 
 
 def _normalize_axis(axis: int, *, ndim: int, op_name: str) -> int:
-    normalized = int(axis)
+    normalized = axis
     if normalized < 0:
         normalized += ndim
     if normalized < 0 or normalized >= ndim:
@@ -125,7 +125,7 @@ def _normalize_tensordot_axes(
         a_axes = _normalize_axis_sequence(axes[0], ndim=a_ndim, op_name=op_name)
         b_axes = _normalize_axis_sequence(axes[1], ndim=b_ndim, op_name=op_name)
     else:
-        axes_int = int(axes)
+        axes_int = axes
         if axes_int < 0:
             msg = f"{op_name} does not support negative integer axes ({axes_int})"
             raise ValueError(msg)

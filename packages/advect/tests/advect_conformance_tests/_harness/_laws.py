@@ -794,6 +794,6 @@ def check_law(
         _law_second_order(case, values, context)
     elif law is Law.STAGED:
         _law_staged(case, values, context)
-    else:  # pragma: no cover - exhaustive over a closed enum
+    else:  # Exhaustive over a closed enum.
         msg = f"Law {law.value} has no implementation"
         raise ConformanceError(msg)

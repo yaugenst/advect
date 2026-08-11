@@ -1,4 +1,4 @@
-# ruff: noqa: EM101, PLR2004, TRY003
+# ruff: noqa: PLR2004
 """Abstract registrations and evaluators for indexing-shaped operations."""
 
 from __future__ import annotations

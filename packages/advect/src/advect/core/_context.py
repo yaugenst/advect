@@ -19,7 +19,7 @@ from advect.core._errors import TracingError
 _thread_local = threading.local()
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Iterator
+    from collections.abc import Generator, Iterable
 
 
 @dataclass(slots=True)
@@ -152,7 +152,7 @@ def _get_operation_recorders() -> list[object]:
 
 
 @contextmanager
-def _use_operation_recorder(recorder: object) -> Iterator[None]:
+def _use_operation_recorder(recorder: object) -> Generator[None]:
     """Expose one selected recorder while a backend handler evaluates operands."""
     recorders = _get_operation_recorders()
     recorders.append(recorder)
@@ -163,7 +163,7 @@ def _use_operation_recorder(recorder: object) -> Iterator[None]:
 
 
 @contextmanager
-def _suspend_tracing() -> Iterator[None]:
+def _suspend_tracing() -> Generator[None]:
     """Temporarily hide active recorders while an atomic provider executes."""
     frames = _get_trace_frames()
     operation_recorders = _get_operation_recorders()
@@ -195,7 +195,7 @@ def _has_active_trace_kind(trace_kind: str) -> bool:
 
 
 @contextmanager
-def _use_array_api_version(array_api_version: str) -> Iterator[None]:
+def _use_array_api_version(array_api_version: str) -> Generator[None]:
     """Retain a trace's selected Array API revision during replay."""
     versions = cast(
         "list[str] | None",
@@ -213,7 +213,7 @@ def _use_array_api_version(array_api_version: str) -> Iterator[None]:
 
 
 @contextmanager
-def _rematerialization_region() -> Iterator[None]:
+def _rematerialization_region() -> Generator[None]:
     """Mark execution whose intermediates will be replayed during autodiff."""
     depth = int(getattr(_thread_local, "rematerialization_depth", 0))
     _thread_local.rematerialization_depth = depth + 1
@@ -364,7 +364,7 @@ def _get_numerics_context() -> tuple[str, str | None]:
 
 
 @contextmanager
-def _numerics_context(phase: str, source_location: str | None) -> Iterator[None]:
+def _numerics_context(phase: str, source_location: str | None) -> Generator[None]:
     if not _is_numerics_debug():
         yield
         return
@@ -380,7 +380,7 @@ def _numerics_context(phase: str, source_location: str | None) -> Iterator[None]
 
 
 @contextmanager
-def debug(*, numerics: bool = False) -> Iterator[None]:
+def debug(*, numerics: bool = False) -> Generator[None]:
     """Enable scoped trace diagnostics.
 
     Debug mode records per-operation user locations and gives live tracers a
@@ -393,7 +393,7 @@ def debug(*, numerics: bool = False) -> Iterator[None]:
         bool(getattr(_thread_local, "debug_numerics", False)),
     )
     _thread_local.debug = True
-    _thread_local.debug_numerics = bool(numerics)
+    _thread_local.debug_numerics = numerics
     try:
         yield
     finally:

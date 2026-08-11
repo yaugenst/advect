@@ -98,7 +98,10 @@ def test_jax_bridge_validates_the_auxiliary_contract() -> None:
     sample = jnp.asarray([1.0, 2.0], dtype=jnp.float32)
 
     with pytest.raises(TypeError, match=r"must be a \(value, aux\) tuple"):
-        wrap(lambda value: np.sum(value), has_aux=True)(sample)
+        wrap(
+            lambda value: np.sum(value),  # noqa: PLW0108 - bridge boundary
+            has_aux=True,
+        )(sample)
     with pytest.raises(TypeError):
         wrap(
             lambda value: (np.sum(value), {"label": "loss"}),
@@ -249,13 +252,13 @@ def test_jax_reverse_mode_replays_the_pure_advect_function_once(
 
 
 def test_jax_bridge_rejects_integer_input_leaves() -> None:
-    bridged = wrap(lambda value: np.sum(value))
+    bridged = wrap(lambda value: np.sum(value))  # noqa: PLW0108 - bridge boundary
     with pytest.raises(TypeError, match="only NumPy floating and complex arrays"):
         bridged(jnp.asarray([1, 2], dtype=jnp.int32))
 
 
 def test_jax_bridge_rejects_non_numpy_floating_dtypes() -> None:
-    bridged = wrap(lambda value: np.sum(value))
+    bridged = wrap(lambda value: np.sum(value))  # noqa: PLW0108 - bridge boundary
     with pytest.raises(TypeError, match="only NumPy floating and complex arrays"):
         bridged(jnp.asarray([1.0, 2.0], dtype=jnp.bfloat16))
 

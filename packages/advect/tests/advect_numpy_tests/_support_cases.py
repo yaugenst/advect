@@ -319,7 +319,7 @@ def _function(
     modes: tuple[str, ...] = _ALL_MODES,
     variant: str = "baseline",
     compare_values: bool = True,
-    derivative_argnums: DerivativeArgnums | None | Literal["auto"] = "auto",
+    derivative_argnums: DerivativeArgnums | Literal["auto"] | None = "auto",
     trace_argnums: tuple[int, ...] | None = None,
     return_input: int | None = None,
     result_adapter: Literal["identity", "array", "dtype_num", "tuple"] = "identity",
@@ -771,7 +771,7 @@ def _additional_outer_cases() -> tuple[NumpySupportCase, ...]:
         right: ArrayInput,
         *,
         modes: tuple[str, ...] = _ALL_MODES,
-        derivative_argnums: DerivativeArgnums | None | Literal["auto"] = "auto",
+        derivative_argnums: DerivativeArgnums | Literal["auto"] | None = "auto",
     ) -> NumpySupportCase:
         callable_name = f"numpy.{name}.outer"
         groups = (

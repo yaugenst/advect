@@ -168,7 +168,7 @@ def _basic_index_spec(key: object) -> tuple[tuple[object, ...], ...]:
             result.append(("newaxis",))
         elif item is Ellipsis:
             result.append(("ellipsis",))
-        else:  # pragma: no cover - caller establishes basic indexing
+        else:
             raise AssertionError(type(item).__name__)
     return tuple(result)
 
@@ -186,7 +186,7 @@ def index_from_spec(index_spec: object) -> object:
                 items.append(None)
             case ("ellipsis",):
                 items.append(Ellipsis)
-            case _:  # pragma: no cover - _basic_index_spec owns this invariant
+            case _:
                 raise AssertionError(encoded)
     return items[0] if len(items) == 1 else tuple(items)
 

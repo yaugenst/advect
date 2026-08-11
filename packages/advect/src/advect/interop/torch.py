@@ -1,3 +1,4 @@
+# ruff: noqa: ANN401  # PyTorch tensors, devices, and autograd contexts are runtime-defined.
 """PyTorch reverse-mode bridge for NumPy-backed Advect callables."""
 
 from __future__ import annotations
@@ -99,7 +100,7 @@ def _direct_call(
     )
 
 
-def wrap(function: Callable[..., Any]) -> Callable[..., Any]:
+def wrap(function: Callable[..., object]) -> Callable[..., object]:
     """Wrap a NumPy-backed callable as a first-order PyTorch operation.
 
     Every tensor leaf in positional or keyword arguments with a NumPy floating
@@ -110,7 +111,7 @@ def wrap(function: Callable[..., Any]) -> Callable[..., Any]:
     """
 
     @functools.wraps(function)
-    def wrapped(*args: Any, **kwargs: Any) -> Any:
+    def wrapped(*args: object, **kwargs: object) -> object:
         values = (*args, *kwargs.values())
         positional_count = len(args)
         keyword_names = tuple(kwargs)

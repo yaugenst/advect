@@ -68,7 +68,9 @@ def test_single_input_atleast_function_retains_alias_provenance() -> None:
     primal = np.array([1.0, 2.0])
     tangent = np.ones_like(primal)
 
-    value, directional = ad.jvp(lambda traced: np.atleast_2d(traced))(
+    value, directional = ad.jvp(
+        lambda traced: np.atleast_2d(traced)  # noqa: PLW0108 - JVP boundary
+    )(
         primal,
         tangents=tangent,
     )

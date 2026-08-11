@@ -57,6 +57,7 @@ def dynamic_vjp_many(
     output_cotangent_sets: Sequence[Sequence[tuple[int, object]]],
     requested_inputs: Sequence[int],
 ) -> list[list[object | None]]: ...
+
 @final
 class DynamicTape:
     def __new__(cls) -> Self: ...

@@ -150,7 +150,7 @@ def _jvp_cumprod(
         x_last = xp.reshape(x, (1, flat_size))
         dx_last = xp.reshape(tangent, (1, flat_size))
         y_last = xp.cumprod(x_last, axis=-1)
-        output_count = int(_shape_unwrapped(y_last)[-1])
+        output_count = _shape_unwrapped(y_last)[-1]
         if output_count == 0:
             return xp.astype(tangent, out_dtype) * 0
         terms: list[Any] = [dx_last[..., 0]]
@@ -163,7 +163,7 @@ def _jvp_cumprod(
     x_last = _moveaxis(x, axis_norm, -1)
     dx_last = _moveaxis(tangent, axis_norm, -1)
     y_last = xp.cumprod(x_last, axis=-1)
-    output_count = int(_shape_unwrapped(y_last)[-1])
+    output_count = _shape_unwrapped(y_last)[-1]
     if output_count == 0:
         return xp.astype(tangent, out_dtype) * 0
     terms = [dx_last[..., 0]]

@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Protocol, cast
 
 from advect.autodiff.api.forward import linearize
 from advect.core._array_api.providers import (
@@ -16,15 +17,22 @@ from advect.core._primitive import primitive
 from advect.core._pytree import tree_flatten, tree_map, tree_unflatten
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-
+    from advect.autodiff._ephemeral import LinearMap
     from advect.core._primitive import Primitive
     from advect.core._pytree import TreeDef
 
 
-type ResidualFunction = Callable[[Any, Any], Any]
-type RootSolver = Callable[[Callable[[Any], Any], Any], Any]
-type LinearSolver = Callable[[Callable[[Any], Any], Any], Any]
+type _ResidualFunction[SolutionT, ParamsT] = Callable[[SolutionT, ParamsT], SolutionT]
+type _RootSolver[SolutionT] = Callable[[Callable[[SolutionT], SolutionT], SolutionT], SolutionT]
+type _LinearSolver[SolutionT] = Callable[[Callable[[SolutionT], SolutionT], SolutionT], SolutionT]
+
+
+class _ImplicitRootCallable[ParamsT, SolutionT](Protocol):
+    def __call__(self, params: ParamsT, *, initial: SolutionT) -> SolutionT: ...
+
+
+class _Negatable(Protocol):
+    def __neg__(self) -> object: ...
 
 
 class ImplicitSolveError(AdvectError):
@@ -35,25 +43,30 @@ _RESIDUAL_ARGUMENT_COUNT = 2
 
 
 @dataclass(frozen=True, slots=True)
-class _ImplicitRootConfig:
-    residual: ResidualFunction
-    solve: RootSolver
-    linear_solve: LinearSolver
-    transpose_solve: LinearSolver
+class _ImplicitRootConfig[ParamsT, SolutionT]:
+    residual: _ResidualFunction[SolutionT, ParamsT]
+    solve: _RootSolver[SolutionT]
+    linear_solve: _LinearSolver[SolutionT]
+    transpose_solve: _LinearSolver[SolutionT]
     params_treedef: TreeDef
     initial_treedef: TreeDef
 
 
-def _leaf_spec(value: Any) -> tuple[tuple[int, ...], str, str, str | None]:
+def _leaf_spec(value: object) -> tuple[tuple[int, ...], str, str, str | None]:
     shape = tuple(int(dimension) for dimension in getattr(value, "shape", ()))
     dtype = getattr(value, "dtype", None)
     if dtype is None:
-        dtype = {
-            bool: "bool",
-            int: "int64",
-            float: "float64",
-            complex: "complex128",
-        }.get(type(value), type(value).__name__)
+        value_type = type(value)
+        if value_type is bool:
+            dtype = "bool"
+        elif value_type is int:
+            dtype = "int64"
+        elif value_type is float:
+            dtype = "float64"
+        elif value_type is complex:
+            dtype = "complex128"
+        else:
+            dtype = value_type.__name__
     namespace = _get_array_namespace(value)
     provider = (
         "python"
@@ -61,12 +74,14 @@ def _leaf_spec(value: Any) -> tuple[tuple[int, ...], str, str, str | None]:
         else (_get_backend_key_from_namespace(namespace) or type(namespace).__module__)
     )
     device = getattr(value, "device", None)
+    if device is None and provider == "numpy":
+        device = "cpu"
     return shape, str(dtype), provider, None if device is None else str(device)
 
 
 def _validate_same_spec(
-    actual: Any,
-    expected: Any,
+    actual: object,
+    expected: object,
     *,
     label: str,
     check_dtype: bool = True,
@@ -100,7 +115,7 @@ def _validate_same_spec(
             raise TypeError(msg)
 
 
-def _zero_like(value: Any) -> Any:
+def _zero_like(value: object) -> object:
     namespace = _get_array_namespace(value)
     zeros_like = getattr(namespace, "zeros_like", None) if namespace is not None else None
     if callable(zeros_like):
@@ -111,19 +126,19 @@ def _zero_like(value: Any) -> Any:
     raise TypeError(msg)
 
 
-def _zero_tree(value: Any) -> Any:
+def _zero_tree(value: object) -> object:
     return tree_map(_zero_like, value)
 
 
-def _negate_leaf(leaf: Any) -> Any:
-    return None if leaf is None else -leaf
+def _negate_leaf(leaf: object) -> object:
+    return None if leaf is None else -cast("_Negatable", leaf)
 
 
 def _fill_missing_tangents(
-    primals: tuple[Any, ...],
-    tangents: tuple[Any | None, ...],
+    primals: tuple[object, ...],
+    tangents: tuple[object | None, ...],
     treedef: TreeDef,
-) -> Any:
+) -> object:
     leaves = [
         _zero_like(primal) if tangent is None else tangent
         for primal, tangent in zip(primals, tangents, strict=True)
@@ -131,19 +146,19 @@ def _fill_missing_tangents(
     return tree_unflatten(treedef, leaves)
 
 
-def _negate_tree(value: Any) -> Any:
+def _negate_tree(value: object) -> object:
     return tree_map(_negate_leaf, value)
 
 
-def _materialize_cotangent_leaf(cotangent: Any, primal: Any) -> Any:
+def _materialize_cotangent_leaf(cotangent: object, primal: object) -> object:
     return _zero_like(primal) if cotangent is None else cotangent
 
 
-def _materialize_cotangent(cotangent: Any, primal: Any) -> Any:
+def _materialize_cotangent(cotangent: object, primal: object) -> object:
     return tree_map(_materialize_cotangent_leaf, cotangent, primal)
 
 
-def _restore_flat_output(value: Any, treedef: TreeDef, *, label: str) -> Any:
+def _restore_flat_output(value: object, treedef: TreeDef, *, label: str) -> object:
     _leaves, actual_treedef = tree_flatten(value)
     if actual_treedef == treedef or treedef.node_type is None:
         return value
@@ -153,7 +168,7 @@ def _restore_flat_output(value: Any, treedef: TreeDef, *, label: str) -> Any:
     raise TypeError(msg)
 
 
-def _normalize_scalar_solution_provider(solution: Any, params: Any) -> Any:
+def _normalize_scalar_solution_provider(solution: object, params: object) -> object:
     """Move Python scalar roots onto the differentiable parameter provider."""
     params_leaves, _params_treedef = tree_flatten(params)
     namespace = next(
@@ -178,13 +193,13 @@ def _normalize_scalar_solution_provider(solution: Any, params: Any) -> Any:
     return tree_unflatten(solution_treedef, normalized)
 
 
-def _solve_root(
-    residual: ResidualFunction,
-    solve: RootSolver,
+def _solve_root[SolutionT, ParamsT](
+    residual: _ResidualFunction[SolutionT, ParamsT],
+    solve: _RootSolver[SolutionT],
     *,
-    params: Any,
-    initial: Any,
-) -> Any:
+    params: ParamsT,
+    initial: SolutionT,
+) -> SolutionT:
     solution = solve(lambda candidate: residual(candidate, params), initial)
     _validate_same_spec(
         solution,
@@ -192,18 +207,18 @@ def _solve_root(
         label="implicit root solution",
         check_dtype=False,
     )
-    solution = _normalize_scalar_solution_provider(solution, params)
+    solution = cast("SolutionT", _normalize_scalar_solution_provider(solution, params))
     residual_value = residual(solution, params)
     _validate_same_spec(residual_value, solution, label="implicit residual")
     return solution
 
 
 def _residual_linearization(
-    residual: ResidualFunction,
+    residual: _ResidualFunction[object, object],
     *,
-    solution: Any,
-    params: Any,
-) -> tuple[Any, Any]:
+    solution: object,
+    params: object,
+) -> tuple[object, LinearMap]:
     residual_value, residual_linear = linearize(
         residual,
         solution,
@@ -218,14 +233,14 @@ def _residual_linearization(
     return residual_value, residual_linear
 
 
-def _split_residual_pullback(value: Any) -> tuple[Any, Any]:
+def _split_residual_pullback(value: object) -> tuple[object, object]:
     if not isinstance(value, tuple) or len(value) != _RESIDUAL_ARGUMENT_COUNT:
         msg = "implicit residual pullback did not return state and parameter cotangents"
         raise TypeError(msg)
     return value
 
 
-def _build_implicit_primitive() -> Primitive[..., Any]:
+def _build_implicit_primitive() -> Primitive[..., object]:
     @primitive(
         name="advect_internal.implicit_root",
         static_argnames=("config",),
@@ -234,8 +249,8 @@ def _build_implicit_primitive() -> Primitive[..., Any]:
     def implementation(
         params: object,
         initial: object,
-        config: _ImplicitRootConfig,
-    ) -> Any:
+        config: _ImplicitRootConfig[object, object],
+    ) -> object:
         params_count = config.params_treedef.num_leaves
         initial_count = config.initial_treedef.num_leaves
         params_leaves, actual_params_treedef = tree_flatten(params)
@@ -259,7 +274,7 @@ def _build_implicit_primitive() -> Primitive[..., Any]:
     def abstract(
         params: object,
         initial: object,
-        config: _ImplicitRootConfig,
+        config: _ImplicitRootConfig[object, object],
     ) -> object:
         del params, initial, config
         msg = (
@@ -271,12 +286,12 @@ def _build_implicit_primitive() -> Primitive[..., Any]:
 
     @implementation.def_jvp
     def jvp_rule(
-        output: Any,
-        primals: tuple[Any, ...],
-        tangents: tuple[Any | None, ...],
+        output: object,
+        primals: tuple[object, ...],
+        tangents: tuple[object | None, ...],
         *,
-        config: _ImplicitRootConfig,
-    ) -> Any:
+        config: _ImplicitRootConfig[object, object],
+    ) -> object:
         params_count = config.params_treedef.num_leaves
         params = tree_unflatten(config.params_treedef, list(primals[:params_count]))
         solution = _restore_flat_output(
@@ -298,7 +313,7 @@ def _build_implicit_primitive() -> Primitive[..., Any]:
             zero_solution = _zero_tree(solution)
             zero_params = _zero_tree(params)
 
-            def apply_state(direction: Any) -> Any:
+            def apply_state(direction: object) -> object:
                 return residual_linear((direction, zero_params))
 
             forcing = residual_linear((zero_solution, params_tangent))
@@ -314,12 +329,12 @@ def _build_implicit_primitive() -> Primitive[..., Any]:
 
     @implementation.def_transpose
     def transpose_rule(
-        cotangent: Any,
-        primals: tuple[Any, ...],
-        output: Any,
+        cotangent: object,
+        primals: tuple[object, ...],
+        output: object,
         *,
-        config: _ImplicitRootConfig,
-    ) -> tuple[Any | None, ...]:
+        config: _ImplicitRootConfig[object, object],
+    ) -> tuple[object | None, ...]:
         params_count = config.params_treedef.num_leaves
         initial_count = config.initial_treedef.num_leaves
         params = tree_unflatten(config.params_treedef, list(primals[:params_count]))
@@ -344,7 +359,7 @@ def _build_implicit_primitive() -> Primitive[..., Any]:
         )
         try:
 
-            def apply_state_transpose(cotangent_value: Any) -> Any:
+            def apply_state_transpose(cotangent_value: object) -> object:
                 state_cotangent, _parameter_cotangent = _split_residual_pullback(
                     residual_linear.pullback(cotangent_value)
                 )
@@ -380,13 +395,13 @@ def _build_implicit_primitive() -> Primitive[..., Any]:
 _implicit_root_operation = _build_implicit_primitive()
 
 
-def implicit_root(
-    residual: ResidualFunction,
+def implicit_root[ParamsT, SolutionT](
+    residual: _ResidualFunction[SolutionT, ParamsT],
     *,
-    solve: RootSolver,
-    linear_solve: LinearSolver,
-    transpose_solve: LinearSolver | None = None,
-) -> Callable[..., Any]:
+    solve: _RootSolver[SolutionT],
+    linear_solve: _LinearSolver[SolutionT],
+    transpose_solve: _LinearSolver[SolutionT] | None = None,
+) -> _ImplicitRootCallable[ParamsT, SolutionT]:
     """Build a dynamic transform for a converged implicit solution.
 
     The returned callable solves ``residual(solution, params) == 0`` and
@@ -489,7 +504,7 @@ def implicit_root(
         raise TypeError(msg)
     resolved_transpose_solve = linear_solve if transpose_solve is None else transpose_solve
 
-    def root(params: Any, *, initial: Any) -> Any:
+    def root(params: ParamsT, *, initial: SolutionT) -> SolutionT:
         if _get_active_trace_kind() == "stage_abstract":
             msg = (
                 "implicit_root() contains opaque Python solver callbacks and supports "
@@ -506,16 +521,19 @@ def implicit_root(
             )
         _params_leaves, params_treedef = tree_flatten(params)
         _initial_leaves, initial_treedef = tree_flatten(initial)
-        return _implicit_root_operation._call_dynamic_only(  # noqa: SLF001
-            params=params,
-            initial=initial,
-            config=_ImplicitRootConfig(
-                residual=residual,
-                solve=solve,
-                linear_solve=linear_solve,
-                transpose_solve=resolved_transpose_solve,
-                params_treedef=params_treedef,
-                initial_treedef=initial_treedef,
+        return cast(
+            "SolutionT",
+            _implicit_root_operation._call_dynamic_only(  # noqa: SLF001
+                params=params,
+                initial=initial,
+                config=_ImplicitRootConfig(
+                    residual=residual,
+                    solve=solve,
+                    linear_solve=linear_solve,
+                    transpose_solve=resolved_transpose_solve,
+                    params_treedef=params_treedef,
+                    initial_treedef=initial_treedef,
+                ),
             ),
         )
 

@@ -168,7 +168,7 @@ def _nan_to_num_handler(
             neginf=neginf,
         )
         node_id, result_value = _snapshot_traced(result)
-        return result_value, int(node_id)
+        return result_value, node_id
 
     call_kwargs: dict[str, Any] = {"copy": copy}
     if nan is not None:

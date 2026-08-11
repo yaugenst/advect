@@ -6,6 +6,7 @@ import json
 import math
 from typing import TYPE_CHECKING
 
+import numpy as np
 import pytest
 
 from advect import _native_core as advect_native
@@ -180,7 +181,6 @@ def test_attrs_reject_unsupported_objects(unsupported: object) -> None:
 
 
 def test_dtype_descriptors_are_backend_neutral_strings() -> None:
-    np = pytest.importorskip("numpy")
     builder = advect_native.GraphBuilder()
     native_id = builder.append_input_node([1], np.dtype("float64"))
     endian_id = builder.append_input_node([1], np.dtype(">f8"))
@@ -343,7 +343,6 @@ def test_graph_schema_version_is_required_and_consistent_per_op() -> None:
 
 
 def test_native_staged_execution_binds_once_and_supports_constants_and_outputs() -> None:
-    np = pytest.importorskip("numpy")
     builder = advect_native.GraphBuilder()
     input_id = builder.append_input_node([2], "float32")
     constant_id = _append_constant(
@@ -416,7 +415,6 @@ def test_native_staged_execution_binds_once_and_supports_constants_and_outputs()
 
 
 def test_native_staged_execution_validates_results_and_annotates_callback_errors() -> None:
-    np = pytest.importorskip("numpy")
     builder = advect_native.GraphBuilder()
     input_id = builder.append_input_node([2], "float32")
     output_id = builder.append_node("custom.bad", [input_id], {}, [2], "float32")
@@ -459,7 +457,6 @@ def test_native_staged_execution_validates_results_and_annotates_callback_errors
 
 
 def test_native_staged_execution_plan_is_reentrant() -> None:
-    np = pytest.importorskip("numpy")
     builder = advect_native.GraphBuilder()
     input_id = builder.append_input_node([2], "float32")
     output_id = builder.append_node("custom.reentrant", [input_id], {}, [2], "float32")
@@ -496,7 +493,6 @@ def test_native_staged_execution_plan_is_reentrant() -> None:
 
 
 def test_native_staged_execution_donates_only_owned_unaliased_last_uses() -> None:
-    np = pytest.importorskip("numpy")
     donations: list[int | None] = []
 
     def bind(op: str, _attrs: dict[str, object]) -> object:

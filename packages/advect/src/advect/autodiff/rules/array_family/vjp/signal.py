@@ -59,7 +59,7 @@ def _full_signal_cotangent(
     trailing = full_size - start - output_size
     if trailing:
         parts.append(xp.broadcast_to(zero, (trailing,)))
-    return cast("xp.ndarray", xp.concatenate(tuple(parts), axis=0))
+    return xp.concatenate(tuple(parts), axis=0)
 
 
 def _vjp_signal_binary(

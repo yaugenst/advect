@@ -66,7 +66,7 @@ def _ndim_unwrapped(value: Any) -> int:
 
 
 def _iscomplex_unwrapped(value: Any) -> bool:
-    return bool(xp.iscomplexobj(_asarray_unwrapped(value)))
+    return xp.iscomplexobj(_asarray_unwrapped(value))
 
 
 def _positive_domain_mask(value: Any) -> xp.ndarray[Any, Any]:
@@ -286,7 +286,7 @@ def _normalize_axis_tuple(
     if axis is None:
         return tuple(range(ndim))
     axis_items = (axis,) if isinstance(axis, int) else axis
-    normalized = tuple(int(item) % ndim for item in axis_items)
+    normalized = tuple(item % ndim for item in axis_items)
     if len(set(normalized)) != len(normalized):
         msg = f"Repeated axes are not supported (axis={axis!r})"
         raise NotImplementedError(msg)

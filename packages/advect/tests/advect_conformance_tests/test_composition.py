@@ -120,7 +120,7 @@ def _compile_program(instructions: list[tuple[str, float]]) -> Callable[[object]
                 state = np.tanh(state)
             elif opcode == "where":
                 state = np.where(np.arange(6) % 2 == 0, state, -state)
-            else:  # pragma: no cover - closed strategy vocabulary
+            else:  # Closed strategy vocabulary.
                 raise AssertionError(opcode)
         return np.sum(np.sin(state) + 0.1 * state * state)
 

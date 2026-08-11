@@ -10,52 +10,18 @@ config:
   MD004:
     style: dash  # Use - for unordered lists
 
-  # MD010/no-hard-tabs - Hard tabs
-  MD010:
-    code_blocks: false  # Allow tabs in code blocks
-    spaces_per_tab: 4
-
   # MD013/line-length - Line length
   # Disabled for now - spec documents often have long lines in tables and prose
   # Can be re-enabled with stricter limits once docs are migrated to proper format
   MD013: false
 
-  # MD040/fenced-code-language - Fenced code blocks should have a language specified
-  # Disabled - we use unlabeled code blocks for error message examples
-  MD040: false
-
   # MD060/table-column-style - Table column style
   # Disabled - our spec documents use various table styles
   MD060: false
 
-  # MD024/no-duplicate-heading - Multiple headings with the same content
-  MD024:
-    siblings_only: true  # Only check siblings, not all headings
-
   # MD029/ol-prefix - Ordered list item prefix
   MD029:
     style: ordered  # Use 1. 2. 3. etc.
-
-  # MD031/blanks-around-fences - Fenced code blocks should be surrounded by blank lines
-  MD031:
-    list_items: false  # Don't require in list items
-
-  # MD033/no-inline-html - Inline HTML
-  MD033:
-    allowed_elements:
-      - br
-      - sup
-      - sub
-      - kbd
-      - details
-      - summary
-
-  # MD035/hr-style - Horizontal rule style
-  MD035:
-    style: "---"
-
-  # MD044/proper-names - Unsafe for import paths in mkdocstrings directives
-  MD044: false
 
   # MD046/code-block-style - Code block style
   # Disabled - MkDocs admonitions use indentation that looks like code blocks

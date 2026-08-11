@@ -526,7 +526,10 @@ impl Display for RawArenaError {
 impl std::error::Error for RawArenaError {}
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
+#[expect(
+    clippy::unwrap_used,
+    reason = "test setup unwraps values whose absence should fail the test"
+)]
 mod tests {
     use super::*;
 

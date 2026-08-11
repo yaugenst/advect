@@ -14,8 +14,9 @@ permissions:
   contents: read
 
 env:
+  ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+  ACTIONLINT_VERSION: 1.7.12
   FORCE_COLOR: "1"
-  UV_SYSTEM_PYTHON: "1"
 
 jobs:
   python:
@@ -39,16 +40,31 @@ jobs:
       - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
         with:
           enable-cache: true
+          version-file: pyproject.toml
 
       - name: Set up Python
         run: uv python install "$PYTHON_VERSION"
 
       - name: Install dependencies
-        run: uv sync --all-groups --frozen --python "$PYTHON_VERSION"
+        run: uv sync --all-groups --locked --python "$PYTHON_VERSION"
 
-      - name: Check lockfile freshness
+      - name: Lint GitHub Actions workflows
         if: matrix.python-version == '3.12'
-        run: uv lock --check
+        run: |
+          archive="$RUNNER_TEMP/actionlint.tar.gz"
+          curl -fsSL \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz" \
+            -o "$archive"
+          echo "${ACTIONLINT_SHA256}  $archive" | sha256sum --check
+          tar -xzf "$archive" -C "$RUNNER_TEMP" actionlint
+          command -v shellcheck
+          "$RUNNER_TEMP/actionlint" -shellcheck shellcheck
+
+      - name: Test release eligibility guard
+        if: matrix.python-version == '3.12'
+        run: |
+          shellcheck .github/scripts/verify-release-state.sh
+          bash .github/scripts/verify-release-state.sh --self-test
 
       - name: Run repository hooks
         if: matrix.python-version == '3.12'
@@ -56,9 +72,7 @@ jobs:
 
       - name: Check types
         if: matrix.python-version == '3.12'
-        run: >-
-          uv run pyrefly check --config pyproject.toml --preset strict
-          packages/advect/src
+        run: uv run pyrefly check
 
       - name: Test
         run: .venv/bin/python -m pytest --maxfail=1
@@ -88,12 +102,13 @@ jobs:
       - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
         with:
           enable-cache: true
+          version-file: pyproject.toml
 
       - name: Set up Python
         run: uv python install 3.12
 
       - name: Install locked environment
-        run: uv sync --all-groups --frozen
+        run: uv sync --all-groups --locked
 
       - name: Select NumPy ${{ matrix.numpy-version }}
         env:
@@ -136,12 +151,13 @@ jobs:
       - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
         with:
           enable-cache: true
+          version-file: pyproject.toml
 
       - name: Set up Python
         run: uv python install 3.12
 
       - name: Install locked environment
-        run: uv sync --all-groups --frozen
+        run: uv sync --all-groups --locked
 
       - name: Select ${{ matrix.requirement }}
         env:
@@ -184,12 +200,13 @@ jobs:
       - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
         with:
           enable-cache: true
+          version-file: pyproject.toml
 
       - name: Set up Python
         run: uv python install "$PYTHON_VERSION"
 
       - name: Install locked environment
-        run: uv sync --all-groups --frozen --python "$PYTHON_VERSION"
+        run: uv sync --all-groups --locked --python "$PYTHON_VERSION"
 
       - name: Select xarray compatibility pair
         env:
@@ -248,12 +265,13 @@ jobs:
       - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
         with:
           enable-cache: true
+          version-file: pyproject.toml
 
       - name: Set up Python
         run: uv python install "$PYTHON_VERSION"
 
       - name: Install locked environment
-        run: uv sync --all-groups --frozen --python "$PYTHON_VERSION"
+        run: uv sync --all-groups --locked --python "$PYTHON_VERSION"
 
       - name: Select optional dependencies
         env:
@@ -300,8 +318,12 @@ jobs:
       contents: read
 
   rust:
-    name: Rust
+    name: Rust ${{ matrix.rust-version }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        rust-version: ["1.94.0", stable]
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -309,19 +331,21 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
         with:
-          toolchain: 1.94.0
+          toolchain: ${{ matrix.rust-version }}
           components: clippy, rustfmt
 
       - name: Check formatting
+        if: matrix.rust-version == 'stable'
         run: cargo fmt --all --check
 
       - name: Lint
-        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+        run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 
       - name: Test
-        run: cargo test --workspace --all-targets
+        run: cargo test --locked --workspace --all-targets
 
       - name: Check dependency policy
+        if: matrix.rust-version == 'stable'
         uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
         with:
           command: check

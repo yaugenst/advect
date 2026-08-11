@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from advect.autodiff.rules.array_family._backend_runtime import xp
 from advect.autodiff.rules.array_family._transpose_utils import (
-    FFTNorm,
     _adjoint_fft_norm as _adjoint_norm,
 )
 from advect.autodiff.rules.array_family.jvp.common import _zeros_output_tangent
+
+if TYPE_CHECKING:
+    from advect.autodiff.rules.array_family._transpose_utils import FFTNorm
 
 
 def _jvp_fft(
@@ -26,7 +28,7 @@ def _jvp_fft(
     tangent = tangents[0] if tangents else None
     if tangent is None:
         return _zeros_output_tangent(ans, tangents)
-    return cast("xp.ndarray[Any, Any]", xp.fft.fft(tangent, n=n, axis=int(axis), norm=norm))
+    return cast("xp.ndarray[Any, Any]", xp.fft.fft(tangent, n=n, axis=axis, norm=norm))
 
 
 def _jvp_ifft(
@@ -43,7 +45,7 @@ def _jvp_ifft(
     tangent = tangents[0] if tangents else None
     if tangent is None:
         return _zeros_output_tangent(ans, tangents)
-    return cast("xp.ndarray[Any, Any]", xp.fft.ifft(tangent, n=n, axis=int(axis), norm=norm))
+    return cast("xp.ndarray[Any, Any]", xp.fft.ifft(tangent, n=n, axis=axis, norm=norm))
 
 
 def _jvp_fft2(
@@ -128,7 +130,7 @@ def _jvp_rfft(
     tangent = tangents[0] if tangents else None
     if tangent is None:
         return _zeros_output_tangent(ans, tangents)
-    return cast("xp.ndarray[Any, Any]", xp.fft.rfft(tangent, n=n, axis=int(axis), norm=norm))
+    return cast("xp.ndarray[Any, Any]", xp.fft.rfft(tangent, n=n, axis=axis, norm=norm))
 
 
 def _jvp_rfft2(
@@ -179,7 +181,7 @@ def _jvp_irfft(
     tangent = tangents[0] if tangents else None
     if tangent is None:
         return _zeros_output_tangent(ans, tangents)
-    return cast("xp.ndarray[Any, Any]", xp.fft.irfft(tangent, n=n, axis=int(axis), norm=norm))
+    return cast("xp.ndarray[Any, Any]", xp.fft.irfft(tangent, n=n, axis=axis, norm=norm))
 
 
 def _jvp_irfft2(
@@ -238,7 +240,7 @@ def _jvp_hfft(
         xp.fft.irfft(
             xp.conj(tangent),
             n=n,
-            axis=int(axis),
+            axis=axis,
             norm=_adjoint_norm(norm),
         ),
     )
@@ -265,7 +267,7 @@ def _jvp_ihfft(
             xp.fft.rfft(
                 tangent,
                 n=n,
-                axis=int(axis),
+                axis=axis,
                 norm=_adjoint_norm(norm),
             )
         ),

@@ -24,6 +24,7 @@ _LICENSE_FILES = (
     "RUST_STDLIB_LICENSE_UNICODE_3_0.txt",
     "THIRD_PARTY_LICENSES.txt",
 )
+_PACKAGE_FILES = ("advect/_native_core.pyi", "advect/py.typed")
 _WHEELS = tuple(
     (python_tag, python_tag, platform_tag)
     for python_tag, platform_tag in product(
@@ -39,7 +40,12 @@ _WHEELS = tuple(
 )
 
 
-def _write_wheel(path: Path, *, license_files: tuple[str, ...] = _LICENSE_FILES) -> None:
+def _write_wheel(
+    path: Path,
+    *,
+    license_files: tuple[str, ...] = _LICENSE_FILES,
+    package_files: tuple[str, ...] = _PACKAGE_FILES,
+) -> None:
     dist_info = f"advect-{_VERSION}.dist-info"
     with zipfile.ZipFile(path, "w") as archive:
         archive.writestr(
@@ -51,9 +57,16 @@ def _write_wheel(path: Path, *, license_files: tuple[str, ...] = _LICENSE_FILES)
         )
         for name in license_files:
             archive.writestr(f"{dist_info}/licenses/{name}", "license fixture\n")
+        for name in package_files:
+            archive.writestr(name, "package fixture\n")
 
 
-def _write_sdist(path: Path, *, license_files: tuple[str, ...] = _LICENSE_FILES) -> None:
+def _write_sdist(
+    path: Path,
+    *,
+    license_files: tuple[str, ...] = _LICENSE_FILES,
+    package_files: tuple[str, ...] = _PACKAGE_FILES,
+) -> None:
     root = f"advect-{_VERSION}"
     with tarfile.open(path, "w:gz") as archive:
         for relative in (
@@ -61,6 +74,7 @@ def _write_sdist(path: Path, *, license_files: tuple[str, ...] = _LICENSE_FILES)
             "pyproject.toml",
             "packages/advect-native/Cargo.toml",
             *license_files,
+            *(f"packages/advect/src/{name}" for name in package_files),
         ):
             payload = b"release fixture\n"
             info = tarfile.TarInfo(f"{root}/{relative}")
@@ -131,10 +145,44 @@ def test_assemble_release_artifacts_rejects_missing_wheel_notices(tmp_path: Path
         )
 
 
+def test_assemble_release_artifacts_rejects_missing_wheel_typing_files(tmp_path: Path) -> None:
+    dist_dir = tmp_path / "dist"
+    _write_release_set(dist_dir)
+    _write_wheel(next(dist_dir.glob("*.whl")), package_files=())
+
+    with pytest.raises(ReleaseArtifactError, match="missing required package files"):
+        assemble_release_artifacts(
+            dist_dir,
+            version=_VERSION,
+            source_revision=_REVISION,
+            manifest_path=tmp_path / "RELEASE-PROVENANCE.json",
+            checksums_path=tmp_path / "SHA256SUMS",
+        )
+
+
 def test_assemble_release_artifacts_rejects_missing_sdist_notices(tmp_path: Path) -> None:
     dist_dir = tmp_path / "dist"
     _write_release_set(dist_dir)
     _write_sdist(dist_dir / f"advect-{_VERSION}.tar.gz", license_files=("LICENSE",))
+
+    with pytest.raises(ReleaseArtifactError, match="missing required source files"):
+        assemble_release_artifacts(
+            dist_dir,
+            version=_VERSION,
+            source_revision=_REVISION,
+            manifest_path=tmp_path / "RELEASE-PROVENANCE.json",
+            checksums_path=tmp_path / "SHA256SUMS",
+        )
+
+
+@pytest.mark.parametrize("missing_package_file", _PACKAGE_FILES)
+def test_assemble_release_artifacts_rejects_missing_sdist_typing_files(
+    tmp_path: Path, missing_package_file: str
+) -> None:
+    dist_dir = tmp_path / "dist"
+    _write_release_set(dist_dir)
+    package_files = tuple(name for name in _PACKAGE_FILES if name != missing_package_file)
+    _write_sdist(dist_dir / f"advect-{_VERSION}.tar.gz", package_files=package_files)
 
     with pytest.raises(ReleaseArtifactError, match="missing required source files"):
         assemble_release_artifacts(

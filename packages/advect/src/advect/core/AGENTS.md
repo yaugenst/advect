@@ -35,7 +35,7 @@ These are routes, not a checklist. Read only what the change needs:
 
 ## Verify
 
-- `uv run pyrefly check --config pyproject.toml --preset strict packages/advect/src`
+- `uv run pyrefly check`
 - `uv run pytest packages/advect/tests/advect_core_tests`
 - For an Array API integration change, also run the affected
   `advect_grad_tests` and `advect_array_api_compat_tests`.

@@ -47,7 +47,7 @@ def _adjoint_fft_norm(norm: FFTNorm | None) -> FFTNorm:
 
 def _conjugate_transpose(value: xp.ndarray) -> xp.ndarray:
     """Conjugate-transpose the final two axes."""
-    return cast("xp.ndarray", xp.conj(xp.swapaxes(value, -1, -2)))
+    return xp.conj(xp.swapaxes(value, -1, -2))
 
 
 def _diagonal_matrix(values: xp.ndarray, *, dtype: xp.dtype[Any]) -> xp.ndarray:
@@ -67,7 +67,7 @@ def _lower_triangular_halfdiag(value: xp.ndarray) -> xp.ndarray:
 
 
 def _normalize_uplo(value: str) -> Literal["L", "U"]:
-    normalized = str(value).upper()
+    normalized = value.upper()
     if normalized not in {"L", "U"}:
         msg = f"expected UPLO='L' or 'U', got {value!r}"
         raise ValueError(msg)
@@ -105,7 +105,7 @@ def infer_tangent_dtype(ans: Any, tangents: tuple[Any | None, ...]) -> xp.dtype[
     ans_value = _unwrap_traced_leaf(ans)
     dtypes: list[Any] = [xp.asarray(ans_value).dtype]
     dtypes.extend(_tangent_type_operand(tangent) for tangent in tangents if tangent is not None)
-    return cast("xp.dtype[Any]", xp.result_type(*dtypes))
+    return xp.result_type(*dtypes)
 
 
 def zeros_output_tangent(ans: Any, tangents: tuple[Any | None, ...]) -> xp.ndarray:
@@ -129,7 +129,7 @@ def infer_output_tangent_dtype(ans: Any, tangents: tuple[Any | None, ...]) -> xp
     dtypes.extend(_tangent_type_operand(tangent) for tangent in tangents if tangent is not None)
     if not dtypes:
         return cast("xp.dtype[Any]", xp.float64)
-    return cast("xp.dtype[Any]", xp.result_type(*dtypes))
+    return xp.result_type(*dtypes)
 
 
 def zeros_output_tangent_structure(ans: Any, tangents: tuple[Any | None, ...]) -> Any:

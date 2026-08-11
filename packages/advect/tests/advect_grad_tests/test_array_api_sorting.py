@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
+import array_api_strict as xp
 import pytest
 
 import advect as ad
-
-xp = pytest.importorskip("array_api_strict")
 
 
 def _roundtrip(program: ad.StagedProgram) -> ad.StagedProgram:

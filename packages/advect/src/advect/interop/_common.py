@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from importlib import import_module
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -31,12 +31,12 @@ def require_dependency(module_name: str) -> ModuleType:
         raise ModuleNotFoundError(message, name=module_name) from error
 
 
-def invoke_with_keywords(
-    function: Callable[..., Any],
-    *values: Any,
+def invoke_with_keywords[R](
+    function: Callable[..., R],
+    *values: object,
     positional_count: int,
     keyword_names: tuple[str, ...],
-) -> Any:
+) -> R:
     """Call ``function`` from ordered positional and keyword values."""
     return function(
         *values[:positional_count],
@@ -44,7 +44,7 @@ def invoke_with_keywords(
     )
 
 
-def numeric_tree(value: Any, *, boundary: str) -> tuple[list[Any], TreeDef]:
+def numeric_tree(value: object, *, boundary: str) -> tuple[list[object], TreeDef]:
     """Flatten a nonempty pytree of NumPy floating or complex values."""
     leaves, treedef = tree_flatten(value)
     if not leaves:
@@ -66,9 +66,9 @@ def numeric_tree(value: Any, *, boundary: str) -> tuple[list[Any], TreeDef]:
 
 
 def validated_vjp(
-    function: Callable[..., Any],
-    values: tuple[Any, ...],
-) -> tuple[list[Any], TreeDef, ad.Pullback]:
+    function: Callable[..., object],
+    values: tuple[object, ...],
+) -> tuple[list[object], TreeDef, ad.Pullback]:
     """Retain one Advect pullback after validating its public output."""
     value, pullback = ad.vjp(function, argnums=tuple(range(len(values))))(*values)
     try:
@@ -79,7 +79,7 @@ def validated_vjp(
     return output_leaves, output_treedef, pullback
 
 
-def conjugate_complex_tree(value: Any) -> Any:
+def conjugate_complex_tree(value: object) -> object:
     """Conjugate complex leaves while preserving a framework-neutral pytree."""
     leaves, treedef = tree_flatten(value)
     converted = [np.conjugate(leaf) if np.iscomplexobj(leaf) else leaf for leaf in leaves]

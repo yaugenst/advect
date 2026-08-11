@@ -1934,7 +1934,7 @@ _OTHER_FRONTEND_INVOCATIONS: tuple[InvocationCase, ...] = (
 )
 
 
-# --- optional SciPy special functions ----------------------------------------
+# --- SciPy special functions -------------------------------------------------
 # ``advect.scipy`` registers these through the real ``advect.primitive`` path, so they
 # exercise the custom-primitive path rather than the array-family tables. They
 # are the closest thing in-tree to a third-party primitive, and they earn the
@@ -1942,17 +1942,14 @@ _OTHER_FRONTEND_INVOCATIONS: tuple[InvocationCase, ...] = (
 
 
 def _scipy_cases() -> tuple[InvocationCase, ...]:
-    try:
-        import advect.scipy  # noqa: F401, PLC0415 - registers the primitives
-        from advect.scipy import ndimage, special  # noqa: PLC0415
-        from advect.scipy._ndimage.selection import (  # noqa: PLC0415
-            _selection_transpose_primitive,
-        )
-        from advect.scipy._ndimage.stencil import (  # noqa: PLC0415
-            _stencil_input_transpose_primitive,
-        )
-    except ImportError:  # pragma: no cover - exercised only without the extra
-        return ()
+    import advect.scipy  # noqa: F401, PLC0415 - registers the primitives
+    from advect.scipy import ndimage, special  # noqa: PLC0415
+    from advect.scipy._ndimage.selection import (  # noqa: PLC0415
+        _selection_transpose_primitive,
+    )
+    from advect.scipy._ndimage.stencil import (  # noqa: PLC0415
+        _stencil_input_transpose_primitive,
+    )
 
     return (
         _unary(

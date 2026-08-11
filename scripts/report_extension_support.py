@@ -15,6 +15,8 @@ from itertools import pairwise
 from pathlib import Path
 from typing import cast
 
+from advect.core._array_api.profiles import SUPPORTED_ARRAY_API_VERSIONS
+from advect.core._array_api.support import build_support_profile
 from advect.support import support_catalog
 
 _HEADER = (
@@ -77,13 +79,6 @@ def _render_frontend_table(
 
 def _revision_profiles() -> list[tuple[str, list[dict[str, object]]]]:
     """Collect the official per-revision callable classification."""
-    # The classification is not part of the public catalog payload; the
-    # renderer reaches for the same internals support_catalog() uses.
-    from advect.core._array_api.profiles import (  # noqa: PLC0415
-        SUPPORTED_ARRAY_API_VERSIONS,
-    )
-    from advect.core._array_api.support import build_support_profile  # noqa: PLC0415
-
     return [
         (
             version,

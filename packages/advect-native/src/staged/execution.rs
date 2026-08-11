@@ -255,7 +255,10 @@ fn scalar_kind_matches_dtype(kind: &str, dtype: &str) -> bool {
 
 /// Link every staged operation exactly once through the Python provider.
 #[pyfunction]
-#[allow(clippy::needless_pass_by_value)]
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "PyO3 extracts owned arguments at the Python boundary"
+)]
 pub(crate) fn build_graph_execution_plan(
     py: Python<'_>,
     store: PyRef<'_, GraphStore>,
@@ -271,7 +274,10 @@ pub(crate) fn build_graph_execution_plan(
 /// Execute once with invocation-local values while Rust owns release timing.
 #[pyfunction]
 #[pyo3(signature = (plan, inputs, constants, context=None))]
-#[allow(clippy::needless_pass_by_value)]
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "PyO3 extracts owned arguments at the Python boundary"
+)]
 pub(crate) fn execute_graph(
     py: Python<'_>,
     plan: PyRef<'_, GraphExecutionPlan>,

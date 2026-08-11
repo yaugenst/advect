@@ -98,7 +98,7 @@ def _poly_add_sub_handler(
         msg = f"numpy.{name} expects two coefficient vectors during tracing"
         raise TracingError(msg)
     anchor = _first_traced(args, traced_type=traced_type)
-    if anchor is None:  # pragma: no cover - NumPy dispatch requires a tracer
+    if anchor is None:
         msg = "polynomial arithmetic requires a traced operand"
         raise TracingError(msg)
     left = np.atleast_1d(_as_traced(args[0], anchor=anchor, traced_type=traced_type))
@@ -151,7 +151,7 @@ def _polymul_handler(
         msg = "numpy.polymul expects two coefficient vectors during tracing"
         raise TracingError(msg)
     anchor = _first_traced(args, traced_type=traced_type)
-    if anchor is None:  # pragma: no cover - NumPy dispatch requires a tracer
+    if anchor is None:
         msg = "numpy.polymul requires a traced operand"
         raise TracingError(msg)
     left = np.atleast_1d(_as_traced(args[0], anchor=anchor, traced_type=traced_type))
@@ -174,7 +174,7 @@ def _polydiv_handler(
         msg = "numpy.polydiv expects two coefficient vectors during tracing"
         raise TracingError(msg)
     anchor = _first_traced(args, traced_type=traced_type)
-    if anchor is None:  # pragma: no cover - NumPy dispatch requires a tracer
+    if anchor is None:
         msg = "numpy.polydiv requires a traced operand"
         raise TracingError(msg)
     dividend = np.atleast_1d(_as_traced(args[0], anchor=anchor, traced_type=traced_type)) + 0.0
@@ -241,7 +241,7 @@ def _polyfit_handler(  # noqa: C901, PLR0912, PLR0915 - mirrors NumPy's output c
         (args[0], args[1], values.get("w")),
         traced_type=traced_type,
     )
-    if anchor is None:  # pragma: no cover - NumPy dispatch requires a tracer
+    if anchor is None:
         msg = "numpy.polyfit requires a traced x, y, or weight operand"
         raise TracingError(msg)
     x = np.atleast_1d(_as_traced(args[0], anchor=anchor, traced_type=traced_type)) + 0.0
@@ -403,7 +403,7 @@ def _polyval_handler(
         msg = "numpy.polyval expects (p, x) during tracing"
         raise TracingError(msg)
     anchor = _first_traced(args, traced_type=traced_type)
-    if anchor is None:  # pragma: no cover - NumPy dispatch requires a tracer
+    if anchor is None:
         msg = "numpy.polyval requires a traced operand"
         raise TracingError(msg)
     coefficients = np.atleast_1d(_as_traced(args[0], anchor=anchor, traced_type=traced_type))

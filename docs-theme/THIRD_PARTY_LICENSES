@@ -19,8 +19,18 @@ e5e15b262fa1b6cfe91ae9ff019adc3592398d9dedf63bed2827ad36de4cf63b  scp-bold.woff2
 Source Code Pro is licensed under the SIL Open Font License 1.1. Its copyright
 notice and license are in fonts/LICENSE-source-code-pro.
 
-Braille Mono is a U+2800-28FF subset of Adwaita Mono. Its copyright notice and
-SIL Open Font License 1.1 text are in fonts/LICENSE-adwaita-mono.
+Braille Mono is a U+2800-28FF subset of Adwaita Mono 50.0. The generator uses
+GNOME's release source and verifies these SHA-256 hashes:
+
+https://gitlab.gnome.org/GNOME/adwaita-fonts/-/raw/50.0/mono/AdwaitaMono-Regular.ttf
+https://gitlab.gnome.org/GNOME/adwaita-fonts/-/raw/50.0/LICENSE
+
+0edc6a8d8ca249f594dee661b2f57f1a3baa33bc7aca826c6a9fe27b06f9f930  AdwaitaMono-Regular.ttf
+459687971d21c53923c1d1c9c062ec273a7ea03226b36195b79ec6af7d98dc81  LICENSE-adwaita-mono
+fdd8a403be78c201e149a8d60664112d7ebc21a4a1795d4a2ef22273a8a7912b  braille-mono.woff2
+
+Its copyright notice and SIL Open Font License 1.1 text are in
+fonts/LICENSE-adwaita-mono.
 
 
 MkDocs 1.6.1 search assets

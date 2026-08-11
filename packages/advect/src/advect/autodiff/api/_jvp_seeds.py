@@ -2,19 +2,22 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from advect.autodiff.api._scalar_boundary import _coerce_scalar_tangent_like
 from advect.core._array_api.providers import _get_array_namespace
 from advect.core._pytree import tree_flatten
 
+if TYPE_CHECKING:
+    from advect.autodiff.api._input_trace import _TracedInputSpec
+
 
 def _normalize_jvp_tangents(
-    tangents: Any,
+    tangents: object,
     *,
     single_argnum: bool,
     expected: int,
-) -> tuple[Any, ...]:
+) -> tuple[object, ...]:
     if single_argnum:
         return (tangents,)
 
@@ -31,11 +34,11 @@ def _normalize_jvp_tangents(
 
 
 def _coerce_tangent_like(
-    tangent: Any,
-    primal: Any,
+    tangent: object,
+    primal: object,
     *,
     restore_python_scalar: bool,
-) -> Any:
+) -> object:
     if tangent is None:
         return None
 
@@ -69,17 +72,17 @@ def _coerce_tangent_like(
 
 def _build_input_tangent_seeds(
     *,
-    positional_specs: list[Any],
-    tangents: Any,
+    positional_specs: list[_TracedInputSpec],
+    tangents: object,
     single_argnum: bool,
-) -> dict[Any, Any]:
+) -> dict[int, Any]:
     tangent_args = _normalize_jvp_tangents(
         tangents,
         single_argnum=single_argnum,
         expected=len(positional_specs),
     )
 
-    tangent_seeds: dict[Any, Any] = {}
+    tangent_seeds: dict[int, Any] = {}
     for spec, tangent_arg in zip(positional_specs, tangent_args, strict=True):
         tangent_leaves, tangent_treedef = tree_flatten(tangent_arg)
         if tangent_treedef != spec.treedef:

@@ -201,7 +201,7 @@ def _array_equal_handler(
         optional=("equal_nan",),
     )
     anchor = _first_traced(args[:2], traced_type=traced_type)
-    if anchor is None:  # pragma: no cover - NumPy dispatch requires a tracer
+    if anchor is None:
         msg = "numpy.array_equal requires a traced operand"
         raise TracingError(msg)
     if _shape(args[0]) != _shape(args[1]):
@@ -226,7 +226,7 @@ def _array_equiv_handler(
         msg = "numpy.array_equiv expects two arrays during tracing"
         raise TracingError(msg)
     anchor = _first_traced(args, traced_type=traced_type)
-    if anchor is None:  # pragma: no cover - NumPy dispatch requires a tracer
+    if anchor is None:
         msg = "numpy.array_equiv requires a traced operand"
         raise TracingError(msg)
     try:

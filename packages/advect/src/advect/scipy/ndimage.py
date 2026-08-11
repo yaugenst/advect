@@ -1,11 +1,11 @@
-# ruff: noqa: A002, EM101, PLR0913, TRY003
+# ruff: noqa: A002, PLR0913
 # SciPy-compatible names/signatures intentionally trigger these rules.
 """Traceable counterparts to frequently used ``scipy.ndimage`` operations."""
 
 from __future__ import annotations
 
 import operator
-from typing import Any, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 import numpy as np
 from scipy import ndimage as _scipy_ndimage
@@ -51,6 +51,12 @@ from advect.scipy._ndimage.morphology import (
     _rank_filter_primitive,
     _selection_call,
 )
+
+if TYPE_CHECKING:
+    from typing import Protocol
+
+    class _LoweringMetadata(Protocol):
+        __advect_lowering__: str
 
 
 def gaussian_filter(
@@ -577,7 +583,7 @@ def prewitt(
 
 
 for _composite in (laplace, gaussian_laplace, sobel, prewitt):
-    _composite.__advect_lowering__ = "composite"  # type: ignore[attr-defined]
+    cast("_LoweringMetadata", _composite).__advect_lowering__ = "composite"
 
 
 def maximum_filter(
@@ -1272,7 +1278,7 @@ for _composite in (
     white_tophat,
     black_tophat,
 ):
-    _composite.__advect_lowering__ = "composite"  # type: ignore[attr-defined]
+    cast("_LoweringMetadata", _composite).__advect_lowering__ = "composite"
 
 
 __all__ = [

@@ -54,7 +54,10 @@ def test_binary_outer_matches_broadcasted_call(
     left_tangent = np.linspace(0.1, 0.4, left_rows)
     right_tangent = np.linspace(-0.2, 0.3, right_columns)
 
-    primal, tangent = ad.jvp(lambda x, y: np.multiply.outer(x, y), argnums=(0, 1))(
+    primal, tangent = ad.jvp(
+        lambda x, y: np.multiply.outer(x, y),  # noqa: PLW0108 - JVP boundary
+        argnums=(0, 1),
+    )(
         left,
         right,
         tangents=(left_tangent, right_tangent),

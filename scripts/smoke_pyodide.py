@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import sys
+from typing import TYPE_CHECKING
 
 import numpy as np
 
 import advect as ad
+
+if TYPE_CHECKING:
+    import numpy.typing as npt
 
 
 def _require(*, condition: bool, message: str) -> None:
@@ -25,11 +29,11 @@ def main() -> None:
         message=f"Expected NumPy 2.4 in Pyodide, found {np.__version__}",
     )
 
-    def function(value: object) -> object:
+    def function(value: npt.ArrayLike) -> npt.NDArray[np.floating]:
         return np.sin(value) ** 2
 
     value = np.asarray(0.55)
-    derivative = ad.grad(function)(value)
+    derivative = np.asarray(ad.grad(function)(value))
     expected = 2 * np.sin(value) * np.cos(value)
     np.testing.assert_allclose(derivative, expected)
 

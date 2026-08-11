@@ -8,5 +8,8 @@ pub use host::{Host, LinkedOperation, Operand, OutputOwnership};
 pub use plan::LinkedExecutionPlan;
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
+#[expect(
+    clippy::unwrap_used,
+    reason = "test setup unwraps values whose absence should fail the test"
+)]
 mod tests;

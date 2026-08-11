@@ -420,7 +420,7 @@ class _ArrayFunctionProtocolMixin:
             out_arr.advect_require_mutable("array-function out=")
             normalized_kwargs.pop("out", None)
             validated_out = self._validate_numpy_array_function_out(
-                func=cast("Callable[..., object]", func),
+                func=func,
                 args=normalized_args,
                 kwargs=normalized_kwargs,
                 out_arr=out_arr,
@@ -450,7 +450,7 @@ class _ArrayFunctionProtocolMixin:
         try:
             with _use_operation_recorder(recorder):
                 result_value, node_id = ARRAY_FUNCTION_RUNTIME.handle_array_function(
-                    func=cast("Callable[..., object]", func),
+                    func=func,
                     recorder=cast("Any", recorder),
                     traced_type=cast("Any", traced_type),
                     args=normalized_args,
@@ -502,7 +502,7 @@ class _ArrayFunctionProtocolMixin:
             committed_node_id, committed_value = _snapshot_traced(replacement)
             out_arr.advect_replace(
                 value=committed_value if validated_out is None else validated_out,
-                node_id=int(committed_node_id),
+                node_id=committed_node_id,
                 operation="array-function out=",
             )
             return out_arr

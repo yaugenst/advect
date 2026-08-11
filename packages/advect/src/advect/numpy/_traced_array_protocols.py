@@ -46,7 +46,7 @@ def _ephemeral_operand(
     if isinstance(value, traced_type):
         if value.recorder is recorder:
             node_id, payload = value._advect_snapshot_in_active_trace()  # noqa: SLF001
-            return int(node_id), weak_scalar_runtime_value(value, payload)
+            return node_id, weak_scalar_runtime_value(value, payload)
         if not _is_recorder_in_active_trace_stack(value.recorder):
             msg = "Cannot use a NumPy tracer from an unrelated or expired trace recorder."
             raise TraceLevelError(msg)
@@ -57,7 +57,7 @@ def _ephemeral_operand(
     if callable(snapshot) and getattr(value, "recorder", None) is recorder:
         node_id, payload = cast("tuple[int, object]", snapshot())
         if bool(getattr(type(payload), "__advect_abstract_array__", False)):
-            return int(node_id), payload
+            return node_id, payload
 
     if type(value) in (bool, int, float, complex):
         return None, value
@@ -152,7 +152,7 @@ def run_ephemeral_simple_ufunc(
             node_ids = (second_id,)
             input_positions = (1,)
             literals = (first_value,)
-        else:  # pragma: no cover - NumPy calls the protocol on a traced operand
+        else:
             node_ids = ()
             input_positions = ()
             literals = values

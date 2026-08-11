@@ -913,7 +913,7 @@ def _functional_update_function() -> Callable[[object], object]:
     def update(field: object) -> object:
         result = field.copy()  # type: ignore[attr-defined]
         for _ in range(_UPDATE_STEPS):
-            result[1:-1] += 0.125  # type: ignore[index,operator]
+            result[1:-1] += 0.125
         return result
 
     return update

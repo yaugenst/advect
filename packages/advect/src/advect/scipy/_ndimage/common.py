@@ -1,4 +1,4 @@
-# ruff: noqa: A002, ANN401, EM101, TRY003
+# ruff: noqa: A002, ANN401
 # SciPy-compatible names/signatures and primitive rule schemas intentionally trigger these rules.
 """Normalize ndimage arguments and bridge public calls to private primitives.
 

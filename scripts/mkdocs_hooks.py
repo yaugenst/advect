@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import shutil
 import tomllib
@@ -89,6 +90,8 @@ def _stage_browser_assets(site_dir: Path) -> None:
     wheel_pattern = f"advect-{_package_version()}-*.whl"
     wheels = list((_ROOT / "dist" / "pyodide").glob(wheel_pattern))
     if not wheels:
+        if not os.environ.get("ADVECT_REQUIRE_BROWSER_WHEEL"):
+            return
         message = (
             "no browser wheel: run `mkdir -p dist && "
             "uvx --from pyodide-build==0.36.0 pyodide build . "
@@ -118,8 +121,10 @@ def on_post_build(config: MkDocsConfig) -> None:
 
     landing_contract = (
         f'<link rel="canonical" href="{site_url}">',
-        '<link rel="alternate" type="text/plain" '
-        'title="Advect documentation for AI agents" href="llms.txt">',
+        (
+            '<link rel="alternate" type="text/plain" '
+            'title="Advect documentation for AI agents" href="llms.txt">'
+        ),
         '<section class="agent-context" aria-label="Machine-readable documentation">',
         '<a href="llms.txt">llms.txt</a>',
     )

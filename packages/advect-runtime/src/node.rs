@@ -40,6 +40,10 @@ pub struct NodeMetadata {
 
 impl NodeMetadata {
     /// Construct and validate node metadata.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "arguments mirror the durable node metadata record"
+    )]
     pub fn new(
         attrs: AttrMap,
         shape: Vec<usize>,

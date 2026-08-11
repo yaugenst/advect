@@ -97,13 +97,14 @@ Run all snippets natively:
 uv run python scripts/run_doc_snippets.py docs
 ```
 
-For browser-facing changes, build the wheel once before the strict docs build;
-the MkDocs hook stages the wheel, playground adapter, and examples:
+The ordinary strict build does not require a browser wheel. For browser-facing
+changes and release builds, build the wheel and require the MkDocs hook to
+stage it with the playground adapter and examples:
 
 ```bash
 mkdir -p dist
 uvx --from pyodide-build==0.36.0 pyodide build . --outdir dist/pyodide
-uv run mkdocs build --strict
+ADVECT_REQUIRE_BROWSER_WHEEL=1 uv run mkdocs build --strict
 ```
 
 The Pyodide CI lane also runs the snippets inside its browser-compatible

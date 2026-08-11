@@ -1,4 +1,3 @@
-# ruff: noqa: EM102, TRY003
 """Abstract registrations and evaluators for Fourier transforms."""
 
 from __future__ import annotations

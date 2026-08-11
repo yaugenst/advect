@@ -23,13 +23,15 @@ def test_public_autodiff_exports_resolve_from_root() -> None:
 
 
 def test_root_import_keeps_autodiff_lazy() -> None:
-    subprocess.run(  # noqa: S603 - fixed interpreter and source string
+    subprocess.run(
         [
             sys.executable,
             "-c",
-            "import sys; import advect; "
-            "assert not any(name == 'advect.autodiff' or "
-            "name.startswith('advect.autodiff.') for name in sys.modules)",
+            (
+                "import sys; import advect; "
+                "assert not any(name == 'advect.autodiff' or "
+                "name.startswith('advect.autodiff.') for name in sys.modules)"
+            ),
         ],
         check=True,
     )

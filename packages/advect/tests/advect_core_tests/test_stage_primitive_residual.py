@@ -205,7 +205,7 @@ def test_staged_artifact_never_serializes_or_returns_a_residual() -> None:
         return x.spec
 
     program = ad.stage(
-        lambda x: primitive(x),
+        lambda x: primitive(x),  # noqa: PLW0108 - explicit trace boundary
         specs=(ad.ArraySpec((2,), "float64"),),
     )
     assert implementation_calls == 0
@@ -232,7 +232,7 @@ def test_staged_custom_replay_under_dynamic_trace_stays_atomic() -> None:
         return x.spec
 
     program = ad.stage(
-        lambda x: primitive(x),
+        lambda x: primitive(x),  # noqa: PLW0108 - explicit trace boundary
         specs=(ad.ArraySpec((2,), "float64"),),
     )
     value = np.array([2.0, 3.0])

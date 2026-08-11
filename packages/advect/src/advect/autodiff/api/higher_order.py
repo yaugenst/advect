@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import functools
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Protocol, cast
 
 from advect.autodiff._ephemeral import linearize_call
 from advect.autodiff.api._scalar_boundary import (
@@ -29,14 +29,25 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 
+class _HvpTransform[R](Protocol):
+    """Callable contract for the keyword-augmented HVP transform."""
+
+    def __call__(
+        self,
+        *args: object,
+        vectors: object,
+        **kwargs: object,
+    ) -> tuple[R, object]: ...
+
+
 def _dtype_is_complex(dtype: object) -> bool:
     return bool(getattr(dtype, "kind", None) == "c" or "complex" in str(dtype).lower())
 
 
 def _hessian_context(
     *,
-    args: tuple[Any, ...],
-    kwargs: dict[str, Any],
+    args: tuple[object, ...],
+    kwargs: dict[str, object],
     argnums: tuple[int, ...],
     single_argnum: bool,
     api_name: str,
@@ -69,12 +80,12 @@ def _hessian_context(
 
 
 def _unlift_hessian_result(
-    value: Any,
+    value: object,
     *,
-    args: tuple[Any, ...],
+    args: tuple[object, ...],
     argnums: tuple[int, ...],
     diagonal: bool,
-) -> Any:
+) -> object:
     selected = _normalize_argnums_for_call(argnums, nargs=len(args))
     scalar_inputs = tuple(_is_real_python_scalar(args[index]) for index in selected)
     mask = (
@@ -90,22 +101,22 @@ def _unlift_hessian_result(
 
 def _selected_scalar_mask(
     *,
-    args: tuple[Any, ...],
+    args: tuple[object, ...],
     argnums: tuple[int, ...],
     single_argnum: bool,
 ) -> tuple[bool, ...]:
     selected = _normalize_argnums_for_call(argnums, nargs=len(args))
-    selected_values: Any = (
+    selected_values: object = (
         args[selected[0]] if single_argnum else tuple(args[index] for index in selected)
     )
     leaves, _treedef = tree_flatten(selected_values)
     return tuple(_is_real_python_scalar(leaf) for leaf in leaves)
 
 
-def hvp(
-    f: Callable[..., Any],
+def hvp[R](
+    f: Callable[..., R],
     argnums: int | tuple[int, ...] = 0,
-) -> Callable[..., tuple[Any, Any]]:
+) -> _HvpTransform[R]:
     """Return a dynamic value-and-Hessian-vector-product transform.
 
     The returned function evaluates ``f`` and applies its Hessian to one
@@ -182,12 +193,11 @@ def hvp(
     jvp_value_and_grad = jvp(value_and_grad(f, argnums=argnums), argnums=argnums)
 
     @functools.wraps(f)
-    def hvp_fn(*args: Any, vectors: Any, **kwargs: Any) -> tuple[Any, Any]:
+    def hvp_fn(*args: object, vectors: object, **kwargs: object) -> tuple[R, object]:
         _resolve_selected_argnums(argnums=argnums_tuple, nargs=len(args))
-        (value, _gradient), (_directional, product) = jvp_value_and_grad(
-            *args,
-            tangents=vectors,
-            **kwargs,
+        (value, _gradient), (_directional, product) = cast(
+            "tuple[tuple[R, object], tuple[object, object]]",
+            jvp_value_and_grad(*args, tangents=vectors, **kwargs),
         )
         return value, _unlift_scalar_tree_by_mask(
             product,
@@ -201,10 +211,10 @@ def hvp(
     return hvp_fn
 
 
-def hessian(
-    f: Callable[..., Any],
+def hessian[**P](
+    f: Callable[P, object],
     argnums: int | tuple[int, ...] = 0,
-) -> Callable[..., Any]:
+) -> Callable[P, object]:
     """Return a dynamic transform that assembles an exact dense Hessian.
 
     Each selected positional argument is one dense real input block. For
@@ -279,7 +289,7 @@ def hessian(
     gradient_function = grad(f, argnums=argnums)
 
     @functools.wraps(f)
-    def hessian_fn(*args: Any, **kwargs: Any) -> Any:
+    def hessian_fn(*args: P.args, **kwargs: P.kwargs) -> object:
         context = _hessian_context(
             args=args,
             kwargs=kwargs,
@@ -312,10 +322,10 @@ def hessian(
     return hessian_fn
 
 
-def hessian_diag(
-    f: Callable[..., Any],
+def hessian_diag[**P](
+    f: Callable[P, object],
     argnums: int | tuple[int, ...] = 0,
-) -> Callable[..., Any]:
+) -> Callable[P, object]:
     """Return a dynamic transform that assembles exact Hessian diagonals.
 
     For each selected positional argument, the result contains the diagonal of
@@ -388,7 +398,7 @@ def hessian_diag(
     gradient_function = grad(f, argnums=argnums)
 
     @functools.wraps(f)
-    def hessian_diag_fn(*args: Any, **kwargs: Any) -> Any:
+    def hessian_diag_fn(*args: P.args, **kwargs: P.kwargs) -> object:
         context = _hessian_context(
             args=args,
             kwargs=kwargs,

@@ -349,8 +349,7 @@ For an envelope-only change, run:
 ```bash
 uv run ruff format --check .
 uv run ruff check .
-uv run pyrefly check --config pyproject.toml --preset strict \
-  packages/advect/src
+uv run pyrefly check
 uv run pytest packages/advect/tests/advect_core_tests/test_stage_durability.py
 uv run pytest packages/advect/tests/advect_core_tests
 ```
@@ -372,8 +371,8 @@ For an internal runtime change whose adapter contract is unchanged, run:
 
 ```bash
 cargo fmt --all --check
-cargo clippy -p advect-runtime --all-targets --all-features -- -D warnings
-cargo test -p advect-runtime --all-targets
+cargo clippy --locked -p advect-runtime --all-targets --all-features -- -D warnings
+cargo test --locked -p advect-runtime --all-targets
 cargo deny --all-features check -W unmaintained
 ```
 
@@ -394,8 +393,8 @@ runtime change:
 
 ```bash
 cargo fmt --all --check
-cargo clippy --workspace --all-targets --all-features -- -D warnings
-cargo test --workspace --all-targets
+cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+cargo test --locked --workspace --all-targets
 cargo deny --all-features check -W unmaintained
 uv run pytest packages/advect/tests/advect_native_tests
 uv build --package advect --wheel --out-dir dist/wheelhouse --clear

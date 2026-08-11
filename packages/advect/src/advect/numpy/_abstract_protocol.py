@@ -1,4 +1,4 @@
-# ruff: noqa: EM101, EM102, PLR2004, TRY003
+# ruff: noqa: PLR2004
 """NumPy protocol lowering for payload-free staged arrays."""
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ def abstract_array_ufunc(
     **kwargs: object,
 ) -> AbstractArray:
     """Lower one NumPy ufunc call into the staged canonical graph."""
-    name = str(ufunc.__name__)
+    name = ufunc.__name__
     if method in {"reduce", "accumulate"}:
         if len(inputs) != 1:
             raise TracingError(f"numpy.{name}.{method} expects one input array")
@@ -97,7 +97,7 @@ def abstract_array_function(
     """Lower one NumPy array-function call into the staged canonical graph."""
     del types
     module = str(getattr(func, "__module__", "numpy"))
-    name = str(func.__name__)
+    name = func.__name__
     if module == "numpy.lib.scimath":
         raise TracingError(
             f"numpy.lib.scimath.{name} is dynamic-only because its output dtype "

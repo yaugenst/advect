@@ -115,13 +115,13 @@ def test_torch_bridge_pullback_is_one_shot() -> None:
 
 
 def test_torch_bridge_rejects_integer_input_leaves() -> None:
-    bridged = wrap(lambda value: np.sum(value))
+    bridged = wrap(lambda value: np.sum(value))  # noqa: PLW0108 - bridge boundary
     with pytest.raises(TypeError, match="only floating and complex tensors"):
         bridged(torch.tensor([1, 2], dtype=torch.int64))
 
 
 def test_torch_bridge_rejects_dtypes_that_cannot_cross_numpy() -> None:
-    bridged = wrap(lambda value: np.sum(value))
+    bridged = wrap(lambda value: np.sum(value))  # noqa: PLW0108 - bridge boundary
     sample = torch.ones(2, dtype=torch.bfloat16, requires_grad=True)
 
     with pytest.raises(TypeError, match="cannot cross the NumPy bridge"):

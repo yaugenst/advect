@@ -11,13 +11,10 @@ allow = [
   "MIT",
   "Apache-2.0",
   "Apache-2.0 WITH LLVM-exception",
-  "BSD-2-Clause",
-  "BSD-3-Clause",
-  "ISC",
   "Unicode-3.0",
 ]
 confidence-threshold = 0.8
-unused-allowed-license = "allow"
+unused-allowed-license = "deny"
 
 [bans]
 multiple-versions = "warn"

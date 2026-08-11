@@ -76,7 +76,7 @@ def _logn_handler(
         msg = "numpy.lib.scimath.logn expects (n, x) during tracing"
         raise TracingError(msg)
     anchor = _first_traced(args, traced_type=traced_type)
-    if anchor is None:  # pragma: no cover - NumPy dispatch requires a tracer
+    if anchor is None:
         msg = "numpy.lib.scimath.logn requires a traced operand"
         raise TracingError(msg)
     base = (
@@ -109,7 +109,7 @@ def _power_handler(
         msg = "numpy.lib.scimath.power expects (x, p) during tracing"
         raise TracingError(msg)
     anchor = _first_traced(args, traced_type=traced_type)
-    if anchor is None:  # pragma: no cover - NumPy dispatch requires a tracer
+    if anchor is None:
         msg = "numpy.lib.scimath.power requires a traced operand"
         raise TracingError(msg)
     base = (

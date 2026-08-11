@@ -8,7 +8,7 @@ from functools import lru_cache
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator
+    from collections.abc import Callable, Generator
 
     from advect.core._registry_types import OpDef
 
@@ -67,7 +67,7 @@ class OpRegistry:
         return tuple(self._ops[name] for name in sorted(self._ops))
 
     @contextmanager
-    def transaction(self) -> Iterator[None]:
+    def transaction(self) -> Generator[None]:
         """Roll back all registry state when the enclosed operation fails.
 
         Transactions are intended for atomic consumers such as graph

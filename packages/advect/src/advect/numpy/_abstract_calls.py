@@ -1,4 +1,4 @@
-# ruff: noqa: C901, EM101, EM102, PLR0911, PLR0912, PLR0915, PLR2004, TRY003
+# ruff: noqa: C901, PLR0911, PLR0912, PLR0915, PLR2004
 """NumPy calling conventions for payload-free staged arrays."""
 
 from __future__ import annotations
@@ -40,7 +40,7 @@ def can_cast_dtype(source: object, target: object, *, casting: str) -> bool:
         raise ValueError(f"Unknown NumPy casting rule {casting!r}")
     import numpy as np  # noqa: PLC0415 - frontend-local provider policy
 
-    return bool(np.can_cast(cast("Any", source), cast("Any", target), casting=cast("Any", casting)))
+    return np.can_cast(cast("Any", source), cast("Any", target), casting=cast("Any", casting))
 
 
 def _record_numpy(
@@ -520,7 +520,7 @@ def _matrix_power(
         remaining >>= 1
         if remaining:
             base = _numpy_array(trace, "matmul", (base, base), {})
-    if result is None:  # pragma: no cover - exponent zero returns above
+    if result is None:
         raise AssertionError("matrix_power failed to produce a result")
     return result
 
@@ -605,7 +605,7 @@ def _compress(
     position_spec = ArraySpec((len(positions),), "int64")
     position_array = _new_abstract_array(
         trace,
-        int(trace.add_constant(positions, position_spec)),
+        trace.add_constant(positions, position_spec),
         position_spec,
         owned=False,
     )

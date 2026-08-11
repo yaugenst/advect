@@ -1,4 +1,3 @@
-# ruff: noqa: EM101, TRY003
 """Abstract registrations and evaluators for array creation."""
 
 from __future__ import annotations

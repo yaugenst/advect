@@ -265,7 +265,7 @@ def check_gradient(
     evidence. Run it on a composed public path in addition to testing each
     custom primitive with `check_primitive`.
     """
-    steps = tuple(float(epsilon) for epsilon in epsilons)
+    steps = tuple(epsilons)
     if not steps or any(not math.isfinite(step) or step <= 0 for step in steps):
         msg = "check_gradient epsilons must be a non-empty sequence of positive values"
         raise ValueError(msg)
@@ -425,7 +425,7 @@ def check_primitive(  # noqa: C901, PLR0912, PLR0913, PLR0915
         return primitive(**arguments)
 
     def dynamic_call(*values: Any) -> Any:
-        return invoke(cast("tuple[Any, ...]", values))
+        return invoke(values)
 
     concrete = invoke(primals)
     input_leaves, _input_treedef = tree_flatten(primals)

@@ -36,7 +36,7 @@ def user_location(*, depth: int | None = None) -> SourceLocation | None:
     """Capture one user frame without materializing or formatting a traceback."""
     try:
         frame = vars(sys)["_getframe"](1 if depth is None else depth)
-    except (KeyError, ValueError):  # pragma: no cover - implementation without frames
+    except (KeyError, ValueError):  # Python implementations without frames.
         return None
 
     if depth is not None:

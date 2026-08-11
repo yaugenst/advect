@@ -1,3 +1,4 @@
+# ruff: noqa: ANN401  # HIPS Autograd exposes tracer boxes and primitive callbacks dynamically.
 """HIPS Autograd reverse-mode bridge for Advect callables."""
 
 from __future__ import annotations
@@ -61,7 +62,7 @@ def _gradient_like(gradient: Any, primal: Any) -> Any:
     return result
 
 
-def wrap(function: Callable[..., Any]) -> Callable[..., Any]:
+def wrap(function: Callable[..., object]) -> Callable[..., object]:
     """Wrap a NumPy-backed callable as a first-order HIPS Autograd primitive.
 
     Every NumPy floating or complex leaf in positional or keyword arguments is
@@ -72,7 +73,7 @@ def wrap(function: Callable[..., Any]) -> Callable[..., Any]:
     """
 
     @functools.wraps(function)
-    def wrapped(*args: Any, **kwargs: Any) -> Any:
+    def wrapped(*args: object, **kwargs: object) -> object:
         values = (*args, *kwargs.values())
         positional_count = len(args)
         keyword_names = tuple(kwargs)

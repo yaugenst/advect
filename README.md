@@ -9,11 +9,17 @@ before the first stable release.
 
 ## Try it
 
-Advect supports Python 3.12 through 3.14:
+Advect publishes wheels for CPython 3.12 through 3.14 on manylinux_2_17
+(glibc 2.17+) Linux x86-64 and AArch64, macOS x86-64 and Apple silicon, and
+Windows x86-64:
 
 ```bash
 python -m pip install advect
 ```
+
+The first release does not support musllinux, Windows ARM64, free-threaded
+CPython, PyPy, or abi3. If no compatible wheel exists, `pip` may fall back to
+the source distribution, which requires Rust 1.94 or newer to build.
 
 ```python
 import numpy as np

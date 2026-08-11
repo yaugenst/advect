@@ -618,14 +618,14 @@ def _jvp_linalg_norm(
             tangent,
             axes=axes,
             keepdims=keepdims,
-            ord_value=2.0 if ord_value is None else float(ord_value),
+            ord_value=2.0 if ord_value is None else ord_value,
         )
     if len(axes) == _MATRIX_AXIS_COUNT:
         return _matrix_norm_jvp(
             ans,
             x,
             tangent,
-            axes=cast("tuple[int, int]", axes),
+            axes=axes,
             keepdims=keepdims,
             ord_value="fro" if ord_value is None else ord_value,
         )
@@ -684,7 +684,7 @@ def _jvp_linalg_vector_norm(
         tangent,
         axes=axes,
         keepdims=keepdims,
-        ord_value=float(ord),
+        ord_value=ord,
     )
 
 

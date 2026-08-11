@@ -28,6 +28,6 @@
 
 - `uv run ruff format --check .`
 - `uv run ruff check .`
-- `uv run pyrefly check --config pyproject.toml --preset strict packages/advect/src`
+- `uv run pyrefly check`
 - Run the owning suite from the [testing guide](../../../../docs/development/testing.md);
   run `uv run pytest` when package assembly or multiple integrations change.

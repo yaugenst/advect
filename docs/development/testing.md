@@ -27,8 +27,7 @@ lifetime evidence required for a new public form.
 Set up the locked development environment with Python 3.12 through 3.14:
 
 ```bash
-uv sync --all-groups
-uv lock --check
+uv sync --all-groups --locked
 uv run pre-commit install --install-hooks
 ```
 
@@ -48,12 +47,16 @@ The canonical static and test gates are:
 ```bash
 uv run ruff format --check .
 uv run ruff check .
-uv run pyrefly check --config pyproject.toml --preset strict \
-  packages/advect/src
+uv run pyrefly check
 uv run pytest
 uv run pytest packages/advect/tests/advect_conformance_tests \
   --hypothesis-profile=thorough
 ```
+
+Pyrefly checks the runtime package and the release/browser-documentation
+scripts listed in `pyproject.toml`. Dynamic provider-qualification and
+benchmark scripts, plus tests, remain outside this production typing gate;
+their necessary boundary suppressions stay local.
 
 Run the owning suite while iterating. Run the full Python suite for changes to
 traced operations, derivative rules, shared transform behavior, or public
@@ -72,12 +75,15 @@ Use Rust 1.94 or newer with Clippy and rustfmt:
 ```bash
 rustup toolchain install stable --component clippy rustfmt
 cargo fmt --all --check
-cargo clippy --workspace --all-targets --all-features -- -D warnings
-cargo test --workspace --all-targets
+cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+cargo test --locked --workspace --all-targets
 cargo deny --all-features check -W unmaintained
 uv run pytest packages/advect/tests/advect_native_tests
 uv build --package advect --wheel --out-dir dist/wheelhouse --clear
 ```
+
+CI runs the locked workspace Clippy and test gates on both Rust 1.94 and the
+current stable toolchain.
 
 For an internal `advect-runtime` change whose adapter contract is unchanged,
 the focused Clippy and test forms (`-p advect-runtime`) plus format and

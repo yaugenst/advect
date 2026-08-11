@@ -135,7 +135,7 @@ def decode_basic_index(payload: object) -> tuple[object, ...]:
         msg = "Staged basic-index metadata must be a sequence"
         raise TypeError(msg)
     decoded = decode_index(payload)
-    if not isinstance(decoded, tuple):  # pragma: no cover - sequence check above
+    if not isinstance(decoded, tuple):
         msg = "Staged basic-index metadata must decode to a tuple"
         raise TypeError(msg)
     return decoded

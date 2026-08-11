@@ -8,12 +8,15 @@ and cross-references resolve under their public names.
 
 from __future__ import annotations
 
+from typing import override
+
 import griffe
 
 
 class AdvectLazyExports(griffe.Extension):
     """Alias lazy autodiff exports onto the `advect` package."""
 
+    @override
     def on_package(self, *, pkg: griffe.Module, **kwargs: object) -> None:
         """Add aliases for the lazily exported autodiff names."""
         del kwargs

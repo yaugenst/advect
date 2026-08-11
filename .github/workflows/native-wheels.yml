@@ -2,6 +2,12 @@ name: Native Wheels
 
 on:
   workflow_call:
+    inputs:
+      source_revision:
+        description: Immutable source commit to build; defaults to the triggering commit
+        required: false
+        type: string
+        default: ""
   workflow_dispatch:
 
 permissions:
@@ -13,7 +19,6 @@ concurrency:
 
 env:
   FORCE_COLOR: "1"
-  UV_SYSTEM_PYTHON: "1"
 
 jobs:
   wheelhouse:
@@ -70,6 +75,7 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
+          ref: ${{ inputs.source_revision || github.sha }}
 
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
@@ -78,6 +84,7 @@ jobs:
       - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
         with:
           enable-cache: true
+          version-file: pyproject.toml
 
       - name: Build portable wheel
         uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
@@ -124,6 +131,25 @@ jobs:
             "$smoke_python" scripts/smoke_wheel_install.py "$profile"
           done
 
+      - name: Smoke-test simultaneous dependency minimums
+        if: matrix.platform.artifact == 'linux-x86_64' && matrix.python.version == '3.12'
+        run: |
+          uv venv .wheel-minimum-smoke --python "$PYTHON_VERSION"
+          uv pip install \
+            --python .wheel-minimum-smoke/bin/python \
+            numpy==2.0.2 \
+            array-api-compat==1.11.2 \
+            scipy==1.18.0 \
+            xarray==2024.6.0
+          uv pip install \
+            --python .wheel-minimum-smoke/bin/python \
+            --no-cache \
+            --no-index \
+            --find-links dist/wheelhouse \
+            'advect[scipy,xarray]'
+          uv pip check --python .wheel-minimum-smoke/bin/python
+          .wheel-minimum-smoke/bin/python scripts/smoke_wheel_install.py scientific
+
       - name: Upload wheel
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
@@ -138,6 +164,7 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
+          ref: ${{ inputs.source_revision || github.sha }}
 
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
@@ -150,6 +177,7 @@ jobs:
       - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
         with:
           enable-cache: true
+          version-file: pyproject.toml
 
       - name: Build and verify source distribution
         run: |

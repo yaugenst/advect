@@ -165,7 +165,7 @@ def test_runtime_result_must_match_declared_abstract_spec() -> None:
     program = cast(
         "ad.StagedProgram",
         ad.stage(
-            lambda x: wrong(x),
+            lambda x: wrong(x),  # noqa: PLW0108 - explicit trace boundary
             specs=(ad.ArraySpec((2,), "float32"),),
         ),
     )

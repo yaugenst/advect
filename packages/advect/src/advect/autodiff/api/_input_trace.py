@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from advect.autodiff.api._scalar_boundary import (
     _is_real_python_scalar,
@@ -23,10 +23,10 @@ _LEAF_TREEDEF = TreeDef(node_type=None, aux_data=None, children=(), num_leaves=1
 
 
 def _array_namespace_for_input(
-    value: Any,
+    value: object,
     *,
     array_api_version: str | None = None,
-) -> Any | None:
+) -> object | None:
     """Resolve the selected namespace or reject an incompatible protocol."""
     selected = array_api_version or _get_active_array_api_version() or LATEST_ARRAY_API_VERSION
     namespace = (
@@ -46,7 +46,7 @@ def _array_namespace_for_input(
 @dataclass(frozen=True, slots=True)
 class _LeafTraceSpec:
     node_id: int | None
-    primal: Any | None
+    primal: object | None
     restore_python_scalar: bool
 
 
@@ -58,11 +58,11 @@ class _TracedInputSpec:
 
 def _trace_leaf_as_input(
     graph: DynamicTape,
-    value: Any,
+    value: object,
     *,
     prefix: str | None,
-    xp: Any | None,
-) -> tuple[Any, _TracedInputSpec] | None:
+    xp: object | None,
+) -> tuple[object, _TracedInputSpec] | None:
     """Trace an unregistered array/scalar leaf without general pytree allocation."""
     if _get_node_impl(type(value)) is not None:
         return None

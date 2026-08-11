@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+import array_api_strict as xp
 import numpy as np
 import pytest
 
@@ -18,8 +19,6 @@ from advect.autodiff.rules.array_family.providers import resolve_array_family_ba
 from advect.core._array_api.providers import ResolvedArrayNamespace
 from advect.core._errors import HigherOrderNotSupportedError
 from advect.core._eval_dispatch import bind_node_evaluator, evaluate_node_value
-
-xp = pytest.importorskip("array_api_strict")
 
 
 def _numpy_sin(value: object) -> object:

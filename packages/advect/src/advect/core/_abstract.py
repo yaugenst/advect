@@ -1,4 +1,4 @@
-# ruff: noqa: EM101, EM102, PLR2004, SLF001, TRY003
+# ruff: noqa: PLR2004, SLF001
 """Payload-free arrays for explicit, conservative abstract staging.
 
 Only operations declared in :mod:`advect.core._abstract_domains` are stageable.
@@ -375,7 +375,7 @@ class AbstractNamespace:
     def _advect_materialize_constant(self, value: object, spec: ArraySpec) -> AbstractArray:
         """Lift a closed staged constant without converting it through Python."""
         node_id = self._trace.add_constant(value, spec)
-        return _new_abstract_array(self._trace, int(node_id), spec, owned=False)
+        return _new_abstract_array(self._trace, node_id, spec, owned=False)
 
     def __getattr__(self, name: str) -> str | Callable[..., Any]:
         if not self._prefix and name in _DTYPE_NAMES:
@@ -525,7 +525,7 @@ class AbstractArray:
             _StrongScalarConstant(1.0, self.dtype),
             spec,
         )
-        return _new_abstract_array(self._trace, int(node_id), spec, owned=False)
+        return _new_abstract_array(self._trace, node_id, spec, owned=False)
 
     @property
     def _advect_weak(self) -> bool:
@@ -699,10 +699,10 @@ class AbstractArray:
                 raise ValueError("can only convert an array of size 1 to a scalar")
             if self.shape == ():
                 return self
-            return cast("AbstractArray", self[tuple(0 for _dimension in self.shape)])
+            return self[tuple(0 for _dimension in self.shape)]
         if isinstance(index, tuple):
-            return cast("AbstractArray", self[index])
-        return cast("AbstractArray", self.reshape((-1,))[index])
+            return self[index]
+        return self.reshape((-1,))[index]
 
     def sum(self, *args: object, **kwargs: object) -> AbstractArray:
         return cast(
@@ -852,9 +852,9 @@ def _inplace_method(name: str) -> Callable[[AbstractArray, object], object]:
     return method
 
 
-AbstractArray.__neg__ = _unary_method("negative")  # type: ignore[attr-defined]
-AbstractArray.__pos__ = _unary_method("positive")  # type: ignore[attr-defined]
-AbstractArray.__abs__ = _unary_method("absolute")  # type: ignore[attr-defined]
+AbstractArray.__neg__ = _unary_method("negative")
+AbstractArray.__pos__ = _unary_method("positive")
+AbstractArray.__abs__ = _unary_method("absolute")
 for _dunder in (
     ("iadd", "add"),
     ("isub", "subtract"),
@@ -884,7 +884,7 @@ def _lift(trace: AbstractTrace, value: object) -> AbstractArray:
     )
     return _new_abstract_array(
         trace,
-        int(trace.add_constant(value, spec)),
+        trace.add_constant(value, spec),
         spec,
         owned=False,
     )
@@ -936,7 +936,7 @@ def _emit(
     )
     return _new_abstract_array(
         trace,
-        int(node_id),
+        node_id,
         spec,
         owned=True,
         layout=_emitted_layout(op, inputs, attrs),
@@ -974,7 +974,7 @@ def _emit_outputs(
             shape=spec.shape,
             dtype=spec.dtype,
         )
-        outputs.append(_new_abstract_array(trace, int(output_id), spec, owned=True))
+        outputs.append(_new_abstract_array(trace, output_id, spec, owned=True))
     return tuple(outputs)
 
 
@@ -1002,25 +1002,17 @@ def _append_node(  # noqa: PLR0913 - mirrors the native node schema
         raise ValueError(
             f"Op '{op}' expects num_outputs={op_def.num_outputs}, got num_outputs={num_outputs}"
         )
-    return int(
-        trace.builder.append_node(
-            op,
-            [int(node_id) for node_id in inputs],
-            encode_graph_attrs_for_native(attrs),
-            [int(dimension) for dimension in shape],
-            dtype,
-            schema_version=op_def.schema_version,
-            num_outputs=num_outputs,
-            output_shapes=(
-                None
-                if output_shapes is None
-                else [
-                    [int(dimension) for dimension in output_shape] for output_shape in output_shapes
-                ]
-            ),
-            output_dtypes=None if output_dtypes is None else list(output_dtypes),
-            source_location=get_source_location(),
-        )
+    return trace.builder.append_node(
+        op,
+        inputs,
+        encode_graph_attrs_for_native(attrs),
+        shape,
+        dtype,
+        schema_version=op_def.schema_version,
+        num_outputs=num_outputs,
+        output_shapes=output_shapes,
+        output_dtypes=output_dtypes,
+        source_location=get_source_location(),
     )
 
 
@@ -1159,7 +1151,7 @@ def _array_api_asarray(  # noqa: C901 - one constructor contract
             spec = _nested_sequence_spec(value, dtype)
             return _new_abstract_array(
                 trace,
-                int(trace.add_constant(value, spec)),
+                trace.add_constant(value, spec),
                 spec,
                 owned=False,
             )
@@ -1178,7 +1170,7 @@ def _array_api_asarray(  # noqa: C901 - one constructor contract
             spec = _nested_sequence_spec(raw_value, dtype)
             raw_value = _new_abstract_array(
                 trace,
-                int(trace.add_constant(raw_value, spec)),
+                trace.add_constant(raw_value, spec),
                 spec,
                 owned=False,
             )
@@ -1186,7 +1178,7 @@ def _array_api_asarray(  # noqa: C901 - one constructor contract
         spec = ArraySpec((), _dtype_name(dtype))
         raw_value = _new_abstract_array(
             trace,
-            int(trace.add_constant(_StrongScalarConstant(raw_value, spec.dtype), spec)),
+            trace.add_constant(_StrongScalarConstant(raw_value, spec.dtype), spec),
             spec,
             owned=False,
         )

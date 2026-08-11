@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+import array_api_strict as strict
 import numpy as np
 import pytest
 from numpy.testing import assert_allclose
@@ -382,7 +383,8 @@ def test_scalar_vjp_accepts_complex_cotangents_for_complex_outputs() -> None:
 
 
 def test_constant_python_complex_output_supports_linear_transforms() -> None:
-    function = lambda _value: 1.0j  # noqa: E731 - compact constant-output fixture
+    def function(_value: object) -> complex:
+        return 1.0j
 
     value, tangent = ad.jvp(function)(3.0, tangents=2.0)
     assert type(value) is complex
@@ -678,8 +680,6 @@ def test_staged_named_and_pytree_scalar_masks_follow_selected_leaves() -> None:
 
 
 def test_array_api_strict_mixed_scalar_staged_composition_preserves_dtype() -> None:
-    strict = pytest.importorskip("array_api_strict")
-
     array = strict.asarray(4.0, dtype=strict.float32)
     program = ad.stage(
         lambda array, scalar: array * scalar,

@@ -457,7 +457,7 @@ def _linspace_handler(
         )[1]
         step = _lift_composite_constant(concrete_step, result_tracer)
     step_node_id, step_value = _snapshot_traced(step)
-    return (result, step_value), (node_id, int(step_node_id))
+    return (result, step_value), (node_id, step_node_id)
 
 
 def _pad_handler(
@@ -552,7 +552,7 @@ def _normalize_pad_parameter(
     name: str,
 ) -> tuple[tuple[object, object], ...]:
     if isinstance(value, traced_type):
-        shape = tuple(int(size) for size in value.shape)
+        shape = tuple(value.shape)
         if not shape:
             return ((value, value),) * ndim
         if shape == (2,):

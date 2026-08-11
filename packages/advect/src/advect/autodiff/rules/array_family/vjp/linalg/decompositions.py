@@ -79,7 +79,7 @@ def _vjp_pinv(
     input_cotangent = _h(term1 + term2 + term3)
     if not xp.iscomplexobj(x):
         input_cotangent = xp.real(input_cotangent)
-    return (cast("xp.ndarray", input_cotangent), *(None for _ in rest))
+    return (input_cotangent, *(None for _ in rest))
 
 
 def _vjp_qr(
@@ -154,7 +154,7 @@ def _vjp_qr(
     input_cotangent = _right_solve(_h(r), bar_dx_rinv)
     if not xp.iscomplexobj(x):
         input_cotangent = xp.real(input_cotangent)
-    return (cast("xp.ndarray", input_cotangent),)
+    return (input_cotangent,)
 
 
 def _vjp_svdvals(

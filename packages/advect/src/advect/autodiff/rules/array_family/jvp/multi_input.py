@@ -33,10 +33,7 @@ def _jvp_concatenate(
         _coerce_tangent_or_zeros(tangent, primal=inp, dtype=dtype)
         for inp, tangent in zip(inputs, tangents, strict=True)
     ]
-    return cast(
-        "xp.ndarray[Any, Any]",
-        _normalize_output_tangent(ans, tangents, xp.concatenate(parts, axis=axis)),
-    )
+    return _normalize_output_tangent(ans, tangents, xp.concatenate(parts, axis=axis))
 
 
 def _jvp_stack(
@@ -54,10 +51,7 @@ def _jvp_stack(
         _coerce_tangent_or_zeros(tangent, primal=inp, dtype=dtype)
         for inp, tangent in zip(inputs, tangents, strict=True)
     ]
-    return cast(
-        "xp.ndarray[Any, Any]",
-        _normalize_output_tangent(ans, tangents, xp.stack(parts, axis=axis)),
-    )
+    return _normalize_output_tangent(ans, tangents, xp.stack(parts, axis=axis))
 
 
 def _signal_binary_jvp(
@@ -91,10 +85,7 @@ def _signal_binary_jvp(
             correlate=correlate,
         )
         result = contribution if result is None else result + contribution
-    return cast(
-        "xp.ndarray[Any, Any]",
-        _normalize_output_tangent(ans, tangents, result),
-    )
+    return _normalize_output_tangent(ans, tangents, result)
 
 
 def _jvp_convolve(
@@ -452,16 +443,16 @@ def _jvp_linspace(
         out = out + xp.linspace(
             _asarray_preserving_trace(d_start),
             0.0,
-            num=int(num),
-            endpoint=bool(endpoint),
-            axis=int(axis),
+            num=num,
+            endpoint=endpoint,
+            axis=axis,
         )
     if d_stop is not None:
         out = out + xp.linspace(
             0.0,
             _asarray_preserving_trace(d_stop),
-            num=int(num),
-            endpoint=bool(endpoint),
-            axis=int(axis),
+            num=num,
+            endpoint=endpoint,
+            axis=axis,
         )
     return cast("xp.ndarray[Any, Any]", _asarray_preserving_trace(out))

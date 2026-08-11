@@ -321,7 +321,7 @@ def test_stage_uses_custom_primitive_abstract_rule() -> None:
         return x.spec
 
     program = ad.stage(
-        lambda x: double(x),
+        lambda x: double(x),  # noqa: PLW0108 - explicit trace boundary
         specs=(ad.ArraySpec((2,), "float32"),),
     )
     result = program(np.array([2.0, 3.0], dtype=np.float32))
@@ -409,7 +409,7 @@ def test_staged_multi_output_primitive_round_trips_flat_node_outputs() -> None:
         return {"double": x.spec, "square": x.spec}
 
     program = ad.stage(
-        lambda x: pair(x),
+        lambda x: pair(x),  # noqa: PLW0108 - explicit trace boundary
         specs=(ad.ArraySpec((2,), "float32"),),
     )
     get_registry().update_num_outputs(pair.op_name, num_outputs=1)
@@ -431,7 +431,7 @@ def test_staged_multi_output_primitive_validates_every_result() -> None:
         return x.spec, x.spec
 
     program = ad.stage(
-        lambda x: pair(x),
+        lambda x: pair(x),  # noqa: PLW0108 - explicit trace boundary
         specs=(ad.ArraySpec((2,), "float32"),),
     )
 
@@ -448,7 +448,10 @@ def test_failed_staged_load_rolls_back_custom_output_arity() -> None:
     def pair_abstract(x: ad.AbstractValue) -> tuple[ad.ArraySpec, ad.ArraySpec]:
         return x.spec, x.spec
 
-    program = ad.stage(lambda x: pair(x), specs=(ad.ArraySpec((2,), "float32"),))
+    program = ad.stage(
+        lambda x: pair(x),  # noqa: PLW0108 - explicit trace boundary
+        specs=(ad.ArraySpec((2,), "float32"),),
+    )
     payload = deepcopy(program.to_dict())
     get_registry().update_num_outputs(pair.op_name, num_outputs=1)
     payload["program"]["graph"]["version"] = "invalid"
@@ -484,7 +487,10 @@ def test_staged_load_rejects_custom_nodes_missing_call_metadata() -> None:
     def identity_abstract(x: ad.AbstractValue) -> ad.ArraySpec:
         return x.spec
 
-    program = ad.stage(lambda x: identity(x), specs=(ad.ArraySpec((1,), "float32"),))
+    program = ad.stage(
+        lambda x: identity(x),  # noqa: PLW0108 - explicit trace boundary
+        specs=(ad.ArraySpec((1,), "float32"),),
+    )
     payload = deepcopy(program.to_dict())
     artifact = payload["program"]
     custom_node = next(

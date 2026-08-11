@@ -74,7 +74,7 @@ def _contraction_vjp(
 def _conjugate_if_complex(value: xp.ndarray) -> xp.ndarray:
     if isinstance(value, complex):
         return cast("xp.ndarray", value.conjugate())
-    return cast("xp.ndarray", xp.conj(value)) if xp.iscomplexobj(value) else value
+    return xp.conj(value) if xp.iscomplexobj(value) else value
 
 
 def _vjp_matmul(

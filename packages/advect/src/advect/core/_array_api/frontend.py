@@ -792,7 +792,7 @@ def _matrix_power_composite(namespace: Any, matrix: Any, exponent: object) -> An
         remaining >>= 1
         if remaining:
             base = namespace.matmul(base, base)
-    if result is None:  # pragma: no cover - exponent zero returns above
+    if result is None:
         message = "matrix_power failed to produce a result"
         raise AssertionError(message)
     return result
@@ -1387,7 +1387,7 @@ class ArrayAPITracer:
     @property
     def _advect_weak(self) -> bool:
         """Return the weak-scalar category of the current SSA value."""
-        return bool(self._require_active_recorder().is_weak(self._node_id))
+        return self._require_active_recorder().is_weak(self._node_id)
 
     def _advect_mark_weak(self) -> None:
         """Mark this rank-zero SSA value as a weak scalar."""

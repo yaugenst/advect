@@ -78,7 +78,7 @@ def _build_signature_metadata(sig: inspect.Signature) -> _SignatureMetadata:
     )
 
 
-def _get_signature_metadata_uncached(f: Any) -> _SignatureMetadata:
+def _get_signature_metadata_uncached(f: Callable[..., object]) -> _SignatureMetadata:
     try:
         return _build_signature_metadata(inspect.signature(f))
     except (ValueError, TypeError) as e:
@@ -87,11 +87,11 @@ def _get_signature_metadata_uncached(f: Any) -> _SignatureMetadata:
 
 
 @functools.lru_cache(maxsize=_SIGNATURE_METADATA_CACHE_SIZE)
-def _get_signature_metadata_cached(f: Any) -> _SignatureMetadata:
+def _get_signature_metadata_cached(f: Callable[..., object]) -> _SignatureMetadata:
     return _get_signature_metadata_uncached(f)
 
 
-def _get_signature_metadata(f: Any) -> _SignatureMetadata:
+def _get_signature_metadata(f: Callable[..., object]) -> _SignatureMetadata:
     try:
         return _get_signature_metadata_cached(f)
     except TypeError:
@@ -99,7 +99,7 @@ def _get_signature_metadata(f: Any) -> _SignatureMetadata:
         return _get_signature_metadata_uncached(f)
 
 
-def _get_signature(f: Any) -> inspect.Signature:
+def _get_signature(f: Callable[..., object]) -> inspect.Signature:
     return _get_signature_metadata(f).signature
 
 
@@ -117,11 +117,11 @@ def _validate_argnames(sig: inspect.Signature, argnames: tuple[str, ...]) -> Non
 
 def _trace_value_as_inputs(
     graph: DynamicTape,
-    value: Any,
+    value: object,
     *,
     prefix: str | None,
-    xp: Any | None,
-) -> tuple[Any, _TracedInputSpec]:
+    xp: object | None,
+) -> tuple[object, _TracedInputSpec]:
     leaf_trace = _trace_leaf_as_input(graph, value, prefix=prefix, xp=xp)
     if leaf_trace is not None:
         return leaf_trace
@@ -195,10 +195,10 @@ def _trace_value_as_inputs(
 
 def _trace_passive_outer_value(
     graph: DynamicTape,
-    value: Any,
+    value: object,
     *,
     prefix: str,
-) -> Any:
+) -> object:
     """Lift outer tracers into this tape without differentiating their positions."""
     if callable(getattr(value, "_advect_snapshot", None)):
         traced, _node_id = _wrap_input(value, graph, name=prefix, active=False)
@@ -355,7 +355,7 @@ def _trace_positional_selections(
     graph: DynamicTape,
     args: tuple[Any, ...],
     normalized_argnums: list[int],
-    xp: Any | None,
+    xp: object | None,
 ) -> tuple[list[Any], list[_TracedInputSpec]]:
     traced_args = list(args)
     pos_specs: list[_TracedInputSpec] = []
@@ -383,7 +383,7 @@ def _trace_named_selections(
     traced_args: list[Any],
     traced_kwargs: dict[str, Any],
     argnames: tuple[str, ...] | None,
-    xp: Any | None,
+    xp: object | None,
 ) -> tuple[
     list[Any],
     dict[str, Any],
@@ -455,7 +455,7 @@ def _trace_selected_args_and_kwargs(
     kwargs: dict[str, Any],
     normalized_argnums: list[int],
     argnames: tuple[str, ...] | None,
-    xp: Any | None,
+    xp: object | None,
 ) -> tuple[
     list[Any],
     dict[str, Any],

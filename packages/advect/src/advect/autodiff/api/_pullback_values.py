@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, cast
 
 from advect.autodiff.api._scalar_boundary import (
     _is_boolean_numeric,
@@ -13,10 +13,24 @@ from advect.core._array_api.providers import _get_array_namespace
 from advect.core._pytree import tree_flatten, tree_unflatten
 
 if TYPE_CHECKING:
+    from typing import Protocol
+
+    from advect.autodiff.api._input_trace import _TracedInputSpec
     from advect.core._pytree import TreeDef
 
+    class _SupportsAdd(Protocol):
+        def __add__(self, other: object, /) -> object: ...
 
-def _sum(x: Any, *, axis: Any, keepdims: bool) -> Any:
+    class _SupportsShape(Protocol):
+        shape: tuple[int, ...]
+
+
+def _sum(
+    x: object,
+    *,
+    axis: int | tuple[int, ...] | None,
+    keepdims: bool,
+) -> object:
     """Backend-agnostic sum via Array API namespace when available."""
     xp = _get_array_namespace(x)
     if xp is not None and hasattr(xp, "sum"):
@@ -27,7 +41,7 @@ def _sum(x: Any, *, axis: Any, keepdims: bool) -> Any:
     raise TypeError(msg)
 
 
-def _reshape(x: Any, shape: tuple[int, ...]) -> Any:
+def _reshape(x: object, shape: tuple[int, ...]) -> object:
     """Backend-agnostic reshape used while normalizing cotangents."""
     xp = _get_array_namespace(x)
     if xp is not None and hasattr(xp, "reshape"):
@@ -39,7 +53,7 @@ def _reshape(x: Any, shape: tuple[int, ...]) -> Any:
     raise TypeError(msg)
 
 
-def _unbroadcast(g: Any, target_shape: tuple[int, ...]) -> Any:
+def _unbroadcast(g: object, target_shape: tuple[int, ...]) -> object:
     """Sum ``g`` over broadcast axes to match ``target_shape``."""
     if not hasattr(g, "shape"):
         return g
@@ -54,7 +68,7 @@ def _unbroadcast(g: Any, target_shape: tuple[int, ...]) -> Any:
     ndim_diff = len(g_shape) - len(target_shape)
     if ndim_diff > 0:
         g = _sum(g, axis=tuple(range(ndim_diff)), keepdims=False)
-        g_shape = tuple(g.shape)
+        g_shape = tuple(cast("_SupportsShape", g).shape)
     elif ndim_diff < 0:
         missing_rank = -ndim_diff
         if any(dimension != 1 for dimension in target_shape[:missing_rank]):
@@ -64,7 +78,7 @@ def _unbroadcast(g: Any, target_shape: tuple[int, ...]) -> Any:
             )
             raise ValueError(msg)
         g = _reshape(g, (1,) * missing_rank + g_shape)
-        g_shape = tuple(g.shape)
+        g_shape = tuple(cast("_SupportsShape", g).shape)
 
     axes_to_sum: list[int] = []
     for i, (g_dim, t_dim) in enumerate(zip(g_shape, target_shape, strict=True)):
@@ -76,7 +90,7 @@ def _unbroadcast(g: Any, target_shape: tuple[int, ...]) -> Any:
     return g
 
 
-def _ones_like(value: Any) -> Any:
+def _ones_like(value: object) -> object:
     """Create an all-ones array matching ``value``."""
     xp = _get_array_namespace(value)
     if xp is None:
@@ -88,7 +102,7 @@ def _ones_like(value: Any) -> Any:
     return xp.ones_like(value)
 
 
-def _zeros_like(value: Any) -> Any:
+def _zeros_like(value: object) -> object:
     """Create an all-zeros array matching ``value``."""
     xp = _get_array_namespace(value)
     if xp is None:
@@ -102,7 +116,7 @@ def _zeros_like(value: Any) -> Any:
     return xp.zeros_like(value)
 
 
-def _flatten_output_cotangents(output_treedef: TreeDef, g: Any) -> list[Any]:
+def _flatten_output_cotangents(output_treedef: TreeDef, g: object) -> list[object]:
     if output_treedef.node_type is None:
         return [g]
 
@@ -113,7 +127,7 @@ def _flatten_output_cotangents(output_treedef: TreeDef, g: Any) -> list[Any]:
     return g_leaves
 
 
-def _coerce_output_cotangent_like(cotangent: Any, primal: Any) -> Any:
+def _coerce_output_cotangent_like(cotangent: object, primal: object) -> object:
     """Validate one cotangent leaf against its concrete output primal."""
     if cotangent is None:
         return None
@@ -161,23 +175,26 @@ def _coerce_output_cotangent_like(cotangent: Any, primal: Any) -> Any:
     return cotangent
 
 
-def _build_grad_outputs(output_node_ids: list[int], g_leaves: list[Any]) -> dict[int, Any]:
-    gradients: dict[int, Any] = {}
+def _build_grad_outputs(
+    output_node_ids: list[int],
+    g_leaves: list[object],
+) -> dict[int, object]:
+    gradients: dict[int, object] = {}
     for node_id, g_leaf in zip(output_node_ids, g_leaves, strict=True):
         if g_leaf is None:
             continue
         previous = gradients.get(node_id)
-        gradients[node_id] = g_leaf if previous is None else previous + g_leaf
+        gradients[node_id] = g_leaf if previous is None else cast("_SupportsAdd", previous) + g_leaf
     return gradients
 
 
 def _build_grad_tree(
-    spec: Any,
+    spec: _TracedInputSpec,
     *,
-    grads: dict[int, Any],
+    grads: dict[int, object],
     active_leaf_positions: frozenset[int] | None = None,
-) -> Any:
-    grad_leaves: list[Any] = []
+) -> object:
+    grad_leaves: list[object] = []
     for position, leaf_spec in enumerate(spec.leaf_specs):
         if active_leaf_positions is not None and position not in active_leaf_positions:
             grad_leaves.append(None)
@@ -199,15 +216,15 @@ def _build_grad_tree(
 
 def _format_backward_result(
     *,
-    positional_grads: list[Any],
-    named_grads: dict[str, Any],
+    positional_grads: list[object],
+    named_grads: dict[str, object],
     single_argnum: bool,
-) -> Any:
+) -> object:
     if named_grads:
         if not positional_grads:
             return named_grads
         if single_argnum and len(positional_grads) == 1:
-            pos_out: Any = positional_grads[0]
+            pos_out: object = positional_grads[0]
         else:
             pos_out = tuple(positional_grads)
         return pos_out, named_grads

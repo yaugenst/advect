@@ -217,7 +217,9 @@ def test_fft_jvp_accepts_numpy_default_n() -> None:
     x = np.array([1.0, 2.0, 3.0])
     tangent = np.ones_like(x)
 
-    value, output_tangent = ad.jvp(lambda arg: np.fft.fft(arg))(x, tangents=tangent)
+    value, output_tangent = ad.jvp(
+        lambda arg: np.fft.fft(arg)  # noqa: PLW0108 - JVP boundary
+    )(x, tangents=tangent)
 
     assert_allclose(value, np.fft.fft(x))
     assert_allclose(output_tangent, np.fft.fft(tangent))

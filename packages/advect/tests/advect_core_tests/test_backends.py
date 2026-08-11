@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from importlib import import_module
 from typing import TYPE_CHECKING, Any
 
+import array_api_strict as xp
 import numpy as np
 import pytest
 
@@ -97,8 +99,7 @@ def test_unsupported_input_reports_the_missing_backend() -> None:
 
 
 def test_core_array_api_semantics_precede_an_eager_provider_frontend() -> None:
-    xp = pytest.importorskip("array_api_strict")
-    pytest.importorskip("advect.numpy")
+    import_module("advect.numpy")
 
     value = xp.asarray([1.0, 2.0], dtype=xp.float32)
     with _active_tape():
@@ -108,7 +109,6 @@ def test_core_array_api_semantics_precede_an_eager_provider_frontend() -> None:
 
 
 def test_builtin_numpy_provider_is_registered_at_import() -> None:
-    np = pytest.importorskip("numpy")
     value = np.array([1.0, 2.0])
 
     with _active_tape():

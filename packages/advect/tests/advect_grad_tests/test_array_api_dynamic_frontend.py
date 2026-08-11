@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+import array_api_strict as xp
 import numpy as np
 import pytest
 from numpy.testing import assert_allclose
@@ -15,8 +16,6 @@ from advect.autodiff.rules.array_family.providers import (
 )
 from advect.core._array_api.frontend import bind_array_api_call
 from advect.core._errors import TracingError
-
-xp = pytest.importorskip("array_api_strict")
 
 
 class _FutureNamespace:

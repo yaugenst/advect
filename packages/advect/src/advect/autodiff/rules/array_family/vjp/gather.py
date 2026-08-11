@@ -21,7 +21,7 @@ def _shape(value: object) -> tuple[int, ...]:
 
 
 def _normalize_axis(axis: int, ndim: int) -> int:
-    normalized = int(axis)
+    normalized = axis
     if normalized < 0:
         normalized += ndim
     if normalized < 0 or normalized >= ndim:
@@ -61,7 +61,7 @@ def _positions(indices: object, axis_size: int, *, leading_rank: int) -> xp.ndar
 
 
 def _sum_axes(value: xp.ndarray, axes: tuple[int, ...]) -> xp.ndarray:
-    return value if not axes else cast("xp.ndarray", xp.sum(value, axis=axes, dtype=value.dtype))
+    return value if not axes else xp.sum(value, axis=axes, dtype=value.dtype)
 
 
 def _concrete_add_at() -> Any | None:
@@ -196,7 +196,7 @@ def _vjp_take(
         flattened = _sum_axes(weighted, tuple(range(len(index_shape))))
         return (
             _restore_dtype(
-                cast("xp.ndarray", xp.reshape(flattened, source_shape)),
+                xp.reshape(flattened, source_shape),
                 source_dtype,
             ),
             None,
@@ -244,10 +244,7 @@ def _vjp_take(
     )
     return (
         _restore_dtype(
-            cast(
-                "xp.ndarray",
-                _moveaxis(scattered, -1, normalized_axis),
-            ),
+            _moveaxis(scattered, -1, normalized_axis),
             source_dtype,
         ),
         None,
@@ -310,21 +307,15 @@ def _vjp_take_along_axis(
         if target == 1 and actual != 1
     )
     if reduce_axes:
-        scattered = cast(
-            "xp.ndarray",
-            xp.sum(
-                scattered,
-                axis=reduce_axes,
-                dtype=scattered.dtype,
-                keepdims=True,
-            ),
+        scattered = xp.sum(
+            scattered,
+            axis=reduce_axes,
+            dtype=scattered.dtype,
+            keepdims=True,
         )
-    scattered = cast("xp.ndarray", xp.reshape(scattered, target_moved_shape))
+    scattered = xp.reshape(scattered, target_moved_shape)
     return (
-        cast(
-            "xp.ndarray",
-            _moveaxis(scattered, -1, normalized_axis),
-        ),
+        _moveaxis(scattered, -1, normalized_axis),
         None,
     )
 

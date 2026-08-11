@@ -272,7 +272,7 @@ def _is_standard_array_api_namespace(
     array_api_version: str,
 ) -> bool:
     """Recognize the standard protocol, not merely a similarly named module."""
-    return bool(
+    return (
         isinstance(getattr(namespace, "__array_api_version__", None), str)
         and (
             array_api_version == "2022.12"
@@ -338,7 +338,7 @@ def resolve_array_family_backend_provider(
 
     runtime_namespace = resolution.raw_namespace
     backend_key = _get_backend_key_from_namespace(runtime_namespace)
-    if backend_key is None:  # pragma: no cover - namespace negotiation requires a name
+    if backend_key is None:
         msg = "Array API provider namespace does not expose a backend name"
         raise RuntimeError(msg)
     runtime_provider = _runtime_array_api_provider(

@@ -139,7 +139,7 @@ def _searchsorted_handler(
         optional=("side", "sorter"),
     )
     anchor = _first_traced((args[:2], values.get("sorter")), traced_type=traced_type)
-    if anchor is None:  # pragma: no cover - NumPy dispatch requires a tracer
+    if anchor is None:
         msg = "numpy.searchsorted requires a traced operand"
         raise TracingError(msg)
     sorter = values.get("sorter")
@@ -166,7 +166,7 @@ def _digitize_handler(
         optional=("right",),
     )
     anchor = _first_traced(args[:2], traced_type=traced_type)
-    if anchor is None:  # pragma: no cover - NumPy dispatch requires a tracer
+    if anchor is None:
         msg = "numpy.digitize requires a traced operand"
         raise TracingError(msg)
     result = np.digitize(
@@ -253,7 +253,7 @@ def _membership_handler(
         keyword_only=frozenset({"kind"}),
     )
     anchor = _first_traced(args[:2], traced_type=traced_type)
-    if anchor is None:  # pragma: no cover - NumPy dispatch requires a tracer
+    if anchor is None:
         msg = f"numpy.{name} requires a traced operand"
         raise TracingError(msg)
     call_kwargs = {
@@ -298,7 +298,7 @@ def _ix_handler(
         msg = "numpy.ix_ expects one or more one-dimensional arrays during tracing"
         raise TracingError(msg)
     anchor = _first_traced(args, traced_type=traced_type)
-    if anchor is None:  # pragma: no cover - NumPy dispatch requires a tracer
+    if anchor is None:
         msg = "numpy.ix_ requires a traced operand"
         raise TracingError(msg)
     result = np.ix_(*(_concrete(item, traced_type) for item in args))
@@ -316,7 +316,7 @@ def _matching_indices(
         if np.issubdtype(flattened.dtype, np.inexact) and np.isnan(value):
             matches = np.logical_or(matches, np.isnan(flattened))
         positions = np.flatnonzero(matches)
-        if positions.size == 0:  # pragma: no cover - set operation invariant
+        if positions.size == 0:
             msg = "set operation produced a value absent from its inputs"
             raise TracingError(msg)
         result.append(int(positions[0]))
@@ -356,7 +356,7 @@ def _set_operation_handler(
         optional=optional,
     )
     anchor = _first_traced(args[:2], traced_type=traced_type)
-    if anchor is None:  # pragma: no cover - NumPy dispatch requires a tracer
+    if anchor is None:
         msg = f"numpy.{name} requires a traced operand"
         raise TracingError(msg)
     call_kwargs = {"assume_unique": bool(values.get("assume_unique", False))}
@@ -489,7 +489,7 @@ def _multi_index_handler(
         optional=("order",) if unravel else ("mode", "order"),
     )
     anchor = _first_traced(args[:2], traced_type=traced_type)
-    if anchor is None:  # pragma: no cover - NumPy dispatch requires a tracer
+    if anchor is None:
         msg = f"numpy.{name} requires a traced operand"
         raise TracingError(msg)
     first = _concrete(args[0], traced_type)

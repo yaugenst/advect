@@ -48,9 +48,11 @@ class TestPytreeArrayModeProperties:
 
         grads = ad.grad(f)(tree)
         expected = ad.pytree.tree_map(
-            lambda v: 2.0 * v
-            if isinstance(v, (int, float)) and not isinstance(v, bool)
-            else (2 * v if isinstance(v, np.ndarray) else None),
+            lambda v: (
+                2.0 * v
+                if isinstance(v, (int, float)) and not isinstance(v, bool)
+                else (2 * v if isinstance(v, np.ndarray) else None)
+            ),
             tree,
         )
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import array_api_strict as xp
 import pytest
 
 from advect.autodiff.api.common import _require_array_namespace_for_higher_order
@@ -9,8 +10,6 @@ from advect.autodiff.rules.array_family.providers import (
     resolve_array_family_backend_provider,
 )
 from advect.core._errors import HigherOrderNotSupportedError
-
-xp = pytest.importorskip("array_api_strict")
 
 
 def test_array_api_strict_provider_resolves_from_runtime_value() -> None:

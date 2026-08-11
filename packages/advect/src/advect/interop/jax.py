@@ -1,3 +1,4 @@
+# ruff: noqa: ANN401  # JAX pytrees and custom-VJP callback payloads are runtime-defined.
 """JAX reverse-mode bridge for pure NumPy-backed Advect callables."""
 
 from __future__ import annotations
@@ -118,11 +119,11 @@ def _gradient_payloads(gradients: Any, primals: tuple[Any, ...]) -> tuple[Any, .
 
 
 def wrap(
-    function: Callable[..., Any],
+    function: Callable[..., object],
     *,
     has_aux: bool = False,
     result_shape_dtypes: Any | None = None,
-) -> Callable[..., Any]:
+) -> Callable[..., object]:
     """Wrap a pure NumPy-backed callable as a first-order JAX operation.
 
     Floating or complex JAX array pytrees may be passed positionally or by
@@ -204,7 +205,7 @@ def wrap(
     primitive.defvjp(forward_rule, backward_rule)
 
     @functools.wraps(function)
-    def wrapped(*args: Any, **kwargs: Any) -> Any:
+    def wrapped(*args: object, **kwargs: object) -> object:
         return primitive((args, kwargs))
 
     return wrapped

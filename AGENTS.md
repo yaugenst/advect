@@ -46,7 +46,7 @@ observed behavior, or fill a concrete gap in the guides.
 - Work on a feature branch. Rebase on current `origin/main` before merge and
   keep history linear; merge pull requests with rebase.
 - Use Python 3.12 through 3.14 and Rust 1.94 or newer. Set up with
-  `uv sync --all-groups`, `uv lock --check`, and
+  `uv sync --all-groups --locked` and
   `rustup toolchain install stable --component clippy rustfmt` as needed.
 - While iterating, run the focused suite named by the nearest scoped guidance.
   Before review, run every applicable gate in the [testing guide](docs/development/testing.md).

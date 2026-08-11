@@ -135,7 +135,7 @@ def _get_node(
         owner = cast("Any", arg).recorder
         if owner is graph:
             node_id, _value = _snapshot_traced(arg)
-            return int(node_id)
+            return node_id
         if _is_recorder_in_active_trace_stack(owner):
             _snapshot_traced(arg)
             return _LiteralOperand(arg)
@@ -203,7 +203,7 @@ def _finish_composite_reduction(
         msg = "Composite reduction lowering did not produce a traced array"
         raise TracingError(msg)
     node_id, value = _snapshot_traced(result)
-    return value, int(node_id)
+    return value, node_id
 
 
 def _reduction_accumulator_dtype(
@@ -388,7 +388,7 @@ def _clip_static_bound_to_attr(
 
     arr = np.asarray(bound)
     if arr.ndim != 0:
-        return cast("dict[str, Any]", encode_static_array_attr(arr))
+        return encode_static_array_attr(arr)
 
     py_scalar = arr.item()
     if isinstance(py_scalar, np.generic):
@@ -1278,6 +1278,6 @@ def _make_interp_handler(op_name: str) -> Callable[..., tuple[Any, int]]:
         if right_is_input:
             result_tracer = np.where(x > xp[-1], right, result_tracer)
         result_node_id, result_value = _snapshot_traced(result_tracer)
-        return result_value, int(result_node_id)
+        return result_value, result_node_id
 
     return handler

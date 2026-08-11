@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Iterable
 from typing import TYPE_CHECKING, Any, cast
 
 import numpy as _numpy  # noqa: ICN001 - typed module and dynamic lowering namespace
@@ -36,7 +37,13 @@ def _ndim(value: object) -> int:
 
 
 def _normalize_axes(axis: object, ndim: int) -> tuple[int, ...]:
-    raw = (axis,) if isinstance(axis, (int, np.integer)) else tuple(axis)  # type: ignore[arg-type]
+    if isinstance(axis, (int, np.integer)):
+        raw = (axis,)
+    elif isinstance(axis, Iterable):
+        raw = tuple(axis)
+    else:
+        msg = f"axis {axis!r} is not iterable"
+        raise TypeError(msg)
     normalized = tuple(int(item) if int(item) >= 0 else int(item) + ndim for item in raw)
     if any(item < 0 or item >= ndim for item in normalized):
         msg = f"axis {axis!r} is out of bounds for ndim={ndim}"
@@ -62,7 +69,7 @@ def _finish(
     def snapshot_tree(value: object) -> tuple[object, object]:
         if isinstance(value, traced_type):
             node_id, concrete = _snapshot_traced(value)
-            return concrete, int(node_id)
+            return concrete, node_id
         if isinstance(value, (tuple, list)):
             children = [snapshot_tree(item) for item in value]
             return (
@@ -536,7 +543,7 @@ def _round_handler(
         msg = "numpy.round out= is handled by tracer-level functionalization"
         raise TracingError(msg)
     decimals = int(args[1] if len(args) == _BINARY_ARITY else kwargs.get("decimals", 0))
-    scale = float(10.0**decimals)
+    scale = 10.0**decimals
     return _finish(np.rint(args[0] * scale) / scale, traced_type=traced_type)
 
 
@@ -748,7 +755,7 @@ def _concrete_array(value: object) -> Any:
     current = value
     while callable(getattr(current, "_advect_snapshot", None)):
         _node_id, nested = _snapshot_traced(current)
-        if nested is current:  # pragma: no cover - tracer invariant
+        if nested is current:
             break
         current = nested
     return np.asarray(current)
@@ -767,7 +774,7 @@ def _broadcast_arrays_handler(
         msg = "numpy.broadcast_arrays(subok=True) is not supported during tracing"
         raise TracingError(msg)
     anchor = _first_traced(args, traced_type=traced_type)
-    if anchor is None:  # pragma: no cover - NumPy dispatch requires a tracer
+    if anchor is None:
         msg = "numpy.broadcast_arrays requires a traced operand"
         raise TracingError(msg)
     shape = np.broadcast_shapes(*(value.shape for value in args))
@@ -802,7 +809,7 @@ def _select_handler(
         raise TracingError(msg)
     default = args[2] if len(args) == _TERNARY_ARITY else kwargs.get("default", 0)
     anchor = _first_traced((conditions, choices, default), traced_type=traced_type)
-    if anchor is None:  # pragma: no cover - NumPy dispatch requires a tracer
+    if anchor is None:
         msg = "numpy.select requires a traced operand"
         raise TracingError(msg)
     result: object = (
@@ -835,7 +842,7 @@ def _piecewise_handler(
         raise TracingError(msg)
     default_fn = functions.pop() if len(functions) > len(conditions) else 0
     anchor = _first_traced((x, conditions), traced_type=traced_type)
-    if anchor is None:  # pragma: no cover - NumPy dispatch requires a tracer
+    if anchor is None:
         msg = "numpy.piecewise requires a traced input or condition"
         raise TracingError(msg)
     masks = tuple(np.broadcast_to(condition, x.shape) for condition in conditions)
@@ -900,7 +907,7 @@ def _choose_handler(
         msg = "numpy.choose mode must be raise, wrap, or clip"
         raise TracingError(msg)
     anchor = _first_traced((indices, choices), traced_type=traced_type)
-    if anchor is None:  # pragma: no cover - NumPy dispatch requires a tracer
+    if anchor is None:
         msg = "numpy.choose requires a traced operand"
         raise TracingError(msg)
     normalized = tuple(

@@ -49,7 +49,14 @@ impl GraphBuilder {
         op, inputs, attrs, shape, dtype, *, schema_version=1, name=None, num_outputs=1,
         output_shapes=None, output_dtypes=None, source_location=None
     ))]
-    #[allow(clippy::needless_pass_by_value)]
+    #[expect(
+        clippy::needless_pass_by_value,
+        reason = "PyO3 extracts owned arguments at the Python boundary"
+    )]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "arguments mirror the public Python graph-node signature"
+    )]
     fn append_node(
         &mut self,
         py: Python<'_>,

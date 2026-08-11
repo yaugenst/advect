@@ -31,6 +31,7 @@ _REQUIRED_LICENSE_FILES = frozenset(
         "THIRD_PARTY_LICENSES.txt",
     }
 )
+_REQUIRED_PACKAGE_FILES = frozenset({"advect/_native_core.pyi", "advect/py.typed"})
 
 
 class ReleaseArtifactError(ValueError):
@@ -48,6 +49,10 @@ class ArtifactRecord:
     python_tag: str | None = None
     abi_tag: str | None = None
     platform_family: str | None = None
+
+
+def _artifact_filename(record: ArtifactRecord) -> str:
+    return record.filename
 
 
 def _sha256(path: Path) -> str:
@@ -111,6 +116,9 @@ def _validate_wheel(path: Path, *, version: str) -> ArtifactRecord:
                     f"{path.name} metadata is missing License-File entries: {', '.join(missing)}"
                 )
                 raise ReleaseArtifactError(message)
+            if missing := sorted(_REQUIRED_PACKAGE_FILES - names):
+                message = f"{path.name} is missing required package files: {', '.join(missing)}"
+                raise ReleaseArtifactError(message)
     except zipfile.BadZipFile as error:
         message = f"{path.name} is not a readable wheel"
         raise ReleaseArtifactError(message) from error
@@ -149,6 +157,7 @@ def _validate_sdist(path: Path, *, version: str) -> ArtifactRecord:
         f"{root}/pyproject.toml",
         f"{root}/packages/advect-native/Cargo.toml",
         *(f"{root}/{name}" for name in _REQUIRED_LICENSE_FILES),
+        *(f"{root}/packages/advect/src/{name}" for name in _REQUIRED_PACKAGE_FILES),
     }
     if missing := sorted(required - names):
         message = f"{path.name} is missing required source files: {', '.join(missing)}"
@@ -181,7 +190,7 @@ def assemble_release_artifacts(
         message = f"release set must contain exactly one sdist, found {len(sdists)}"
         raise ReleaseArtifactError(message)
 
-    records = [_validate_wheel(path, version=version) for path in wheels]
+    records: list[ArtifactRecord] = [_validate_wheel(path, version=version) for path in wheels]
     actual_wheels = {
         (record.python_tag, record.abi_tag, record.platform_family) for record in records
     }
@@ -192,7 +201,7 @@ def assemble_release_artifacts(
         raise ReleaseArtifactError(message)
 
     records.append(_validate_sdist(sdists[0], version=version))
-    records.sort(key=lambda record: record.filename)
+    records.sort(key=_artifact_filename)
 
     manifest = {
         "schema_version": 1,

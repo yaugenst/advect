@@ -62,7 +62,7 @@ from advect.core._pytree import _get_node_impl, tree_flatten, tree_unflatten
 from advect.core._registry import get_registry
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator
+    from collections.abc import Callable, Generator
 
     from advect.autodiff.rules.array_family.providers import ArrayFamilyBackendProvider
     from advect.core._registry_types import OpDef
@@ -310,7 +310,7 @@ def _dynamic_trace(
     *,
     array_api_version: str,
     reverse_only: bool = False,
-) -> Iterator[DynamicTape]:
+) -> Generator[DynamicTape, None, None]:
     tape = DynamicTape()
     _set_active_recorder(
         cast("Any", tape),
@@ -679,7 +679,7 @@ def _apply_vjp_binding(  # noqa: PLR0913 - mirrors the native callback ABI
             primals=operands,
             attrs=attrs,
             cotangent=cotangent,
-            jvp_rule=cast("Callable[..., Any]", jvp_rule),
+            jvp_rule=jvp_rule,
         )
     else:
         primals = operands if definition.vjp_needs_inputs else ()
@@ -746,7 +746,7 @@ def _apply_structural_vjp_binding_many(  # noqa: PLR0913 - mirrors callback ABI
         primals=operands,
         attrs=attrs,
         cotangents=cotangents,
-        jvp_rule=cast("Callable[..., Any]", jvp_rule),
+        jvp_rule=jvp_rule,
     )
     return tuple(
         _normalize_vjp_contributions(
@@ -1253,7 +1253,7 @@ def _structural_jvp_linear_map(
     primals: tuple[object, ...],
     attrs: dict[str, Any],
     jvp_rule: Callable[..., object],
-) -> Iterator[LinearMap]:
+) -> Generator[LinearMap, None, None]:
     """Build one reusable tangent map for a structural JVP transpose."""
     stack = _STRUCTURAL_TRANSPOSE_STACK.get()
     if op in stack:

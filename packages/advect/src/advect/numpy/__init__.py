@@ -1,5 +1,3 @@
-# ruff: noqa: ANN401
-# ANN401: Backend registration uses Any for type-agnostic dispatch
 """NumPy dispatch, tracing, and a transparent compatibility namespace.
 
 This package contains the NumPy-specific implementation:
@@ -37,20 +35,21 @@ from advect.numpy._traced_array import TracedArray
 
 if TYPE_CHECKING:
     from advect.core._native import DynamicTape
+    from advect.core._protocols import ArrayLike
 
 
 # Register numpy backend with core
-def _accepts_numpy(value: Any) -> bool:
+def _accepts_numpy(value: object) -> bool:
     """Accept only NumPy-owned values; other array protocols keep their frontend."""
     return isinstance(value, (np.ndarray, np.generic, TracedArray))
 
 
 def _handle_numpy_input(
-    value: Any,
+    value: ArrayLike,
     name: str | None = None,
     *,
     active: bool = True,
-) -> Any:
+) -> TracedArray:
     """Create a TracedArray from a numpy array."""
     recorder = _get_active_recorder()
     if recorder is None:
@@ -67,7 +66,7 @@ def _handle_numpy_input(
     return TracedArray(value=array, node_id=node_id, recorder=recorder, owned=False)
 
 
-def _wrap_traced(value: Any, *, node_id: int, recorder: DynamicTape) -> Any:
+def _wrap_traced(value: ArrayLike, *, node_id: int, recorder: DynamicTape) -> TracedArray:
     """Keep primitive results in the NumPy frontend selected by their provider."""
     return TracedArray(value, node_id, recorder)
 
@@ -87,7 +86,7 @@ register_hook("advect.foreign_array_ufunc", nested_array_ufunc)
 register_hook("advect.default_array_namespace", lambda: np)
 
 
-def __getattr__(name: str) -> Any:
+def __getattr__(name: str) -> Any:  # noqa: ANN401 - proxy preserves NumPy's dynamic API
     """Return unmodified attributes from the installed NumPy module."""
     return getattr(np, name)
 

@@ -101,7 +101,7 @@ def test_grad_rejects_complex_scalar_output() -> None:
     z = np.array([1.0 + 2.0j, -0.5 + 0.25j], dtype=np.complex64)
 
     with pytest.raises(ValueError, match="real scalar output"):
-        grad(lambda value: np.sum(value))(z)
+        grad(lambda value: np.sum(value))(z)  # noqa: PLW0108 - grad boundary
 
 
 def test_negative_real_power_higher_order_is_warning_clean() -> None:

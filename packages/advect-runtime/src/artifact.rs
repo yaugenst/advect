@@ -275,7 +275,10 @@ impl NodeWire {
 }
 
 #[cfg(test)]
-#[allow(clippy::indexing_slicing, clippy::unwrap_used)]
+#[expect(
+    clippy::unwrap_used,
+    reason = "test setup unwraps values whose absence should fail the test"
+)]
 mod tests {
     use super::*;
     use crate::{AttrValue, ConstantKind, GraphBuilder};

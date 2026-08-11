@@ -4,14 +4,13 @@ from __future__ import annotations
 
 from typing import Any
 
+import array_api_strict as xp
 import numpy as np
 import pytest
 
 import advect as ad
 from advect.core._errors import EscapedTracerError, TracingError
 from advect.core._protocols import _snapshot_traced
-
-xp = pytest.importorskip("array_api_strict")
 
 
 def test_scalar_payload_is_private_and_internal_snapshot_is_lifetime_checked() -> None:

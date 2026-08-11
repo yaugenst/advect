@@ -202,8 +202,8 @@ def logsumexp(
         b=1.0 if b is None else _array_operand(b),
         axis=_static_axis(axis),
         has_b=has_b,
-        keepdims=bool(keepdims),
-        return_sign=bool(return_sign),
+        keepdims=keepdims,
+        return_sign=return_sign,
     )
     return (result, sign) if return_sign else result
 
@@ -283,7 +283,7 @@ def _normalize_ufunc_text_option(
 def _normalize_ufunc_options(kwargs: dict[str, object]) -> dict[str, object]:
     unknown = set(kwargs).difference(_UFUNC_OPTION_NAMES)
     if unknown:
-        name = sorted(unknown)[0]
+        name = min(unknown)
         msg = f"got an unexpected keyword argument {name!r}"
         raise TypeError(msg)
     if "signature" in kwargs and "sig" in kwargs:
@@ -443,7 +443,7 @@ def _operand_dtype(value: Any) -> np.dtype[Any]:
 
 
 def _is_inexact_dtype(dtype: np.dtype[Any]) -> bool:
-    return bool(np.issubdtype(dtype, np.inexact))
+    return np.issubdtype(dtype, np.inexact)
 
 
 def _traceable_astype(value: Any, dtype: np.dtype[Any]) -> Any:
