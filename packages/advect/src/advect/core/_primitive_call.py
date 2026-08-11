@@ -329,43 +329,23 @@ def _reconstruct_primitive_call(
 
 
 def _flatten_input_gradients(
-    meta: _PrimitiveCallMeta,
     result: object,
     *,
     expected_input_count: int,
 ) -> tuple[object | None, ...]:
-    """Flatten a structured transpose result into graph-input order."""
+    """Validate the public flat transpose-result contract."""
     if not isinstance(result, tuple):
         msg = "Primitive transpose rule must return a tuple of gradients"
         raise TypeError(msg)
     leaves, treedef = tree_flatten(result)
-    if treedef == meta.call_treedef:
-        mask = meta.input_leaf_mask
-    else:
-        args_mask, kwargs_mask = _unflatten_call_tree(
-            meta.call_treedef,
-            list(meta.input_leaf_mask),
-        )
-        kwargs_leaves, _ = tree_flatten(kwargs_mask)
-        if any(kwargs_leaves):
-            msg = (
-                "Primitive transpose result must match the full (args, kwargs) "
-                "pytree when keyword arguments contain traced values"
-            )
-            raise ValueError(msg)
-        args_mask_leaves, args_treedef = tree_flatten(args_mask)
-        if treedef != args_treedef:
-            msg = "Primitive transpose result does not match the input pytree"
-            raise ValueError(msg)
-        mask = tuple(args_mask_leaves)
-    gradients = tuple(leaf for is_input, leaf in zip(mask, leaves, strict=True) if is_input)
-    if len(gradients) != expected_input_count:
+    _expected_leaves, expected_treedef = tree_flatten(tuple(range(expected_input_count)))
+    if treedef != expected_treedef:
         msg = (
-            "Primitive transpose gradient count does not match node inputs: "
-            f"expected {expected_input_count}, got {len(gradients)}"
+            "Primitive transpose result must be a flat tuple with one contribution "
+            "per dynamic input leaf"
         )
-        raise TypeError(msg)
-    return gradients
+        raise ValueError(msg)
+    return tuple(leaves)
 
 
 def _keyword_parameter(path: TreePath) -> str | None:

@@ -68,7 +68,7 @@ def _output_payload(value: Any, expected_treedef: Any | None, *, has_aux: bool) 
     )
 
 
-def _validate_inputs(values: tuple[Any, ...]) -> None:
+def _validate_inputs(values: Any) -> None:
     leaves, _treedef = jax.tree_util.tree_flatten(values)
     if not leaves:
         message = "JAX bridge inputs must contain at least one array leaf"
@@ -125,6 +125,9 @@ def wrap(
 ) -> Callable[..., Any]:
     """Wrap a pure NumPy-backed callable as a first-order JAX operation.
 
+    Floating or complex JAX array pytrees may be passed positionally or by
+    keyword; every leaf is differentiable. Static configuration should be
+    closed over by ``function``.
     With ``has_aux=True``, ``function`` returns ``(value, aux)`` and only
     ``value`` participates in the Advect VJP. Eager calls infer their outputs
     by executing ``function`` directly.
@@ -140,68 +143,71 @@ def wrap(
         else _validate_specs(result_shape_dtypes, has_aux=has_aux)
     )
 
-    def differentiable_function(*values: Any) -> Any:
+    def differentiable_function(call_tree: Any) -> Any:
+        args, kwargs = call_tree
         value, _aux = _split_aux(
-            function(*values),
+            function(*args, **kwargs),
             has_aux=has_aux,
             boundary="Advect function output",
         )
         return value
 
-    def forward_callback(*values: Any) -> Any:
-        concrete_values = _numpy_tree(values)
+    def forward_callback(call_tree: Any) -> Any:
+        concrete_args, concrete_kwargs = _numpy_tree(call_tree)
         return _output_payload(
-            function(*concrete_values),
+            function(*concrete_args, **concrete_kwargs),
             result_treedef,
             has_aux=has_aux,
         )
 
-    def backward_callback(values: tuple[Any, ...], cotangents: Any) -> tuple[Any, ...]:
-        concrete_values = _numpy_tree(values)
+    def backward_callback(call_tree: Any, cotangents: Any) -> tuple[Any, ...]:
+        concrete_call = _numpy_tree(call_tree)
         value_cotangents, _aux_cotangents = _split_aux(
             cotangents,
             has_aux=has_aux,
             boundary="JAX output cotangents",
         )
         concrete_cotangents = _numpy_tree(value_cotangents)
-        _, pullback = ad.vjp(
-            differentiable_function,
-            argnums=tuple(range(len(concrete_values))),
-        )(*concrete_values)
+        _, pullback = ad.vjp(differentiable_function)(concrete_call)
         gradients = pullback(conjugate_complex_tree(concrete_cotangents))
-        return _gradient_payloads(gradients, concrete_values)
+        return _gradient_payloads(gradients, (concrete_call,))
 
-    def call(*values: Any) -> Any:
-        _validate_inputs(values)
+    def call(call_tree: Any) -> Any:
+        _validate_inputs(call_tree)
         if result_shape_dtypes is None:
-            return jax.device_put(forward_callback(*values))
+            return jax.device_put(forward_callback(call_tree))
         return jax.pure_callback(
             forward_callback,
             result_shape_dtypes,
-            *values,
+            call_tree,
         )
 
     @jax.custom_vjp
-    def primitive(*values: Any) -> Any:
-        return call(*values)
+    def primitive(call_tree: Any) -> Any:
+        return call(call_tree)
 
-    def forward_rule(*values: Any) -> tuple[Any, tuple[Any, ...]]:
-        return call(*values), values
+    def forward_rule(call_tree: Any) -> tuple[Any, Any]:
+        return call(call_tree), call_tree
 
-    def backward_rule(values: tuple[Any, ...], cotangents: Any) -> tuple[Any, ...]:
+    def backward_rule(call_tree: Any, cotangents: Any) -> tuple[Any, ...]:
         if result_shape_dtypes is None:
-            return tuple(jax.device_put(backward_callback(values, cotangents)))
-        input_specs = jax.tree_util.tree_map(_shape_dtype_struct, values)
+            return tuple(jax.device_put(backward_callback(call_tree, cotangents)))
+        input_specs = (jax.tree_util.tree_map(_shape_dtype_struct, call_tree),)
         gradients = jax.pure_callback(
             backward_callback,
             input_specs,
-            values,
+            call_tree,
             cotangents,
         )
         return tuple(gradients)
 
     primitive.defvjp(forward_rule, backward_rule)
-    return functools.wraps(function)(primitive)
+
+    @functools.wraps(function)
+    def wrapped(*args: Any, **kwargs: Any) -> Any:
+        return primitive((args, kwargs))
+
+    return wrapped
 
 
 __all__ = ["wrap"]

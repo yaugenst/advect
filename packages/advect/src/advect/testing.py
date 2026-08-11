@@ -18,7 +18,6 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
 
     from advect.core._primitive import Primitive
-    from advect.core._residual import _PrimitiveExecution
 
 
 def _ones_like(value: Any) -> Any:
@@ -425,11 +424,6 @@ def check_primitive(  # noqa: C901, PLR0912, PLR0913, PLR0915
         arguments.update(static_arguments)
         return primitive(**arguments)
 
-    def invoke_exact(values: tuple[Any, ...]) -> _PrimitiveExecution:
-        arguments = dict(zip(dynamic_names, values, strict=True))
-        arguments.update(static_arguments)
-        return primitive._dispatch_exact(**arguments)  # noqa: SLF001
-
     def dynamic_call(*values: Any) -> Any:
         return invoke(cast("tuple[Any, ...]", values))
 
@@ -548,41 +542,7 @@ def check_primitive(  # noqa: C901, PLR0912, PLR0913, PLR0915
         if output_cotangent_treedef != output_treedef:
             msg = "Primitive-check cotangent must match the output pytree"
             raise ValueError(msg)
-        transpose_rule = primitive._transpose_rule  # noqa: SLF001
-        if transpose_rule is not None:
-            if primitive.has_residual:
-                with invoke_exact(primals) as execution:
-                    contributions = transpose_rule(
-                        output_cotangent,
-                        tuple(primal_leaves),
-                        normalize_rule_output(execution.output),
-                        execution.residual,
-                        **static_arguments,
-                    )
-            else:
-                contributions = transpose_rule(
-                    output_cotangent,
-                    tuple(primal_leaves),
-                    rule_concrete,
-                    **static_arguments,
-                )
-            contribution_leaves, _contribution_treedef = tree_flatten(contributions)
-            if len(contribution_leaves) != len(primal_leaves):
-                msg = (
-                    f"Primitive '{primitive.name}' transpose returned "
-                    f"{len(contribution_leaves)} contributions for "
-                    f"{len(primal_leaves)} input leaves"
-                )
-                raise AssertionError(msg)
-            contribution_leaves = [
-                None if nondiff else contribution
-                for nondiff, contribution in zip(
-                    nondiff_mask,
-                    contribution_leaves,
-                    strict=True,
-                )
-            ]
-        else:
+        if primitive._transpose_rule is None:  # noqa: SLF001
             if jvp_rule is None:
                 _missing_rule(primitive, "transpose", "@primitive.def_transpose")
             if primitive.has_residual:
@@ -591,12 +551,12 @@ def check_primitive(  # noqa: C901, PLR0912, PLR0913, PLR0915
                     "an explicit @primitive.def_transpose rule"
                 )
                 raise MissingPrimitiveRuleError(msg)
-            from advect.autodiff.api.reverse import vjp  # noqa: PLC0415
+        from advect.autodiff.api.reverse import vjp  # noqa: PLC0415
 
-            argnums = tuple(range(len(primals)))
-            _value, pullback = vjp(dynamic_call, argnums=argnums)(*primals)
-            contributions = pullback(output_cotangent)
-            contribution_leaves, _contribution_treedef = tree_flatten(contributions)
+        argnums = tuple(range(len(primals)))
+        _value, pullback = vjp(dynamic_call, argnums=argnums)(*primals)
+        contributions = pullback(output_cotangent)
+        contribution_leaves, _contribution_treedef = tree_flatten(contributions)
 
         directional = jvp_result if jvp_rule is not None else finite_difference_directional()
         directional_leaves, directional_treedef = tree_flatten(directional)

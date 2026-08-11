@@ -8,6 +8,7 @@ import numpy as np
 import pytest
 from numpy.testing import assert_allclose
 
+import advect as ad
 from advect.interop.autograd import wrap
 
 
@@ -24,12 +25,12 @@ def test_autograd_bridge_preserves_pytree_outputs_and_multi_argument_gradients()
     parameters = {"field": anp.asarray([1.0, -2.0, 0.5])}
     scale = anp.asarray(1.5)
 
-    direct = bridged(parameters, scale)
+    direct = bridged(parameters, scale=scale)
     assert_allclose(direct["energy"], 11.8125)
     calls = 0
 
     def objective(params, factor):
-        return bridged(params, factor)["energy"]
+        return bridged(params, scale=factor)["energy"]
 
     parameter_gradient, scale_gradient = autograd.grad(objective, argnum=(0, 1))(
         parameters,
@@ -103,6 +104,32 @@ def test_autograd_bridge_rejects_higher_order_differentiation() -> None:
         match=r"first-order VJPs only.*higher-order differentiation",
     ):
         second(anp.asarray(2.0))
+
+
+def test_autograd_bridge_reuses_and_releases_the_exact_forward_linearization() -> None:
+    forwards: list[np.ndarray] = []
+    released: list[np.ndarray] = []
+
+    @ad.primitive(name="tests.interop.autograd.reusable", residual=True)
+    def square(value: np.ndarray) -> ad.PrimitiveResult[np.ndarray]:
+        residual = 2 * value.copy()
+        forwards.append(residual)
+        return ad.PrimitiveResult(value * value, residual, release=released.append)
+
+    @square.def_jvp
+    def square_jvp(output, primals, tangents):
+        del output
+        return 2 * primals[0] * tangents[0]
+
+    @square.def_transpose
+    def square_transpose(cotangent, primals, output, residual):
+        del primals, output
+        return (cotangent * residual,)
+
+    sample = anp.asarray([1.0, 2.0, 3.0])
+    assert_allclose(autograd.jacobian(wrap(square))(sample), np.diag(2 * sample))
+    assert len(forwards) == len(released) == 1
+    assert released[0] is forwards[0]
 
 
 def test_autograd_bridge_rejects_integer_input_leaves() -> None:

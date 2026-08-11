@@ -35,6 +35,23 @@ assert not loaded, loaded
     assert completed.returncode == 0, completed.stderr
 
 
+@pytest.mark.parametrize("framework", _FRAMEWORKS)
+def test_bridge_preserves_the_wrapped_signature(framework: str) -> None:
+    pytest.importorskip(framework)
+    completed = _run(
+        f"""
+import inspect
+from advect.interop.{framework} import wrap
+
+def operation(value, *, scale=1.0):
+    return scale * value
+
+assert inspect.signature(wrap(operation)) == inspect.signature(operation)
+"""
+    )
+    assert completed.returncode == 0, completed.stderr
+
+
 def test_framework_dependencies_use_only_individual_extras() -> None:
     package_metadata = metadata("advect")
     extras = set(package_metadata.get_all("Provides-Extra") or ())

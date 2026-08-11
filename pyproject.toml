@@ -76,6 +76,7 @@ requires = [ "maturin>=1.12,<2" ]
 build-backend = "maturin"
 
 [tool.maturin]
+exclude = [ "**/AGENTS.md", "**/__pycache__/**" ]
 features = [ "extension-module" ]
 manifest-path = "packages/advect-native/Cargo.toml"
 module-name = "advect._native_core"

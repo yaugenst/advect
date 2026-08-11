@@ -188,17 +188,23 @@ class NoVJPError(AdvectError):
         if not non_differentiable and op is not None and op.startswith("custom."):
             parts.append("""
 
-  In the module that defines this primitive, attach a transpose rule to the
-  handle returned by @advect.primitive:
+  Prefer a traceable JVP rule so Advect can use forward mode, transpose it
+  structurally, and differentiate it again:
+
+    @primitive_handle.def_jvp
+    def jvp(output, primals, tangents, **static_attrs):
+        return ...
+
+  If the derivative needs an opaque residual or cannot be expressed as a JVP,
+  attach an explicit transpose instead:
 
     @primitive_handle.def_transpose
     def transpose(cotangent, primals, output, **static_attrs):
         # output is the exact primitive result from this invocation.
-        # Return one cotangent per differentiable input.
+        # Return a flat tuple with one contribution per dynamic input leaf.
         return (...,)
 
-  Alternatively, define @primitive.def_jvp and validate structural transposition
-  with check_primitive from advect.testing.""")
+  Validate the promised modes with check_primitive from advect.testing.""")
         super().__init__("".join(parts))
 
 

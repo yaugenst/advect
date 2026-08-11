@@ -1,4 +1,10 @@
-"""Labeled xarray pytrees for Advect's dynamic autodiff transforms."""
+"""Register xarray containers for Advect's dynamic transforms.
+
+Importing this module makes floating and complex ``DataArray`` and ``Dataset``
+buffers differentiable while dimensions, coordinates, names, and attributes
+remain static metadata. This integration is dynamic-only: stage a raw array
+function, call the program with ``field.data``, and restore labels outside it.
+"""
 
 from __future__ import annotations
 

@@ -22,7 +22,7 @@ def test_torch_bridge_preserves_pytree_device_dtype_and_gradients() -> None:
     bridged = wrap(operation)
     field = torch.tensor([1.0, -2.0, 0.5], dtype=torch.float32, requires_grad=True)
     scale = torch.tensor(1.5, dtype=torch.float64, requires_grad=True)
-    result = bridged({"field": field}, scale)
+    result = bridged({"field": field}, scale=scale)
 
     assert result["field"].device == field.device
     assert result["field"].dtype == torch.float64

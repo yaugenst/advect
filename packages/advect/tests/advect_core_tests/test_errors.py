@@ -9,7 +9,9 @@ def test_custom_reverse_error_points_to_primitive_transpose_api() -> None:
     message = str(NoVJPError("missing transpose", op="custom.acme.solve"))
 
     assert "@primitive_handle.def_transpose" in message
-    assert "@primitive.def_jvp" in message
+    assert "@primitive_handle.def_jvp" in message
+    assert message.index("def_jvp") < message.index("def_transpose")
+    assert "flat tuple with one contribution per dynamic input leaf" in message
     assert "check_primitive from advect.testing" in message
     assert "get_primitive" not in message
     assert "get_registry" not in message

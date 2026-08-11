@@ -54,10 +54,10 @@ running it.
 ## Keep the boundary explicit
 
 The [shared bridge contract](../api/interop/index.md#shared-contract) is a
-first-order reverse-mode boundary. The bridges support positional built-in
-pytrees whose leaves the host can differentiate, but they do not add host
-forward mode, higher derivatives, Advect staging, or general keyword/static
-argument handling. Close static configuration over the wrapped function.
+first-order reverse-mode boundary. The bridges support positional and keyword
+built-in pytrees whose leaves the host can differentiate, but they do not add
+host forward mode, higher derivatives, Advect staging, or static argument
+annotations. Close static configuration over the wrapped function.
 
 The bridge copies values through host NumPy, so it is best for bounded
 operations whose numerical work is large enough to justify the boundary. It is

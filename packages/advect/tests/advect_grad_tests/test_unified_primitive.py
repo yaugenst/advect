@@ -466,6 +466,28 @@ def test_check_primitive_rejects_a_wrong_transpose_without_a_jvp() -> None:
     assert len(released) == 4
 
 
+def test_check_primitive_rejects_a_structurally_invalid_transpose() -> None:
+    @ad.primitive(name="tests.unified.invalid_structured_transpose")
+    def primitive(pair: tuple[np.ndarray, np.ndarray]) -> np.ndarray:
+        return pair[0] + pair[1]
+
+    @primitive.def_transpose
+    def transpose_rule(
+        cotangent: np.ndarray,
+        primals: tuple[np.ndarray, ...],
+        output: np.ndarray,
+    ) -> tuple[tuple[np.ndarray, np.ndarray]]:
+        del primals, output
+        return ((cotangent, cotangent),)
+
+    pair = (np.array([1.0]), np.array([2.0]))
+    with pytest.raises(
+        RuntimeError,
+        match="flat tuple with one contribution per dynamic input leaf",
+    ):
+        check_primitive(primitive, primals=(pair,), check=("transpose",))
+
+
 def test_nested_transforms_keep_opaque_implementation_calls_atomic() -> None:
     implementation_calls: list[np.ndarray] = []
 

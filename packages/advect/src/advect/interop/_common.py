@@ -31,6 +31,19 @@ def require_dependency(module_name: str) -> ModuleType:
         raise ModuleNotFoundError(message, name=module_name) from error
 
 
+def invoke_with_keywords(
+    function: Callable[..., Any],
+    *values: Any,
+    positional_count: int,
+    keyword_names: tuple[str, ...],
+) -> Any:
+    """Call ``function`` from ordered positional and keyword values."""
+    return function(
+        *values[:positional_count],
+        **dict(zip(keyword_names, values[positional_count:], strict=True)),
+    )
+
+
 def numeric_tree(value: Any, *, boundary: str) -> tuple[list[Any], TreeDef]:
     """Flatten a nonempty pytree of NumPy floating or complex values."""
     leaves, treedef = tree_flatten(value)

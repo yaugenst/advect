@@ -114,20 +114,29 @@ def test_jax_bridge_validates_the_auxiliary_contract() -> None:
 
 def test_jax_bridge_runs_value_and_grad_eagerly_and_under_jit() -> None:
     bridged = wrap(
-        lambda value: np.sum(value * value),
+        lambda value, *, scale: np.sum((value * scale) ** 2),
         result_shape_dtypes=jax.ShapeDtypeStruct((), np.float32),
     )
     sample = jnp.asarray([1.0, 2.0, -3.0], dtype=jnp.float32)
+    scale = jnp.asarray(2.0, dtype=jnp.float32)
 
-    direct_value = bridged(sample)
-    eager_value, eager_gradient = jax.value_and_grad(bridged)(sample)
-    jit_value, jit_gradient = jax.jit(jax.value_and_grad(bridged))(sample)
+    def objective(value, factor):
+        return bridged(value, scale=factor)
 
-    np.testing.assert_allclose(direct_value, 14.0)
-    np.testing.assert_allclose(eager_value, 14.0)
-    np.testing.assert_allclose(eager_gradient, 2 * sample)
+    direct_value = bridged(sample, scale=scale)
+    eager_value, eager_gradient = jax.value_and_grad(
+        objective,
+        argnums=(0, 1),
+    )(sample, scale)
+    jit_value, jit_gradient = jax.jit(jax.value_and_grad(objective, argnums=(0, 1)))(sample, scale)
+
+    np.testing.assert_allclose(direct_value, 56.0)
+    np.testing.assert_allclose(eager_value, 56.0)
+    np.testing.assert_allclose(eager_gradient[0], 2 * sample * scale**2)
+    np.testing.assert_allclose(eager_gradient[1], 2 * scale * np.sum(sample**2))
     np.testing.assert_allclose(jit_value, eager_value)
-    np.testing.assert_allclose(jit_gradient, eager_gradient)
+    np.testing.assert_allclose(jit_gradient[0], eager_gradient[0])
+    np.testing.assert_allclose(jit_gradient[1], eager_gradient[1])
 
 
 @pytest.mark.parametrize(
@@ -146,7 +155,7 @@ def test_jax_bridge_preserves_pytree_arguments_and_outputs(
         scale = jnp.asarray(1.5)
 
         parameter_gradient, scale_gradient = jax.grad(
-            lambda params, factor: jnp.sum(bridged(params, factor)["field"] ** 2),
+            lambda params, factor: jnp.sum(bridged(params, scale=factor)["field"] ** 2),
             argnums=(0, 1),
         )(parameters, scale)
 

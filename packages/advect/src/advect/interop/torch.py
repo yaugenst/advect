@@ -9,6 +9,7 @@ import numpy as np
 
 from advect.core._pytree import tree_flatten, tree_unflatten
 from advect.interop._common import (
+    invoke_with_keywords,
     numeric_tree,
     require_dependency,
     validated_vjp,
@@ -72,10 +73,25 @@ def _gradient_tensor(gradient: Any, spec: _InputSpec) -> Any:
     return torch.as_tensor(np.array(array, copy=True), device=device, dtype=dtype)
 
 
-def _direct_call(function: Callable[..., Any], args: tuple[Any, ...], *, device: Any) -> Any:
-    leaves, input_treedef = tree_flatten(args)
-    concrete_args = tree_unflatten(input_treedef, [_tensor_to_numpy(leaf) for leaf in leaves])
-    value = function(*concrete_args)
+def _direct_call(
+    function: Callable[..., Any],
+    values: tuple[Any, ...],
+    *,
+    positional_count: int,
+    keyword_names: tuple[str, ...],
+    device: Any,
+) -> Any:
+    leaves, input_treedef = tree_flatten(values)
+    concrete_values = tree_unflatten(
+        input_treedef,
+        [_tensor_to_numpy(leaf) for leaf in leaves],
+    )
+    value = invoke_with_keywords(
+        function,
+        *concrete_values,
+        positional_count=positional_count,
+        keyword_names=keyword_names,
+    )
     output_leaves, output_treedef = numeric_tree(value, boundary="Advect output")
     return tree_unflatten(
         output_treedef,
@@ -86,30 +102,45 @@ def _direct_call(function: Callable[..., Any], args: tuple[Any, ...], *, device:
 def wrap(function: Callable[..., Any]) -> Callable[..., Any]:
     """Wrap a NumPy-backed callable as a first-order PyTorch operation.
 
-    Every tensor leaf with a NumPy floating or complex representation is an
-    Advect input. Static configuration should be closed over by ``function``.
-    Values execute through NumPy on the host and outputs return to the inputs'
-    common device. One PyTorch backward consumes the retained Advect pullback.
+    Every tensor leaf in positional or keyword arguments with a NumPy floating
+    or complex representation is an Advect input. Static configuration should
+    be closed over by ``function``. Values execute through NumPy on the host
+    and outputs return to the inputs' common device. One PyTorch backward
+    consumes the retained Advect pullback.
     """
 
     @functools.wraps(function)
-    def wrapped(*args: Any) -> Any:
-        input_leaves, input_treedef, device = _input_tensor_leaves(args)
+    def wrapped(*args: Any, **kwargs: Any) -> Any:
+        values = (*args, *kwargs.values())
+        positional_count = len(args)
+        keyword_names = tuple(kwargs)
+        input_leaves, input_treedef, device = _input_tensor_leaves(values)
         if not torch.is_grad_enabled() or not any(leaf.requires_grad for leaf in input_leaves):
-            return _direct_call(function, args, device=device)
+            return _direct_call(
+                function,
+                values,
+                positional_count=positional_count,
+                keyword_names=keyword_names,
+                device=device,
+            )
 
         output_treedef_holder: list[Any] = []
 
         class _AdvectFunction(torch.autograd.Function):
             @staticmethod
             def forward(ctx: Any, *flat_inputs: Any) -> tuple[Any, ...]:
-                concrete_args = tree_unflatten(
+                concrete_values = tree_unflatten(
                     input_treedef,
                     [_tensor_to_numpy(leaf) for leaf in flat_inputs],
                 )
                 output_leaves, output_treedef, pullback = validated_vjp(
-                    function,
-                    concrete_args,
+                    functools.partial(
+                        invoke_with_keywords,
+                        function,
+                        positional_count=positional_count,
+                        keyword_names=keyword_names,
+                    ),
+                    concrete_values,
                 )
                 try:
                     outputs = tuple(_output_tensor(leaf, device=device) for leaf in output_leaves)

@@ -21,6 +21,8 @@ gradient = autograd.grad(energy)(anp.linspace(0, 1, 8))
 print(gradient)
 ```
 
-The custom primitive retains the exact Advect
-[`Pullback`](../transforms.md#advect.Pullback) from its forward call. A nested
+The custom primitive retains the exact reusable Advect
+[`LinearMap`](../transforms.md#advect.LinearMap) from its forward call.
+First-order transforms such as `autograd.jacobian` may apply its pullback more
+than once; releasing the host VJP releases the retained linearization. A nested
 Autograd trace raises an explicit higher-order error.

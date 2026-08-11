@@ -550,14 +550,10 @@ class Primitive(Generic[P, R]):
                     public_output,
                     **static_attrs,
                 )
-            if isinstance(result, tuple) and len(result) == len(inputs):
-                contributions: tuple[Any | None, ...] = result
-            else:
-                contributions = _flatten_input_gradients(
-                    meta,
-                    result,
-                    expected_input_count=len(inputs),
-                )
+            contributions = _flatten_input_gradients(
+                result,
+                expected_input_count=len(inputs),
+            )
             nondiff_mask = meta.nondiff_mask(len(inputs))
             return tuple(
                 None if nondiff else contribution
@@ -697,12 +693,22 @@ def primitive[**CallP, ResultT](
     >>> @ad.primitive(name="examples.cube")
     ... def cube(value):
     ...     return value**3
+    >>> @cube.def_abstract
+    ... def cube_abstract(value):
+    ...     return value.spec
     >>> @cube.def_jvp
     ... def cube_jvp(output, primals, tangents):
     ...     del output
     ...     (value,), (tangent,) = primals, tangents
-    ...     return 3 * value**2 * tangent
-    >>> ad.grad(lambda value: np.sum(cube(value)))(np.array([2.0])).tolist()
+    ...     return np.zeros_like(value) if tangent is None else 3 * value**2 * tangent
+    >>> from advect.testing import check_primitive
+    >>> sample = np.array([2.0])
+    >>> check_primitive(
+    ...     cube,
+    ...     primals=(sample,),
+    ...     check=("abstract", "jvp", "transpose", "nested", "stage"),
+    ... )
+    >>> ad.grad(lambda value: np.sum(cube(value)))(sample).tolist()
     [12.0]
     """
 

@@ -3,17 +3,19 @@
 from __future__ import annotations
 
 import functools
+import weakref
 from importlib import import_module
 from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 
+import advect as ad
 from advect.core._pytree import tree_flatten, tree_unflatten
 from advect.interop._common import (
     conjugate_complex_tree,
+    invoke_with_keywords,
     numeric_tree,
     require_dependency,
-    validated_vjp,
 )
 
 if TYPE_CHECKING:
@@ -62,77 +64,101 @@ def _gradient_like(gradient: Any, primal: Any) -> Any:
 def wrap(function: Callable[..., Any]) -> Callable[..., Any]:
     """Wrap a NumPy-backed callable as a first-order HIPS Autograd primitive.
 
-    Every NumPy floating or complex leaf in the positional arguments is
+    Every NumPy floating or complex leaf in positional or keyword arguments is
     selected. The bridge translates between Autograd's complex-bilinear
-    cotangents and Advect's real-adjoint convention. Higher-order
+    cotangents and Advect's real-adjoint convention. The exact forward
+    linearization remains reusable for first-order host transforms; higher-order
     differentiation is rejected.
     """
 
     @functools.wraps(function)
-    def wrapped(*args: Any) -> Any:
-        if not _contains_box(args):
-            numeric_tree(args, boundary="HIPS Autograd bridge input")
-            value = function(*args)
+    def wrapped(*args: Any, **kwargs: Any) -> Any:
+        values = (*args, *kwargs.values())
+        positional_count = len(args)
+        keyword_names = tuple(kwargs)
+        call = functools.partial(
+            invoke_with_keywords,
+            function,
+            positional_count=positional_count,
+            keyword_names=keyword_names,
+        )
+        if not _contains_box(values):
+            numeric_tree(values, boundary="HIPS Autograd bridge input")
+            value = call(*values)
             numeric_tree(value, boundary="Advect output")
             return value
-        if _contains_nested_box(args):
+        if _contains_nested_box(values):
             raise NotImplementedError(_HIGHER_ORDER_ERROR)
 
-        concrete_inputs = _concrete(args)
+        concrete_inputs = _concrete(values)
         input_leaves, input_treedef = numeric_tree(
             concrete_inputs,
             boundary="HIPS Autograd bridge input",
         )
         output_treedef_holder: list[Any] = []
-        pullback_holder: list[Any] = []
+        linear_holder: list[Any] = []
 
         @ag_extend.primitive
         def execute(ordered_values: tuple[Any, ...]) -> tuple[Any, ...]:
-            concrete_args = _concrete(ordered_values)
-            output_leaves, output_treedef, pullback = validated_vjp(
-                function,
-                concrete_args,
+            concrete_values = _concrete(ordered_values)
+            value, linear = ad.linearize(
+                call,
+                *concrete_values,
+                argnums=tuple(range(len(concrete_values))),
             )
+            try:
+                output_leaves, output_treedef = numeric_tree(
+                    value,
+                    boundary="Advect output",
+                )
+            except BaseException:
+                linear.close()
+                raise
             output_treedef_holder.append(output_treedef)
-            pullback_holder.append(pullback)
+            linear_holder.append(linear)
             return tuple(output_leaves)
 
         def make_vjp(
             _answer: Any,
             _ordered_values: tuple[Any, ...],
         ) -> Callable[[Any], Any]:
-            pullback = pullback_holder.pop()
+            linear = linear_holder.pop()
             output_treedef = output_treedef_holder[-1]
 
             def apply(cotangents: Any) -> Any:
                 if _contains_box(cotangents):
-                    pullback.close()
+                    linear.close()
                     raise NotImplementedError(_HIGHER_ORDER_ERROR)
-                cotangent_values = tuple(cotangents)
-                cotangent_tree = tree_unflatten(
-                    output_treedef,
-                    list(cotangent_values),
-                )
-                gradients = pullback(conjugate_complex_tree(cotangent_tree))
-                gradients = conjugate_complex_tree(gradients)
-                gradient_leaves, _gradient_treedef = tree_flatten(gradients)
-                gradient_tree = tree_unflatten(
-                    input_treedef,
-                    [
-                        _gradient_like(gradient, primal)
-                        for gradient, primal in zip(
-                            gradient_leaves,
-                            input_leaves,
-                            strict=True,
-                        )
-                    ],
-                )
-                return ag_builtins.tuple(gradient_tree)
+                try:
+                    cotangent_values = tuple(cotangents)
+                    cotangent_tree = tree_unflatten(
+                        output_treedef,
+                        list(cotangent_values),
+                    )
+                    normalized_cotangent = conjugate_complex_tree(cotangent_tree)
+                    gradients = conjugate_complex_tree(linear.pullback(normalized_cotangent))
+                    gradient_leaves, _gradient_treedef = tree_flatten(gradients)
+                    gradient_tree = tree_unflatten(
+                        input_treedef,
+                        [
+                            _gradient_like(gradient, primal)
+                            for gradient, primal in zip(
+                                gradient_leaves,
+                                input_leaves,
+                                strict=True,
+                            )
+                        ],
+                    )
+                    return ag_builtins.tuple(gradient_tree)
+                except BaseException:
+                    linear.close()
+                    raise
 
+            weakref.finalize(apply, linear.close)
             return apply
 
         ag_extend.defvjp(execute, make_vjp)
-        flat_outputs = execute(ag_builtins.tuple(args))
+        flat_outputs = execute(ag_builtins.tuple(values))
         return tree_unflatten(output_treedef_holder[0], list(flat_outputs))
 
     return wrapped

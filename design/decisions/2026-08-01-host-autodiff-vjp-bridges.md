@@ -29,13 +29,13 @@ There is no aggregate dependency extra: users install only the host framework
 they use. Importing `advect` or `advect.interop` imports none of them.
 
 Each framework module exports one `wrap` function. A wrapped callable accepts
-one or more positional tuple, list, or dictionary pytrees whose leaves are
-standard NumPy floating or complex values; every leaf is differentiable. A
-custom container must be recognized by both Advect and its host. Static
-configuration is closed over by the callable. Differentiable outputs are
-nonempty pytrees with the same dtype boundary. The bridge is first-order reverse
-mode only and does not register an array provider, change Advect's resolver,
-enter durable staging, or expose a second derivative engine.
+one or more positional or keyword tuple, list, or dictionary pytrees whose
+leaves are standard NumPy floating or complex values; every supplied leaf is
+differentiable. A custom container must be recognized by both Advect and its
+host. Static configuration is closed over by the callable. Differentiable
+outputs are nonempty pytrees with the same dtype boundary. The bridge is
+first-order reverse mode only and does not register an array provider, change
+Advect's resolver, enter durable staging, or expose a second derivative engine.
 
 The framework-specific ownership is:
 
@@ -44,8 +44,9 @@ The framework-specific ownership is:
   input device. One backward consumes that pullback. PyTorch cotangents pass
   through without conjugation.
 - HIPS Autograd uses one custom primitive per traced invocation. The primitive
-  retains the matching Advect pullback, consumes it in the host VJP, and
-  conjugates complex cotangents and gradients at the boundary. A nested
+  retains the matching reusable Advect linearization, applies its pullback for
+  each host cotangent, and conjugates complex cotangents and gradients at the
+  boundary. The host VJP closure owns and closes the linearization. A nested
   Autograd trace rejects explicitly.
 - JAX uses `custom_vjp`. Concrete eager calls execute the NumPy-backed callable
   directly and infer its output. If JIT compilation or abstract shape
@@ -71,7 +72,7 @@ staged pure callback and replays the forward computation during reverse mode.
 A remote or otherwise effectful operation needs an application-owned adapter
 with an explicit residual/token lifecycle rather than the generic JAX bridge.
 
-The initial contract intentionally excludes keyword differentiation, static
-leaf annotations, `torch.func`, `torch.compile`, JAX `jvp`, `vmap`, higher
-derivatives, and durable artifacts. A concrete application need may extend one
-of these boundaries without turning the frameworks into providers.
+The initial contract intentionally excludes static leaf annotations,
+`torch.func`, `torch.compile`, JAX `jvp`, `vmap`, higher derivatives, and
+durable artifacts. A concrete application need may extend one of these
+boundaries without turning the frameworks into providers.

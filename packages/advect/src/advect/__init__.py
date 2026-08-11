@@ -1,4 +1,25 @@
-"""Advect: a small, extensible automatic-differentiation core."""
+"""NumPy-native automatic differentiation and reusable staged programs.
+
+Start with ``grad``, ``value_and_grad``, ``jvp``, or ``vjp`` on an ordinary
+NumPy-backed callable. ``stage`` captures a reusable ``StagedProgram`` that
+can be serialized with ``to_dict()`` and restored with
+``StagedProgram.from_dict()``.
+
+Extension and integration entry points are deliberately explicit:
+
+* ``primitive`` defines an atomic operation. Prefer a traceable
+  ``@handle.def_jvp`` rule, add ``@handle.def_abstract`` for staging, and
+  validate it with ``from advect.testing import check_primitive``.
+* ``from advect.interop.jax import wrap`` (or ``torch`` / ``autograd``) puts
+  an Advect callable inside a first-order host-framework transform.
+* ``import advect.xarray`` registers labeled containers for dynamic
+  transforms; stage raw ``.data`` arrays instead.
+* ``support_catalog()`` reports supported public forms, while ``debug()``
+  adds source locations to tracing errors.
+
+Use ``help(advect.grad)``, ``help(advect.stage)``, or
+``help(advect.primitive)`` for the complete local contracts.
+"""
 
 from __future__ import annotations
 

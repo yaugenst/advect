@@ -633,18 +633,18 @@ runtime. Their rationale and scope are defined by
 - The modules import explicitly behind independent dependency extras. Importing
   `advect` or `advect.interop` imports no host framework and registers no array
   provider.
-- Positional tuple, list, and dictionary pytrees containing standard NumPy
-  floating or complex values are differentiable; a custom container must be
-  recognized by Advect and its host. Static configuration is closed over by the
-  callable. Keyword differentiation, forward mode, higher derivatives, JAX
+- Positional or keyword tuple, list, and dictionary pytrees containing standard
+  NumPy floating or complex values are differentiable; a custom container must
+  be recognized by Advect and its host. Static configuration is closed over by
+  the callable. Static leaf annotations, forward mode, higher derivatives, JAX
   batching, and durable staging remain outside the initial contract.
 - PyTorch retains and consumes the exact forward Advect pullback. JAX executes
   concrete eager calls directly; JIT compilation and abstract shape evaluation
   supply an explicit result shape/dtype pytree and use pure host callbacks. Both
   JAX reverse paths replay the callable during backward. With `has_aux=True`,
   the JAX callable returns `(value, aux)` and only `value` participates in that
-  replayed VJP. HIPS Autograd retains the exact forward pullback in its custom
-  primitive.
+  replayed VJP. HIPS Autograd retains the exact reusable forward linearization
+  in its custom primitive and closes it with the host VJP closure.
 - PyTorch shares Advect's real-adjoint complex cotangent representation. JAX
   and HIPS Autograd conjugate both the incoming output cotangent and returned
   input gradient at their boundaries.
