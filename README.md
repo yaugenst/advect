@@ -1,6 +1,4 @@
-# Advect
-
-![Advect logo](https://raw.githubusercontent.com/yaugenst/advect/main/docs-theme/img/logo.svg)
+# ![Advect](docs-theme/img/logo.svg)
 
 Advect brings automatic differentiation to NumPy code. Write a numerical
 function as usual, then calculate its gradients and other derivatives without
