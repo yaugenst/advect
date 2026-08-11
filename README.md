@@ -1,6 +1,14 @@
 <!-- markdownlint-disable-next-line MD033 -->
 <h1 align="center"><img src="docs-theme/img/logo.svg" alt="Advect"></h1>
 
+<!-- markdownlint-disable MD033 -->
+<p align="center">
+  <a href="https://github.com/yaugenst/advect/actions/workflows/ci.yml"><img src="https://github.com/yaugenst/advect/actions/workflows/ci.yml/badge.svg?branch=main&amp;event=push" alt="CI"></a>
+  <a href="https://pypi.org/project/advect/"><img src="https://img.shields.io/pypi/v/advect.svg" alt="PyPI"></a>
+  <a href="https://pypi.org/project/advect/"><img src="https://img.shields.io/pypi/pyversions/advect.svg" alt="Python versions"></a>
+</p>
+<!-- markdownlint-enable MD033 -->
+
 Advect is a focused automatic differentiation library for scientific Python,
 with broad NumPy API coverage and first-class support for the Python Array API
 standard. For repeated workloads, it can stage a function into a reusable,
