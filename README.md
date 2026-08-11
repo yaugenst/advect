@@ -1,13 +1,10 @@
-# ![Advect](docs-theme/img/logo.svg)
+<!-- markdownlint-disable-next-line MD033 -->
+<h1 align="center"><img src="docs-theme/img/logo.svg" alt="Advect"></h1>
 
-Advect brings automatic differentiation to NumPy code. Write a numerical
-function as usual, then calculate its gradients and other derivatives without
-deriving or maintaining them by hand.
-
-You keep familiar NumPy operations, Python branches, loops, and helper
-functions. Advect follows the path each call takes. For repeated work with the
-same input structure, `stage` turns the function into a reusable program that
-can be saved and loaded.
+Advect is a focused automatic differentiation library for scientific Python,
+with broad NumPy API coverage and first-class support for the Python Array API
+standard. For repeated workloads, it can stage a function into a reusable,
+optimized program that can itself be differentiated, saved, and loaded.
 
 ## Try it
 
