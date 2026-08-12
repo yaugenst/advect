@@ -20,6 +20,38 @@ const flip = () => {
 themeBtn.addEventListener("click", flip);
 syncMode();
 
+/* ---------------- documentation versions ---------------- */
+const versionPicker = document.createElement("label");
+const versionSelect = document.createElement("select");
+versionPicker.id = "versionpicker";
+versionPicker.hidden = true;
+versionSelect.id = "versionselect";
+versionSelect.className = "tbtn";
+versionSelect.setAttribute("aria-label", "Documentation version");
+versionPicker.append("[v:", versionSelect, "]");
+document.querySelector(".bar .path").before(versionPicker);
+const versionRoot = new URL(`${base_url}/`, window.location.href);
+fetch(new URL("../versions.json", versionRoot))
+  .then((response) => response.json())
+  .then((versions) => {
+    const currentName = versionRoot.pathname.split("/").filter(Boolean).pop();
+    const current = versions.find((entry) => (
+      entry.version === currentName || entry.aliases.includes(currentName)
+    ));
+    if (!current || versions.length < 2) return;
+    for (const entry of versions) versionSelect.add(new Option(entry.title, entry.version));
+    versionSelect.value = current.version;
+    versionPicker.hidden = false;
+    versionSelect.addEventListener("change", () => {
+      const relativePage = window.location.pathname.slice(versionRoot.pathname.length);
+      const target = new URL(`../${versionSelect.value}/${relativePage}`, versionRoot);
+      target.search = window.location.search;
+      target.hash = window.location.hash;
+      window.location.assign(target);
+    });
+  })
+  .catch(() => { /* local and unversioned builds have no versions file */ });
+
 /* ---------------- API overloads ---------------- */
 for (const overloads of document.querySelectorAll(".doc-overloads")) {
   const count = overloads.childElementCount;
