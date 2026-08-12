@@ -46,9 +46,9 @@ def settle_loss(x):
     return np.sum(state * state), steps
 
 
-gradient, steps = ad.grad(settle_loss, has_aux=True)(
-    np.array([2.0, -1.0])
-)
+initial_state = np.array([2.0, -1.0])
+settle_gradient = ad.grad(settle_loss, has_aux=True)
+gradient, steps = settle_gradient(initial_state)
 print(f"{steps} iterations; gradient:", gradient)
 ```
 

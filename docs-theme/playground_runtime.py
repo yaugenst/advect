@@ -514,7 +514,7 @@ def _source_spans(
 
     probe_program = cast(
         "ad.StagedProgram",
-        ad.stage(probe_values, np.asarray(0.0)),
+        ad.stage(probe_values, 0.0),
     )
     probe_artifact = cast("dict[str, object]", probe_program.to_dict()["program"])
     probe_graph = cast("dict[str, object]", probe_artifact["graph"])
@@ -560,7 +560,7 @@ def _def_source_spans(
                 values.append(value)
         return (result, *values)
 
-    probe_program = cast("ad.StagedProgram", ad.stage(probed, np.asarray(0.0)))
+    probe_program = cast("ad.StagedProgram", ad.stage(probed, 0.0))
     probe_artifact = cast("dict[str, object]", probe_program.to_dict()["program"])
     probe_graph = cast("dict[str, object]", probe_artifact["graph"])
     outputs = cast("list[int]", probe_graph["outputs"])
@@ -610,19 +610,19 @@ def playground_trace_json(source: str, mode: str = "expr", direction: str = "jvp
         expression_tree = _parse_expression(source)
         function = _expression_function(expression_tree)
 
-    sample = np.asarray(0.0)
-    tangent = np.asarray(1.0)
+    derivative = ad.jvp(function)
+    example_input = 0.0
 
     def first_derivative(x: object) -> object:
-        return ad.jvp(function)(x, tangents=tangent)
+        return derivative(x, tangents=1.0)
 
-    jvp_program = cast("ad.StagedProgram", ad.stage(first_derivative, sample))
+    jvp_program = cast("ad.StagedProgram", ad.stage(first_derivative, example_input))
     # staging rejects higher-order autodiff; the curvature readout runs the
     # dynamic transform instead — advect's define-by-run path, per evaluation
     _EVALUATE = (jvp_program, ad.hessian(function))
 
     if direction == "vjp":
-        primal_program = cast("ad.StagedProgram", ad.stage(function, sample))
+        primal_program = cast("ad.StagedProgram", ad.stage(function, example_input))
         display_program = ad.vjp_program(primal_program)
     else:
         display_program = jvp_program
@@ -633,7 +633,7 @@ def playground_trace_json(source: str, mode: str = "expr", direction: str = "jvp
     eval_started = time.perf_counter()
     with np.errstate(all="ignore"):
         for x in xs:
-            value, derivative = jvp_program(np.asarray(x))
+            value, derivative = jvp_program(float(x))
             values.append(value)
             derivatives.append(derivative)
     eval_seconds = time.perf_counter() - eval_started
@@ -675,7 +675,7 @@ def playground_trace_json(source: str, mode: str = "expr", direction: str = "jvp
     )
 
 
-def playground_evaluate_json(x: float) -> str:
+def playground_evaluate_json(x: SupportsFloat) -> str:
     """Evaluate f and f' via the staged program, and f'' dynamically."""
     if _EVALUATE is None:
         raise RuntimeError("trace an expression before evaluating it")
@@ -685,7 +685,7 @@ def playground_evaluate_json(x: float) -> str:
         value = float(cast("SupportsFloat", item))
         return value if math.isfinite(value) else None
 
-    point = np.asarray(x, dtype=np.float64)
+    point = float(x)
     with np.errstate(all="ignore"):
         value, derivative = jvp_program(point)
         try:

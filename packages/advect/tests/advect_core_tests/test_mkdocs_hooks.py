@@ -71,9 +71,11 @@ def test_browser_wheel_is_required_only_when_requested(
         mkdocs_hooks._stage_browser_assets(tmp_path / "site")
 
 
-def test_playground_accepts_integer_plot_boundary() -> None:
+def test_playground_uses_a_scalar_float_staged_signature() -> None:
     runtime = runpy.run_path(str(mkdocs_hooks._ROOT / "docs-theme" / "playground_runtime.py"))
 
     runtime["playground_trace_json"]("x")
 
+    artifact = json.loads(runtime["playground_artifact_json"]())
+    assert artifact["program"]["call_specs"][0]["weak"] is True
     assert json.loads(runtime["playground_evaluate_json"](4)) == [4.0, 1.0, 0.0]

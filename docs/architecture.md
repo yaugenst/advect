@@ -90,7 +90,8 @@ def loss(x):
 
 
 example = np.linspace(0.0, 1.0, 4)
-gradient_program = ad.grad(ad.stage(loss, example))
+loss_program = ad.stage(loss, example)
+gradient_program = ad.grad(loss_program)
 print("staged gradient:", np.round(gradient_program(example), 6))
 print(
     "optimized nodes:",
