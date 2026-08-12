@@ -50,8 +50,6 @@ _CURRENT_ARRAY_FAMILY_PROVIDER: _CurrentProvider = ContextVar(
 _ARRAY_FAMILY_JVP_RULE_ATTR = "__advect_array_family_jvp_rule__"
 _ARRAY_FAMILY_VJP_RULE_ATTR = "__advect_array_family_vjp_rule__"
 _SELECT_INPUTS_VJP_ATTR = "__advect_vjp_for_input_indices__"
-_PREBIND_VJP_ATTR = "__advect_prebind_for_call__"
-_EXECUTE_PREBOUND_ATTR = "__advect_execute_prebound__"
 _TRACED_NAMESPACE_ALIASES = {
     "cumprod": "cumulative_prod",
     "cumsum": "cumulative_sum",
@@ -480,64 +478,4 @@ def wrap_array_family_vjp_rule(
 
         setattr(wrapped_vjp, _SELECT_INPUTS_VJP_ATTR, _wrapped_selective_vjp)
 
-    prebind_rule = getattr(rule, _PREBIND_VJP_ATTR, None)
-    if callable(prebind_rule):
-        prebind_vjp = prebind_rule
-
-        def _wrapped_prebind_vjp(
-            *,
-            ans: object,
-            inputs: tuple[object, ...],
-            g: object,
-            attrs: dict[str, object],
-            active_input_indices: tuple[int, ...] | None = None,
-        ) -> object:
-            provider = _resolve_provider_for_call(
-                ans,
-                *inputs,
-                g,
-            )
-            bound = run_with_array_family_backend_provider(
-                provider,
-                prebind_vjp,
-                ans=ans,
-                inputs=inputs,
-                g=g,
-                attrs=attrs,
-                active_input_indices=active_input_indices,
-            )
-            if not callable(bound):
-                return bound
-            bound_vjp = cast("_VJPFn", bound)
-
-            @wraps(bound_vjp)
-            def _wrapped_bound_vjp(*args: object, **kwargs: object) -> _VJPResult:
-                return cast(
-                    "_VJPResult",
-                    run_with_array_family_backend_provider(
-                        provider,
-                        bound_vjp,
-                        *args,
-                        **kwargs,
-                    ),
-                )
-
-            execute_prebound = getattr(bound_vjp, _EXECUTE_PREBOUND_ATTR, None)
-            if callable(execute_prebound):
-                execute = execute_prebound
-
-                def _wrapped_execute_prebound(runtime_g: object) -> _VJPResult:
-                    return cast(
-                        "_VJPResult",
-                        run_with_array_family_backend_provider(
-                            provider,
-                            execute,
-                            runtime_g,
-                        ),
-                    )
-
-                setattr(_wrapped_bound_vjp, _EXECUTE_PREBOUND_ATTR, _wrapped_execute_prebound)
-            return _wrapped_bound_vjp
-
-        setattr(wrapped_vjp, _PREBIND_VJP_ATTR, _wrapped_prebind_vjp)
     return wrapped_vjp
