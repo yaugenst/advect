@@ -668,7 +668,7 @@ class TracedArray(NDArrayOperatorsMixin):
 
     @override
     def __imod__(self, other: Any) -> Self:
-        return self._inplace_op(other, np.mod, "numpy.mod")
+        return self._inplace_op(other, np.mod, "numpy.remainder")
 
     @override
     def __ipow__(self, other: Any) -> Self:

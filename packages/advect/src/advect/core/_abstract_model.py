@@ -33,6 +33,8 @@ class ArraySpec:
         if invalid_dimension:
             msg = f"ArraySpec dimensions must be non-negative integers, got {self.shape!r}"
             raise ValueError(msg)
+        if self.weak and self.shape:
+            raise ValueError("Only rank-zero ArraySpec values can be weak scalars")
 
 
 @dataclass(frozen=True, slots=True)

@@ -65,7 +65,7 @@ def _differentiable_nan_to_num(
         for replacement in (nan, posinf, neginf):
             if replacement is not None:
                 result = result + replacement * 0
-        return result
+        return np.astype(result, dtype)
     real_dtype = np.empty((), dtype=dtype).real.dtype
     limit = np.finfo(real_dtype).max
     nan_value = 0.0 if nan is None else nan

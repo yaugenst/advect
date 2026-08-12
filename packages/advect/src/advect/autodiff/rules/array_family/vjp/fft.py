@@ -53,9 +53,15 @@ def _resize_axis_adjoint(
                 stop=target_length,
             )
         ]
-    pad_width = [(0, 0)] * value.ndim
-    pad_width[normalized_axis] = (0, target_length - current_length)
-    return xp.pad(value, tuple(pad_width), mode="constant", constant_values=0)
+    zeros_shape = list(value.shape)
+    zeros_shape[normalized_axis] = target_length - current_length
+    zeros = _array_constructor_like(
+        value,
+        "zeros",
+        tuple(zeros_shape),
+        dtype=value.dtype,
+    )
+    return xp.concatenate((value, zeros), axis=normalized_axis)
 
 
 def _resize_axes_adjoint(

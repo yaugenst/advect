@@ -250,12 +250,12 @@ def _normalize_dtype(dtype: object) -> str | None:
 
 
 def _normalize_signature(value: object) -> str | bytes | tuple[str | None, ...]:
-    if isinstance(value, str | bytes):
-        return value
     if isinstance(value, np.str_):
         return str(value)
     if isinstance(value, np.bytes_):
         return bytes(value)
+    if isinstance(value, str | bytes):
+        return value
     if not isinstance(value, tuple):
         msg = "the signature object to ufunc must be a string or a tuple"
         raise TypeError(msg)
@@ -270,12 +270,12 @@ def _normalize_ufunc_text_option(
 ) -> str | bytes | None:
     if value is None and allow_none:
         return None
-    if isinstance(value, str | bytes):
-        return value
     if isinstance(value, np.str_):
         return str(value)
     if isinstance(value, np.bytes_):
         return bytes(value)
+    if isinstance(value, str | bytes):
+        return value
     msg = f"{name} must be str, not {type(value).__name__}"
     raise TypeError(msg)
 

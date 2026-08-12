@@ -329,6 +329,8 @@ def _normalized_pad_width(
         before, after = cast("tuple[int, int]", raw)
         return ((before, after),) * ndim
     result = tuple((int(pair[0]), int(pair[1])) for pair in cast("tuple[Any, ...]", raw))
+    if len(result) == 1:
+        return result * ndim
     if len(result) != ndim:
         msg = f"pad_width has {len(result)} axes for rank {ndim}"
         raise ValueError(msg)

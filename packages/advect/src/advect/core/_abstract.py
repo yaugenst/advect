@@ -1304,8 +1304,8 @@ def _array_api_diff(
                 "AbstractArray",
                 _apply_array_api(
                     trace,
-                    "broadcast_to",
-                    (boundary, tuple(boundary_shape)),
+                    "full",
+                    (tuple(boundary_shape), boundary),
                     {},
                 ),
             )

@@ -128,7 +128,7 @@ def _irfftn(
     if "s" in normalized_kwargs and normalized_kwargs.get("s") is not None:
         s_norm = _normalize_shape_tuple(normalized_kwargs["s"])
         if s_norm is not None and normalized_kwargs.get("axes") is None:
-            normalized_kwargs["axes"] = tuple(range(len(s_norm)))
+            normalized_kwargs["axes"] = tuple(range(-len(s_norm), 0))
     return _fft_handler(
         graph=graph,
         traced_type=traced_type,
