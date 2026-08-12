@@ -8,6 +8,8 @@ from importlib.metadata import metadata
 
 import pytest
 
+import advect.interop._common as interop_common
+
 _FRAMEWORKS = ("autograd", "jax", "torch")
 
 
@@ -92,3 +94,26 @@ else:
 """
     )
     assert completed.returncode == 0, completed.stderr
+
+
+@pytest.mark.parametrize(
+    ("missing_name", "message"),
+    [
+        ("torch", r"advect\[torch\]"),
+        ("torch._C", "compiled extension missing"),
+    ],
+)
+def test_dependency_errors_distinguish_missing_extras_from_broken_dependencies(
+    monkeypatch: pytest.MonkeyPatch,
+    missing_name: str,
+    message: str,
+) -> None:
+    def fail_import(_module_name: str) -> None:
+        raise ModuleNotFoundError("compiled extension missing", name=missing_name)
+
+    monkeypatch.setattr(interop_common, "import_module", fail_import)
+
+    with pytest.raises(ModuleNotFoundError, match=message) as error:
+        interop_common.require_dependency("torch")
+
+    assert error.value.name == missing_name

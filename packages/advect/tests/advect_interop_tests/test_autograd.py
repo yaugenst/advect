@@ -12,6 +12,11 @@ import advect as ad
 from advect.interop.autograd import wrap
 
 
+class _UnconvertibleOutput:
+    def __array__(self, *_args: object, **_kwargs: object) -> np.ndarray:
+        raise ValueError("intentional conversion failure")
+
+
 def test_autograd_bridge_preserves_pytree_outputs_and_multi_argument_gradients() -> None:
     calls = 0
 
@@ -104,6 +109,52 @@ def test_autograd_bridge_rejects_higher_order_differentiation() -> None:
         match=r"first-order VJPs only.*higher-order differentiation",
     ):
         second(anp.asarray(2.0))
+
+
+def test_autograd_bridge_rejects_differentiating_the_host_vjp() -> None:
+    host_vjp, _value = autograd.make_vjp(wrap(lambda value: value * value))(anp.asarray([2.0, 3.0]))
+
+    with pytest.raises(
+        NotImplementedError,
+        match=r"first-order VJPs only.*higher-order differentiation",
+    ):
+        autograd.jacobian(host_vjp)(anp.ones(2))
+    with pytest.raises(RuntimeError, match="closed or consumed"):
+        host_vjp(anp.ones(2))
+
+
+def test_autograd_bridge_closes_a_linearization_after_a_failed_pullback() -> None:
+    released: list[np.ndarray] = []
+
+    @ad.primitive(name="tests.interop.autograd.failing_pullback", residual=True)
+    def identity(value: np.ndarray) -> ad.PrimitiveResult[np.ndarray]:
+        residual = value.copy()
+        return ad.PrimitiveResult(value, residual, release=released.append)
+
+    @identity.def_jvp
+    def identity_jvp(output, primals, tangents):
+        del output, primals
+        return tangents[0]
+
+    @identity.def_transpose
+    def identity_transpose(cotangent, primals, output, residual):
+        del cotangent, primals, output, residual
+        raise RuntimeError("intentional transpose failure")
+
+    with pytest.raises(RuntimeError, match="intentional transpose failure"):
+        autograd.grad(lambda value: anp.sum(wrap(identity)(value)))(anp.asarray([1.0, 2.0]))
+
+    assert len(released) == 1
+
+
+def test_autograd_bridge_rejects_empty_output_pytrees_during_a_transform() -> None:
+    with pytest.raises(TypeError, match="must contain at least one NumPy floating or complex leaf"):
+        autograd.grad(wrap(lambda _value: ()))(2.0)
+
+
+def test_autograd_bridge_rejects_outputs_that_cannot_be_converted_to_numpy() -> None:
+    with pytest.raises(TypeError, match="is not a numeric array or scalar"):
+        wrap(lambda _value: _UnconvertibleOutput())(2.0)
 
 
 def test_autograd_bridge_reuses_and_releases_the_exact_forward_linearization() -> None:
