@@ -1,4 +1,3 @@
-# ruff: noqa: PLR2004  # Numeric arity checks in handler validation
 """Linalg-related ``__array_function__`` handlers."""
 
 from __future__ import annotations
@@ -39,19 +38,6 @@ np: Any = _numpy
 
 def _op_name(suffix: str) -> str:
     return f"numpy.linalg.{suffix}"
-
-
-def _reject_duplicate_positionals(
-    args: tuple[Any, ...],
-    kwargs: dict[str, Any],
-    names: tuple[str, ...],
-    *,
-    function: str,
-) -> None:
-    for index, name in enumerate(names, start=1):
-        if len(args) > index and name in kwargs:
-            msg = f"np.linalg.{function} received {name} twice"
-            raise TypeError(msg)
 
 
 def _record_multi_output(
@@ -95,16 +81,9 @@ def _slogdet_handler(
     graph: DynamicTape,
     traced_type: type[TracedArrayLike],
     args: tuple[Any, ...],
-    kwargs: dict[str, Any],
+    _kwargs: dict[str, Any],
 ) -> ArrayFunctionResult:
     """Handle np.linalg.slogdet as a multi-output op."""
-    if not args:
-        msg = "np.linalg.slogdet requires an input array"
-        raise ValueError(msg)
-    if kwargs:
-        msg = f"np.linalg.slogdet does not support kwargs during tracing: {sorted(kwargs)}"
-        raise TracingError(msg)
-
     a = args[0]
     result = np.linalg.slogdet(_get_value(a, traced_type))
     outputs = tuple(result)
@@ -130,23 +109,6 @@ def _svd_handler(
     pos_full_matrices = 1
     pos_compute_uv = 2
     pos_hermitian = 3
-    max_svd_args = 4
-
-    if not args:
-        msg = "np.linalg.svd requires an input array"
-        raise ValueError(msg)
-
-    allowed_kwargs = frozenset({"full_matrices", "compute_uv", "hermitian"})
-    unsupported = set(kwargs) - allowed_kwargs
-    if unsupported:
-        msg = f"np.linalg.svd does not support kwargs during tracing: {sorted(unsupported)}"
-        raise TracingError(msg)
-    _reject_duplicate_positionals(
-        args,
-        kwargs,
-        ("full_matrices", "compute_uv", "hermitian"),
-        function="svd",
-    )
 
     a = args[0]
     full_matrices = (
@@ -158,9 +120,6 @@ def _svd_handler(
         args[pos_compute_uv] if len(args) > pos_compute_uv else kwargs.get("compute_uv", True)
     )
     hermitian = args[pos_hermitian] if len(args) > pos_hermitian else kwargs.get("hermitian", False)
-    if len(args) > max_svd_args:
-        msg = "np.linalg.svd supports at most 4 positional arguments"
-        raise TypeError(msg)
 
     if compute_uv is False:
         svals = np.linalg.svd(
@@ -207,20 +166,9 @@ def _svdvals_handler(
     graph: DynamicTape,
     traced_type: type[TracedArrayLike],
     args: tuple[Any, ...],
-    kwargs: dict[str, Any],
+    _kwargs: dict[str, Any],
 ) -> ArrayFunctionResult:
     """Handle np.linalg.svdvals as a single-output op."""
-    max_svdvals_args = 1
-    if not args:
-        msg = "np.linalg.svdvals requires an input array"
-        raise ValueError(msg)
-    if kwargs:
-        msg = f"np.linalg.svdvals does not support kwargs during tracing: {sorted(kwargs)}"
-        raise TracingError(msg)
-    if len(args) > max_svdvals_args:
-        msg = "np.linalg.svdvals supports at most 1 positional argument"
-        raise TypeError(msg)
-
     a = args[0]
     svals = np.linalg.svdvals(_get_value(a, traced_type))
     svals_shape, svals_dtype = _result_shape_and_dtype(svals)
@@ -272,27 +220,6 @@ def _norm_handler(
     pos_ord = 1
     pos_axis = 2
     pos_keepdims = 3
-    max_norm_args = 4
-
-    if not args:
-        msg = "np.linalg.norm requires an input array"
-        raise ValueError(msg)
-
-    allowed_kwargs = frozenset({"ord", "axis", "keepdims"})
-    unsupported = set(kwargs) - allowed_kwargs
-    if unsupported:
-        msg = f"np.linalg.norm does not support kwargs during tracing: {sorted(unsupported)}"
-        raise TracingError(msg)
-    _reject_duplicate_positionals(
-        args,
-        kwargs,
-        ("ord", "axis", "keepdims"),
-        function="norm",
-    )
-
-    if len(args) > max_norm_args:
-        msg = "np.linalg.norm supports at most 4 positional arguments"
-        raise TypeError(msg)
 
     a = args[0]
     ord_raw = args[pos_ord] if len(args) > pos_ord else kwargs.get("ord")
@@ -340,20 +267,9 @@ def _det_handler(
     graph: DynamicTape,
     traced_type: type[TracedArrayLike],
     args: tuple[Any, ...],
-    kwargs: dict[str, Any],
+    _kwargs: dict[str, Any],
 ) -> ArrayFunctionResult:
     """Handle np.linalg.det as a single-output op."""
-    max_det_args = 1
-    if not args:
-        msg = "np.linalg.det requires an input array"
-        raise ValueError(msg)
-    if kwargs:
-        msg = f"np.linalg.det does not support kwargs during tracing: {sorted(kwargs)}"
-        raise TracingError(msg)
-    if len(args) > max_det_args:
-        msg = "np.linalg.det supports at most 1 positional argument"
-        raise TypeError(msg)
-
     a = args[0]
     # Preserve an enclosing trace for higher-order derivatives.
     a_value = _get_value(a, traced_type)
@@ -375,20 +291,9 @@ def _inv_handler(
     graph: DynamicTape,
     traced_type: type[TracedArrayLike],
     args: tuple[Any, ...],
-    kwargs: dict[str, Any],
+    _kwargs: dict[str, Any],
 ) -> ArrayFunctionResult:
     """Handle np.linalg.inv as a single-output op."""
-    max_inv_args = 1
-    if not args:
-        msg = "np.linalg.inv requires an input array"
-        raise ValueError(msg)
-    if kwargs:
-        msg = f"np.linalg.inv does not support kwargs during tracing: {sorted(kwargs)}"
-        raise TracingError(msg)
-    if len(args) > max_inv_args:
-        msg = "np.linalg.inv supports at most 1 positional argument"
-        raise TypeError(msg)
-
     a = args[0]
     # Preserve an enclosing trace for higher-order derivatives.
     a_value = _get_value(a, traced_type)
@@ -413,18 +318,6 @@ def _cholesky_handler(
     kwargs: dict[str, Any],
 ) -> ArrayFunctionResult:
     """Handle np.linalg.cholesky as a single-output op."""
-    max_cholesky_args = 1
-    if not args:
-        msg = "np.linalg.cholesky requires an input array"
-        raise ValueError(msg)
-    unsupported = set(kwargs) - {"upper"}
-    if unsupported:
-        msg = f"np.linalg.cholesky does not support kwargs during tracing: {sorted(unsupported)}"
-        raise TracingError(msg)
-    if len(args) > max_cholesky_args:
-        msg = "np.linalg.cholesky supports at most 1 positional argument"
-        raise TypeError(msg)
-
     a = args[0]
     upper = kwargs.get("upper", False)
     if type(upper) is not bool:
@@ -448,16 +341,9 @@ def _solve_handler(
     graph: DynamicTape,
     traced_type: type[TracedArrayLike],
     args: tuple[Any, ...],
-    kwargs: dict[str, Any],
+    _kwargs: dict[str, Any],
 ) -> ArrayFunctionResult:
     """Handle np.linalg.solve as a single-output op."""
-    if len(args) != 2:
-        msg = "np.linalg.solve expects (a, b) during tracing"
-        raise TypeError(msg)
-    if kwargs:
-        msg = f"np.linalg.solve does not support kwargs during tracing: {sorted(kwargs)}"
-        raise TracingError(msg)
-
     a, b = args
     solve_value = np.linalg.solve(_get_value(a, traced_type), _get_value(b, traced_type))
     solve_shape, solve_dtype = _result_shape_and_dtype(solve_value)
@@ -483,21 +369,6 @@ def _pinv_handler(
     kwargs: dict[str, Any],
 ) -> ArrayFunctionResult:
     """Handle np.linalg.pinv as a single-output op."""
-    if not args or len(args) > 3:
-        msg = "np.linalg.pinv expects (a, rcond=None, hermitian=False) during tracing"
-        raise TypeError(msg)
-    allowed_kwargs = frozenset({"rcond", "hermitian", "rtol"})
-    unsupported = set(kwargs) - allowed_kwargs
-    if unsupported:
-        msg = f"np.linalg.pinv does not support kwargs during tracing: {sorted(unsupported)}"
-        raise TracingError(msg)
-    _reject_duplicate_positionals(
-        args,
-        kwargs,
-        ("rcond", "hermitian"),
-        function="pinv",
-    )
-
     a = args[0]
     values = dict(kwargs)
     values.update(dict(zip(("rcond", "hermitian"), args[1:], strict=False)))
@@ -547,24 +418,9 @@ def _qr_handler(
 ) -> ArrayFunctionResult:
     """Handle np.linalg.qr as a multi-output op, or a single-output qr_r op when mode='r'."""
     pos_mode = 1
-    max_qr_args = 2
-
-    if not args:
-        msg = "np.linalg.qr requires an input array"
-        raise ValueError(msg)
-
-    allowed_kwargs = frozenset({"mode"})
-    unsupported = set(kwargs) - allowed_kwargs
-    if unsupported:
-        msg = f"np.linalg.qr does not support kwargs during tracing: {sorted(unsupported)}"
-        raise TracingError(msg)
-    _reject_duplicate_positionals(args, kwargs, ("mode",), function="qr")
 
     a = args[0]
     mode = args[pos_mode] if len(args) > pos_mode else kwargs.get("mode", "reduced")
-    if len(args) > max_qr_args:
-        msg = "np.linalg.qr supports at most 2 positional arguments"
-        raise TypeError(msg)
 
     if mode is None:
         mode = "reduced"
@@ -608,21 +464,9 @@ def _eig_handler(
     graph: DynamicTape,
     traced_type: type[TracedArrayLike],
     args: tuple[Any, ...],
-    kwargs: dict[str, Any],
+    _kwargs: dict[str, Any],
 ) -> ArrayFunctionResult:
     """Handle np.linalg.eig as a multi-output op."""
-    max_eig_args = 1
-
-    if not args:
-        msg = "np.linalg.eig requires an input array"
-        raise ValueError(msg)
-    if kwargs:
-        msg = f"np.linalg.eig does not support kwargs during tracing: {sorted(kwargs)}"
-        raise TracingError(msg)
-    if len(args) > max_eig_args:
-        msg = "np.linalg.eig supports at most 1 positional argument"
-        raise TypeError(msg)
-
     a = args[0]
     result = np.linalg.eig(_get_value(a, traced_type))
     outputs = tuple(result)
@@ -646,22 +490,6 @@ def _eigh_handler(
 ) -> ArrayFunctionResult:
     """Handle np.linalg.eigh as a multi-output op."""
     pos_uplo = 1
-    max_eigh_args = 2
-    if not args:
-        msg = "np.linalg.eigh requires an input array"
-        raise ValueError(msg)
-
-    allowed_kwargs = frozenset({"UPLO"})
-    unsupported = set(kwargs) - allowed_kwargs
-    if unsupported:
-        msg = f"np.linalg.eigh does not support kwargs during tracing: {sorted(unsupported)}"
-        raise TracingError(msg)
-    _reject_duplicate_positionals(args, kwargs, ("UPLO",), function="eigh")
-
-    if len(args) > max_eigh_args:
-        msg = "np.linalg.eigh supports at most 2 positional arguments"
-        raise TypeError(msg)
-
     a = args[0]
     uplo = args[pos_uplo] if len(args) > pos_uplo else kwargs.get("UPLO", "L")
     uplo_raw = str(uplo)
@@ -691,20 +519,9 @@ def _eigvals_handler(
     graph: DynamicTape,
     traced_type: type[TracedArrayLike],
     args: tuple[Any, ...],
-    kwargs: dict[str, Any],
+    _kwargs: dict[str, Any],
 ) -> ArrayFunctionResult:
     """Handle np.linalg.eigvals as a single-output op."""
-    max_eigvals_args = 1
-    if not args:
-        msg = "np.linalg.eigvals requires an input array"
-        raise ValueError(msg)
-    if kwargs:
-        msg = f"np.linalg.eigvals does not support kwargs during tracing: {sorted(kwargs)}"
-        raise TracingError(msg)
-    if len(args) > max_eigvals_args:
-        msg = "np.linalg.eigvals supports at most 1 positional argument"
-        raise TypeError(msg)
-
     a = args[0]
     eigvals = np.linalg.eigvals(_get_value(a, traced_type))
     eigvals_shape, eigvals_dtype = _result_shape_and_dtype(eigvals)
@@ -728,22 +545,6 @@ def _eigvalsh_handler(
 ) -> ArrayFunctionResult:
     """Handle np.linalg.eigvalsh as a single-output op."""
     pos_uplo = 1
-    max_eigvalsh_args = 2
-    if not args:
-        msg = "np.linalg.eigvalsh requires an input array"
-        raise ValueError(msg)
-
-    allowed_kwargs = frozenset({"UPLO"})
-    unsupported = set(kwargs) - allowed_kwargs
-    if unsupported:
-        msg = f"np.linalg.eigvalsh does not support kwargs during tracing: {sorted(unsupported)}"
-        raise TracingError(msg)
-    _reject_duplicate_positionals(args, kwargs, ("UPLO",), function="eigvalsh")
-
-    if len(args) > max_eigvalsh_args:
-        msg = "np.linalg.eigvalsh supports at most 2 positional arguments"
-        raise TypeError(msg)
-
     a = args[0]
     uplo = args[pos_uplo] if len(args) > pos_uplo else kwargs.get("UPLO", "L")
     uplo_raw = str(uplo)
@@ -844,10 +645,10 @@ def _lstsq_handler(
         optional=("rcond",),
     )
     matrix, right = args[:2]
-    anchor = _first_traced((matrix, right), traced_type=traced_type)
-    if anchor is None:
-        msg = "numpy.linalg.lstsq requires a traced matrix or right-hand side"
-        raise TracingError(msg)
+    anchor = cast(
+        "TracedArrayLike",
+        _first_traced((matrix, right), traced_type=traced_type),
+    )
     if int(matrix.ndim) != _MATRIX_RANK:
         msg = "numpy.linalg.lstsq matrix must be two-dimensional"
         raise TracingError(msg)
@@ -944,19 +745,8 @@ def _cross_handler(
     kwargs: dict[str, Any],
 ) -> tuple[Any, int]:
     positional_names = ("axisa", "axisb", "axisc", "axis")
-    if len(args) < _BINARY_ARG_COUNT or len(args) > _BINARY_ARG_COUNT + len(positional_names):
-        msg = "numpy.cross expects (a, b, axisa=-1, axisb=-1, axisc=-1, axis=None)"
-        raise TracingError(msg)
-    unsupported = set(kwargs) - set(positional_names)
-    if unsupported:
-        msg = f"numpy.cross kwargs not supported during tracing: {sorted(unsupported)}"
-        raise TracingError(msg)
     values = dict(kwargs)
-    for name, value in zip(positional_names, args[_BINARY_ARG_COUNT:], strict=False):
-        if name in values:
-            msg = f"numpy.cross received {name} twice"
-            raise TracingError(msg)
-        values[name] = value
+    values.update(dict(zip(positional_names, args[_BINARY_ARG_COUNT:], strict=False)))
 
     a, b = args[:2]
     result = np.cross(_get_value(a, traced_type), _get_value(b, traced_type), **values)
@@ -987,23 +777,12 @@ def _tensordot_handler(
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
 ) -> tuple[Any, int]:
-    if len(args) < _BINARY_ARG_COUNT or len(args) > _TENSORDOT_MAX_ARGS:
-        msg = "numpy.tensordot expects (a, b, axes=...) during tracing"
-        raise TracingError(msg)
-    unsupported = set(kwargs) - {"axes"}
-    if unsupported:
-        msg = f"numpy.tensordot kwargs not supported during tracing: {sorted(unsupported)}"
-        raise TracingError(msg)
-
     a, b = args[0], args[1]
     axes = (
         args[_BINARY_ARG_COUNT]
         if len(args) == _TENSORDOT_MAX_ARGS
         else kwargs.get("axes", _TENSORDOT_DEFAULT_AXES)
     )
-    if len(args) == _TENSORDOT_MAX_ARGS and "axes" in kwargs:
-        msg = "numpy.tensordot received axes twice"
-        raise TracingError(msg)
     result = np.tensordot(_get_value(a, traced_type), _get_value(b, traced_type), axes=axes)
 
     attrs: dict[str, Any] = {}
@@ -1070,10 +849,7 @@ def _normalize_einsum_syntax(
     einsum_operands: tuple[Any, ...],
 ) -> str:
     try:
-        try:
-            einsum_module = importlib.import_module("numpy._core.einsumfunc")
-        except ModuleNotFoundError:
-            einsum_module = importlib.import_module("numpy.core.einsumfunc")
+        einsum_module = importlib.import_module("numpy._core.einsumfunc")
         parser_name = "_parse_einsum_input"
         parse_einsum_input = getattr(einsum_module, parser_name)
         in_subscripts, out_subscripts, _ = parse_einsum_input(einsum_operands)

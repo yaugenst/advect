@@ -41,10 +41,7 @@ _REPEAT_MIN_ARGS = 2
 _REPEAT_MAX_ARGS = 3
 _REPEAT_AXIS_POSITIONAL_ARGS = 3
 _TILE_NARGS = 2
-_RESHAPE_MAX_ARGS = 3
 _RESHAPE_ORDER_POSITION = 2
-_TRACE_MAX_ARGS = 6
-_DIFF_MAX_ARGS = 5
 
 
 def _reshape_handler(
@@ -54,13 +51,6 @@ def _reshape_handler(
     kwargs: dict[str, Any],
 ) -> tuple[Any, int]:
     """Handle reshape with backend compatibility (shape vs newshape)."""
-    if not args or len(args) > _RESHAPE_MAX_ARGS:
-        msg = "np.reshape expects (a, shape, order='C') during tracing"
-        raise TracingError(msg)
-    unsupported = set(kwargs) - {"copy", "newshape", "order", "shape"}
-    if unsupported:
-        msg = f"np.reshape kwargs not supported during tracing: {sorted(unsupported)}"
-        raise TracingError(msg)
     a = args[0]
 
     if len(args) > 1 and ("shape" in kwargs or "newshape" in kwargs):
@@ -74,9 +64,6 @@ def _reshape_handler(
         msg = "np.reshape requires a shape argument"
         raise ValueError(msg)
 
-    if len(args) > _RESHAPE_ORDER_POSITION and "order" in kwargs:
-        msg = "np.reshape received order twice"
-        raise TracingError(msg)
     order = (
         args[_RESHAPE_ORDER_POSITION]
         if len(args) > _RESHAPE_ORDER_POSITION
@@ -125,15 +112,6 @@ def _diag_handler(
     kwargs: dict[str, Any],
 ) -> tuple[Any, int]:
     """Handle ``np.diag`` with traced inputs."""
-    unsupported = set(kwargs) - {"k"}
-    if unsupported:
-        msg = f"{_op_name('diag')} kwargs not yet supported during tracing: {sorted(unsupported)}"
-        raise TracingError(msg)
-
-    if len(args) not in {1, _DIAG_MAX_ARGS}:
-        msg = f"{_op_name('diag')} expects one array argument and optional k during tracing"
-        raise TracingError(msg)
-
     a = args[0]
     k = kwargs.get("k", args[1] if len(args) == _DIAG_MAX_ARGS else 0)
     k_int = int(k)
@@ -162,22 +140,8 @@ def _trace_handler(
     kwargs: dict[str, Any],
 ) -> tuple[Any, int]:
     """Handle ``np.trace`` with explicit attr capture."""
-    unsupported = set(kwargs) - {"offset", "axis1", "axis2", "dtype", "out"}
-    if unsupported:
-        msg = f"{_op_name('trace')} kwargs not yet supported during tracing: {sorted(unsupported)}"
-        raise TracingError(msg)
-
-    if not args or len(args) > _TRACE_MAX_ARGS:
-        msg = f"{_op_name('trace')} expects (a, offset, axis1, axis2, dtype, out)"
-        raise TracingError(msg)
-
     positional_names = ("offset", "axis1", "axis2", "dtype", "out")
-    values = dict(kwargs)
-    for name, value in zip(positional_names, args[1:], strict=False):
-        if name in values:
-            msg = f"{_op_name('trace')} received {name} twice"
-            raise TracingError(msg)
-        values[name] = value
+    values = dict(zip(positional_names, args[1:], strict=False)) | kwargs
 
     if values.get("out") is not None:
         msg = f"{_op_name('trace')} out= is not supported during tracing"
@@ -218,28 +182,14 @@ def _trace_handler(
     return result, node_id
 
 
-def _diff_handler(  # noqa: PLR0912 - exact NumPy signature and operand modes
+def _diff_handler(
     graph: DynamicTape,
     traced_type: type[TracedArrayLike],
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
 ) -> tuple[Any, int]:
     """Handle ``np.diff`` with differentiable prepend/append operands."""
-    unsupported = set(kwargs) - {"n", "axis", "prepend", "append"}
-    if unsupported:
-        msg = f"{_op_name('diff')} kwargs not yet supported during tracing: {sorted(unsupported)}"
-        raise TracingError(msg)
-
-    if not args or len(args) > _DIFF_MAX_ARGS:
-        msg = f"{_op_name('diff')} expects (a, n, axis, prepend, append) during tracing"
-        raise TracingError(msg)
-
-    values = dict(kwargs)
-    for name, value in zip(("n", "axis", "prepend", "append"), args[1:], strict=False):
-        if name in values:
-            msg = f"{_op_name('diff')} received {name} twice"
-            raise TracingError(msg)
-        values[name] = value
+    values = dict(zip(("n", "axis", "prepend", "append"), args[1:], strict=False)) | kwargs
 
     n = int(values.get("n", 1))
     if n < 0:

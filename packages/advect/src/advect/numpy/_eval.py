@@ -3,7 +3,7 @@
 This module provides a registry-aligned evaluator that:
 1. Maps op names to NumPy functions dynamically
 2. Filters attrs to valid kwargs via signature inspection
-3. Uses special handlers for complex ops (reshape, getitem, setitem)
+3. Uses special handlers for complex ops
 
 The goal is to replace the hard-coded lambda table with a more maintainable
 data-driven approach that automatically handles new ops.
@@ -139,29 +139,6 @@ def _eval_arange(_inputs: tuple[np.ndarray, ...], attrs: dict[str, Any]) -> np.n
     if stop is None:
         return np.arange(start, **kwargs)
     return np.arange(start, stop, step, **kwargs)
-
-
-@_evaluator("advect.getitem")
-def _eval_getitem(inputs: tuple[np.ndarray, ...], attrs: dict[str, Any]) -> Any:
-    """Evaluate getitem with deserialized index."""
-    idx = attrs.get("index")
-    return _coerce_eval_result(inputs[0][idx])
-
-
-@_evaluator("advect.index_update")
-def _eval_index_update(inputs: tuple[np.ndarray, ...], attrs: dict[str, Any]) -> np.ndarray:
-    """Evaluate a pure functional basic-index update."""
-    result = inputs[0].copy()
-    idx = attrs.get("index")
-    mode = attrs.get("mode", "set")
-    if mode == "add":
-        result[idx] += inputs[1]
-    elif mode == "set":
-        result[idx] = inputs[1]
-    else:
-        msg = f"Unsupported index_update mode {mode!r}"
-        raise ValueError(msg)
-    return result
 
 
 @_evaluator("advect.copy")
