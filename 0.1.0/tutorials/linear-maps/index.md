@@ -22,7 +22,8 @@ def response(parameters):
 
 point = np.array([0.5, 2.0])
 direction = np.array([1.0, -0.25])
-value, tangent = ad.jvp(response)(point, tangents=direction)
+response_jvp = ad.jvp(response)
+value, tangent = response_jvp(point, tangents=direction)
 
 print("response:", value)
 print("J @ direction:", tangent)
@@ -36,7 +37,8 @@ This is forward mode. Its cost follows the number of directions, which makes it 
 
 ```python
 cotangent = np.array([2.0, -1.0])
-value, pullback = ad.vjp(response)(point)
+response_vjp = ad.vjp(response)
+value, pullback = response_vjp(point)
 input_cotangent = pullback(cotangent)
 
 print("J.T @ cotangent:", input_cotangent)

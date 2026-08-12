@@ -69,10 +69,11 @@ cotangent. Advect exposes both without first building a dense Jacobian.</p>
 </span><span id="__span-0-13"><a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>
 </span><span id="__span-0-14"><a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a><span class="n">point</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="mf">0.5</span><span class="p">,</span> <span class="mf">2.0</span><span class="p">])</span>
 </span><span id="__span-0-15"><a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a><span class="n">direction</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="mf">1.0</span><span class="p">,</span> <span class="o">-</span><span class="mf">0.25</span><span class="p">])</span>
-</span><span id="__span-0-16"><a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a><span class="n">value</span><span class="p">,</span> <span class="n">tangent</span> <span class="o">=</span> <span class="n">ad</span><span class="o">.</span><span class="n">jvp</span><span class="p">(</span><span class="n">response</span><span class="p">)(</span><span class="n">point</span><span class="p">,</span> <span class="n">tangents</span><span class="o">=</span><span class="n">direction</span><span class="p">)</span>
-</span><span id="__span-0-17"><a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a>
-</span><span id="__span-0-18"><a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a><span class="nb">print</span><span class="p">(</span><span class="s2">&quot;response:&quot;</span><span class="p">,</span> <span class="n">value</span><span class="p">)</span>
-</span><span id="__span-0-19"><a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a><span class="nb">print</span><span class="p">(</span><span class="s2">&quot;J @ direction:&quot;</span><span class="p">,</span> <span class="n">tangent</span><span class="p">)</span>
+</span><span id="__span-0-16"><a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a><span class="n">response_jvp</span> <span class="o">=</span> <span class="n">ad</span><span class="o">.</span><span class="n">jvp</span><span class="p">(</span><span class="n">response</span><span class="p">)</span>
+</span><span id="__span-0-17"><a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a><span class="n">value</span><span class="p">,</span> <span class="n">tangent</span> <span class="o">=</span> <span class="n">response_jvp</span><span class="p">(</span><span class="n">point</span><span class="p">,</span> <span class="n">tangents</span><span class="o">=</span><span class="n">direction</span><span class="p">)</span>
+</span><span id="__span-0-18"><a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a>
+</span><span id="__span-0-19"><a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a><span class="nb">print</span><span class="p">(</span><span class="s2">&quot;response:&quot;</span><span class="p">,</span> <span class="n">value</span><span class="p">)</span>
+</span><span id="__span-0-20"><a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a><span class="nb">print</span><span class="p">(</span><span class="s2">&quot;J @ direction:&quot;</span><span class="p">,</span> <span class="n">tangent</span><span class="p">)</span>
 </span></code></pre></div>
 <p>This is forward mode. Its cost follows the number of directions, which makes
 it natural when the input is small or only a few directional derivatives are
@@ -82,10 +83,11 @@ needed.</p>
 one-shot <a href="../../api/transforms/#advect.Pullback"><code>Pullback</code></a>. Applying the
 pullback computes <code>J.T @ cotangent</code>:</p>
 <div class="language-python run highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="n">cotangent</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="mf">2.0</span><span class="p">,</span> <span class="o">-</span><span class="mf">1.0</span><span class="p">])</span>
-</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="n">value</span><span class="p">,</span> <span class="n">pullback</span> <span class="o">=</span> <span class="n">ad</span><span class="o">.</span><span class="n">vjp</span><span class="p">(</span><span class="n">response</span><span class="p">)(</span><span class="n">point</span><span class="p">)</span>
-</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="n">input_cotangent</span> <span class="o">=</span> <span class="n">pullback</span><span class="p">(</span><span class="n">cotangent</span><span class="p">)</span>
-</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>
-</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="nb">print</span><span class="p">(</span><span class="s2">&quot;J.T @ cotangent:&quot;</span><span class="p">,</span> <span class="n">input_cotangent</span><span class="p">)</span>
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="n">response_vjp</span> <span class="o">=</span> <span class="n">ad</span><span class="o">.</span><span class="n">vjp</span><span class="p">(</span><span class="n">response</span><span class="p">)</span>
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="n">value</span><span class="p">,</span> <span class="n">pullback</span> <span class="o">=</span> <span class="n">response_vjp</span><span class="p">(</span><span class="n">point</span><span class="p">)</span>
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="n">input_cotangent</span> <span class="o">=</span> <span class="n">pullback</span><span class="p">(</span><span class="n">cotangent</span><span class="p">)</span>
+</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>
+</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="nb">print</span><span class="p">(</span><span class="s2">&quot;J.T @ cotangent:&quot;</span><span class="p">,</span> <span class="n">input_cotangent</span><span class="p">)</span>
 </span></code></pre></div>
 <p>The pullback owns this call's dynamic trace and releases it when consumed. Use
 it as a context manager, or call <code>close()</code>, if a path may decide not to apply
@@ -184,6 +186,7 @@ are limited to real inputs and outputs.</p>
 <div class="bar">
   <a href="../.." class="b" data-short="[1]" aria-current="true">[1:docs]</a>
   <a href="../../playground/" class="b" id="wsplay" data-short="[2]">[2:playground]</a>
+  <a href="https://github.com/yaugenst/advect" class="b" data-short="[git]">[git:source]</a>
   <span class="path hidesm">$ man advect/tutorials/linear-maps</span>
   <span class="grow"></span>
   <button class="tbtn" id="treebtn" data-short="[e]" aria-label="Toggle documentation tree">[e] tree</button>

@@ -29,7 +29,8 @@ def energy(x):
 
 
 x = np.array([0.0, 0.5, 1.0])
-value, gradient = ad.value_and_grad(energy)(x)
+energy_and_gradient = ad.value_and_grad(energy)
+value, gradient = energy_and_gradient(x)
 print(f"loss: {value:.6f}")
 print("gradient:", np.round(gradient, 6))
 ```

@@ -340,7 +340,8 @@ function renderPanes() {
   renderTree();
   renderReport();
   renderLegend();
-  document.getElementById("tapeToggle").textContent = `[ tape: ${state.tapeView} ]`;
+  document.getElementById("tapeToggle").textContent =
+    `[ view: ${state.tapeView === "live" ? "optimized" : "traced"} ]`;
   document.getElementById("dirToggle").textContent = `[ graph: ${state.direction} ]`;
 }
 
@@ -427,14 +428,16 @@ async function trace(source, narrated = true) {
     if (narrated) {
       narrateSource(source);
       narrate("df = ad.jvp(f)");
-      narrate("program = ad.stage(lambda x: df(x, tangents=np.asarray(1.0)), np.asarray(0.0))");
+      narrate("example_input = 0.0");
+      narrate("program = ad.stage(lambda x: df(x, tangents=1.0), example_input)");
       if (state.direction === "vjp") {
-        narrate("pullback = ad.vjp_program(ad.stage(f, np.asarray(0.0)))");
+        narrate("staged_f = ad.stage(f, example_input)");
+        narrate("pullback = ad.vjp_program(staged_f)");
       }
     }
     renderPanes();
     redraw();
-    narrateGradient(true);
+    if (narrated) narrateGradient(true);
     document.getElementById("bootmeta").innerHTML =
       `<b>advect ${esc(result.runtime.advect)}</b><br>Pyodide · NumPy ${esc(result.runtime.numpy)}<br>real Python API`;
     statboot.textContent = "Python · live";
@@ -451,7 +454,7 @@ function narrateGradient(force = false) {
   if (!Number.isFinite(state.lastDerivative)) return;
   if (!force && Math.abs(state.x0 - state.lastNarrated) < 0.01) return;
   state.lastNarrated = state.x0;
-  narrate(`program(np.asarray(${state.x0.toFixed(2)}))`);
+  narrate(`program(${state.x0.toFixed(2)})`);
   tline(`(${pyFloat(state.lastValue)}, ${pyFloat(state.lastDerivative)})`, "out acc");
 }
 
@@ -646,15 +649,18 @@ functionDef.addEventListener("scroll", () => {
 /* ---------------- pane [c] controls ---------------- */
 document.getElementById("tapeToggle").addEventListener("click", () => {
   state.tapeView = state.tapeView === "live" ? "traced" : "live";
-  if (state.tapeView === "traced") narrate("program.trace   # the tape before dce/simplify/cse");
+  if (state.tapeView === "traced") narrate("program.trace  # operations before optimization");
   renderPanes();
 });
 document.getElementById("dirToggle").addEventListener("click", () => {
   if (!traceInPython || state.loaded) return;
   state.direction = state.direction === "jvp" ? "vjp" : "jvp";
-  narrate(state.direction === "vjp"
-    ? "pullback = ad.vjp_program(ad.stage(f, np.asarray(0.0)))"
-    : "program = ad.stage(lambda x: df(x, tangents=np.asarray(1.0)), np.asarray(0.0))");
+  if (state.direction === "vjp") {
+    narrate("staged_f = ad.stage(f, example_input)");
+    narrate("pullback = ad.vjp_program(staged_f)");
+  } else {
+    narrate("program = ad.stage(lambda x: df(x, tangents=1.0), example_input)");
+  }
   trace(currentSource(), false);
 });
 document.getElementById("save").addEventListener("click", () => {
@@ -804,7 +810,7 @@ drawAxes();
     completionNames = JSON.parse(pyodide.globals.get("playground_names_json")());
     narrate("import advect as ad");
     narrate("import numpy as np");
-    tline("# values, derivatives, graphs, and traces below come from Advect in Pyodide", "cmt");
+    tline("# expression mode provides NumPy functions directly", "cmt");
     await trace(functionInput.value.trim());
     functionInput.disabled = false;
     statpos.hidden = false;

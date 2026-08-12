@@ -15,7 +15,8 @@ def loss(x):
 
 
 x = np.linspace(-0.5, 0.5, 8)
-gradient = ad.grad(loss)(x)
+loss_gradient = ad.grad(loss)
+gradient = loss_gradient(x)
 
 np.testing.assert_allclose(gradient, 2 * np.sin(x) * np.cos(x))
 print("gradient:", np.round(gradient, 6))
@@ -26,8 +27,10 @@ The transform traces the concrete call, runs reverse mode, and releases the trac
 Use [`value_and_grad`](https://yaugenst.github.io/advect/0.1.0/api/transforms/#advect.value_and_grad) when an optimizer needs the objective and gradient from the same evaluation:
 
 ```python
-value, gradient = ad.value_and_grad(loss)(x)
-updated = x - 0.1 * gradient
+loss_and_gradient = ad.value_and_grad(loss)
+value, gradient = loss_and_gradient(x)
+step_size = 0.1
+updated = x - step_size * gradient
 
 print(f"loss: {value:.6f}")
 print(f"loss after one step: {loss(updated):.6f}")
@@ -41,10 +44,11 @@ def loss_with_metrics(x):
     return value, {"maximum": np.max(np.abs(x)), "size": x.size}
 
 
-value, gradient, metrics = ad.value_and_grad(
+loss_and_gradient = ad.value_and_grad(
     loss_with_metrics,
     has_aux=True,
-)(x)
+)
+value, gradient, metrics = loss_and_gradient(x)
 print(f"loss: {value:.6f}; metrics: {metrics}")
 ```
 
@@ -65,11 +69,12 @@ def model_loss(params, inputs, *, scale):
     return scale * np.sum(prediction**2)
 
 
-(dparameters, dfeatures), named = ad.grad(
+model_gradient = ad.grad(
     model_loss,
     argnums=(0, 1),
     argnames=("scale",),
-)(parameters, features, scale=0.5)
+)
+(dparameters, dfeatures), named = model_gradient(parameters, features, scale=0.5)
 
 print("weight gradient:", dparameters["weight"])
 print("feature gradient:", dfeatures)

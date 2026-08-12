@@ -2,7 +2,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="description" content="Explore a real Advect value-and-gradient graph in the browser with Python and Pyodide.">
+<meta name="description" content="Differentiate and stage a NumPy expression in your browser, then inspect its graph.">
 <link rel="canonical" href="https://yaugenst.github.io/advect/0.1.0/playground/">
 <title>playground(1) · advect</title>
 <link rel="icon" href="../img/favicon.svg" type="image/svg+xml">
@@ -57,12 +57,12 @@ var base_url = "..";
         <span class="ptitle"><span class="pn">[b]</span> graph — hover links f(x) ↔ program · click to pin</span>
         <span class="ptitle pr"><button class="tbtn" id="dirToggle">[ graph: jvp ]</button></span>
         <div class="treewrap"><pre class="ctree" id="ctree"><span class="irplain dim"># loading Python — Pyodide, NumPy, and Advect download once…</span></pre></div>
-        <div class="pfoot"><span class="dim">↖ = this exact SSA node already appears above · hover any line to find its copies</span></div>
+        <div class="pfoot"><span class="dim">↖ = this operation already appears above · hover any line to find its copies</span></div>
       </section>
 
       <section class="pane pane-prog" aria-label="Staged program">
-        <span class="ptitle"><span class="pn">[c]</span> program — the staged derivative, as SSA</span>
-        <span class="ptitle pr"><button class="tbtn" id="tapeToggle">[ tape: live ]</button></span>
+        <span class="ptitle"><span class="pn">[c]</span> program — staged derivative</span>
+        <span class="ptitle pr"><button class="tbtn" id="tapeToggle">[ view: optimized ]</button></span>
         <div class="tapewrap"><pre class="tape" id="tape"><span class="irplain dim"># loading Python…</span></pre></div>
         <div class="pfoot" id="report"></div>
         <div class="pfoot" id="legend"></div>
@@ -118,6 +118,7 @@ var base_url = "..";
 <div class="bar">
   <a href=".." class="b" data-short="[1]">[1:docs]</a>
   <a href="./" class="b" id="wsplay" data-short="[2]" aria-current="true">[2:playground]</a>
+  <a href="https://github.com/yaugenst/advect" class="b" data-short="[git]">[git:source]</a>
   <span class="path hidesm">$ man advect/playground</span>
   <span class="grow"></span>
   <button class="tbtn" id="treebtn" data-short="[e]" aria-label="Toggle documentation tree">[e] tree</button>

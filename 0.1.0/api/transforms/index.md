@@ -83,8 +83,11 @@ Examples:
 ```pycon
 >>> import advect as ad
 >>> import numpy as np
+>>> def squared_norm(x):
+...     return np.sum(x**2)
 >>> x = np.array([1.0, 2.0, 3.0])
->>> ad.grad(lambda value: np.sum(value**2))(x).tolist()
+>>> gradient = ad.grad(squared_norm)
+>>> gradient(x).tolist()
 [2.0, 4.0, 6.0]
 ```
 
@@ -167,8 +170,11 @@ Examples:
 ```pycon
 >>> import advect as ad
 >>> import numpy as np
+>>> def squared_norm(x):
+...     return np.sum(x**2)
 >>> x = np.array([1.0, 2.0, 3.0])
->>> value, gradient = ad.value_and_grad(lambda v: np.sum(v**2))(x)
+>>> value_and_gradient = ad.value_and_grad(squared_norm)
+>>> value, gradient = value_and_gradient(x)
 >>> float(value), gradient.tolist()
 (14.0, [2.0, 4.0, 6.0])
 ```
@@ -208,7 +214,12 @@ Examples:
 ```pycon
 >>> import advect as ad
 >>> import numpy as np
->>> value, tangent = ad.jvp(lambda x: x**2)(np.array([1.0, 2.0]), tangents=np.ones(2))
+>>> def square(x):
+...     return x**2
+>>> x = np.array([1.0, 2.0])
+>>> direction = np.ones_like(x)
+>>> directional_derivative = ad.jvp(square)
+>>> value, tangent = directional_derivative(x, tangents=direction)
 >>> value.tolist(), tangent.tolist()
 ([1.0, 4.0], [2.0, 4.0])
 ```
