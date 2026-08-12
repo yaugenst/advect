@@ -94,6 +94,9 @@ jobs:
       - name: Check documentation search
         run: node scripts/check_docs_search.cjs
 
+      - name: Check documentation shell
+        run: node scripts/check_docs_shell.cjs
+
       - name: Configure git identity
         if: inputs.version != ''
         run: |

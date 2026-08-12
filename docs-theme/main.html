@@ -2,6 +2,7 @@
 {#- ---- man-page identity: NAME(section) + section label ---------------- -#}
 {%- set segs = page.url.rstrip("/").split("/") if page and page.url and page.url != "." else [] -%}
 {%- set top = segs[0] if segs else "" -%}
+{%- set is_playground = top == "playground" -%}
 {%- set mansec = "3" if top == "api" else ("7" if top in ("architecture", "compatibility") else "1") -%}
 {%- set seclabel = {"1": "User Commands", "3": "Library Calls", "7": "Miscellanea"}[mansec] -%}
 {%- set manname = (segs[-1] if segs else "advect") -%}
@@ -134,12 +135,18 @@ var base_url = "{{ base_url }}";
 <div class="overlay" id="help" role="dialog" aria-label="Keyboard shortcuts">
   <h3>Keys</h3>
   <table>
+    {% if is_playground %}
+    <tr><td class="kk">← →</td><td>move x₀</td></tr>
+    <tr><td class="kk">o / v</td><td>optimized / traced view · JVP / VJP</td></tr>
+    <tr><td class="kk">1</td><td>return to the docs</td></tr>
+    {% else %}
     <tr><td class="kk">j k d u g G</td><td>scroll the page</td></tr>
     <tr><td class="kk">n / p</td><td>next / previous page</td></tr>
     <tr><td class="kk">e</td><td>toggle the docs tree pane</td></tr>
     <tr><td class="kk">o</td><td>toggle the page outline</td></tr>
-    <tr><td class="kk">/</td><td>search the manual</td></tr>
     <tr><td class="kk">2</td><td>open the playground</td></tr>
+    {% endif %}
+    <tr><td class="kk">/</td><td>search the manual</td></tr>
     <tr><td class="kk">t</td><td>system → light → dark</td></tr>
     <tr><td class="kk">?</td><td>close this help</td></tr>
   </table>
