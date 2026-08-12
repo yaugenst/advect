@@ -22,6 +22,7 @@ const dump = (page) => execFileSync(chrome, [
   "--no-sandbox",
   "--disable-gpu",
   "--allow-file-access-from-files",
+  "--virtual-time-budget=1000",
   `--user-data-dir=${profile}`,
   "--dump-dom",
   pathToFileURL(page).href,
@@ -54,7 +55,11 @@ const check = `<script>
   check(docsLink.href === new URL("../", location.href).href, "docs target");
   check(help.textContent.includes("return to the docs"), "playground help");
   check(!help.textContent.includes("page outline"), "docs-only help hidden");
-  document.documentElement.dataset.advectShellCheck = failures.length ? failures.join("|") : "passed";
+  setTimeout(() => {
+    check(!document.getElementById("versionpicker").hidden, "version selector visible");
+    check(document.getElementById("versionselect").value === "0.1.1", "current version selected");
+    document.documentElement.dataset.advectShellCheck = failures.length ? failures.join("|") : "passed";
+  }, 0);
 })();
 </script>`;
 
@@ -62,6 +67,15 @@ let html = fs.readFileSync(playground, "utf8")
   .replace('<script src="../js/examples.js"></script>', "")
   .replace('<script src="../search/main.js"></script>', "")
   .replace('<script type="module" src="../js/playground.js"></script>', "")
+  .replace('<script src="../js/theme.js"></script>', `<script>
+    window.fetch = () => Promise.resolve({
+      json: () => Promise.resolve([
+        { version: "dev", title: "dev", aliases: [] },
+        { version: "0.1.0", title: "0.1.0", aliases: [] },
+        { version: "0.1.1", title: "0.1.1", aliases: ["site"] },
+      ]),
+    });
+  </script><script src="../js/theme.js"></script>`)
   .replace("</body>", `${check}\n</body>`);
 const navigationHtml = html
   .replace(check, '<script>document.dispatchEvent(new KeyboardEvent("keydown", { key: "1" }));</script>');
