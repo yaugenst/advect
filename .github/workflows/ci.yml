@@ -81,7 +81,7 @@ jobs:
         if: matrix.python-version == '3.12'
         run: >-
           uv run pytest packages/advect/tests/advect_conformance_tests
-          --hypothesis-profile=thorough
+          --hypothesis-profile=thorough -n auto --dist=worksteal
 
   numpy-compatibility:
     name: NumPy ${{ matrix.numpy-version }}

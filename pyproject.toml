@@ -60,6 +60,7 @@ dev = [
   "pre-commit>=4.5,<5",
   "pyrefly==1.2.0",
   "pytest>=9.0.3",
+  "pytest-xdist>=3.8,<4",
   "ruff==0.16.2",
   "scipy>=1.18,<2",
   "xarray>=2024.6",
