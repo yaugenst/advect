@@ -13,20 +13,6 @@ on:
         required: false
         type: string
         default: ""
-  workflow_dispatch:
-    inputs:
-      source_revision:
-        description: Immutable source commit to document; defaults to the triggering commit
-        required: false
-        type: string
-        default: ""
-      version:
-        description: Released version label to replace and publish with mike
-        required: true
-        type: string
-
-permissions:
-  contents: write
 
 concurrency:
   group: docs-${{ inputs.version != '' && 'deploy' || github.ref }}
