@@ -104,6 +104,17 @@ def test_torch_bridge_handles_an_unused_output_and_no_grad_calls() -> None:
     assert not result["used"].requires_grad
 
 
+def test_torch_bridge_returns_no_gradient_for_inputs_that_do_not_require_it() -> None:
+    bridged = wrap(lambda value, scale: np.sum(value * scale))
+    value = torch.tensor([1.0, 2.0], requires_grad=True)
+    scale = torch.tensor(3.0)
+
+    bridged(value, scale).backward()
+
+    torch.testing.assert_close(value.grad, torch.full_like(value, 3.0))
+    assert scale.grad is None
+
+
 def test_torch_bridge_pullback_is_one_shot() -> None:
     bridged = wrap(lambda value: np.sum(value * value))
     sample = torch.tensor([1.0, 2.0], requires_grad=True)
@@ -112,6 +123,33 @@ def test_torch_bridge_pullback_is_one_shot() -> None:
 
     with pytest.raises(RuntimeError, match="closed or consumed"):
         loss.backward()
+
+
+def test_torch_bridge_rejects_higher_order_differentiation() -> None:
+    bridged = wrap(lambda value: value * value)
+    sample = torch.tensor(2.0, requires_grad=True)
+    first_gradient = torch.autograd.grad(bridged(sample), sample, create_graph=True)[0]
+
+    assert not first_gradient.requires_grad
+    with pytest.raises(RuntimeError, match="does not require grad"):
+        torch.autograd.grad(first_gradient, sample)
+
+
+def test_torch_bridge_requires_at_least_one_input_tensor() -> None:
+    with pytest.raises(TypeError, match="must contain at least one tensor leaf"):
+        wrap(lambda: np.asarray(1.0))()
+
+
+def test_torch_bridge_rejects_nontensor_input_leaves() -> None:
+    with pytest.raises(TypeError, match=r"input leaf 0 is not a torch.Tensor"):
+        wrap(lambda value: value)(2.0)
+
+
+def test_torch_bridge_rejects_inputs_on_mixed_devices() -> None:
+    bridged = wrap(lambda left, right: left + right)
+
+    with pytest.raises(ValueError, match="must be on one device"):
+        bridged(torch.tensor(1.0), torch.ones((), device="meta"))
 
 
 def test_torch_bridge_rejects_integer_input_leaves() -> None:
@@ -126,3 +164,17 @@ def test_torch_bridge_rejects_dtypes_that_cannot_cross_numpy() -> None:
 
     with pytest.raises(TypeError, match="cannot cross the NumPy bridge"):
         bridged(sample)
+
+
+def test_torch_bridge_rejects_empty_output_pytrees() -> None:
+    bridged = wrap(lambda _value: ())
+
+    with pytest.raises(TypeError, match="must contain at least one NumPy floating or complex leaf"):
+        bridged(torch.tensor(1.0, requires_grad=True))
+
+
+def test_torch_bridge_rejects_numpy_output_dtypes_without_a_torch_dtype() -> None:
+    bridged = wrap(lambda value: value.astype(np.longdouble))
+
+    with pytest.raises(TypeError, match=r"can't convert np.ndarray of type"):
+        bridged(torch.tensor([1.0], requires_grad=True))

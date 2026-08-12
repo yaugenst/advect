@@ -38,6 +38,29 @@ def test_jax_bridge_requires_result_specs_when_staged() -> None:
         jax.jit(pullback)(jnp.asarray(1.0, dtype=jnp.float32))
 
 
+def test_jax_bridge_exposes_its_abstract_output_contract() -> None:
+    bridged = wrap(
+        lambda value: value * value,
+        result_shape_dtypes=jax.ShapeDtypeStruct((2,), np.float32),
+    )
+
+    result = jax.eval_shape(
+        bridged,
+        jax.ShapeDtypeStruct((2,), np.float32),
+    )
+
+    assert result.shape == (2,)
+    assert result.dtype == np.dtype(np.float32)
+
+
+def test_jax_bridge_rejects_host_forward_mode() -> None:
+    bridged = wrap(lambda value: np.sum(value * value))
+    sample = jnp.asarray([1.0, 2.0], dtype=jnp.float32)
+
+    with pytest.raises(TypeError, match="forward-mode autodiff"):
+        jax.jvp(bridged, (sample,), (jnp.ones_like(sample),))
+
+
 def test_jax_bridge_excludes_auxiliary_outputs_from_the_vjp() -> None:
     def operation(value):
         return np.sum(value * value), {
@@ -263,6 +286,35 @@ def test_jax_bridge_rejects_non_numpy_floating_dtypes() -> None:
         bridged(jnp.asarray([1.0, 2.0], dtype=jnp.bfloat16))
 
 
+@pytest.mark.parametrize(
+    ("result_shape_dtypes", "message"),
+    [
+        ({}, "must contain at least one output leaf"),
+        (object(), "must expose shape and dtype"),
+        (
+            jax.ShapeDtypeStruct((), np.int32),
+            "only NumPy floating and complex outputs",
+        ),
+    ],
+)
+def test_jax_bridge_validates_result_specs(result_shape_dtypes, message: str) -> None:
+    with pytest.raises(TypeError, match=message):
+        wrap(
+            lambda value: value,
+            result_shape_dtypes=result_shape_dtypes,
+        )
+
+
+def test_jax_bridge_requires_at_least_one_input_array() -> None:
+    with pytest.raises(TypeError, match="must contain at least one array leaf"):
+        wrap(lambda: np.asarray(1.0))()
+
+
+def test_jax_bridge_rejects_nonarray_input_leaves() -> None:
+    with pytest.raises(TypeError, match="input leaf 0 is not an array"):
+        wrap(lambda value: value)(2.0)
+
+
 def test_jax_bridge_rejects_integer_output_leaves_eagerly() -> None:
     bridged = wrap(lambda value: np.sum(value, dtype=np.int32))
     with pytest.raises(TypeError, match="only NumPy floating and complex"):
@@ -278,6 +330,19 @@ def test_jax_bridge_rejects_a_wrong_result_dtype() -> None:
     with pytest.raises(
         jax.errors.JaxRuntimeError,
         match=r"Incorrect output dtype.*Expected: complex64, Actual: float32",
+    ):
+        bridged(jnp.asarray([1.0], dtype=jnp.float32)).block_until_ready()
+
+
+def test_jax_bridge_rejects_a_wrong_result_shape() -> None:
+    bridged = wrap(
+        lambda value: np.sum(value),  # noqa: PLW0108 - bridge boundary
+        result_shape_dtypes=jax.ShapeDtypeStruct((2,), np.float32),
+    )
+
+    with pytest.raises(
+        jax.errors.JaxRuntimeError,
+        match=r"Incorrect output shape.*Expected: \(2,\), Actual: \(\)",
     ):
         bridged(jnp.asarray([1.0], dtype=jnp.float32)).block_until_ready()
 
