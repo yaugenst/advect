@@ -103,8 +103,17 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
+      - name: Deploy development documentation
+        if: inputs.version == 'dev'
+        env:
+          DOCS_VERSION: ${{ inputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh auth setup-git
+          uv run mike deploy --push "$DOCS_VERSION"
+
       - name: Deploy released documentation
-        if: inputs.version != ''
+        if: inputs.version != '' && inputs.version != 'dev'
         env:
           DOCS_VERSION: ${{ inputs.version }}
           GH_TOKEN: ${{ github.token }}

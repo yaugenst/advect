@@ -367,9 +367,19 @@ jobs:
 
   docs:
     name: Documentation
+    if: github.event_name == 'pull_request'
     uses: ./.github/workflows/docs.yml
     permissions:
       contents: read
+
+  dev-docs:
+    name: Development documentation
+    if: github.event_name == 'push'
+    uses: ./.github/workflows/docs.yml
+    with:
+      version: dev
+    permissions:
+      contents: write # the reusable docs workflow pushes gh-pages
 
   rust:
     name: Rust ${{ matrix.rust-version }}
@@ -449,6 +459,7 @@ jobs:
       - xarray-compatibility
       - optional-dependency-compatibility
       - docs
+      - dev-docs
       - rust
       - native-wheels
       - secrets
@@ -463,7 +474,7 @@ jobs:
           ARRAY_API_COMPAT_RESULT: ${{ needs.array-api-compatibility.result }}
           XARRAY_RESULT: ${{ needs.xarray-compatibility.result }}
           OPTIONAL_DEPENDENCIES_RESULT: ${{ needs.optional-dependency-compatibility.result }}
-          DOCS_RESULT: ${{ needs.docs.result }}
+          DOCS_RESULT: ${{ github.event_name == 'push' && needs.dev-docs.result || needs.docs.result }}
           RUST_RESULT: ${{ needs.rust.result }}
           WHEELS_RESULT: ${{ needs.native-wheels.result }}
           SECRETS_RESULT: ${{ needs.secrets.result }}
