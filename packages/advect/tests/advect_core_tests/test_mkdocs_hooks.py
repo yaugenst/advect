@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import runpy
 from typing import TYPE_CHECKING
 
 import pytest
@@ -67,3 +69,11 @@ def test_browser_wheel_is_required_only_when_requested(
     monkeypatch.setenv("ADVECT_REQUIRE_BROWSER_WHEEL", "1")
     with pytest.raises(FileNotFoundError, match="no browser wheel"):
         mkdocs_hooks._stage_browser_assets(tmp_path / "site")
+
+
+def test_playground_accepts_integer_plot_boundary() -> None:
+    runtime = runpy.run_path(str(mkdocs_hooks._ROOT / "docs-theme" / "playground_runtime.py"))
+
+    runtime["playground_trace_json"]("x")
+
+    assert json.loads(runtime["playground_evaluate_json"](4)) == [4.0, 1.0, 0.0]
