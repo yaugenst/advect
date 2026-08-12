@@ -688,18 +688,10 @@ def _insert_handler(
     source_markers = np.arange(int(array.size), dtype=np.int64).reshape(array_shape)
     inserted_markers = np.arange(int(inserted.size), dtype=np.int64).reshape(inserted_shape)
     try:
-        source_map = _numpy.insert(
-            source_markers,
-            obj,
-            np.full(inserted_shape, -1, dtype=np.int64),
-            axis=axis,
-        )
-        inserted_map = _numpy.insert(
-            np.full(array_shape, -1, dtype=np.int64),
-            obj,
-            inserted_markers,
-            axis=axis,
-        )
+        source_fill = _numpy.full_like(inserted_markers, -1)
+        inserted_fill = _numpy.full_like(source_markers, -1)
+        source_map = _numpy.insert(source_markers, obj, source_fill, axis=axis)
+        inserted_map = _numpy.insert(inserted_fill, obj, inserted_markers, axis=axis)
     except (IndexError, TypeError, ValueError) as exc:
         raise type(exc)(str(exc)) from exc
 
@@ -893,16 +885,10 @@ def _histogram_bin_edges_handler(
 
 
 def _histogram2d_bin_specs(bins: Any) -> tuple[object, object]:
-    if isinstance(bins, (tuple, list)) and len(bins) == _BINARY_ARITY:
-        return bins[0], bins[1]
     ndim = getattr(bins, "ndim", None)
-    if ndim is None:
-        ndim = np.ndim(bins)
-    if int(ndim) == 0:
-        return bins, bins
-    if not isinstance(bins, (tuple, list)) and int(ndim) == 1:
-        return bins, bins
-    return (bins[0], bins[1]) if int(ndim) == _BINARY_ARITY else (bins, bins)
+    paired = isinstance(bins, (tuple, list)) and len(bins) == _BINARY_ARITY
+    paired = paired or int(np.ndim(bins) if ndim is None else ndim) == _BINARY_ARITY
+    return (bins[0], bins[1]) if paired else (bins, bins)
 
 
 def _histogram2d_handler(

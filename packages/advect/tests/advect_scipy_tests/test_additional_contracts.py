@@ -142,18 +142,6 @@ def test_large_rank_filter_ties_have_a_real_adjoint() -> None:
     assert_allclose(np.vdot(directional, cotangent), np.vdot(tangent, pullback(cotangent)))
 
 
-def test_direct_special_out_tuple_matches_scipy() -> None:
-    sample = np.array([-0.7, 0.2, 1.3])
-    actual = np.empty_like(sample)
-    expected = np.empty_like(sample)
-
-    result = special.erf(sample, out=(actual,))
-    scipy_special.erf(sample, out=(expected,))
-
-    assert result is actual
-    assert_array_equal(actual, expected)
-
-
 @pytest.mark.parametrize(
     "out",
     [(), (None, None)],

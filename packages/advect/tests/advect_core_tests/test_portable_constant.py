@@ -12,6 +12,7 @@ import pytest
 
 from advect import _native_core as advect_native
 from advect.core._portable_constant import (
+    _constant_payload,
     iter_constant_values,
     portable_constant_from_payload,
     snapshot_constant_parts,
@@ -135,6 +136,16 @@ def test_portable_constant_validation_is_transactional() -> None:
     with pytest.raises(ValueError, match="require 8 bytes"):
         validate_constant(corrupt)
     assert validate_constant(payload) == payload
+
+
+def test_portable_constant_rejects_invalid_scalar_and_boolean_encodings() -> None:
+    scalar = snapshot_constant_parts(1, shape=(), dtype="int64")
+    with pytest.raises(ValueError, match="scalar constant must have rank zero"):
+        validate_constant({**_constant_payload(scalar), "shape": [1]})
+
+    boolean = snapshot_constant_parts([True], shape=(1,), dtype="bool")
+    with pytest.raises(ValueError, match="bytes must be zero or one"):
+        validate_constant({**_constant_payload(boolean), "data": "02"})
 
 
 def test_portable_constant_rejects_nonstandard_dtype() -> None:

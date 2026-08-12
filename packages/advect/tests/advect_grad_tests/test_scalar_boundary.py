@@ -341,6 +341,11 @@ def test_nonscalar_output_error_names_the_public_transform(transform_name: str) 
         transform(lambda value: np.stack((value, value)))(np.array(1.0))
 
 
+def test_grad_rejects_a_multi_leaf_output() -> None:
+    with pytest.raises(ValueError, match="output pytree has 2 leaves"):
+        ad.grad(lambda value: (value, value))(2.0)
+
+
 @pytest.mark.parametrize(
     "tangent",
     [

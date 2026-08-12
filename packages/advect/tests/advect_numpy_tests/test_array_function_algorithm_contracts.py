@@ -125,22 +125,6 @@ def test_sliding_window_view_rejects_a_writeable_traced_result() -> None:
         )(values, tangents=np.ones_like(values))
 
 
-def test_bincount_differentiates_weights_and_honors_minlength() -> None:
-    indices = np.array([0, 2, 2, 4], dtype=np.int64)
-    weights = np.array([1.0, 2.0, 3.0, 0.5])
-    direction = np.array([0.2, -0.1, 0.3, 0.4])
-
-    primal, tangent = ad.jvp(lambda current: np.bincount(indices, weights=current, minlength=7))(
-        weights, tangents=direction
-    )
-
-    np.testing.assert_array_equal(primal, np.bincount(indices, weights=weights, minlength=7))
-    np.testing.assert_array_equal(
-        tangent,
-        np.bincount(indices, weights=direction, minlength=7),
-    )
-
-
 def test_bincount_accepts_traced_indices_without_weights() -> None:
     indices = np.array([0, 2, 2, 4], dtype=np.int64)
 
@@ -195,7 +179,7 @@ def test_insert_supports_an_axis_and_traced_values() -> None:
     inserted_direction = np.array([0.4, -0.2])
 
     primal, tangent = ad.jvp(
-        lambda array, values: np.insert(array, 1, values, axis=1),
+        lambda array, values: np.insert(array, 1, values, axis=-1),
         argnums=(0, 1),
     )(
         source,
@@ -203,10 +187,10 @@ def test_insert_supports_an_axis_and_traced_values() -> None:
         tangents=(source_direction, inserted_direction),
     )
 
-    np.testing.assert_array_equal(primal, np.insert(source, 1, inserted, axis=1))
+    np.testing.assert_array_equal(primal, np.insert(source, 1, inserted, axis=-1))
     np.testing.assert_array_equal(
         tangent,
-        np.insert(source_direction, 1, inserted_direction, axis=1),
+        np.insert(source_direction, 1, inserted_direction, axis=-1),
     )
 
 

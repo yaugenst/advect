@@ -12,11 +12,6 @@ import advect as ad
 from advect.interop.autograd import wrap
 
 
-class _UnconvertibleOutput:
-    def __array__(self, *_args: object, **_kwargs: object) -> np.ndarray:
-        raise ValueError("intentional conversion failure")
-
-
 def test_autograd_bridge_preserves_pytree_outputs_and_multi_argument_gradients() -> None:
     calls = 0
 
@@ -152,9 +147,13 @@ def test_autograd_bridge_rejects_empty_output_pytrees_during_a_transform() -> No
         autograd.grad(wrap(lambda _value: ()))(2.0)
 
 
-def test_autograd_bridge_rejects_outputs_that_cannot_be_converted_to_numpy() -> None:
+def test_autograd_bridge_translates_failed_output_array_conversion() -> None:
+    class UnconvertibleOutput:
+        def __array__(self, *_args: object, **_kwargs: object) -> np.ndarray:
+            raise ValueError("intentional conversion failure")
+
     with pytest.raises(TypeError, match="is not a numeric array or scalar"):
-        wrap(lambda _value: _UnconvertibleOutput())(2.0)
+        wrap(lambda _value: UnconvertibleOutput())(2.0)
 
 
 def test_autograd_bridge_reuses_and_releases_the_exact_forward_linearization() -> None:

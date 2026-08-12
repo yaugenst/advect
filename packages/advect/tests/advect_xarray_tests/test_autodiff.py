@@ -95,7 +95,7 @@ def test_linearize_reuses_labeled_forward_and_reverse_map() -> None:
     xr.testing.assert_identical(input_cotangent, xr.full_like(field, 3.0))
 
 
-def test_dataset_gradient_differentiates_each_data_variable() -> None:
+def test_dataset_autodiff_preserves_each_data_variable() -> None:
     dataset = xr.Dataset(
         data_vars={
             "field": xr.DataArray(
@@ -123,8 +123,20 @@ def test_dataset_gradient_differentiates_each_data_variable() -> None:
             "weight": 2.0 * dataset["weight"].data,
         }
     )
-
     xr.testing.assert_identical(gradient, expected)
+
+    tangent = xr.ones_like(dataset)
+    output, output_tangent = ad.jvp(lambda value: 3.0 * value)(dataset, tangents=tangent)
+    primal, pullback = ad.vjp(lambda value: 3.0 * value)(dataset)
+    try:
+        input_cotangent = pullback(xr.ones_like(primal))
+    finally:
+        pullback.close()
+
+    xr.testing.assert_identical(output, 3.0 * dataset)
+    xr.testing.assert_identical(output_tangent, 3.0 * tangent)
+    xr.testing.assert_identical(primal, output)
+    xr.testing.assert_identical(input_cotangent, 3.0 * tangent)
 
 
 def test_xarray_alignment_runs_normally_inside_dynamic_trace() -> None:
@@ -170,7 +182,7 @@ def test_data_dependent_output_coordinates_are_rejected() -> None:
 
 def test_staging_rejects_xarray_until_custom_pytree_codecs_exist() -> None:
     with pytest.raises(TypeError, match="Stage the numerical leaves or raw-array kernel"):
-        ad.stage(lambda value: (value * value).sum(), specs=(_field(),))
+        ad.stage(lambda value: value + 1, xr.DataArray(np.asarray(2.0)))
 
 
 def test_stage_raw_data_and_reattach_labels_outside_program() -> None:

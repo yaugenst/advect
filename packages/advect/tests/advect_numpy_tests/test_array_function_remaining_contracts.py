@@ -237,53 +237,42 @@ def test_truth_reductions_honor_where_and_keepdims(operation: Callable[..., Any]
     np.testing.assert_array_equal(tangent, np.zeros_like(primal))
 
 
-def test_isclose_equal_nan_is_piecewise_constant() -> None:
+@pytest.mark.parametrize(
+    ("operation", "expected"),
+    [
+        (
+            lambda x: np.isclose(
+                x,
+                [np.nan, 2.0, 3.0],
+                1e-5,
+                1e-8,
+                True,  # noqa: FBT003 - exercise the positional signature
+            ),
+            [True, True, True],
+        ),
+        (lambda x: np.array_equal(x, np.ones((2, 2))), False),
+        (
+            lambda x: np.array_equal(
+                x,
+                [np.nan, 2.0, 3.0],
+                True,  # noqa: FBT003 - exercise the positional signature
+            ),
+            True,
+        ),
+        (lambda x: np.array_equiv(x, np.ones(4)), False),
+    ],
+    ids=("isclose-equal-nan", "array-equal-shape", "array-equal-nan", "array-equiv-shape"),
+)
+def test_comparison_options_are_piecewise_constant(
+    operation: Callable[[Any], Any],
+    expected: object,
+) -> None:
     value = np.array([np.nan, 2.0, 3.0])
 
-    primal, tangent = ad.jvp(
-        lambda x: np.isclose(
-            x,
-            value,
-            1e-5,
-            1e-8,
-            True,  # noqa: FBT003 - exercise NumPy's positional signature
-        )
-    )(value, tangents=np.ones_like(value))
+    primal, tangent = ad.jvp(operation)(value, tangents=np.ones_like(value))
 
-    np.testing.assert_array_equal(primal, [True, True, True])
+    np.testing.assert_array_equal(primal, expected)
     np.testing.assert_array_equal(tangent, np.zeros_like(primal))
-
-
-def test_array_equal_handles_shape_and_nan_options() -> None:
-    value = np.array([np.nan, 2.0, 3.0])
-
-    mismatched, mismatched_tangent = ad.jvp(lambda x: np.array_equal(x, np.ones((2, 2))))(
-        value, tangents=np.ones_like(value)
-    )
-    equal_nan, equal_nan_tangent = ad.jvp(
-        lambda x: np.array_equal(
-            x,
-            value,
-            True,  # noqa: FBT003 - exercise NumPy's positional signature
-        )
-    )(value, tangents=np.ones_like(value))
-
-    assert not mismatched
-    assert equal_nan
-    np.testing.assert_array_equal(mismatched_tangent, np.zeros((), dtype=bool))
-    np.testing.assert_array_equal(equal_nan_tangent, np.zeros((), dtype=bool))
-
-
-def test_array_equiv_returns_false_for_nonbroadcastable_shapes() -> None:
-    value = np.arange(3.0)
-
-    primal, tangent = ad.jvp(lambda x: np.array_equiv(x, np.ones(4)))(
-        value,
-        tangents=np.ones_like(value),
-    )
-
-    assert not primal
-    np.testing.assert_array_equal(tangent, np.zeros((), dtype=bool))
 
 
 def test_signal_operations_reject_an_invalid_mode() -> None:

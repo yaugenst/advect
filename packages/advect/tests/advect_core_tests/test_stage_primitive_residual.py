@@ -12,6 +12,8 @@ import advect as ad
 from advect.core._backends import dispatch_input
 from advect.core._context import _set_active_recorder
 from advect.core._native import DynamicTape, dynamic_vjp
+from advect.core._primitive_call import _attach_residual
+from advect.core._residual import _PrimitiveExecution, _ResidualSlot
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -151,6 +153,22 @@ def test_invalid_primitive_output_releases_unattached_residual() -> None:
         traced = dispatch_input(np.array(2.0))
         with pytest.raises(TypeError, match="invalid output"):
             primitive(traced)
+
+    assert released == [token]
+
+
+def test_residual_is_released_when_tape_attachment_fails() -> None:
+    released: list[object] = []
+    token = object()
+    execution = _PrimitiveExecution(token, _ResidualSlot(token, released.append))
+
+    class FailingRecorder:
+        @staticmethod
+        def record_residual(_node_id: int, _residual: object) -> None:
+            raise RuntimeError("recording failed")
+
+    with pytest.raises(RuntimeError, match="recording failed"):
+        _attach_residual(FailingRecorder(), 1, execution)  # type: ignore[arg-type]
 
     assert released == [token]
 

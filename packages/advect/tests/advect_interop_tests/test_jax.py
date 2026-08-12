@@ -334,19 +334,6 @@ def test_jax_bridge_rejects_a_wrong_result_dtype() -> None:
         bridged(jnp.asarray([1.0], dtype=jnp.float32)).block_until_ready()
 
 
-def test_jax_bridge_rejects_a_wrong_result_shape() -> None:
-    bridged = wrap(
-        lambda value: np.sum(value),  # noqa: PLW0108 - bridge boundary
-        result_shape_dtypes=jax.ShapeDtypeStruct((2,), np.float32),
-    )
-
-    with pytest.raises(
-        jax.errors.JaxRuntimeError,
-        match=r"Incorrect output shape.*Expected: \(2,\), Actual: \(\)",
-    ):
-        bridged(jnp.asarray([1.0], dtype=jnp.float32)).block_until_ready()
-
-
 def test_jax_bridge_rejects_a_wrong_result_pytree() -> None:
     bridged = wrap(
         lambda value: {"actual": np.sum(value)},

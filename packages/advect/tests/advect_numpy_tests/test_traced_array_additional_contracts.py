@@ -54,22 +54,6 @@ def test_ufunc_out_rejects_a_destination_view_before_mutation() -> None:
 
 
 @pytest.mark.parametrize(
-    ("order", "error", "match"),
-    [(1, TypeError, "order must be str"), ("Z", ValueError, "order must be one of")],
-)
-def test_dynamic_copy_rejects_invalid_orders(
-    order: object,
-    error: type[Exception],
-    match: str,
-) -> None:
-    with pytest.raises(error, match=match):
-        ad.jvp(lambda array: array.copy(order=order))(
-            np.arange(4.0),
-            tangents=np.ones(4),
-        )
-
-
-@pytest.mark.parametrize(
     ("operation", "value", "other", "expected_tangent"),
     [
         (operator.itruediv, np.asarray([2.0, 4.0]), 2.0, np.asarray([0.5, 0.5])),

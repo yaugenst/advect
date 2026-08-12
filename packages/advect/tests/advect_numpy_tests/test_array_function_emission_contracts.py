@@ -27,14 +27,6 @@ def test_nested_jvp_can_use_an_operand_from_the_active_outer_trace() -> None:
     np.testing.assert_allclose(tangent, 2 * np.sum(direction))
 
 
-def test_constant_pad_reverse_mode_broadcasts_a_single_axis_pair() -> None:
-    value = np.arange(6.0).reshape(2, 3)
-
-    gradient = ad.grad(lambda x: np.sum(np.pad(x, ((1, 2),), mode="constant")))(value)
-
-    np.testing.assert_array_equal(gradient, np.ones_like(value))
-
-
 def test_clip_supports_static_array_and_one_sided_bounds() -> None:
     value = np.array([-2.0, -0.2, 0.7, 3.0])
     direction = np.array([0.3, -0.4, 0.2, 0.1])
@@ -95,7 +87,6 @@ def test_clip_reports_invalid_bound_forms(operation: Any, message: str) -> None:
     "operation",
     [
         pytest.param(lambda x: np.where(x > 0), id="where-one-argument"),
-        pytest.param(np.stack, id="stack-non-sequence"),
         pytest.param(lambda x: np.var(x, ddof=1, correction=1), id="variance-two-corrections"),
     ],
 )

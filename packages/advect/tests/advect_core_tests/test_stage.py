@@ -144,6 +144,23 @@ def test_stage_reports_captured_constants() -> None:
     assert len(records[0].digest) == 64
 
 
+def test_stage_snapshots_bound_method_state() -> None:
+    class Model:
+        offset = np.array([1.0, 2.0], dtype=np.float32)
+
+        def apply(self, value: object) -> object:
+            return value + self.offset
+
+    model = Model()
+    program = ad.stage(model.apply, specs=(ad.ArraySpec((2,), "float32"),))
+    model.offset[:] = 0
+
+    np.testing.assert_array_equal(
+        program(np.array([3.0, 4.0], dtype=np.float32)),
+        [4.0, 6.0],
+    )
+
+
 def test_stage_optimizes_once_and_reports_remapped_graph() -> None:
     def redundant(x: object) -> object:
         left = x + 1

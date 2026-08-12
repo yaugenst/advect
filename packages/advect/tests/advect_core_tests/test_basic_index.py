@@ -45,3 +45,52 @@ def test_boolean_scalar_index_is_rejected_at_the_canonical_boundary() -> None:
 
     with pytest.raises(TracingError, match="Boolean scalar indexing"):
         index_to_attrs((True,))
+
+
+@pytest.mark.parametrize(
+    ("payload", "match"),
+    [
+        ({"type": "int", "value": True}, "integer index"),
+        ({"type": "slice", "start": None, "stop": None}, "slice index"),
+        (
+            {"type": "slice", "start": "0", "stop": None, "step": None},
+            "slice bounds",
+        ),
+        ({"type": "newaxis", "extra": None}, "new-axis index"),
+        ({"type": "ellipsis", "extra": None}, "ellipsis index"),
+        ({"type": "unknown"}, "Unknown serialized index component"),
+        (
+            {"type": "array", "dtype": "int64", "shape": [2]},
+            "Invalid serialized array index",
+        ),
+        (
+            {"type": "array", "dtype": 1, "shape": [2], "values": [0, 1]},
+            "dtype must be a string",
+        ),
+        (
+            {"type": "array", "dtype": "int64", "shape": "2", "values": [0, 1]},
+            "shape must be a sequence",
+        ),
+        (
+            {"type": "array", "dtype": "int64", "shape": [-1], "values": []},
+            "dimensions must be nonnegative integers",
+        ),
+        (
+            {"type": "array", "dtype": "int64", "shape": [2], "values": [0, 1]},
+            "Array indices are not supported",
+        ),
+        ([{"type": "ellipsis"}, {"type": "ellipsis"}], "at most one ellipsis"),
+        (object(), "Invalid serialized index component object"),
+    ],
+)
+def test_serialized_index_validation_rejects_malformed_components(
+    payload: object,
+    match: str,
+) -> None:
+    with pytest.raises(TypeError, match=match):
+        decode_index(payload)
+
+
+def test_staged_basic_index_validation_requires_a_sequence() -> None:
+    with pytest.raises(TypeError, match="metadata must be a sequence"):
+        decode_basic_index({"type": "int", "value": 1})

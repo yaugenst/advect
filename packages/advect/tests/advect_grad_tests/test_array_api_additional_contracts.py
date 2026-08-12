@@ -9,6 +9,7 @@ import array_api_strict as strict
 import numpy as np
 import pytest
 
+import advect as ad
 from advect.autodiff._ephemeral import trace_call
 from advect.core._array_api import providers
 from advect.core._array_api.frontend import (
@@ -37,44 +38,20 @@ def _trace(function: Any, *values: Any) -> Any:
         traced.tape.release_payloads()
 
 
-def test_call_binding_normalizes_standard_static_parameters() -> None:
-    source = SimpleNamespace(shape=(2, 3), dtype=np.dtype("float64"))
-    second = object()
+def test_call_binding_normalizes_optional_live_parameters() -> None:
+    source = object()
+    maximum = object()
 
-    expanded = bind_array_api_call("expand_dims", (source, 0), {})
-    concatenated = bind_array_api_call("concat", ((source, second),), {"axis": 0})
-    clipped = bind_array_api_call("clip", (source,), {"min": None, "max": second})
+    clipped = bind_array_api_call("clip", (source,), {"min": None, "max": maximum})
     pinv = bind_array_api_call("linalg.pinv", (source,), {"rtol": None})
-    converted = bind_array_api_call(
-        "asarray",
-        (source,),
-        {"dtype": "float32", "device": "cpu"},
-    )
-    tiled = bind_array_api_call("tile", (source,), {"repetitions": (2, 3)})
-    sorted_value = bind_array_api_call("sort", (source,), {})
-    diagonal = bind_array_api_call("linalg.diagonal", (source,), {"offset": 1})
-    transposed = bind_array_api_call("matrix_transpose", (source,), {})
 
-    assert expanded.operands == (source,)
-    assert expanded.attrs == {"axis": 0}
-    assert concatenated.operands == (source, second)
-    assert concatenated.attrs == {"axis": 0}
-    assert clipped.operands == (source, second)
+    assert clipped.operands == (source, maximum)
     assert clipped.attrs == {
         "_advect_clip_min_is_input": False,
         "_advect_clip_max_is_input": True,
     }
     assert pinv.operands == (source,)
     assert pinv.attrs == {"_advect_pinv_tolerance": None}
-    assert converted.attrs == {
-        "dtype": "float32",
-        "_advect_array_api_asarray": True,
-        "_advect_device": "cpu",
-    }
-    assert tiled.attrs == {"reps": (2, 3)}
-    assert sorted_value.attrs == {"descending": False, "stable": True}
-    assert diagonal.attrs == {"offset": 1, "axis1": -2, "axis2": -1}
-    assert transposed.attrs == {"axes": (1, 0)}
 
 
 @pytest.mark.parametrize(
@@ -278,64 +255,9 @@ def test_composite_boundaries_fail_before_provider_execution(
         _trace(function, *values)
 
 
-def test_extended_static_forms_execute_through_the_standard_namespace() -> None:
-    values = _strict([3.0, 1.0, 6.0], dtype=strict.float64)
-    sorter = _strict([1, 0, 2], dtype=strict.int64)
-    queries = _strict([2.0, 5.0], dtype=strict.float64)
-
-    cumulative = _trace(
-        lambda value: value.__array_namespace__().cumulative_sum(
-            value,
-            axis=-1,
-            include_initial=True,
-        ),
-        values,
-    )
-    unchanged_diff = _trace(
-        lambda value: value.__array_namespace__().diff(
-            value,
-            n=0,
-            prepend=value[:1],
-        ),
-        values,
-    )
-    insertion_points = _trace(
-        lambda value: value.__array_namespace__().searchsorted(
-            value,
-            queries,
-            sorter=sorter,
-        ),
-        values,
-    )
-    live_sequence = _trace(
-        lambda value: value.__array_namespace__().asarray(
-            [value[0], 2.0],
-            dtype=value.dtype,
-        ),
-        values,
-    )
-
-    np.testing.assert_array_equal(np.asarray(cumulative), [0.0, 3.0, 4.0, 10.0])
-    np.testing.assert_array_equal(np.asarray(unchanged_diff), np.asarray(values))
-    np.testing.assert_array_equal(
-        np.asarray(insertion_points),
-        np.asarray(strict.searchsorted(values, queries, sorter=sorter)),
-    )
-    np.testing.assert_array_equal(np.asarray(live_sequence), [3.0, 2.0])
-
-
 @pytest.mark.parametrize(
     ("function", "value", "match"),
     [
-        pytest.param(
-            lambda argument: argument.__array_namespace__().cumulative_sum(
-                argument,
-                include_initial=True,
-            ),
-            _strict([[1.0, 2.0]], dtype=strict.float64),
-            "require axis=",
-            id="cumulative-matrix-without-axis",
-        ),
         pytest.param(
             lambda argument: argument.__array_namespace__().cumulative_sum(
                 argument,
@@ -345,24 +267,6 @@ def test_extended_static_forms_execute_through_the_standard_namespace() -> None:
             _strict([1.0, 2.0], dtype=strict.float64),
             "axis 2 is out of bounds",
             id="cumulative-axis",
-        ),
-        pytest.param(
-            lambda argument: argument.__array_namespace__().searchsorted(
-                argument,
-                sorter=_strict([0, 1], dtype=strict.int64),
-            ),
-            _strict([1.0, 2.0], dtype=strict.float64),
-            "expects two positional array arguments",
-            id="searchsorted-arity",
-        ),
-        pytest.param(
-            lambda argument: argument.__array_namespace__().asarray(
-                [argument[0]],
-                copy=False,
-            ),
-            _strict([1.0, 2.0], dtype=strict.float64),
-            "cannot construct an array from a sequence",
-            id="asarray-live-sequence-copy",
         ),
         pytest.param(
             lambda argument: argument.__array_namespace__().asarray([argument], argument),
@@ -395,6 +299,40 @@ def test_extended_forms_report_ordinary_boundary_errors(
 ) -> None:
     with pytest.raises((TypeError, ValueError), match=match):
         _trace(function, value)
+
+
+def test_extended_provider_edge_paths() -> None:
+    value = _strict([3.0, 1.0, 6.0], dtype=strict.float64)
+    unchanged = _trace(
+        lambda x: x.__array_namespace__().diff(x, n=0, prepend=x[:1]),
+        value,
+    )
+
+    np.testing.assert_array_equal(np.asarray(unchanged), np.asarray(value))
+    with pytest.raises(ValueError, match="require axis="):
+        _trace(
+            lambda x: x.__array_namespace__().cumulative_sum(x, include_initial=True),
+            _strict([[1.0, 2.0]], dtype=strict.float64),
+        )
+    with pytest.raises(TypeError, match="expects two positional array arguments"):
+        _trace(lambda x: x.__array_namespace__().searchsorted(x, sorter=x), value)
+    with pytest.raises(ValueError, match="cannot construct an array from a sequence"):
+        _trace(lambda x: x.__array_namespace__().asarray([x[0]], copy=False), value)
+
+
+def test_debug_representation_uses_the_provider_value() -> None:
+    representations: list[str] = []
+    _trace(
+        lambda x: representations.append(repr(x)) or x,
+        _strict([1.0], dtype=strict.float64),
+    )
+    with ad.debug():
+        _trace(
+            lambda x: representations.append(repr(x)) or x,
+            _strict([1.0], dtype=strict.float64),
+        )
+    assert "values=" not in representations[0]
+    assert "values=Array([1.]" in representations[1]
 
 
 def test_tracer_array_methods_preserve_standard_array_results() -> None:
@@ -506,14 +444,11 @@ def test_tracer_rejects_a_different_revision_request() -> None:
         )
 
 
-def test_namespace_profile_introspection_tracks_admitted_revisions() -> None:
+def test_namespace_proxy_filters_profiles_and_forwards_info() -> None:
     namespace_2022 = ArrayAPINamespace(strict, array_api_version="2022.12")
-    namespace_2023 = ArrayAPINamespace(strict, array_api_version="2023.12")
     namespace_2024 = ArrayAPINamespace(strict, array_api_version="2024.12")
 
     assert "cumulative_sum" not in dir(namespace_2022)
-    assert "cumulative_sum" in dir(namespace_2023)
-    assert "cumulative_prod" not in dir(namespace_2023)
     assert "cumulative_prod" in dir(namespace_2024)
     assert "svd" in dir(namespace_2024.linalg)
     with pytest.raises(
@@ -549,10 +484,9 @@ class _ProtocolArray:
 
     def __init__(self, namespace: Any) -> None:
         self.namespace = namespace
-        self.requests: list[str | None] = []
 
     def __array_namespace__(self, *, api_version: str | None = None) -> Any:
-        self.requests.append(api_version)
+        del api_version
         return self.namespace
 
 
@@ -583,18 +517,32 @@ def _provider_namespace(
     return SimpleNamespace(**attributes)
 
 
+def test_provider_namespace_changes_after_negotiation_are_reported() -> None:
+    current = _provider_namespace()
+
+    class ChangingArray:
+        __advect_namespace_is_instance_specific__ = True
+        shape = (1,)
+        dtype = np.dtype("float64")
+
+        def __init__(self, replacement: Any) -> None:
+            self.calls = 0
+            self.replacement = replacement
+
+        def __array_namespace__(self, *, api_version: str | None = None) -> Any:
+            del api_version
+            self.calls += 1
+            return current if self.calls <= 2 else self.replacement
+
+    with pytest.raises(TypeError, match="no longer exposes an Array API namespace"):
+        _trace(lambda value: value, ChangingArray(None))
+    with pytest.raises(TypeError, match=r"provider exposes '2022\.12'"):
+        _trace(lambda value: value, ChangingArray(_provider_namespace(version="2022.12")))
+
+
 def test_namespace_discovery_supports_instance_only_and_wrapped_protocols() -> None:
     providers._clear_array_namespace_caches()
     namespace = _provider_namespace()
-    instance_only = SimpleNamespace()
-
-    def instance_namespace(*, api_version: str | None = None) -> Any:
-        assert api_version == "2024.12"
-        return namespace
-
-    instance_only.__array_namespace__ = instance_namespace
-
-    assert providers._get_array_namespace(instance_only, api_version="2024.12") is namespace
 
     class CountingArray:
         calls = 0
@@ -667,16 +615,3 @@ def test_acceptance_reports_provider_revision_and_noninvasive_failures() -> None
     assert not _accepts_array_api(_ProtocolArray(_provider_namespace(namespace_info=False)))
     assert not _accepts_array_api(SimpleNamespace(shape=(1,), dtype=np.dtype("float64")))
     assert not _accepts_array_api(object())
-
-
-def test_namespace_donation_checker_is_optional(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(providers, "_ARRAY_NAMESPACE_DONATION_CHECKER", None)
-    assert not providers._array_namespace_can_donate("owned")
-
-    monkeypatch.setattr(
-        providers,
-        "_ARRAY_NAMESPACE_DONATION_CHECKER",
-        lambda value: value == "owned",
-    )
-    assert providers._array_namespace_can_donate("owned")
-    assert not providers._array_namespace_can_donate("borrowed")

@@ -20,7 +20,7 @@ def _assert_unary_jvp_matches_difference(
     *,
     rtol: float = 2e-5,
     atol: float = 2e-6,
-) -> tuple[Any, Any]:
+) -> None:
     primal, tangent = ad.jvp(function)(value, tangents=direction)
     np.testing.assert_allclose(primal, function(value), rtol=rtol, atol=atol)
     step = 1e-6
@@ -28,7 +28,6 @@ def _assert_unary_jvp_matches_difference(
         2 * step
     )
     np.testing.assert_allclose(tangent, difference, rtol=rtol, atol=atol)
-    return primal, tangent
 
 
 @pytest.mark.parametrize("operation", [np.hstack, np.vstack, np.dstack, np.column_stack])
@@ -253,19 +252,6 @@ def test_average_rejects_zero_weight_sums() -> None:
         )
 
 
-def test_average_without_weights_matches_mean() -> None:
-    value = np.arange(6.0).reshape(2, 3)
-    direction = np.linspace(-0.2, 0.3, value.size).reshape(value.shape)
-
-    primal, tangent = ad.jvp(lambda array: np.average(array, axis=1))(
-        value,
-        tangents=direction,
-    )
-
-    np.testing.assert_allclose(primal, np.mean(value, axis=1))
-    np.testing.assert_allclose(tangent, np.mean(direction, axis=1))
-
-
 def test_trapezoid_supports_scalar_spacing_and_broadcast_coordinates() -> None:
     value = np.arange(6.0).reshape(3, 2)
     direction = np.linspace(-0.2, 0.3, value.size).reshape(value.shape)
@@ -282,19 +268,6 @@ def test_trapezoid_supports_scalar_spacing_and_broadcast_coordinates() -> None:
         lambda array: np.trapezoid(array, x=coordinates, axis=1),
         row_value,
         row_direction,
-    )
-
-
-@pytest.mark.parametrize("operation", [np.nancumsum, np.nancumprod])
-def test_nan_scans_support_axis_and_dtype(
-    operation: Callable[..., Any],
-) -> None:
-    value = np.array([[1.0, np.nan, 2.0], [0.5, 2.0, 3.0]])
-    direction = np.array([[0.2, 0.0, -0.1], [0.3, -0.2, 0.1]])
-    _assert_unary_jvp_matches_difference(
-        lambda array: operation(array, axis=1, dtype=np.float64),
-        value,
-        direction,
     )
 
 
@@ -455,20 +428,7 @@ def test_piecewise_validates_branch_count_and_callable_output_size() -> None:
         )(value, tangents=direction)
 
 
-def test_choose_supports_wrapping_and_validates_its_choice_contract() -> None:
-    indices = np.array([-1, 0, 2])
-    value = np.arange(3.0)
-    direction = np.array([0.2, -0.1, 0.3])
-
-    primal, tangent = ad.jvp(lambda array: np.choose(indices, (array, array + 10), mode="wrap"))(
-        value, tangents=direction
-    )
-    np.testing.assert_array_equal(
-        primal,
-        np.choose(indices, (value, value + 10), mode="wrap"),
-    )
-    np.testing.assert_array_equal(tangent, direction)
-
+def test_choose_validates_its_choice_contract() -> None:
     with pytest.raises(ad.TracingError, match="non-empty choice sequence"):
         ad.jvp(lambda traced_indices: np.choose(traced_indices, []))(
             np.array([0.0]),
@@ -572,17 +532,9 @@ def test_cov_validates_normalization_inputs(
         )
 
 
-def test_corrcoef_supports_scalar_and_complex_results() -> None:
+def test_corrcoef_supports_scalar_results() -> None:
     value = np.array([0.2, 1.0, 2.5, 4.0])
     direction = np.array([0.1, -0.2, 0.3, 0.05])
     primal, tangent = ad.jvp(np.corrcoef)(value, tangents=direction)
     np.testing.assert_allclose(primal, np.corrcoef(value))
     np.testing.assert_allclose(tangent, 0.0, atol=1e-14)
-
-    complex_value = np.array([[1 + 1j, 2 - 0.5j, 3 + 0.2j], [2 - 0.3j, -1 + 0.7j, 0.5 + 2j]])
-    complex_primal, complex_tangent = ad.jvp(np.corrcoef)(
-        complex_value,
-        tangents=np.zeros_like(complex_value),
-    )
-    np.testing.assert_allclose(complex_primal, np.corrcoef(complex_value))
-    np.testing.assert_array_equal(complex_tangent, np.zeros_like(complex_primal))

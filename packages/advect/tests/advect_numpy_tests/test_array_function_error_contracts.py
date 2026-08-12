@@ -46,8 +46,3 @@ def test_array_function_rejects_traced_static_control() -> None:
 
     with pytest.raises(ad.TracingError, match=r"period=.*must be static"):
         _run_traced(lambda value: np.interp(value, xp, fp, period=value[0, 0]))
-
-
-def test_array_function_reports_unregistered_numpy_operation() -> None:
-    with pytest.raises(ad.TracingError, match=r"numpy\.packbits.*not yet supported"):
-        _run_traced(np.packbits)

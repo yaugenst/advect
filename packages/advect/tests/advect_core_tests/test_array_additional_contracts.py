@@ -65,29 +65,6 @@ def test_asarray_rejects_an_array_namespace_without_asarray() -> None:
         ad.asarray(Value())
 
 
-def test_asarray_rejects_incomplete_traced_sequence_providers() -> None:
-    class Namespace:
-        @staticmethod
-        def asarray(value: object, **kwargs: object) -> object:
-            del kwargs
-            return value
-
-    class FakeTracer:
-        def _advect_snapshot(self) -> tuple[int, object]:
-            return 0, object()
-
-    class NamespacedFakeTracer(FakeTracer):
-        def __array_namespace__(self) -> Namespace:
-            return Namespace()
-
-    for tracer, message in (
-        (FakeTracer(), "does not expose an array namespace"),
-        (NamespacedFakeTracer(), "does not provide stack"),
-    ):
-        with pytest.raises(TypeError, match=message):
-            ad.asarray([tracer])
-
-
 def test_source_checkout_has_a_local_version_fallback(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

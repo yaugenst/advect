@@ -19,628 +19,376 @@ def _array_spec(shape: tuple[int, ...], dtype: str = "float32") -> ad.ArraySpec:
     return ad.ArraySpec(shape, dtype)
 
 
+def _case(
+    operation: Callable[..., object],
+    shapes: tuple[tuple[int, ...], ...],
+    match: str,
+    error: type[Exception] = ValueError,
+    dtypes: tuple[str, ...] = (),
+) -> tuple[Callable[..., object], tuple[ad.ArraySpec, ...], type[Exception], str]:
+    resolved_dtypes = dtypes or ("float32",) * len(shapes)
+    specs = tuple(
+        _array_spec(shape, dtype) for shape, dtype in zip(shapes, resolved_dtypes, strict=True)
+    )
+    return operation, specs, error, match
+
+
+_INVALID_STAGING_CASES = {
+    "norm-rank": _case(lambda x: np.linalg.norm(x), ((2, 3, 4),), "requires axis="),
+    "norm-axis-count": _case(
+        lambda x: np.linalg.norm(x, axis=(0, 1, 2)), ((2, 3, 4),), "one or two axes"
+    ),
+    "cholesky-rank": _case(lambda x: np.linalg.cholesky(x), ((3,),), "at least two dimensions"),
+    "det-square": _case(lambda x: np.linalg.det(x), ((2, 3),), "square matrix"),
+    "cholesky-upper": _case(
+        lambda x: np.linalg.cholesky(x, upper=1), ((2, 2),), "upper must be a bool", TypeError
+    ),
+    "eigvals-real": _case(
+        lambda x: np.linalg.eigvals(x), ((2, 2),), "requires a complex input", TypeError
+    ),
+    "eigvalsh-uplo": _case(
+        lambda x: np.linalg.eigvalsh(x, UPLO="X"), ((2, 2),), "UPLO must be 'L' or 'U'"
+    ),
+    "matrix-norm-keepdims": _case(
+        lambda x: np.linalg.matrix_norm(x, keepdims=1),
+        ((2, 2),),
+        "keepdims must be a bool",
+        TypeError,
+    ),
+    "pinv-tolerance-broadcast": _case(
+        lambda x, tolerance: np.linalg.pinv(x, rtol=tolerance),
+        ((2, 3, 2), (1, 2)),
+        "tolerance must broadcast",
+    ),
+    "vector-norm-keepdims": _case(
+        lambda x: np.linalg.vector_norm(x, keepdims=1),
+        ((2, 3),),
+        "keepdims must be a bool",
+        TypeError,
+    ),
+    "solve-square": _case(
+        lambda matrix, right: np.linalg.solve(matrix, right),
+        ((2, 3), (3,)),
+        "coefficient input.*square matrix",
+    ),
+    "solve-vector-core": _case(
+        lambda matrix, right: np.linalg.solve(matrix, right),
+        ((3, 3), (2,)),
+        "right-hand side.*core dimension",
+    ),
+    "solve-matrix-core": _case(
+        lambda matrix, right: np.linalg.solve(matrix, right),
+        ((3, 3), (2, 4)),
+        "right-hand side.*core dimension",
+    ),
+    "eig-rank": _case(
+        lambda x: np.linalg.eig(x), ((3,),), "at least two dimensions", ValueError, ("complex64",)
+    ),
+    "eigh-square": _case(lambda x: np.linalg.eigh(x), ((2, 3),), "square matrix"),
+    "eig-real": _case(lambda x: np.linalg.eig(x), ((2, 2),), "requires a complex input", TypeError),
+    "qr-mode": _case(
+        lambda x: np.linalg.qr(x, mode="raw"), ((2, 2),), "mode must be 'reduced' or 'complete'"
+    ),
+    "svd-compute-uv": _case(
+        lambda x: np.linalg.svd(x, compute_uv=0), ((2, 2),), "compute_uv must be true"
+    ),
+    "svd-hermitian": _case(
+        lambda x: np.linalg.svd(x, hermitian=1), ((2, 2),), "hermitian must be a bool", TypeError
+    ),
+    "svd-full-matrices": _case(
+        lambda x: np.linalg.svd(x, full_matrices=1),
+        ((2, 2),),
+        "full_matrices must be a bool",
+        TypeError,
+    ),
+    "outer-rank": _case(
+        lambda left, right: np.linalg.outer(left, right), ((2, 2), (2,)), "one-dimensional"
+    ),
+    "cross-components": _case(
+        lambda left, right: np.linalg.cross(left, right),
+        ((2, 2), (2, 2)),
+        "three-component vectors",
+    ),
+    "vecdot-length": _case(
+        lambda left, right: np.linalg.vecdot(left, right), ((2, 3), (2, 4)), "equal length"
+    ),
+    "dot-core": _case(
+        lambda left, right: np.dot(left, right),
+        ((2, 3), (4, 2)),
+        "contracted dimensions.*equal lengths",
+    ),
+    "transpose-axes": _case(
+        lambda x: np.transpose(x, axes=(0,)), ((2, 3),), "every input axis exactly once"
+    ),
+    "broadcast-target": _case(
+        lambda x: np.broadcast_to(x, (1, 3)), ((2, 3),), "Cannot broadcast shape"
+    ),
+    "expand-dims-repeat": _case(
+        lambda x: np.expand_dims(x, axis=(0, 0)), ((2, 3),), "Repeated expansion axis"
+    ),
+    "squeeze-non-unit": _case(
+        lambda x: np.squeeze(x, axis=0), ((2, 3),), "Cannot squeeze non-unit axes"
+    ),
+    "repeat-negative": _case(
+        lambda x: np.repeat(x, -1),
+        ((2, 3),),
+        "requires one non-negative integer",
+        NotImplementedError,
+    ),
+    "tile-negative": _case(
+        lambda x: np.tile(x, (2, -1)), ((2, 3),), "repetitions must be non-negative"
+    ),
+    "concatenate-rank": _case(
+        lambda left, right: np.concatenate((left, right), axis=0), ((2, 3), (4,)), "equal rank"
+    ),
+    "concatenate-shape": _case(
+        lambda left, right: np.concatenate((left, right), axis=0),
+        ((2, 3), (4, 4)),
+        "disagree outside the joined axis",
+    ),
+    "stack-shape": _case(
+        lambda left, right: np.stack((left, right), axis=0), ((2, 3), (2, 4)), "identical shapes"
+    ),
+    "searchsorted-rank": _case(
+        lambda values, queries: np.searchsorted(values, queries),
+        ((2, 3), (2,)),
+        "sorted input must be one-dimensional",
+    ),
+    "searchsorted-side": _case(
+        lambda values, queries: np.searchsorted(values, queries, side="middle"),
+        ((3,), (2,)),
+        "side must be 'left' or 'right'",
+    ),
+    "take-along-axis-rank": _case(
+        lambda values, indices: np.take_along_axis(values, indices, axis=1),
+        ((2, 3), (3,)),
+        "same rank",
+        ValueError,
+        ("float32", "int64"),
+    ),
+    "diagonal-rank": _case(lambda x: np.diagonal(x), ((3,),), "at least two dimensions"),
+    "diagonal-offset": _case(
+        lambda x: np.diagonal(x, offset=1.5), ((2, 3),), "offset must be an integer", TypeError
+    ),
+    "diagonal-axes": _case(
+        lambda x: np.diagonal(x, axis1=0, axis2=0), ((2, 3),), "axes must be distinct"
+    ),
+    "trace-rank": _case(lambda x: np.trace(x), ((3,),), "at least two dimensions"),
+    "trace-axes": _case(
+        lambda x: np.trace(x, axis1=0, axis2=0), ((2, 3),), "axes must be distinct"
+    ),
+    "eye-dimensions": _case(
+        lambda x: x.__array_namespace__().eye(-1, dtype=x.dtype),
+        ((1,),),
+        "dimensions must be non-negative integers",
+    ),
+    "linspace-num": _case(
+        lambda x: x.__array_namespace__().linspace(0.0, 1.0, -1, dtype=x.dtype),
+        ((1,),),
+        "num must be a non-negative integer",
+    ),
+    "linspace-endpoint": _case(
+        lambda x: x.__array_namespace__().linspace(0.0, 1.0, 3, endpoint=1, dtype=x.dtype),
+        ((1,),),
+        "endpoint must be a bool",
+        TypeError,
+    ),
+    "convolve-rank": _case(
+        lambda left, right: np.convolve(left, right),
+        ((2, 3), (2,)),
+        "inputs must be one-dimensional",
+    ),
+    "convolve-empty": _case(
+        lambda left, right: np.convolve(left, right), ((0,), (2,)), "inputs cannot be empty"
+    ),
+    "convolve-mode": _case(
+        lambda left, right: np.convolve(left, right, mode="other"),
+        ((2,), (2,)),
+        "mode must be full, same, or valid",
+    ),
+    "fftfreq-size": _case(
+        lambda x: x.__array_namespace__().fft.fftfreq(0, dtype=x.dtype),
+        ((1,),),
+        "n must be a positive integer",
+    ),
+    "rfftfreq-spacing": _case(
+        lambda x: x.__array_namespace__().fft.rfftfreq(4, d=0, dtype=x.dtype),
+        ((1,),),
+        "d must be a nonzero real scalar",
+    ),
+    "cumulative-axis": _case(
+        lambda x: x.__array_namespace__().cumulative_sum(x), ((2, 3),), "require axis="
+    ),
+    "axis-bool": _case(
+        lambda x: x.__array_namespace__().sum(x, axis=True),
+        ((2, 3),),
+        "Axis must be an integer",
+        TypeError,
+    ),
+    "axis-type": _case(
+        lambda x: x.__array_namespace__().sum(x, axis=1.5),
+        ((2, 3),),
+        "integer or iterable",
+        TypeError,
+    ),
+    "axis-repeat": _case(
+        lambda x: x.__array_namespace__().sum(x, axis=(0, 0)), ((2, 3),), "Repeated axis"
+    ),
+    "matmul-scalar": _case(lambda left, right: left @ right, ((), (2,)), "at least one dimension"),
+    "matmul-core": _case(
+        lambda left, right: left @ right, ((2, 3), (4, 2)), "core dimensions disagree"
+    ),
+    "shape-type": _case(
+        lambda x: x.__array_namespace__().reshape(x, object()),
+        ((6,),),
+        "Shape must be an integer or iterable",
+        TypeError,
+    ),
+    "shape-component": _case(
+        lambda x: x.__array_namespace__().reshape(x, (True, 6)),
+        ((6,),),
+        "Shape must contain integers",
+        TypeError,
+    ),
+    "fft-length-type": _case(
+        lambda x: x.__array_namespace__().fft.fft(x, n="4"),
+        ((4,),),
+        "length must be an integer or None",
+        TypeError,
+    ),
+    "fft-length-value": _case(
+        lambda x: x.__array_namespace__().fft.fft(x, n=0), ((4,),), "positive integer"
+    ),
+    "fft-dtype": _case(
+        lambda x: x.__array_namespace__().fft.fft(x),
+        ((4,),),
+        "FFT input must be floating-point or complex",
+        TypeError,
+        ("int32",),
+    ),
+    "fftn-empty-axes": _case(
+        lambda x: x.__array_namespace__().fft.fftn(x, axes=()), ((2, 3),), "axes must be non-empty"
+    ),
+    "fftn-size-count": _case(
+        lambda x: x.__array_namespace__().fft.fftn(x, s=(2,), axes=(0, 1)),
+        ((2, 3),),
+        "sizes and axes must have equal length",
+    ),
+    "reshape-unknown-count": _case(
+        lambda x: x.__array_namespace__().reshape(x, (-1, -1)), ((6,),), "Invalid reshape target"
+    ),
+    "reshape-zero-known-size": _case(
+        lambda x: x.__array_namespace__().reshape(x, (0, -1)),
+        ((6,),),
+        "reshape changes element count",
+    ),
+    "reshape-element-count": _case(
+        lambda x: x.__array_namespace__().reshape(x, (4, 2)),
+        ((6,),),
+        "reshape changes element count",
+    ),
+    "moveaxis-axis-count": _case(
+        lambda x: x.__array_namespace__().moveaxis(x, (0, 1), (2,)),
+        ((2, 3, 4),),
+        "source and destination must have equal length",
+    ),
+    "tensordot-bool": _case(
+        lambda left, right: left.__array_namespace__().linalg.tensordot(left, right, axes=True),
+        ((2, 3), (3, 2)),
+        "axes must be an integer or a pair",
+        TypeError,
+    ),
+    "tensordot-axis-count": _case(
+        lambda left, right: left.__array_namespace__().linalg.tensordot(left, right, axes=3),
+        ((2, 3), (3, 2)),
+        "Invalid tensordot axes count",
+    ),
+    "tensordot-axis-type": _case(
+        lambda left, right: left.__array_namespace__().linalg.tensordot(left, right, axes=1.5),
+        ((2, 3), (3, 2)),
+        "axes must be an integer or a pair",
+        TypeError,
+    ),
+    "tensordot-axis-pair": _case(
+        lambda left, right: left.__array_namespace__().linalg.tensordot(left, right, axes=((0,),)),
+        ((2, 3), (3, 2)),
+        "must contain two axis sequences",
+    ),
+    "tensordot-axis-list-count": _case(
+        lambda left, right: left.__array_namespace__().linalg.tensordot(
+            left, right, axes=((0, 1), (0,))
+        ),
+        ((2, 3), (2, 3)),
+        "axis lists must have equal length",
+    ),
+    "tensordot-core": _case(
+        lambda left, right: left.__array_namespace__().linalg.tensordot(
+            left, right, axes=((1,), (0,))
+        ),
+        ((2, 3), (4, 2)),
+        "contraction dimensions disagree",
+    ),
+    "arange-start": _case(
+        lambda x: x.__array_namespace__().arange(bool(1), 3, dtype=x.dtype),
+        ((1,),),
+        "concrete real scalars",
+        TypeError,
+    ),
+    "arange-stop": _case(
+        lambda x: x.__array_namespace__().arange(0, object(), dtype=x.dtype),
+        ((1,),),
+        "concrete real scalars",
+        TypeError,
+    ),
+    "arange-step-type": _case(
+        lambda x: x.__array_namespace__().arange(0, 3, object(), dtype=x.dtype),
+        ((1,),),
+        "concrete real scalars",
+        TypeError,
+    ),
+    "arange-step-zero": _case(
+        lambda x: x.__array_namespace__().arange(0, 3, 0, dtype=x.dtype),
+        ((1,),),
+        "step must be nonzero",
+    ),
+    "namespace-version": _case(
+        lambda x: x.__array_namespace__(api_version="2023.12").sum(x), ((2,),), "requested.*targets"
+    ),
+    "len-data-dependence": _case(
+        lambda x: len(x), ((2,),), "len\\(\\).*not allowed", ad.TracingError
+    ),
+    "item-size": _case(lambda x: x.item(), ((2,),), "array of size 1"),
+    "concrete-operand-type": _case(
+        lambda x: x + object(), ((2,),), "Cannot stage concrete operand", TypeError
+    ),
+    "asarray-missing-input": _case(
+        lambda x: x.__array_namespace__().asarray(),
+        ((2,),),
+        "asarray.*requires an input",
+        TypeError,
+    ),
+    "cumulative-missing-input": _case(
+        lambda x: x.__array_namespace__().cumulative_sum(include_initial=True),
+        ((2,),),
+        "expects an array and optional axis",
+        TypeError,
+    ),
+    "diff-missing-input": _case(
+        lambda x: x.__array_namespace__().diff(), ((2,),), "diff.*expects", TypeError
+    ),
+    "searchsorted-missing-query": _case(
+        lambda x: x.__array_namespace__().searchsorted(x, sorter=x),
+        ((2,),),
+        "expects two positional array arguments",
+        TypeError,
+    ),
+}
+
+
 @pytest.mark.parametrize(
     ("operation", "specs", "error", "match"),
-    [
-        pytest.param(
-            lambda x: np.linalg.norm(x),
-            (_array_spec((2, 3, 4)),),
-            ValueError,
-            "requires axis=",
-            id="norm-rank",
-        ),
-        pytest.param(
-            lambda x: np.linalg.norm(x, axis=(0, 1, 2)),
-            (_array_spec((2, 3, 4)),),
-            ValueError,
-            "one or two axes",
-            id="norm-axis-count",
-        ),
-        pytest.param(
-            lambda x: np.linalg.cholesky(x),
-            (_array_spec((3,)),),
-            ValueError,
-            "at least two dimensions",
-            id="cholesky-rank",
-        ),
-        pytest.param(
-            lambda x: np.linalg.det(x),
-            (_array_spec((2, 3)),),
-            ValueError,
-            "square matrix",
-            id="det-square",
-        ),
-        pytest.param(
-            lambda x: np.linalg.cholesky(x, upper=1),
-            (_array_spec((2, 2)),),
-            TypeError,
-            "upper must be a bool",
-            id="cholesky-upper",
-        ),
-        pytest.param(
-            lambda x: np.linalg.eigvals(x),
-            (_array_spec((2, 2)),),
-            TypeError,
-            "requires a complex input",
-            id="eigvals-real",
-        ),
-        pytest.param(
-            lambda x: np.linalg.eigvalsh(x, UPLO="X"),
-            (_array_spec((2, 2)),),
-            ValueError,
-            "UPLO must be 'L' or 'U'",
-            id="eigvalsh-uplo",
-        ),
-        pytest.param(
-            lambda x: np.linalg.matrix_norm(x, keepdims=1),
-            (_array_spec((2, 2)),),
-            TypeError,
-            "keepdims must be a bool",
-            id="matrix-norm-keepdims",
-        ),
-        pytest.param(
-            lambda x, tolerance: np.linalg.pinv(x, rtol=tolerance),
-            (_array_spec((2, 3, 2)), _array_spec((1, 2))),
-            ValueError,
-            "tolerance must broadcast",
-            id="pinv-tolerance-broadcast",
-        ),
-        pytest.param(
-            lambda x: np.linalg.vector_norm(x, keepdims=1),
-            (_array_spec((2, 3)),),
-            TypeError,
-            "keepdims must be a bool",
-            id="vector-norm-keepdims",
-        ),
-        pytest.param(
-            lambda matrix, right: np.linalg.solve(matrix, right),
-            (_array_spec((2, 3)), _array_spec((3,))),
-            ValueError,
-            "coefficient input.*square matrix",
-            id="solve-square",
-        ),
-        pytest.param(
-            lambda matrix, right: np.linalg.solve(matrix, right),
-            (_array_spec((3, 3)), _array_spec((2,))),
-            ValueError,
-            "right-hand side.*core dimension",
-            id="solve-vector-core",
-        ),
-        pytest.param(
-            lambda matrix, right: np.linalg.solve(matrix, right),
-            (_array_spec((3, 3)), _array_spec((2, 4))),
-            ValueError,
-            "right-hand side.*core dimension",
-            id="solve-matrix-core",
-        ),
-        pytest.param(
-            lambda x: np.linalg.eig(x),
-            (_array_spec((3,), "complex64"),),
-            ValueError,
-            "at least two dimensions",
-            id="eig-rank",
-        ),
-        pytest.param(
-            lambda x: np.linalg.eigh(x),
-            (_array_spec((2, 3)),),
-            ValueError,
-            "square matrix",
-            id="eigh-square",
-        ),
-        pytest.param(
-            lambda x: np.linalg.eig(x),
-            (_array_spec((2, 2)),),
-            TypeError,
-            "requires a complex input",
-            id="eig-real",
-        ),
-        pytest.param(
-            lambda x: np.linalg.qr(x, mode="raw"),
-            (_array_spec((2, 2)),),
-            ValueError,
-            "mode must be 'reduced' or 'complete'",
-            id="qr-mode",
-        ),
-        pytest.param(
-            lambda x: np.linalg.svd(x, compute_uv=0),
-            (_array_spec((2, 2)),),
-            ValueError,
-            "compute_uv must be true",
-            id="svd-compute-uv",
-        ),
-        pytest.param(
-            lambda x: np.linalg.svd(x, hermitian=1),
-            (_array_spec((2, 2)),),
-            TypeError,
-            "hermitian must be a bool",
-            id="svd-hermitian",
-        ),
-        pytest.param(
-            lambda x: np.linalg.svd(x, full_matrices=1),
-            (_array_spec((2, 2)),),
-            TypeError,
-            "full_matrices must be a bool",
-            id="svd-full-matrices",
-        ),
-        pytest.param(
-            lambda left, right: np.linalg.outer(left, right),
-            (_array_spec((2, 2)), _array_spec((2,))),
-            ValueError,
-            "one-dimensional",
-            id="outer-rank",
-        ),
-        pytest.param(
-            lambda left, right: np.linalg.cross(left, right),
-            (_array_spec((2, 2)), _array_spec((2, 2))),
-            ValueError,
-            "three-component vectors",
-            id="cross-components",
-        ),
-        pytest.param(
-            lambda left, right: np.linalg.vecdot(left, right),
-            (_array_spec((2, 3)), _array_spec((2, 4))),
-            ValueError,
-            "equal length",
-            id="vecdot-length",
-        ),
-        pytest.param(
-            lambda left, right: np.dot(left, right),
-            (_array_spec((2, 3)), _array_spec((4, 2))),
-            ValueError,
-            "contracted dimensions.*equal lengths",
-            id="dot-core",
-        ),
-        pytest.param(
-            lambda x: np.transpose(x, axes=(0,)),
-            (_array_spec((2, 3)),),
-            ValueError,
-            "every input axis exactly once",
-            id="transpose-axes",
-        ),
-        pytest.param(
-            lambda x: np.broadcast_to(x, (1, 3)),
-            (_array_spec((2, 3)),),
-            ValueError,
-            "Cannot broadcast shape",
-            id="broadcast-target",
-        ),
-        pytest.param(
-            lambda x: np.expand_dims(x, axis=(0, 0)),
-            (_array_spec((2, 3)),),
-            ValueError,
-            "Repeated expansion axis",
-            id="expand-dims-repeat",
-        ),
-        pytest.param(
-            lambda x: np.squeeze(x, axis=0),
-            (_array_spec((2, 3)),),
-            ValueError,
-            "Cannot squeeze non-unit axes",
-            id="squeeze-non-unit",
-        ),
-        pytest.param(
-            lambda x: np.repeat(x, -1),
-            (_array_spec((2, 3)),),
-            NotImplementedError,
-            "requires one non-negative integer",
-            id="repeat-negative",
-        ),
-        pytest.param(
-            lambda x: np.tile(x, (2, -1)),
-            (_array_spec((2, 3)),),
-            ValueError,
-            "repetitions must be non-negative",
-            id="tile-negative",
-        ),
-        pytest.param(
-            lambda left, right: np.concatenate((left, right), axis=0),
-            (_array_spec((2, 3)), _array_spec((4,))),
-            ValueError,
-            "equal rank",
-            id="concatenate-rank",
-        ),
-        pytest.param(
-            lambda left, right: np.concatenate((left, right), axis=0),
-            (_array_spec((2, 3)), _array_spec((4, 4))),
-            ValueError,
-            "disagree outside the joined axis",
-            id="concatenate-shape",
-        ),
-        pytest.param(
-            lambda left, right: np.stack((left, right), axis=0),
-            (_array_spec((2, 3)), _array_spec((2, 4))),
-            ValueError,
-            "identical shapes",
-            id="stack-shape",
-        ),
-        pytest.param(
-            lambda values, queries: np.searchsorted(values, queries),
-            (_array_spec((2, 3)), _array_spec((2,))),
-            ValueError,
-            "sorted input must be one-dimensional",
-            id="searchsorted-rank",
-        ),
-        pytest.param(
-            lambda values, queries: np.searchsorted(values, queries, side="middle"),
-            (_array_spec((3,)), _array_spec((2,))),
-            ValueError,
-            "side must be 'left' or 'right'",
-            id="searchsorted-side",
-        ),
-        pytest.param(
-            lambda values, indices: np.take_along_axis(values, indices, axis=1),
-            (_array_spec((2, 3)), _array_spec((3,), "int64")),
-            ValueError,
-            "same rank",
-            id="take-along-axis-rank",
-        ),
-        pytest.param(
-            lambda x: np.diagonal(x),
-            (_array_spec((3,)),),
-            ValueError,
-            "at least two dimensions",
-            id="diagonal-rank",
-        ),
-        pytest.param(
-            lambda x: np.diagonal(x, offset=1.5),
-            (_array_spec((2, 3)),),
-            TypeError,
-            "offset must be an integer",
-            id="diagonal-offset",
-        ),
-        pytest.param(
-            lambda x: np.diagonal(x, axis1=0, axis2=0),
-            (_array_spec((2, 3)),),
-            ValueError,
-            "axes must be distinct",
-            id="diagonal-axes",
-        ),
-        pytest.param(
-            lambda x: np.trace(x),
-            (_array_spec((3,)),),
-            ValueError,
-            "at least two dimensions",
-            id="trace-rank",
-        ),
-        pytest.param(
-            lambda x: np.trace(x, axis1=0, axis2=0),
-            (_array_spec((2, 3)),),
-            ValueError,
-            "axes must be distinct",
-            id="trace-axes",
-        ),
-        pytest.param(
-            lambda x: x.__array_namespace__().eye(-1, dtype=x.dtype),
-            (_array_spec((1,)),),
-            ValueError,
-            "dimensions must be non-negative integers",
-            id="eye-dimensions",
-        ),
-        pytest.param(
-            lambda x: x.__array_namespace__().linspace(0.0, 1.0, -1, dtype=x.dtype),
-            (_array_spec((1,)),),
-            ValueError,
-            "num must be a non-negative integer",
-            id="linspace-num",
-        ),
-        pytest.param(
-            lambda x: x.__array_namespace__().linspace(
-                0.0,
-                1.0,
-                3,
-                endpoint=1,
-                dtype=x.dtype,
-            ),
-            (_array_spec((1,)),),
-            TypeError,
-            "endpoint must be a bool",
-            id="linspace-endpoint",
-        ),
-        pytest.param(
-            lambda left, right: np.convolve(left, right),
-            (_array_spec((2, 3)), _array_spec((2,))),
-            ValueError,
-            "inputs must be one-dimensional",
-            id="convolve-rank",
-        ),
-        pytest.param(
-            lambda left, right: np.convolve(left, right),
-            (_array_spec((0,)), _array_spec((2,))),
-            ValueError,
-            "inputs cannot be empty",
-            id="convolve-empty",
-        ),
-        pytest.param(
-            lambda left, right: np.convolve(left, right, mode="other"),
-            (_array_spec((2,)), _array_spec((2,))),
-            ValueError,
-            "mode must be full, same, or valid",
-            id="convolve-mode",
-        ),
-        pytest.param(
-            lambda x: x.__array_namespace__().fft.fftfreq(0, dtype=x.dtype),
-            (_array_spec((1,)),),
-            ValueError,
-            "n must be a positive integer",
-            id="fftfreq-size",
-        ),
-        pytest.param(
-            lambda x: x.__array_namespace__().fft.rfftfreq(4, d=0, dtype=x.dtype),
-            (_array_spec((1,)),),
-            ValueError,
-            "d must be a nonzero real scalar",
-            id="rfftfreq-spacing",
-        ),
-        pytest.param(
-            lambda x: x.__array_namespace__().cumulative_sum(x),
-            (_array_spec((2, 3)),),
-            ValueError,
-            "require axis=",
-            id="cumulative-axis",
-        ),
-        pytest.param(
-            lambda x: x.__array_namespace__().sum(x, axis=True),
-            (_array_spec((2, 3)),),
-            TypeError,
-            "Axis must be an integer",
-            id="axis-bool",
-        ),
-        pytest.param(
-            lambda x: x.__array_namespace__().sum(x, axis=1.5),
-            (_array_spec((2, 3)),),
-            TypeError,
-            "integer or iterable",
-            id="axis-type",
-        ),
-        pytest.param(
-            lambda x: x.__array_namespace__().sum(x, axis=(0, 0)),
-            (_array_spec((2, 3)),),
-            ValueError,
-            "Repeated axis",
-            id="axis-repeat",
-        ),
-        pytest.param(
-            lambda left, right: left @ right,
-            (_array_spec(()), _array_spec((2,))),
-            ValueError,
-            "at least one dimension",
-            id="matmul-scalar",
-        ),
-        pytest.param(
-            lambda left, right: left @ right,
-            (_array_spec((2, 3)), _array_spec((4, 2))),
-            ValueError,
-            "core dimensions disagree",
-            id="matmul-core",
-        ),
-        pytest.param(
-            lambda x: x.__array_namespace__().reshape(x, object()),
-            (_array_spec((6,)),),
-            TypeError,
-            "Shape must be an integer or iterable",
-            id="shape-type",
-        ),
-        pytest.param(
-            lambda x: x.__array_namespace__().reshape(x, (True, 6)),
-            (_array_spec((6,)),),
-            TypeError,
-            "Shape must contain integers",
-            id="shape-component",
-        ),
-        pytest.param(
-            lambda x: x.__array_namespace__().fft.fft(x, n="4"),
-            (_array_spec((4,)),),
-            TypeError,
-            "length must be an integer or None",
-            id="fft-length-type",
-        ),
-        pytest.param(
-            lambda x: x.__array_namespace__().fft.fft(x, n=0),
-            (_array_spec((4,)),),
-            ValueError,
-            "positive integer",
-            id="fft-length-value",
-        ),
-        pytest.param(
-            lambda x: x.__array_namespace__().fft.fft(x),
-            (_array_spec((4,), "int32"),),
-            TypeError,
-            "FFT input must be floating-point or complex",
-            id="fft-dtype",
-        ),
-        pytest.param(
-            lambda x: x.__array_namespace__().fft.fftn(x, axes=()),
-            (_array_spec((2, 3)),),
-            ValueError,
-            "axes must be non-empty",
-            id="fftn-empty-axes",
-        ),
-        pytest.param(
-            lambda x: x.__array_namespace__().fft.fftn(x, s=(2,), axes=(0, 1)),
-            (_array_spec((2, 3)),),
-            ValueError,
-            "sizes and axes must have equal length",
-            id="fftn-size-count",
-        ),
-        pytest.param(
-            lambda x: x.__array_namespace__().reshape(x, (-1, -1)),
-            (_array_spec((6,)),),
-            ValueError,
-            "Invalid reshape target",
-            id="reshape-unknown-count",
-        ),
-        pytest.param(
-            lambda x: x.__array_namespace__().reshape(x, (0, -1)),
-            (_array_spec((6,)),),
-            ValueError,
-            "reshape changes element count",
-            id="reshape-zero-known-size",
-        ),
-        pytest.param(
-            lambda x: x.__array_namespace__().reshape(x, (4, 2)),
-            (_array_spec((6,)),),
-            ValueError,
-            "reshape changes element count",
-            id="reshape-element-count",
-        ),
-        pytest.param(
-            lambda x: x.__array_namespace__().moveaxis(x, (0, 1), (2,)),
-            (_array_spec((2, 3, 4)),),
-            ValueError,
-            "source and destination must have equal length",
-            id="moveaxis-axis-count",
-        ),
-        pytest.param(
-            lambda left, right: left.__array_namespace__().linalg.tensordot(
-                left,
-                right,
-                axes=True,
-            ),
-            (_array_spec((2, 3)), _array_spec((3, 2))),
-            TypeError,
-            "axes must be an integer or a pair",
-            id="tensordot-bool",
-        ),
-        pytest.param(
-            lambda left, right: left.__array_namespace__().linalg.tensordot(
-                left,
-                right,
-                axes=3,
-            ),
-            (_array_spec((2, 3)), _array_spec((3, 2))),
-            ValueError,
-            "Invalid tensordot axes count",
-            id="tensordot-axis-count",
-        ),
-        pytest.param(
-            lambda left, right: left.__array_namespace__().linalg.tensordot(
-                left,
-                right,
-                axes=1.5,
-            ),
-            (_array_spec((2, 3)), _array_spec((3, 2))),
-            TypeError,
-            "axes must be an integer or a pair",
-            id="tensordot-axis-type",
-        ),
-        pytest.param(
-            lambda left, right: left.__array_namespace__().linalg.tensordot(
-                left,
-                right,
-                axes=((0,),),
-            ),
-            (_array_spec((2, 3)), _array_spec((3, 2))),
-            ValueError,
-            "must contain two axis sequences",
-            id="tensordot-axis-pair",
-        ),
-        pytest.param(
-            lambda left, right: left.__array_namespace__().linalg.tensordot(
-                left,
-                right,
-                axes=((0, 1), (0,)),
-            ),
-            (_array_spec((2, 3)), _array_spec((2, 3))),
-            ValueError,
-            "axis lists must have equal length",
-            id="tensordot-axis-list-count",
-        ),
-        pytest.param(
-            lambda left, right: left.__array_namespace__().linalg.tensordot(
-                left,
-                right,
-                axes=((1,), (0,)),
-            ),
-            (_array_spec((2, 3)), _array_spec((4, 2))),
-            ValueError,
-            "contraction dimensions disagree",
-            id="tensordot-core",
-        ),
-        pytest.param(
-            lambda x: x.__array_namespace__().arange(bool(1), 3, dtype=x.dtype),
-            (_array_spec((1,)),),
-            TypeError,
-            "concrete real scalars",
-            id="arange-start",
-        ),
-        pytest.param(
-            lambda x: x.__array_namespace__().arange(0, object(), dtype=x.dtype),
-            (_array_spec((1,)),),
-            TypeError,
-            "concrete real scalars",
-            id="arange-stop",
-        ),
-        pytest.param(
-            lambda x: x.__array_namespace__().arange(0, 3, object(), dtype=x.dtype),
-            (_array_spec((1,)),),
-            TypeError,
-            "concrete real scalars",
-            id="arange-step-type",
-        ),
-        pytest.param(
-            lambda x: x.__array_namespace__().arange(0, 3, 0, dtype=x.dtype),
-            (_array_spec((1,)),),
-            ValueError,
-            "step must be nonzero",
-            id="arange-step-zero",
-        ),
-        pytest.param(
-            lambda x: x.__array_namespace__(api_version="2023.12").sum(x),
-            (_array_spec((2,)),),
-            ValueError,
-            "requested.*targets",
-            id="namespace-version",
-        ),
-        pytest.param(
-            lambda x: len(x),
-            (_array_spec((2,)),),
-            ad.TracingError,
-            r"len\(\).*not allowed",
-            id="len-data-dependence",
-        ),
-        pytest.param(
-            lambda x: x.item(),
-            (_array_spec((2,)),),
-            ValueError,
-            "array of size 1",
-            id="item-size",
-        ),
-        pytest.param(
-            lambda x: x + object(),
-            (_array_spec((2,)),),
-            TypeError,
-            "Cannot stage concrete operand",
-            id="concrete-operand-type",
-        ),
-        pytest.param(
-            lambda x: x.__array_namespace__().asarray(),
-            (_array_spec((2,)),),
-            TypeError,
-            "asarray.*requires an input",
-            id="asarray-missing-input",
-        ),
-        pytest.param(
-            lambda x: x.__array_namespace__().cumulative_sum(include_initial=True),
-            (_array_spec((2,)),),
-            TypeError,
-            "expects an array and optional axis",
-            id="cumulative-missing-input",
-        ),
-        pytest.param(
-            lambda x: x.__array_namespace__().diff(),
-            (_array_spec((2,)),),
-            TypeError,
-            "diff.*expects",
-            id="diff-missing-input",
-        ),
-        pytest.param(
-            lambda x: x.__array_namespace__().searchsorted(x, sorter=x),
-            (_array_spec((2,)),),
-            TypeError,
-            "expects two positional array arguments",
-            id="searchsorted-missing-query",
-        ),
-    ],
+    _INVALID_STAGING_CASES.values(),
+    ids=_INVALID_STAGING_CASES,
 )
 def test_invalid_abstract_domain_contracts_fail_while_staging(
     operation: Callable[..., object],

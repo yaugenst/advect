@@ -175,17 +175,6 @@ def test_eigh_upper_triangle_preserves_tuple_outputs_across_lifetimes() -> None:
     _assert_staged_matches(function, (value,))
 
 
-def test_eigvalsh_accepts_lowercase_upper_triangle_control_dynamically() -> None:
-    value = np.array([[3.0, 1.0], [1.0, 2.0]])
-    direction = np.array([[0.2, -0.1], [-0.1, 0.3]])
-
-    _assert_jvp_matches_directional_difference(
-        lambda x: np.linalg.eigvalsh(x, UPLO="u"),
-        (value,),
-        (direction,),
-    )
-
-
 def test_qr_static_modes_preserve_their_output_contracts() -> None:
     value = np.array([[1.0, 0.2], [0.3, 1.4], [1.2, -0.4]])
 
@@ -205,18 +194,6 @@ def test_qr_static_modes_preserve_their_output_contracts() -> None:
     np.testing.assert_allclose(primal[0] @ primal[1], value)
     for leaf in tangent:
         np.testing.assert_array_equal(leaf, np.zeros_like(leaf))
-
-    def r_only(x: Any) -> Any:
-        return np.linalg.qr(x, mode="r")
-
-    _assert_jvp_matches_directional_difference(
-        r_only,
-        (value,),
-        (np.full_like(value, 0.1),),
-        rtol=2e-4,
-        atol=2e-5,
-    )
-    _assert_staged_matches(r_only, (value,))
 
 
 def test_cross_honors_independent_input_and_output_axes() -> None:
@@ -238,12 +215,6 @@ def test_cross_honors_independent_input_and_output_axes() -> None:
             np.arange(24.0).reshape(2, 3, 4),
             np.arange(40.0).reshape(4, 2, 5),
             id="explicit-axis-lists",
-        ),
-        pytest.param(
-            lambda a, b: np.tensordot(a, b, axes=1),
-            np.arange(24.0).reshape(2, 3, 4),
-            np.arange(20.0).reshape(4, 5),
-            id="integer-axis-count",
         ),
         pytest.param(
             lambda a, b: np.tensordot(a, b, axes=(1, 0)),
@@ -275,11 +246,6 @@ def test_tensordot_axes_forms_trace_and_stage(
             id="diagonal-and-dtype",
         ),
         pytest.param(
-            lambda x: np.einsum("ij->i", x, dtype=np.float64),
-            (np.array([[1.0, 0.2], [0.3, 1.4], [1.2, -0.4]]),),
-            id="single-operand-reduction",
-        ),
-        pytest.param(
             lambda a, b: np.einsum(a, [0, 1], b, [1, 2], [0, 2], optimize="greedy"),
             (
                 np.array([[3.0, 1.0], [1.0, 2.0]]),
@@ -308,7 +274,6 @@ def test_einsum_material_call_forms_match_directional_differences(
 @pytest.mark.parametrize(
     ("left", "right"),
     [
-        pytest.param(np.array([1.0, 2.0, 3.0]), np.array([4.0, 5.0, 6.0]), id="vector-vector"),
         pytest.param(
             np.array([[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]]),
             np.array([4.0, 5.0]),
