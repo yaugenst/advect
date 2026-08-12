@@ -162,6 +162,14 @@ def _algorithm_cases() -> tuple[NumpySupportCase, ...]:
             (Input(0), 2),
             ((0,),),
         ),
+        _case(
+            "lib.stride_tricks.sliding_window_view",
+            (_MATRIX,),
+            (Input(0), (2, 2)),
+            ((0,),),
+            (("axis", (0, 1)),),
+            variant="axis-tuple",
+        ),
         _unary("sort_complex"),
         _unary("unwrap", ArrayInput([0.0, 2.8, -2.8, 0.2], "float64")),
         _unary("real_if_close", ArrayInput([1.0 + 1e-15j, 2.0 - 1e-15j], "complex128")),
@@ -180,6 +188,14 @@ def _algorithm_cases() -> tuple[NumpySupportCase, ...]:
             ((0,), (1,), (0, 1)),
         ),
         _case(
+            "insert",
+            (_MATRIX, ArrayInput([9.0, 10.0], "float64")),
+            (Input(0), 1, Input(1)),
+            ((0,), (1,), (0, 1)),
+            (("axis", 0),),
+            variant="axis-row",
+        ),
+        _case(
             "histogram",
             (samples, weights),
             (Input(0),),
@@ -194,6 +210,22 @@ def _algorithm_cases() -> tuple[NumpySupportCase, ...]:
             (("bins", 3),),
         ),
         _case(
+            "histogram",
+            (samples, _SCALAR, _OTHER_SCALAR),
+            (Input(0),),
+            ((0,), (0, 1), (0, 2), (0, 1, 2)),
+            (("bins", 3), ("range", (Input(1), Input(2)))),
+            variant="integer-bins-traced-range",
+        ),
+        _case(
+            "histogram_bin_edges",
+            (samples, _SCALAR, _OTHER_SCALAR),
+            (Input(0),),
+            ((0,), (0, 1), (0, 2), (0, 1, 2)),
+            (("bins", 3), ("range", (Input(1), Input(2)))),
+            variant="traced-range",
+        ),
+        _case(
             "histogram2d",
             (samples, y_samples, weights),
             (Input(0), Input(1)),
@@ -201,11 +233,27 @@ def _algorithm_cases() -> tuple[NumpySupportCase, ...]:
             (("bins", (edges, edges)), ("weights", Input(2)), ("density", True)),
         ),
         _case(
+            "histogram2d",
+            (samples, y_samples),
+            (Input(0), Input(1)),
+            ((0,), (1,), (0, 1)),
+            (("bins", 3),),
+            variant="unweighted-integer-bins",
+        ),
+        _case(
             "histogramdd",
             (ArrayInput([[0.1, 0.2], [0.4, 0.7], [0.8, 0.9], [0.2, 0.6]], "float64"), weights),
             (Input(0),),
             ((1,),),
             (("bins", (edges, edges)), ("weights", Input(1)), ("density", True)),
+        ),
+        _case(
+            "histogramdd",
+            (samples, y_samples),
+            ((Input(0), Input(1)),),
+            ((0,), (1,), (0, 1)),
+            (("bins", 3), ("range", ((0.0, 1.0), (0.0, 1.0)))),
+            variant="column-sequence",
         ),
     )
 
@@ -334,6 +382,17 @@ def _composite_cases() -> tuple[NumpySupportCase, ...]:
     condition = ArrayInput([True, False, True, False], "bool")
     complement = [False, True, False, True]
     nan_values = ArrayInput([1.0, float("nan"), 3.0, 5.0], "float64")
+    nan_matrix = ArrayInput(
+        [[1.0, float("nan"), 2.0], [3.0, 4.0, float("nan")]],
+        "float64",
+    )
+    covariance_matrix = ArrayInput(
+        [[1.0, 2.0], [2.0, 1.0], [3.0, 4.0], [5.0, 3.0]],
+        "float64",
+    )
+    covariance_other = ArrayInput([[0.5], [1.5], [2.5], [4.0]], "float64")
+    frequency_weights = ArrayInput([1, 2, 1, 2], "int64")
+    analytic_weights = ArrayInput([1.0, 0.5, 2.0, 1.5], "float64")
     return (
         _case(
             "average",
@@ -343,12 +402,65 @@ def _composite_cases() -> tuple[NumpySupportCase, ...]:
             (("weights", Input(1)),),
             modes=_ALL_MODES,
         ),
+        _case(
+            "average",
+            (_MATRIX,),
+            (Input(0),),
+            ((0,),),
+            (("axis", (0, 1)), ("keepdims", True), ("returned", True)),
+            modes=_ALL_MODES,
+            variant="unweighted-returned",
+            result_adapter="tuple",
+        ),
+        _case(
+            "average",
+            (_MATRIX, _SHORT),
+            (Input(0),),
+            ((0,), (1,), (0, 1)),
+            (
+                ("axis", 1),
+                ("weights", Input(1)),
+                ("keepdims", True),
+                ("returned", True),
+            ),
+            modes=_ALL_MODES,
+            variant="axis-weights-returned",
+            result_adapter="tuple",
+        ),
         _unary("ptp"),
         _case(
             "trapezoid", (_REAL, _POSITIVE), (Input(0),), ((0,), (1,), (0, 1)), (("x", Input(1)),)
         ),
+        _case(
+            "trapezoid",
+            (_MATRIX, _SHORT),
+            (Input(0),),
+            ((0,), (1,), (0, 1)),
+            (("x", Input(1)), ("axis", 1)),
+            variant="matrix-vector-coordinates",
+        ),
+        _case(
+            "trapezoid",
+            (_MATRIX, _SCALAR),
+            (Input(0),),
+            ((0,), (1,), (0, 1)),
+            (("dx", Input(1)), ("axis", 0)),
+            variant="traced-spacing",
+        ),
         _unary("nancumsum", nan_values),
         _unary("nancumprod", ArrayInput([1.0, float("nan"), 2.0, 3.0], "float64")),
+        _unary(
+            "nancumsum",
+            nan_matrix,
+            kwargs=(("axis", 1), ("dtype", DType("float32"))),
+            variant="axis-dtype",
+        ),
+        _unary(
+            "nancumprod",
+            nan_matrix,
+            kwargs=(("axis", 0),),
+            variant="axis",
+        ),
         _unary("round", modes=_ALL_MODES),
         _unary("round", kwargs=(("decimals", 1),), variant="decimals"),
         _unary("around", kwargs=(("decimals", 1),)),
@@ -392,6 +504,14 @@ def _composite_cases() -> tuple[NumpySupportCase, ...]:
             (("mode", "clip"),),
         ),
         _case(
+            "choose",
+            (ArrayInput([-1, 0, 3, 1], "int64"), _REAL),
+            (Input(0), (Input(1), 4.0, -2.0)),
+            ((1,),),
+            (("mode", "wrap"),),
+            variant="wrap-mixed-choices",
+        ),
+        _case(
             "compress",
             (_REAL,),
             (condition.data, Input(0)),
@@ -401,7 +521,43 @@ def _composite_cases() -> tuple[NumpySupportCase, ...]:
         _case("extract", (condition, _REAL), (Input(0), Input(1)), ((1,),)),
         _case("vander", (_REAL,), (Input(0),), ((0,),), (("N", 4),)),
         _unary("cov", _MATRIX),
+        _case(
+            "cov",
+            (covariance_matrix, frequency_weights),
+            (Input(0),),
+            ((0,),),
+            (("rowvar", False), ("fweights", Input(1))),
+            variant="frequency-weighted",
+        ),
+        _case(
+            "cov",
+            (covariance_matrix, covariance_other, analytic_weights, frequency_weights),
+            (Input(0),),
+            ((0,), (1,), (2,), (0, 1, 2)),
+            (
+                ("y", Input(1)),
+                ("rowvar", False),
+                ("ddof", 1),
+                ("fweights", Input(3)),
+                ("aweights", Input(2)),
+                ("dtype", DType("float64")),
+            ),
+            variant="combined-weights",
+        ),
         _unary("corrcoef", _MATRIX),
+        _case(
+            "corrcoef",
+            (covariance_matrix, covariance_other),
+            (Input(0),),
+            ((0,), (1,), (0, 1)),
+            (("y", Input(1)), ("rowvar", False), ("dtype", DType("float64"))),
+            variant="additional-columns",
+        ),
+        _unary(
+            "corrcoef",
+            ArrayInput([[2.0, 1.0 + 0.2j], [1.0 - 0.2j, 3.0]], "complex128"),
+            variant="complex",
+        ),
     )
 
 
