@@ -24,7 +24,7 @@ function displayResults (results) {
     }
   } else {
     var noResultsText = search_results.getAttribute('data-no-results-text') || "No results found";
-    search_results.insertAdjacentHTML('beforeend', '<p>' + noResultsText + '</p>');
+    search_results.appendChild(document.createElement("p")).textContent = noResultsText;
   }
 }
 
