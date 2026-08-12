@@ -375,6 +375,16 @@ def _function_cases() -> tuple[NumpySupportCase, ...]:
                 (("axis", 0), ("keepdims", True)),
             )
         )
+    for name, initial in (("max", -10.0), ("min", 10.0), ("sum", 2.0)):
+        cases.append(
+            _function(
+                name,
+                (_MATRIX, _BOOL),
+                (Input(0),),
+                (("axis", 0), ("keepdims", True), ("initial", initial), ("where", Input(1))),
+                variant="where-initial",
+            )
+        )
     cases.extend(
         _function(
             name,
