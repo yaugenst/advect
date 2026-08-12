@@ -60,10 +60,11 @@ if (treetile) {
 const outlineTile = document.getElementById("outlinetile");
 const outlineLinks = document.getElementById("outlinelinks");
 const outlineButton = document.getElementById("outlinebtn");
-const links = [...outlineLinks.querySelectorAll("a")];
+const links = outlineLinks ? [...outlineLinks.querySelectorAll("a")] : [];
 const outlineHeadings = links.map((link) => document.getElementById(decodeURIComponent(link.hash.slice(1))));
 
 function setOutline(open) {
+  if (!outlineTile) return;
   root.classList.toggle("outline-open", open);
   outlineTile.setAttribute("aria-hidden", String(!open));
   outlineButton.setAttribute("aria-expanded", String(open));
@@ -107,7 +108,7 @@ if (links.length) {
   syncOutline();
 } else {
   root.classList.remove("outline-open");
-  outlineTile.hidden = true;
+  if (outlineTile) outlineTile.hidden = true;
   outlineButton.hidden = true;
 }
 
