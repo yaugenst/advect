@@ -417,12 +417,6 @@ def register_shape_handlers(
 ) -> None:
     """Register shape-related array functions."""
     handlers[np.reshape] = _reshape_handler
-    handlers[np.transpose] = _make_unary_shape_handler(
-        np.transpose,
-        _op_name("transpose"),
-        ("axes",),
-        _normalize_axis_spec,
-    )
     handlers[np.swapaxes] = _make_unary_shape_handler(
         np.swapaxes,
         "array.swapaxes",

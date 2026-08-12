@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING, Any, cast
 import numpy as np
 
 from advect.numpy._array_function.emission import (
-    _make_arg_reduction_handler,
     _make_atleast_handler,
     _make_axis_keepdims_reduction_handler,
     _make_binary_handler,
@@ -138,10 +137,6 @@ def _register_all_handlers(
 
     dot = _require_function("dot")
     handlers[dot] = _make_binary_handler(dot, _op_name("dot"))
-    argmin = _require_function("argmin")
-    handlers[argmin] = _make_arg_reduction_handler(argmin, _op_name("argmin"))
-    argmax = _require_function("argmax")
-    handlers[argmax] = _make_arg_reduction_handler(argmax, _op_name("argmax"))
     handlers[_require_function("where")] = _make_where_handler(_op_name("where"))
     handlers[_require_function("interp")] = _make_interp_handler(_op_name("interp"))
     handlers[_require_function("clip")] = _make_clip_handler(_op_name("clip"))

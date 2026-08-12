@@ -181,7 +181,6 @@ _SUPPORTED_VARIANCE_KWARGS = frozenset(
     {"axis", "correction", "ddof", "dtype", "keepdims", "mean", "out", "where"}
 )
 _SUPPORTED_CUMULATIVE_KWARGS = frozenset({"axis", "dtype"})
-_SUPPORTED_ARG_REDUCTION_KWARGS = frozenset({"axis", "keepdims", "out"})
 _SUPPORTED_INTERP_KWARGS = frozenset({"left", "right", "period"})
 _SUPPORTED_CLIP_KWARGS = frozenset({"min", "max", "a_min", "a_max", "out"})
 _WHERE_NARGS = 3
@@ -746,66 +745,6 @@ def _make_cumulative_handler(
             attrs["dtype"] = str(np.dtype(dtype))
 
         result_shape, result_dtype = _result_shape_and_dtype(result)
-        node_id = _add_backend_node(
-            graph=graph,
-            op=_canonical_op(op_name),
-            inputs=(_get_node(a, graph, traced_type),),
-            value=result,
-            attrs=attrs,
-            shape=result_shape,
-            dtype=result_dtype,
-        )
-        return result, node_id
-
-    return handler
-
-
-def _make_arg_reduction_handler(
-    np_func: Callable[..., Any], op_name: str
-) -> Callable[..., tuple[Any, int]]:
-    """Create a handler for argmin/argmax-style reductions."""
-
-    def handler(
-        graph: DynamicTape,
-        traced_type: type[TracedArrayLike],
-        args: tuple[Any, ...],
-        kwargs: dict[str, Any],
-    ) -> tuple[Any, int]:
-        positional_names = ("axis", "out")
-        unsupported = set(kwargs.keys()) - _SUPPORTED_ARG_REDUCTION_KWARGS
-        if unsupported:
-            msg = (
-                f"Arg reduction kwargs not yet supported during tracing: {sorted(unsupported)}. "
-                f"Supported kwargs are: {sorted(_SUPPORTED_ARG_REDUCTION_KWARGS)}"
-            )
-            raise TracingError(msg)
-
-        if not args or len(args) > len(positional_names) + 1:
-            msg = f"{op_name} expects an array plus optional axis and out"
-            raise TracingError(msg)
-        values = dict(kwargs)
-        for name, value in zip(positional_names, args[1:], strict=False):
-            if name in values:
-                msg = f"{op_name} received {name} twice"
-                raise TracingError(msg)
-            values[name] = value
-
-        out = values.get("out")
-        if out is not None:
-            msg = f"{op_name} out= is not supported during tracing"
-            raise TracingError(msg)
-
-        a = args[0]
-        axis = values.get("axis")
-        keepdims = values.get("keepdims", False)
-
-        result = np_func(_get_value(a, traced_type), axis=axis, keepdims=keepdims)
-        result_shape, result_dtype = _result_shape_and_dtype(result)
-
-        attrs: dict[str, Any] = {"keepdims": bool(keepdims)}
-        if axis is not None:
-            attrs["axis"] = int(axis)
-
         node_id = _add_backend_node(
             graph=graph,
             op=_canonical_op(op_name),
