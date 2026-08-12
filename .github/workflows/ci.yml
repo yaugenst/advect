@@ -74,14 +74,54 @@ jobs:
         if: matrix.python-version == '3.12'
         run: uv run pyrefly check
 
+      - name: Test with coverage
+        if: matrix.python-version == '3.12'
+        run: >-
+          .venv/bin/python -m pytest --maxfail=1
+          --cov=advect --cov-report=xml:coverage.xml
+
       - name: Test
+        if: matrix.python-version != '3.12'
         run: .venv/bin/python -m pytest --maxfail=1
+
+      - name: Upload coverage artifact
+        if: matrix.python-version == '3.12'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: python-coverage
+          path: coverage.xml
+          if-no-files-found: error
+          retention-days: 1
 
       - name: Search primitive conformance thoroughly
         if: matrix.python-version == '3.12'
         run: >-
           uv run pytest packages/advect/tests/advect_conformance_tests
           --hypothesis-profile=thorough -n auto --dist=worksteal
+
+  coverage:
+    name: Coverage
+    needs: python
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # Codecov exchanges GitHub's short-lived OIDC identity
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: python-coverage
+          path: coverage
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+        with:
+          disable_search: true
+          files: coverage/coverage.xml
+          use_oidc: true
 
   numpy-compatibility:
     name: NumPy ${{ matrix.numpy-version }}
@@ -389,6 +429,7 @@ jobs:
     name: CI Success
     needs:
       - python
+      - coverage
       - numpy-compatibility
       - array-api-compatibility
       - xarray-compatibility
@@ -403,6 +444,7 @@ jobs:
       - name: Check blocking jobs
         env:
           PYTHON_RESULT: ${{ needs.python.result }}
+          COVERAGE_RESULT: ${{ needs.coverage.result }}
           NUMPY_RESULT: ${{ needs.numpy-compatibility.result }}
           ARRAY_API_COMPAT_RESULT: ${{ needs.array-api-compatibility.result }}
           XARRAY_RESULT: ${{ needs.xarray-compatibility.result }}
@@ -414,6 +456,7 @@ jobs:
         run: |
           for result in \
             "$PYTHON_RESULT" \
+            "$COVERAGE_RESULT" \
             "$NUMPY_RESULT" \
             "$ARRAY_API_COMPAT_RESULT" \
             "$XARRAY_RESULT" \
