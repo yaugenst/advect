@@ -1,0 +1,269 @@
+<!doctype html><html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Automatic differentiation for the NumPy code you already write">
+<link rel="canonical" href="https://yaugenst.github.io/advect/0.1.1/development/codebase/">
+<title>codebase(1) · advect</title>
+<link rel="icon" href="../../img/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../css/fonts.css">
+<link rel="stylesheet" href="../../css/theme.css?v=bf544137efc8">
+<link rel="stylesheet" href="../../assets/_mkdocstrings.css">
+<script>
+var base_url = "../..";
+/* pre-paint: apply persisted display mode and pane state to avoid a theme
+   flash and the panes animating open on every navigation */
+(function () {
+  var m = null, t = null, o = null;
+  try {
+    m = localStorage.getItem("advect-mode");
+    t = localStorage.getItem("advect-tree");
+    o = localStorage.getItem("advect-outline");
+  } catch (e) { /* private mode */ }
+  if (m === "light" || m === "dark") document.documentElement.dataset.theme = m;
+  var open = t === null ? window.innerWidth > 1100 : t === "1";
+  if (open) document.documentElement.classList.add("tree-open");
+  open = o === null ? window.innerWidth > 1500 : o === "1";
+  if (open) document.documentElement.classList.add("outline-open");
+})();
+</script>
+
+</head>
+<body data-base="../..">
+
+<div class="desktop" id="desktop">
+  <aside class="tile treetile" id="treetile" aria-label="Documentation tree" aria-hidden="true">
+    <span class="ptitle"><span class="pn">tree</span> docs/</span>
+    <pre class="tree"><span class="trow"><a href="../.." title="Home">docs/</a></span><span class="trow" style="--ti:4ch"><span class="dim">├── </span><a href="../../tutorials/" title="Tutorials">tutorials/</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/gradients/" title="Gradients and Pytrees">gradients</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/control-flow/" title="Dynamic Control Flow and Mutation">control-flow</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/linear-maps/" title="JVPs, VJPs, and Linear Maps">linear-maps</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/advanced-differentiation/" title="Higher-Order Differentiation">advanced-differentiation</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/implicit-differentiation/" title="Implicit Differentiation">implicit-differentiation</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/staging/" title="Staging and Serialization">staging</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/scientific-python/" title="Arrays and Scientific Python">scientific-python</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/host-frameworks/" title="Host Autodiff Frameworks">host-frameworks</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/primitives/" title="Custom Primitives">primitives</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   └── </span><a href="../../tutorials/debugging/" title="Troubleshooting">debugging</a></span><span class="trow" style="--ti:4ch"><span class="dim">├── </span><a href="../../architecture/" title="Architecture">architecture</a></span><span class="trow" style="--ti:4ch"><span class="dim">├── </span><a href="../../compatibility/" title="Compatibility">compatibility/</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../compatibility/numpy/" title="NumPy">numpy</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../compatibility/array-api/" title="Array API">array-api</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../compatibility/cupy/" title="CuPy">cupy</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../compatibility/scipy/" title="SciPy">scipy</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   └── </span><a href="../../compatibility/xarray/" title="xarray">xarray</a></span><span class="trow" style="--ti:4ch"><span class="dim">├── </span><a href="../../api/" title="API Reference">api-reference/</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span>core-api/</span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="../../api/transforms/" title="Transforms">transforms</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="../../api/staging/" title="Staging">staging</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="../../api/primitives/" title="Primitives">primitives</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="../../api/arrays/" title="Arrays">arrays</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="../../api/pytree/" title="Pytrees">pytree</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="../../api/testing/" title="Testing Utilities">testing</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="../../api/support/" title="Support Catalog">support</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   └── </span><a href="../../api/errors/" title="Errors">errors</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   └── </span>public-modules/</span><span class="trow" style="--ti:12ch"><span class="dim">│       ├── </span><a href="../../api/numpy/" title="NumPy Frontend">numpy</a></span><span class="trow" style="--ti:12ch"><span class="dim">│       ├── </span><a href="../../api/scipy/" title="SciPy">scipy/</a></span><span class="trow" style="--ti:16ch"><span class="dim">│       │   ├── </span><a href="../../api/scipy/special/" title="Special Functions">special</a></span><span class="trow" style="--ti:16ch"><span class="dim">│       │   ├── </span><a href="../../api/scipy/ndimage/" title="Image Processing">ndimage</a></span><span class="trow" style="--ti:16ch"><span class="dim">│       │   └── </span><a href="../../api/scipy/solvers/" title="Solver Callbacks">solvers</a></span><span class="trow" style="--ti:12ch"><span class="dim">│       ├── </span><a href="../../api/xarray/" title="xarray">xarray</a></span><span class="trow" style="--ti:12ch"><span class="dim">│       └── </span><a href="../../api/interop/" title="Host Autodiff Interop">host-autodiff-interop/</a></span><span class="trow" style="--ti:16ch"><span class="dim">│           ├── </span><a href="../../api/interop/torch/" title="PyTorch">torch</a></span><span class="trow" style="--ti:16ch"><span class="dim">│           ├── </span><a href="../../api/interop/jax/" title="JAX">jax</a></span><span class="trow" style="--ti:16ch"><span class="dim">│           └── </span><a href="../../api/interop/autograd/" title="HIPS Autograd">autograd</a></span><span class="trow" style="--ti:4ch"><span class="dim">└── </span><a href="../" title="Developer Guide">developer-guide/</a></span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="./" class="cur" aria-current="page" title="Codebase Map">codebase</a></span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="../adding-operations/" title="Adding Operations">adding-operations</a></span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="../testing/" title="Testing">testing</a></span><span class="trow" style="--ti:8ch"><span class="dim">    └── </span><a href="../documentation/" title="Documentation">documentation</a></span></pre>
+  </aside>
+
+  <article class="tile manwin" aria-label="Manual page">
+    <span class="ptitle"><span class="pn">man</span> advect/development/codebase</span>
+    <div class="manscroll" id="manscroll"><div class="mancol">
+      <div class="manhead"><span>CODEBASE(1)</span><span class="mid">User Commands</span><span>CODEBASE(1)</span></div>
+      <div class="rule">────────────────────────────────────────────────────────────────────────────────────────</div>
+
+      
+      <div class="md">
+        
+        <h1 id="codebase-map">Codebase Map<a class="headerlink" href="#codebase-map" title="Permanent link">&para;</a></h1>
+<p>Advect has one inward dependency direction: public and optional frontends adapt
+user calls into provider-neutral core semantics; the core never reaches back
+out to a frontend. Dynamic autodiff and staging share canonical operation
+semantics, but keep their lifetime machinery separate.</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>user code
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    |
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>    +-- NumPy / Array API / SciPy frontends
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>    +-- xarray structure / host-autodiff adapters
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>                    |
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>                    v
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>        canonical operation emission
+</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>                    |
+</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>          +---------+----------+
+</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>          |                    |
+</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>          v                    v
+</span><span id="__span-0-12"><a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>    dynamic autodiff     abstract staging
+</span><span id="__span-0-13"><a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>          |                    |
+</span><span id="__span-0-14"><a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>          v                    v
+</span><span id="__span-0-15"><a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>  native dynamic tape   advect-runtime graph
+</span><span id="__span-0-16"><a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>                              ^
+</span><span id="__span-0-17"><a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a>                              |
+</span><span id="__span-0-18"><a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a>                       advect-native host
+</span></code></pre></div>
+<h2 id="source-ownership">Source ownership<a class="headerlink" href="#source-ownership" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Path</th>
+<th>Owns</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>packages/advect/src/advect/</code></td>
+<td>Public package assembly, explicit array construction, pytrees, support reporting, and author-facing testing helpers</td>
+</tr>
+<tr>
+<td><code>advect/core/</code></td>
+<td>Standard-library-only contracts: registry, tracing context, abstract values, pytrees, diagnostics, staging, the versioned outer <code>StagedProgram</code> envelope and cross-record validation, and the provider-neutral Array API frontend</td>
+</tr>
+<tr>
+<td><code>advect/core/_array_api/</code></td>
+<td>Array API frontend behavior, revision profiles, signatures, results, provider negotiation, executable evidence, and support declarations</td>
+</tr>
+<tr>
+<td><code>advect/autodiff/</code></td>
+<td>Transform APIs across dynamic calls and staged programs, concrete trace lifetimes, and canonical derivative rules</td>
+</tr>
+<tr>
+<td><code>advect/autodiff/rules/array_family/{jvp,vjp}/</code></td>
+<td>JVP-first array-family formulas and the smaller set of explicit real-adjoint rules</td>
+</tr>
+<tr>
+<td><code>advect/numpy/</code></td>
+<td>NumPy protocols, traced-array behavior, exact NumPy signatures, mutation functionalization, evaluation, and public NumPy support declarations</td>
+</tr>
+<tr>
+<td><code>advect/numpy/_array_function/</code></td>
+<td>NumPy array-function implementations grouped by responsibility, including traceable composites</td>
+</tr>
+<tr>
+<td><code>advect/scipy/</code></td>
+<td>The bounded optional SciPy namespace, its NumPy-backed direct primitives and composites, and dynamic solver callbacks</td>
+</tr>
+<tr>
+<td><code>advect/scipy/_ndimage/</code></td>
+<td>Private ndimage validation, lowering, primitives, and derivative machinery behind the public module</td>
+</tr>
+<tr>
+<td><code>advect/xarray/</code></td>
+<td>Explicit registration of supported labeled containers as pytrees</td>
+</tr>
+<tr>
+<td><code>advect/interop/</code></td>
+<td>First-order VJP bridges into JAX, PyTorch, and HIPS Autograd</td>
+</tr>
+<tr>
+<td><code>packages/advect-runtime/</code></td>
+<td>Python-independent canonical graph artifact, <code>GraphStore</code> validation and serialization, optimization, scheduling, and staged value lifetimes</td>
+</tr>
+<tr>
+<td><code>packages/advect-native/</code></td>
+<td>Required PyO3 translation layer, invocation-local dynamic tape, and Python host over <code>advect-runtime</code></td>
+</tr>
+<tr>
+<td><code>packages/advect/tests/</code></td>
+<td>Executable contract evidence, divided by the owning boundary</td>
+</tr>
+<tr>
+<td><code>docs/</code></td>
+<td>Published tutorials, concepts, compatibility statements, API reference, and this developer guide</td>
+</tr>
+<tr>
+<td><code>design/</code></td>
+<td>Requirements, accepted decisions, implementation status, and performance contracts</td>
+</tr>
+<tr>
+<td><code>scripts/</code></td>
+<td>Qualification, reporting, benchmark, release, and documentation tooling</td>
+</tr>
+</tbody>
+</table>
+<p>Private directories group responsibilities; their individual filenames are
+implementation details. Prefer locating the owning directory and reading its
+module docstrings over depending on a remembered leaf filename.</p>
+<h2 id="boundary-rules">Boundary rules<a class="headerlink" href="#boundary-rules" title="Permanent link">&para;</a></h2>
+<h3 id="core-and-frontends">Core and frontends<a class="headerlink" href="#core-and-frontends" title="Permanent link">&para;</a></h3>
+<p><code>advect.core</code> stays standard-library-only. Third-party array dependencies live
+in frontends or explicit adapters. Core code may define a provider-neutral hook
+or protocol only when at least one real core or Array API path consumes it.</p>
+<p>NumPy protocol dispatch belongs in <code>advect.numpy</code>; Array API negotiation and
+revision-specific behavior belong in <code>core/_array_api</code>. Both meet at canonical
+operation emission. A frontend spelling, support catalog row, and canonical
+operation are related records, not interchangeable sources of truth.</p>
+<p>Optional integrations are explicit. Importing <code>advect</code> installs the required
+NumPy frontend and built-in Array API compatibility bridge, but does not import
+SciPy, xarray, JAX, PyTorch, or HIPS Autograd.</p>
+<h3 id="semantics-and-lifetimes">Semantics and lifetimes<a class="headerlink" href="#semantics-and-lifetimes" title="Permanent link">&para;</a></h3>
+<p>Canonical operation records own stable identity and arity plus their declared
+abstract and derivative capabilities. Frontends and providers own concrete
+execution for built-in array operations; a public custom primitive's authored
+implementation owns its concrete call. Runtime derivative identifiers use
+<code>array.*</code>, <code>array_ext.*</code>, or an explicit <code>advect.*</code> internal name.</p>
+<p>Dynamic transforms own invocation-local concrete values through the native
+tape. Python staging owns the immutable call/output signature and versioned
+<code>StagedProgram</code> envelope. <code>advect-runtime</code> owns the enclosed canonical graph
+artifact and <code>GraphStore</code>. Do not convert the dynamic tape through the staged
+optimizer or duplicate the runtime graph model in Python.</p>
+<h3 id="rust-crates">Rust crates<a class="headerlink" href="#rust-crates" title="Permanent link">&para;</a></h3>
+<p><code>advect-runtime</code> has no Python, PyO3, or numerical-array dependency. It owns
+the canonical graph format, <code>GraphStore</code> validation, optimization, and the
+host-independent execution plan. Python core wraps that graph in the outer
+<code>StagedProgram</code> envelope and validates pytrees, call/output specifications,
+constant-manifest and optimization-report agreement, and other cross-record
+relationships. <code>advect-native</code> translates between them and owns the native
+dynamic tape; it must not reimplement either format, optimization, or staged
+scheduling.</p>
+<h3 id="sources-of-truth">Sources of truth<a class="headerlink" href="#sources-of-truth" title="Permanent link">&para;</a></h3>
+<ul>
+<li>The canonical registry determines which built-in operations exist and which
+  rules they provide.</li>
+<li>Python core's <code>StagedProgram</code> format and codecs determine the outer envelope;
+  <code>advect-runtime</code>'s graph format determines the enclosed canonical artifact.</li>
+<li>Frontend support declarations determine which public spellings and lifetimes
+  are claimed; executable support cases must cover those declarations in both
+  directions.</li>
+<li><code>advect.support_catalog()</code> derives the machine-readable public report from
+  live declarations and registered semantics.</li>
+<li>The NumPy, Array API, CuPy, and SciPy pages under <code>docs/compatibility/</code> are
+  generated projections, not another support registry. The xarray page is a
+  hand-written structure contract because it has no callable inventory.</li>
+<li><code>design/decisions/</code> records why a boundary exists. This developer guide
+  records how to work within the current boundary.</li>
+</ul>
+      </div>
+      
+
+      
+      <nav class="seealso" aria-label="Adjacent pages">
+        <span><a href="../">← overview</a></span>
+        <span class="nn"><a href="../adding-operations/">adding operations →</a></span>
+      </nav>
+      
+      <p class="prompt">$ <span class="cursor">█</span></p>
+    </div></div>
+  </article>
+
+  <aside class="tile outlinetile" id="outlinetile" aria-label="Page outline" aria-hidden="true">
+    <span class="ptitle"><span class="pn">outline</span> this-page</span>
+    <nav class="outlinelinks" id="outlinelinks"><a href="#source-ownership">Source ownership</a><a href="#boundary-rules">Boundary rules</a><a href="#core-and-frontends" class="outline-sub">Core and frontends</a><a href="#semantics-and-lifetimes" class="outline-sub">Semantics and lifetimes</a><a href="#rust-crates" class="outline-sub">Rust crates</a><a href="#sources-of-truth" class="outline-sub">Sources of truth</a></nav>
+  </aside>
+</div>
+
+<div class="overlay" id="help" role="dialog" aria-label="Keyboard shortcuts">
+  <h3>Keys</h3>
+  <table>
+    
+    <tr><td class="kk">j k d u g G</td><td>scroll the page</td></tr>
+    <tr><td class="kk">n / p</td><td>next / previous page</td></tr>
+    <tr><td class="kk">e</td><td>toggle the docs tree pane</td></tr>
+    <tr><td class="kk">o</td><td>toggle the page outline</td></tr>
+    <tr><td class="kk">2</td><td>open the playground</td></tr>
+    
+    <tr><td class="kk">/</td><td>search the manual</td></tr>
+    <tr><td class="kk">t</td><td>system → light → dark</td></tr>
+    <tr><td class="kk">?</td><td>close this help</td></tr>
+  </table>
+</div>
+
+<div class="overlay search-box" id="search" role="dialog" aria-hidden="true" aria-label="Search">
+  <div class="search-in"><span class="ps">/</span><input type="search" id="mkdocs-search-query" spellcheck="false" autocomplete="off" aria-label="Search query" placeholder="search the manual…"></div>
+  <div class="search-hits" id="mkdocs-search-results" data-no-results-text="No manual entry found" aria-live="polite"></div>
+</div>
+
+<aside class="link-preview" id="linkpreview" role="tooltip" aria-hidden="true">
+  <div class="preview-path" id="previewpath"></div>
+  <strong class="preview-title" id="previewtitle"></strong>
+  <pre class="preview-signature" id="previewsignature"><code></code></pre>
+  <p class="preview-description" id="previewdescription"></p>
+</aside>
+
+<div class="bar">
+  <a href="../.." class="b" data-short="[1]" aria-current="true">[1:docs]</a>
+  <a href="../../playground/" class="b" id="wsplay" data-short="[2]">[2:playground]</a>
+  <a href="https://github.com/yaugenst/advect" class="b" data-short="[git]">[git:source]</a>
+  <span class="path hidesm">$ man advect/development/codebase</span>
+  <span class="grow"></span>
+  <button class="tbtn" id="treebtn" data-short="[e]" aria-label="Toggle documentation tree">[e] tree</button>
+  <button class="tbtn" id="outlinebtn" data-short="[o]" aria-label="Toggle page outline" aria-controls="outlinetile" aria-expanded="false">[o] outline</button>
+  <button class="tbtn" id="searchbtn" data-short="[/]" aria-label="Search" aria-controls="search" aria-expanded="false">[/] search</button>
+  <button class="tbtn hidesm" id="helpbtn" aria-label="Keyboard help">[?] keys</button>
+  <button class="tbtn" id="themeToggle" data-short="[mode]" aria-label="Cycle system, light, and dark display modes">[ mode: … ]</button>
+</div>
+
+<script src="../../js/theme.js"></script>
+<script src="../../js/examples.js"></script>
+<script src="../../search/main.js"></script>
+
+</body>
+</html>
