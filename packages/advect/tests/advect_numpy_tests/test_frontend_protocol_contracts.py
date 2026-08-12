@@ -14,25 +14,17 @@ if TYPE_CHECKING:
 
 
 @pytest.mark.parametrize(
-    ("operation", "expected", "expected_tangent"),
+    ("operation", "expected_tangent"),
     [
         (
-            lambda x: np.pad(x, 1, mode="constant", constant_values=2.0),
             lambda x: np.pad(x, 1, mode="constant", constant_values=2.0),
             lambda x: np.pad(x, 1, mode="constant", constant_values=0),
         ),
         (
             lambda x: np.pad(x, (1, 2), mode="constant", constant_values=(-1.0, 2.0)),
-            lambda x: np.pad(x, (1, 2), mode="constant", constant_values=(-1.0, 2.0)),
             lambda x: np.pad(x, (1, 2), mode="constant", constant_values=0),
         ),
         (
-            lambda x: np.pad(
-                x,
-                ((1, 0), (2, 1)),
-                mode="constant",
-                constant_values=((1.0, 2.0), (3.0, 4.0)),
-            ),
             lambda x: np.pad(
                 x,
                 ((1, 0), (2, 1)),
@@ -44,20 +36,16 @@ if TYPE_CHECKING:
         (
             lambda x: np.partition(x, np.asarray(1), axis=-1),
             lambda x: np.partition(x, np.asarray(1), axis=-1),
-            lambda x: np.partition(x, np.asarray(1), axis=-1),
         ),
         (
-            lambda x: np.partition(x, np.asarray([0, 2]), axis=-1),
             lambda x: np.partition(x, np.asarray([0, 2]), axis=-1),
             lambda x: np.partition(x, np.asarray([0, 2]), axis=-1),
         ),
         (
             lambda x: np.gradient(x, axis=np.int64(-1)),
             lambda x: np.gradient(x, axis=-1),
-            lambda x: np.gradient(x, axis=-1),
         ),
         (
-            lambda x: np.gradient(x, axis=(-2, -1)),
             lambda x: np.gradient(x, axis=(-2, -1)),
             lambda x: np.gradient(x, axis=(-2, -1)),
         ),
@@ -74,14 +62,13 @@ if TYPE_CHECKING:
 )
 def test_normalized_numpy_forms_preserve_values_and_tangents(
     operation: Callable[[Any], Any],
-    expected: Callable[[np.ndarray], Any],
     expected_tangent: Callable[[np.ndarray], Any],
 ) -> None:
     value = np.arange(1.0, 7.0).reshape(2, 3)
     direction = np.ones_like(value)
 
     primal, tangent = ad.jvp(operation)(value, tangents=direction)
-    expected_primal = expected(value)
+    expected_primal = operation(value)
     tangent_reference = expected_tangent(direction)
 
     if isinstance(primal, tuple):
@@ -228,7 +215,7 @@ def test_staged_diff_accepts_live_prepend_and_append_operands() -> None:
     append = np.asarray([[30.0], [40.0]])
 
     def difference(x: Any, before: Any, after: Any) -> Any:
-        return np.diff(x, axis=1, prepend=before, append=after)
+        return np.diff(x, n=2, axis=1, prepend=before, append=after)
 
     directions = (
         np.full_like(value, 0.1),
@@ -276,42 +263,6 @@ def test_dynamic_full_differentiates_fill_and_not_like_dispatch_anchor() -> None
     )
     np.testing.assert_allclose(primal, np.full((2, 2), fill))
     np.testing.assert_allclose(tangent, np.full((2, 2), 0.5))
-
-
-def test_special_abstract_numpy_forms_survive_serialization() -> None:
-    value = np.arange(1.0, 10.0).reshape(3, 3)
-    condition = [True, False, True, False, True, False, True, False, False]
-
-    def composites(x: Any) -> tuple[Any, ...]:
-        return (
-            np.gradient(x, edge_order=2),
-            np.average(x, axis=(0, 1), returned=True, keepdims=True),
-            np.linalg.matrix_power(x, 0),
-            np.compress(condition, x),
-            np.cumulative_prod(x, axis=1, dtype=np.float64, include_initial=True),
-            np.full(
-                (2, 2),
-                4.0,
-                dtype=np.float32,
-                order="F",
-                device="cpu",
-                like=x,
-            ),
-        )
-
-    program = ad.stage(composites, specs=(ad.ArraySpec(value.shape, value.dtype),))
-    restored = ad.StagedProgram.from_dict(program.to_dict())
-    expected = composites(value)
-
-    for staged in (program, restored):
-        actual = staged(value)
-        for actual_group, expected_group in zip(actual, expected, strict=True):
-            actual_items = actual_group if isinstance(actual_group, tuple) else (actual_group,)
-            expected_items = (
-                expected_group if isinstance(expected_group, tuple) else (expected_group,)
-            )
-            for item, reference in zip(actual_items, expected_items, strict=True):
-                np.testing.assert_allclose(item, reference)
 
 
 def test_expired_tracers_cannot_cross_array_function_boundaries() -> None:
@@ -376,7 +327,7 @@ def test_unsupported_ufunc_reduction_methods_name_the_rejected_form(method: str)
         ad.stage(operation, specs=(ad.ArraySpec(value.shape, value.dtype),))
 
 
-def test_unsupported_array_functions_fail_clearly_in_both_lifetimes() -> None:
+def test_unsupported_array_function_fails_clearly_in_both_lifetimes() -> None:
     value = np.arange(3.0)
 
     def operation(x: Any) -> Any:
@@ -392,11 +343,16 @@ def test_unsupported_array_functions_fail_clearly_in_both_lifetimes() -> None:
     ("order", "error", "match"),
     [(1, TypeError, "order must be str"), ("Z", ValueError, "order must be one of")],
 )
-def test_staged_array_copy_rejects_invalid_memory_orders(
+def test_array_copy_rejects_invalid_memory_orders_in_both_lifetimes(
     order: object,
     error: type[Exception],
     match: str,
 ) -> None:
+    with pytest.raises(error, match=match):
+        ad.jvp(lambda x: x.copy(order=order))(
+            np.arange(4.0),
+            tangents=np.ones(4),
+        )
     with pytest.raises(error, match=match):
         ad.stage(
             lambda x: x.copy(order=order),

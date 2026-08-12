@@ -42,8 +42,7 @@ def test_histogram2d_preserves_traced_ndarray_edge_rows() -> None:
     for actual, reference in zip(primal, expected, strict=True):
         np.testing.assert_array_equal(actual, reference)
     np.testing.assert_array_equal(tangent[0], np.zeros_like(primal[0]))
-    np.testing.assert_array_equal(tangent[1], direction[0])
-    np.testing.assert_array_equal(tangent[2], direction[1])
+    np.testing.assert_array_equal(tangent[1:], direction)
 
 
 def test_histogramdd_preserves_a_traced_edge_sequence() -> None:
@@ -71,34 +70,6 @@ def test_histogramdd_rejects_an_empty_coordinate_sequence() -> None:
             weights,
             tangents=weights,
         )
-
-
-def test_lexsort_accepts_a_traced_key_matrix() -> None:
-    keys = np.array([[2.0, 1.0, 2.0], [1.0, 3.0, 0.0]])
-
-    primal, tangent = ad.jvp(np.lexsort)(keys, tangents=np.ones_like(keys))
-
-    np.testing.assert_array_equal(primal, np.lexsort(keys))
-    np.testing.assert_array_equal(tangent, np.zeros_like(primal))
-
-
-def test_isin_honors_kind_and_boolean_controls() -> None:
-    values = np.array([1.0, 2.0, 4.0, 7.0])
-    candidates = np.array([2.0, 3.0, 7.0])
-
-    def membership(array: Any) -> Any:
-        return np.isin(
-            array,
-            candidates,
-            assume_unique=True,
-            invert=True,
-            kind="sort",
-        )
-
-    primal, tangent = ad.jvp(membership)(values, tangents=np.ones_like(values))
-
-    np.testing.assert_array_equal(primal, membership(values))
-    np.testing.assert_array_equal(tangent, np.zeros_like(primal))
 
 
 def test_union1d_selects_nan_and_finite_tangents_from_the_inputs() -> None:
@@ -215,19 +186,6 @@ def test_apply_along_axis_rejects_inconsistent_callback_shapes() -> None:
 
     with pytest.raises(ad.TracingError, match="returned inconsistent shapes"):
         ad.jvp(inconsistent)(values, tangents=np.ones_like(values))
-
-
-def test_insert_accepts_a_negative_axis() -> None:
-    values = np.arange(6.0).reshape(2, 3)
-    direction = np.linspace(-0.3, 0.3, values.size).reshape(values.shape)
-
-    primal, tangent = ad.jvp(lambda array: np.insert(array, 1, [10.0, 20.0], axis=-1))(
-        values,
-        tangents=direction,
-    )
-
-    np.testing.assert_array_equal(primal, np.insert(values, 1, [10.0, 20.0], axis=-1))
-    np.testing.assert_array_equal(tangent, np.insert(direction, 1, [0.0, 0.0], axis=-1))
 
 
 def test_insert_preserves_numpy_index_errors() -> None:

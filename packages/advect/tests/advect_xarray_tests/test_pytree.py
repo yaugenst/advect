@@ -121,23 +121,16 @@ def test_pytree_metadata_is_snapshotted_and_has_stable_equality() -> None:
     xr.testing.assert_identical(rebuilt, expected)
 
 
-def test_traced_coordinate_metadata_is_rejected() -> None:
-    class FakeTracer:
-        def _advect_snapshot(self) -> tuple[int, object]:
-            return 0, object()
+def test_nested_traced_coordinate_metadata_is_rejected() -> None:
+    value = xr.DataArray(np.ones(1), dims="x")
 
-    coordinate = np.empty(2, dtype=object)
-    coordinate[:] = [FakeTracer(), FakeTracer()]
-    value = xr.DataArray(
-        np.ones(2),
-        dims="x",
-        coords={"label": ("x", coordinate)},
-    )
+    def add_traced_coordinate(field: xr.DataArray) -> xr.DataArray:
+        coordinate = np.empty(1, dtype=object)
+        coordinate[0] = {"nested": [field.data[0]]}
+        return field.assign_coords(label=("x", coordinate))
 
-    with pytest.raises(
-        TypeError, match="coordinates, dimensions, names, and attributes are static"
-    ):
-        ad.pytree.tree_flatten(value)
+    with pytest.raises(TypeError, match="found traced coordinate 'label'"):
+        ad.jvp(add_traced_coordinate)(value, tangents=xr.ones_like(value))
 
 
 def test_multiindex_coordinate_is_an_explicit_boundary() -> None:

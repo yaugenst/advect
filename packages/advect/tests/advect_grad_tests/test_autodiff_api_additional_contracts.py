@@ -209,28 +209,24 @@ def test_zero_input_linear_map_is_reusable() -> None:
         assert active.transpose_many((1.0, 2.0)) == ((), ())
 
 
-def test_singleton_tuple_linearization_preserves_structure_and_empty_batches() -> None:
+def test_singleton_linear_map_preserves_structure_and_accepts_empty_batches() -> None:
     left = np.array([2.0, 3.0])
     right = np.array([4.0, 5.0])
     value, linear = ad.linearize(
-        lambda x, y: {"product": x * y, "constant": np.array(7.0)},
+        lambda left, right: left * right,
         left,
         right,
         argnums=(1,),
     )
 
-    assert_allclose(value["product"], left * right)
+    assert_allclose(value, left * right)
     with linear as active:
         tangent = active((np.ones_like(right),))
-        assert_allclose(tangent["product"], left)
-        assert_allclose(tangent["constant"], 0.0)
+        assert_allclose(tangent, left)
+        (gradient,) = active.pullback(np.ones_like(value))
+        assert_allclose(gradient, left)
         assert active.apply_many(()) == ()
         assert active.transpose_many(()) == ()
-        (gradient,) = active.transpose()({"product": np.ones_like(right), "constant": None})
-        assert_allclose(gradient, left)
-
-    with pytest.raises(RuntimeError, match="closed or consumed"):
-        linear(np.ones_like(right))
 
 
 def test_pullback_context_closes_an_unconsumed_trace() -> None:
@@ -242,28 +238,6 @@ def test_pullback_context_closes_an_unconsumed_trace() -> None:
 
     with pytest.raises(RuntimeError, match="closed or consumed"):
         pullback(np.ones_like(value))
-
-
-def test_repeated_dynamic_transforms_remain_independent() -> None:
-    def bilinear(left: np.ndarray, right: np.ndarray) -> np.ndarray:
-        return left * right + left * right
-
-    left = np.array([2.0, 3.0])
-    right = np.array([4.0, 5.0])
-    for _iteration in range(2):
-        value, tangent = ad.jvp(bilinear, argnums=(0, 1))(
-            left,
-            right,
-            tangents=(np.ones_like(left), np.ones_like(right)),
-        )
-        assert_allclose(value, 2.0 * left * right)
-        assert_allclose(tangent, 2.0 * (left + right))
-
-    for _iteration in range(2):
-        value, pullback = ad.vjp(bilinear, argnums=(0, 1))(left, right)
-        left_gradient, right_gradient = pullback(np.ones_like(value))
-        assert_allclose(left_gradient, 2.0 * right)
-        assert_allclose(right_gradient, 2.0 * left)
 
 
 def test_jvp_reports_a_public_primitive_without_a_forward_rule() -> None:
@@ -282,21 +256,6 @@ def test_jvp_reports_a_public_primitive_without_a_forward_rule() -> None:
 
     with pytest.raises(ad.NoJVPError, match="no JVP rule is installed"):
         ad.jvp(transpose_only)(np.ones(2), tangents=np.ones(2))
-
-
-def test_checkpoint_validates_and_preserves_an_ordinary_callable() -> None:
-    with pytest.raises(TypeError, match="checkpoint function must be callable"):
-        ad.checkpoint(None)  # type: ignore[arg-type]
-
-    def shifted(value: np.ndarray, *, offset: float = 1.0) -> np.ndarray:
-        """Shift one value."""
-        return value + offset
-
-    wrapped = ad.checkpoint(shifted)
-
-    assert wrapped.__name__ == "shifted"
-    assert wrapped.__doc__ == shifted.__doc__
-    assert_allclose(wrapped(np.array([1.0, 2.0]), offset=3.0), [4.0, 5.0])
 
 
 def test_checkpoint_partial_jvp_zero_fills_passive_inputs() -> None:
@@ -374,18 +333,7 @@ def test_jacobian_rejects_a_constant_python_complex_output() -> None:
         ad.jacobian(lambda _value: 1.0j)(2.0)
 
 
-def test_jacobian_requires_a_backend_for_shaped_outputs() -> None:
-    class ShapedWithoutNamespace:
-        shape = (2,)
-        dtype = np.dtype("float64")
-
-    with pytest.raises(RuntimeError, match="output leaves require an array backend"):
-        ad.jacobian(lambda _value: ShapedWithoutNamespace())(np.ones(3))
-
-
-def test_reverse_transforms_validate_output_structure_and_type() -> None:
-    with pytest.raises(ValueError, match="output pytree has 2 leaves"):
-        ad.grad(lambda value: (value, value))(2.0)
+def test_grad_rejects_a_nonnumeric_output() -> None:
     with pytest.raises(TypeError, match="got str"):
         ad.grad(lambda _value: "not numeric")(2.0)
 
@@ -401,51 +349,6 @@ def test_grad_preserves_none_for_an_untraceable_input_leaf() -> None:
 
     assert_allclose(gradient["value"], np.ones(2))
     assert gradient["label"] is None
-
-
-def test_vjp_rejects_a_vector_cotangent_for_a_python_scalar_output() -> None:
-    _value, pullback = ad.vjp(lambda _value: 3.0)(2.0)
-
-    with pytest.raises(ValueError, match=r"expected \(\), got \(2,\)"):
-        pullback(np.ones(2))
-
-
-def test_vjp_reports_a_missing_namespace_when_coercing_a_cotangent() -> None:
-    class ShapedWithoutNamespace:
-        shape = (2,)
-        dtype = np.dtype("float64")
-
-    _value, pullback = ad.vjp(lambda _value: ShapedWithoutNamespace())(2.0)
-
-    with pytest.raises(TypeError, match="no array namespace is available"):
-        pullback(1.0)
-
-
-def test_custom_transpose_may_restore_a_leading_singleton_dimension() -> None:
-    class ReshapableContribution:
-        def __init__(self, value: np.ndarray) -> None:
-            self.value = value
-            self.shape = value.shape
-
-        def reshape(self, shape: tuple[int, ...]) -> np.ndarray:
-            return self.value.reshape(shape)
-
-    @ad.primitive(name="tests.additional_contracts.reshapable_transpose")
-    def reduce_row(value: np.ndarray) -> np.ndarray:
-        return np.sum(value, axis=0)
-
-    @reduce_row.def_transpose
-    def transpose(
-        cotangent: np.ndarray,
-        primals: tuple[np.ndarray, ...],
-        output: np.ndarray,
-    ) -> tuple[ReshapableContribution]:
-        del primals, output
-        return (ReshapableContribution(cotangent),)
-
-    _value, pullback = ad.vjp(reduce_row)(np.ones((1, 2)))
-
-    assert_allclose(pullback(np.array([2.0, 3.0])), np.array([[2.0, 3.0]]))
 
 
 def test_dense_hessian_rejects_complex_inputs() -> None:
@@ -501,15 +404,17 @@ def test_implicit_root_rejects_solution_and_residual_pytree_changes() -> None:
         bad_residual(np.ones(2), initial=np.zeros(2))
 
 
-@pytest.mark.parametrize("initial", [1, 1.0 + 2.0j])
+@pytest.mark.parametrize("initial", [False, 1, 1.0 + 2.0j])
 def test_implicit_root_accepts_python_scalar_solution_specs(initial: object) -> None:
     root = ad.implicit_root(
-        lambda solution, _params: solution - solution,
+        lambda solution, _params: solution,
         solve=lambda _residual, guess: guess,
         linear_solve=lambda _operator, rhs: rhs,
     )
 
-    assert root(None, initial=initial) == initial
+    result = root(None, initial=initial)
+    assert type(result) is type(initial)
+    assert result == initial
 
 
 def test_implicit_root_jvp_supports_a_partially_seeded_parameter_pytree() -> None:

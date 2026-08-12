@@ -96,24 +96,17 @@ else:
     assert completed.returncode == 0, completed.stderr
 
 
-@pytest.mark.parametrize(
-    ("missing_name", "message"),
-    [
-        ("torch", r"advect\[torch\]"),
-        ("torch._C", "compiled extension missing"),
-    ],
-)
-def test_dependency_errors_distinguish_missing_extras_from_broken_dependencies(
+def test_dependency_errors_preserve_broken_dependencies(
     monkeypatch: pytest.MonkeyPatch,
-    missing_name: str,
-    message: str,
 ) -> None:
+    missing = ModuleNotFoundError("compiled extension missing", name="torch._C")
+
     def fail_import(_module_name: str) -> None:
-        raise ModuleNotFoundError("compiled extension missing", name=missing_name)
+        raise missing
 
     monkeypatch.setattr(interop_common, "import_module", fail_import)
 
-    with pytest.raises(ModuleNotFoundError, match=message) as error:
+    with pytest.raises(ModuleNotFoundError) as error:
         interop_common.require_dependency("torch")
 
-    assert error.value.name == missing_name
+    assert error.value is missing

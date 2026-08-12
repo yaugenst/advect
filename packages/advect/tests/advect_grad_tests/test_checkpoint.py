@@ -12,6 +12,19 @@ import advect as ad
 from advect.core._registry import get_registry
 
 
+def test_checkpoint_preserves_the_ordinary_callable_contract() -> None:
+    with pytest.raises(TypeError, match="checkpoint function must be callable"):
+        ad.checkpoint(None)  # type: ignore[arg-type]
+
+    def shifted(value: float, *, offset: float = 1.0) -> float:
+        """Shift one value."""
+        return value + offset
+
+    wrapped = ad.checkpoint(shifted)
+    assert wrapped(2.0, offset=3.0) == 5.0
+    assert (wrapped.__name__, wrapped.__doc__) == (shifted.__name__, shifted.__doc__)
+
+
 def test_checkpoint_recomputes_once_during_reverse() -> None:
     calls = 0
 

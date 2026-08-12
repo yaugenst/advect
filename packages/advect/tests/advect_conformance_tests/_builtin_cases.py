@@ -332,6 +332,23 @@ _MATMUL_VARIANTS = (
         shapes={"a": (2, 1, 3, 4), "b": (1, 5, 4, 2)},
         dtypes={"a": "complex128", "b": "complex128"},
     ),
+    InputVariant(
+        "batched-matrix-vector-complex128",
+        shapes={"a": (2, 2, 3), "b": (3,)},
+        dtypes={"a": "complex128", "b": "complex128"},
+    ),
+)
+_CONTRACTION_VARIANTS = (
+    InputVariant(
+        "vector-float64",
+        shapes={"a": _VECTOR, "b": _VECTOR},
+        dtypes={"a": "float64", "b": "float64"},
+    ),
+    InputVariant(
+        "scalar-complex128",
+        shapes={"a": (), "b": ()},
+        dtypes={"a": "complex128", "b": "complex128"},
+    ),
 )
 _SOLVE_VARIANTS = (
     InputVariant(
@@ -640,6 +657,12 @@ _ELEMENTWISE_COMPLEX: tuple[InvocationCase, ...] = (
         Real(),
         frontend=Frontend.ARRAY_API,
     ),
+    _unary(
+        "array.imag",
+        np.imag,
+        Real(),
+        reason="real inputs exercise the identically zero imaginary-part rule",
+    ),
     _complex_unary("array.log", lambda x: np.log(x + 4.0), Real()),
     _complex_unary("array.log2", lambda x: np.log2(x + 4.0), Real()),
     _complex_unary("array.log10", lambda x: np.log10(x + 4.0), Real()),
@@ -925,7 +948,11 @@ _SHAPE: tuple[InvocationCase, ...] = (
             _unary("array_ext.flipud", lambda x: np.flipud(np.reshape(x, (2, 3))), Real()),
             _unary("array.roll", lambda x: np.roll(x, 2), Real()),
             _unary("array_ext.rot90", lambda x: np.rot90(np.reshape(x, (2, 3))), Real()),
-            _unary("array_ext.rollaxis", lambda x: np.rollaxis(np.reshape(x, (2, 3)), 1), Real()),
+            _unary(
+                "array_ext.rollaxis",
+                lambda x: np.rollaxis(np.reshape(x, (1, 2, 3)), 0, -1),
+                Real(),
+            ),
             _unary(
                 "array.repeat",
                 lambda x: _xp_call(x, "repeat", x, 2),
@@ -939,9 +966,8 @@ _SHAPE: tuple[InvocationCase, ...] = (
                 frontend=Frontend.ARRAY_API,
             ),
             _unary("array_ext.pad", lambda x: np.pad(x, (1, 2)), Real()),
-            _unary("array.diff", np.diff, Real()),
-            _unary("array_ext.gradient", np.gradient, Real()),
-            _unary("array.concatenate", lambda x: np.concatenate([x, x]), Real()),
+            _unary("array.diff", lambda x: np.diff(x, n=0), Real()),
+            _unary("array_ext.gradient", lambda x: np.gradient(x, edge_order=2), Real()),
             _unary("array.stack", lambda x: np.stack([x, x]), Real()),
             _unary("array.atleast_1d", np.atleast_1d, Real()),
             _unary("array.atleast_2d", np.atleast_2d, Real()),
@@ -980,10 +1006,28 @@ _SHAPE: tuple[InvocationCase, ...] = (
         arguments=(Argument("x", Real(), shape=(3, 4)),),
         reason="a negative offset covers diagonal's shifted scatter transpose",
     ),
+    _binary(
+        "array.concatenate",
+        lambda left, right: np.concatenate((left, right), axis=None),
+        Real(),
+        Real(),
+        variants=(
+            InputVariant(
+                "distinct-shapes",
+                shapes={"a": (2, 3), "b": (2, 2)},
+            ),
+        ),
+        reason="axis=None flattens inputs and the pullback restores their distinct shapes",
+    ),
     InvocationCase(
         op="array.diff",
-        call=lambda x: np.diff(x, n=2, axis=1, prepend=np.zeros((3, 1))),
-        arguments=(Argument("x", Real(), shape=(3, 4)),),
+        call=lambda x: np.diff(
+            x,
+            n=2,
+            axis=1,
+            prepend=np.full((3, 1), 1.0 + 2.0j),
+        ),
+        arguments=(Argument("x", Real(), shape=(3, 4), dtype="complex128"),),
         reason="second differences with a prepended constant cover the nondefault stencil",
     ),
     InvocationCase(
@@ -1089,8 +1133,32 @@ _CONTRACTIONS: tuple[InvocationCase, ...] = (
         variants=_MATMUL_VARIANTS,
     ),
     *_new_numpy_contractions(),
-    _binary("array_ext.dot", np.dot, Real(), Real()),
-    _binary("array_ext.inner", np.inner, Real(), Real()),
+    _binary(
+        "array_ext.dot",
+        np.dot,
+        Real(),
+        Real(),
+        variants=(
+            *_CONTRACTION_VARIANTS,
+            InputVariant(
+                "scalar-vector-complex128",
+                shapes={"a": (), "b": (2,)},
+                dtypes={"a": "complex128", "b": "complex128"},
+            ),
+            InputVariant(
+                "vector-scalar-complex128",
+                shapes={"a": (2,), "b": ()},
+                dtypes={"a": "complex128", "b": "complex128"},
+            ),
+        ),
+    ),
+    _binary(
+        "array_ext.inner",
+        np.inner,
+        Real(),
+        Real(),
+        variants=_CONTRACTION_VARIANTS,
+    ),
     InvocationCase(
         op="array_ext.inner",
         call=np.inner,
@@ -1110,7 +1178,13 @@ _CONTRACTIONS: tuple[InvocationCase, ...] = (
         ),
         reason="outer flattens a non-vector operand before forming the product",
     ),
-    _binary("array_ext.kron", np.kron, Real(), Real()),
+    _binary(
+        "array_ext.kron",
+        np.kron,
+        Real(),
+        Real(),
+        variants=_CONTRACTION_VARIANTS,
+    ),
     InvocationCase(
         op="array_ext.kron",
         call=np.kron,
@@ -1391,6 +1465,12 @@ _LINALG: tuple[InvocationCase, ...] = (
         reason="complex-input eigvals has a data-independent staged output dtype",
     ),
     _unary("array_ext.linalg.norm", np.linalg.norm, Nonzero()),
+    InvocationCase(
+        op="array_ext.linalg.norm",
+        call=np.linalg.norm,
+        arguments=(Argument("x", Nonzero(), shape=(2, 3, 2)),),
+        reason="rank-three default norm flattens every axis before differentiation",
+    ),
 )
 
 # --- spectral ----------------------------------------------------------------
@@ -1556,6 +1636,16 @@ _SELECTION: tuple[InvocationCase, ...] = (
         reason="explicit boundary constants prevent out-of-range cotangents reaching values",
     ),
     InvocationCase(
+        op="array_ext.interp",
+        call=lambda values: np.interp(
+            np.array([-1.0, 0.5, 2.0]),
+            np.array([0.5]),
+            values,
+        ),
+        arguments=(Argument("values", Real(), shape=(1,)),),
+        reason="a single sample has no slope and every query selects that value",
+    ),
+    InvocationCase(
         op="array.linspace",
         call=lambda start, stop: np.linspace(start, stop, 5),
         arguments=(
@@ -1595,6 +1685,17 @@ _SELECTION: tuple[InvocationCase, ...] = (
         laws=DEFAULT_LAWS | {Law.DEPENDENCE},
         dependence_indices=frozenset({0, 1}),
         reason="array endpoints with axis=1 cover broadcast reconstruction and endpoint=False",
+    ),
+    InvocationCase(
+        op="array.linspace",
+        call=lambda start, stop: np.linspace(start, stop, num=1, endpoint=True),
+        arguments=(
+            Argument("start", Real(), shape=()),
+            Argument("stop", Real(), shape=()),
+        ),
+        laws=DEFAULT_LAWS | {Law.DEPENDENCE},
+        dependence_indices=frozenset({0}),
+        reason="a single endpoint depends only on start",
     ),
     InvocationCase(
         op="array.clip",
@@ -1878,6 +1979,15 @@ _OTHER_FRONTEND_INVOCATIONS: tuple[InvocationCase, ...] = (
         arguments=(Argument("x", Real(), shape=_VECTOR),),
         reason="NumPy array-function binding is independent from the Array API binding",
     ),
+    *(
+        InvocationCase(
+            op="array.take",
+            call=lambda x, mode=mode: np.take(x, np.array([4, -1, 1]), axis=1, mode=mode),
+            arguments=(Argument("x", Real(), shape=(2, 3, 4)),),
+            reason=f"mode={mode} normalizes repeated indices on a middle axis",
+        )
+        for mode in ("wrap", "clip")
+    ),
     _namespace(
         "array.take_along_axis",
         lambda x: _xp(x).take_along_axis(x, _xp(x).asarray([0, 2, 4])),
@@ -1888,6 +1998,16 @@ _OTHER_FRONTEND_INVOCATIONS: tuple[InvocationCase, ...] = (
         call=lambda x: np.take_along_axis(x, np.array([0, 2, 4]), axis=0),
         arguments=(Argument("x", Real(), shape=_VECTOR),),
         reason="NumPy array-function binding is independent from the Array API binding",
+    ),
+    InvocationCase(
+        op="array.take_along_axis",
+        call=lambda x: np.take_along_axis(
+            x,
+            np.array([[0, 2], [1, 1]]),
+            axis=1,
+        ),
+        arguments=(Argument("x", Real(), shape=(1, 3)),),
+        reason="broadcast source dimensions reduce duplicate indexed cotangents",
     ),
     _namespace(
         "array.astype",
@@ -1926,10 +2046,23 @@ _OTHER_FRONTEND_INVOCATIONS: tuple[InvocationCase, ...] = (
         variants=_REDUCTION_VARIANTS,
     ),
     _namespace(
+        "array_ext.linalg.vector_norm",
+        lambda x: _xp(x).linalg.vector_norm(x, ord=3, axis=(0, 2), keepdims=True),
+        Argument("x", Nonzero(), shape=(2, 2, 3)),
+        reason="multi-axis p-norm covers tuple-axis normalization",
+    ),
+    _namespace(
         "array_ext.linalg.matrix_norm",
         lambda a: _xp(a).linalg.matrix_norm(a),
         Argument("a", WellConditioned(), shape=_MATRIX),
         tolerance=_LINALG_TOLERANCE,
+    ),
+    _namespace(
+        "array_ext.linalg.matrix_norm",
+        lambda a: _xp(a).linalg.matrix_norm(a, ord="nuc", keepdims=True),
+        Argument("a", WellConditioned(), shape=(2, 2, 3)),
+        tolerance=_LINALG_TOLERANCE,
+        reason="nuclear norm covers the singular-value branch on batched matrices",
     ),
 )
 
@@ -2194,6 +2327,7 @@ DYNAMIC_ONLY_STAGING_INVOCATIONS = frozenset(
         "array.linspace[numpy]",
         "array.linspace[numpy]#1",
         "array.linspace[numpy]#2",
+        "array.linspace[numpy]#3",
         "array.outer[numpy]#1",
         "array.roll[numpy]",
         "array.swapaxes[numpy]",
@@ -2230,6 +2364,7 @@ DYNAMIC_ONLY_STAGING_INVOCATIONS = frozenset(
         "array_ext.linalg.eig[numpy]#2",
         "array_ext.linalg.eigvals[numpy]",
         "array_ext.linalg.eigh[numpy]#1",
+        "array_ext.linalg.norm[numpy]#1",
         "array_ext.linalg.svd[numpy]#2",
         "array_ext.exp2[numpy]",
         "array_ext.fabs[numpy]",
@@ -2246,6 +2381,7 @@ DYNAMIC_ONLY_STAGING_INVOCATIONS = frozenset(
         "array_ext.interp[numpy]#1",
         "array_ext.interp[numpy]#2",
         "array_ext.interp[numpy]#3",
+        "array_ext.interp[numpy]#4",
         "array_ext.kron[numpy]",
         "array_ext.kron[numpy]#1",
         "array_ext.logaddexp2[numpy]",

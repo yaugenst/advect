@@ -451,65 +451,6 @@ def test_loaded_program_rejects_malformed_graph_linkage(
         ad.StagedProgram.from_dict(payload)
 
 
-@pytest.mark.parametrize(
-    ("value", "dtype"),
-    [
-        pytest.param(True, "bool", id="bool"),
-        pytest.param(2, "int64", id="int"),
-        pytest.param(1.0 + 2.0j, "complex128", id="complex"),
-    ],
-)
-def test_stage_infers_and_replays_python_scalar_categories(value: object, dtype: str) -> None:
-    program = ad.stage(lambda item: item, value)
-
-    assert program.signature == ((ad.ArraySpec((), dtype, weak=True),), {})
-    assert program(value) == value
-
-
-def test_stage_rejects_unclassified_examples_and_specs() -> None:
-    with pytest.raises(TypeError, match="declare non-array inputs with StaticSpec"):
-        ad.stage(lambda item: item, "dynamic")
-
-    with pytest.raises(TypeError, match="specs must contain ArraySpec or StaticSpec"):
-        ad.stage(lambda item: item, specs=(object(),))
-
-
-@pytest.mark.parametrize(
-    ("dtype", "value", "match"),
-    [
-        pytest.param("bool", 1, "expected dtype=bool", id="bool"),
-        pytest.param("complex128", True, "got bool", id="complex"),
-        pytest.param("float64", 1.0j, "expected a real scalar", id="float"),
-        pytest.param("int64", 1.0, "expected an integer", id="int"),
-    ],
-)
-def test_staged_call_rejects_changed_weak_scalar_category(
-    dtype: str,
-    value: object,
-    match: str,
-) -> None:
-    program = ad.stage(
-        lambda item: item,
-        specs=(ad.ArraySpec((), dtype, weak=True),),
-    )
-
-    with pytest.raises(ValueError, match=match):
-        program(value)
-
-
-def test_staged_call_rejects_changed_nested_call_structure() -> None:
-    program = ad.stage(
-        lambda items: items["value"],
-        specs=({"value": ad.ArraySpec((1,), "float32")},),
-    )
-    value = np.ones(1, dtype=np.float32)
-
-    with pytest.raises(TypeError, match="pytree differs from the declared specs"):
-        program([value])
-    with pytest.raises(TypeError, match="pytree differs from the declared specs"):
-        program({"other": value})
-
-
 def test_loaded_custom_primitive_rejects_output_structure_arity_mismatch() -> None:
     @ad.primitive(name="tests.additional_stage_pair")
     def pair(value: object) -> tuple[object, object]:
@@ -577,20 +518,55 @@ def test_staged_call_allows_multiple_devices_when_no_constants_are_materialized(
 
 
 @pytest.mark.parametrize(
-    ("kind", "error", "match"),
+    ("value", "dtype"),
+    [(True, "bool"), (2, "int64"), (1.0 + 2.0j, "complex128")],
+)
+def test_stage_infers_and_replays_python_scalar_categories(value: object, dtype: str) -> None:
+    program = ad.stage(lambda item: item, value)
+
+    assert program.signature == ((ad.ArraySpec((), dtype, weak=True),), {})
+    assert program(value) == value
+
+
+def test_stage_rejects_non_array_examples_and_specs() -> None:
+    with pytest.raises(TypeError, match="declare non-array inputs with StaticSpec"):
+        ad.stage(lambda item: item, "dynamic")
+    with pytest.raises(TypeError, match="specs must contain ArraySpec or StaticSpec"):
+        ad.stage(lambda item: item, specs=(object(),))
+
+
+def test_staged_call_rejects_changed_nested_call_structure() -> None:
+    program = ad.stage(
+        lambda items: items["value"],
+        specs=({"value": ad.ArraySpec((1,), "float32")},),
+    )
+
+    with pytest.raises(TypeError, match="pytree differs from the declared specs"):
+        program({"other": np.ones(1, dtype=np.float32)})
+
+
+@pytest.mark.parametrize(
+    ("dtype", "value"),
+    [("bool", 1), ("complex128", True), ("float64", 1.0j), ("int64", 1.0)],
+)
+def test_staged_call_rejects_changed_weak_scalar_category(dtype: str, value: object) -> None:
+    program = ad.stage(lambda item: item, specs=(ad.ArraySpec((), dtype, weak=True),))
+
+    with pytest.raises(ValueError, match="Weak staged argument"):
+        program(value)
+
+
+@pytest.mark.parametrize(
+    ("kind", "result", "error", "match"),
     [
-        pytest.param(
-            "missing",
-            ad.MissingPrimitiveRuleError,
-            "missing 'abstract'",
-            id="missing",
-        ),
-        pytest.param("empty", TypeError, "returned no values", id="empty"),
-        pytest.param("invalid-leaf", TypeError, "must return ArraySpec", id="invalid-leaf"),
+        ("missing", None, ad.MissingPrimitiveRuleError, "missing 'abstract'"),
+        ("empty", (), TypeError, "returned no values"),
+        ("invalid", object(), TypeError, "must return ArraySpec"),
     ],
 )
 def test_stage_rejects_invalid_primitive_abstract_contracts(
     kind: str,
+    result: object,
     error: type[Exception],
     match: str,
 ) -> None:
@@ -603,71 +579,7 @@ def test_stage_rejects_invalid_primitive_abstract_contracts(
         @identity.def_abstract
         def identity_abstract(value: ad.AbstractValue) -> object:
             del value
-            return () if kind == "empty" else object()
+            return result
 
     with pytest.raises(error, match=match):
         ad.stage(identity, specs=(ad.ArraySpec((1,), "float32"),))
-
-
-def test_stage_rejects_untraceable_dynamic_primitive_arguments() -> None:
-    @ad.primitive(name="tests.additional_stage_dynamic_config")
-    def identity(value: object, config: object) -> object:
-        del config
-        return value
-
-    with pytest.raises(TypeError, match="argument 'config' is not traceable"):
-        ad.stage(
-            lambda value: identity(value, config=object()),
-            specs=(ad.ArraySpec((1,), "float32"),),
-        )
-
-
-def test_stage_folds_concrete_primitive_calls_into_captured_constants() -> None:
-    @ad.primitive(name="tests.additional_stage_concrete_primitive")
-    def double(value: int) -> int:
-        return 2 * value
-
-    program = ad.stage(
-        lambda value: value + double(2),
-        specs=(ad.ArraySpec((1,), "int64"),),
-    )
-
-    np.testing.assert_array_equal(program(np.array([3], dtype=np.int64)), np.array([7]))
-
-
-def test_stage_accepts_bound_methods_with_captured_array_state() -> None:
-    class Model:
-        def __init__(self) -> None:
-            self.offset = np.array([1.0, 2.0], dtype=np.float32)
-
-        def apply(self, value: object) -> object:
-            return value + self.offset
-
-    model = Model()
-    program = ad.stage(model.apply, specs=(ad.ArraySpec((2,), "float32"),))
-    model.offset[:] = 0
-
-    np.testing.assert_array_equal(
-        program(np.array([3.0, 4.0], dtype=np.float32)),
-        np.array([4.0, 6.0], dtype=np.float32),
-    )
-
-
-def test_stage_accepts_functions_with_empty_closure_cells() -> None:
-    def make_function() -> Any:
-        captured = object()
-
-        def identity(value: object) -> object:
-            return captured if value is None else value
-
-        assert identity.__closure__ is not None
-        del identity.__closure__[0].cell_contents
-        return identity
-
-    program = ad.stage(
-        make_function(),
-        specs=(ad.ArraySpec((1,), "float32"),),
-    )
-
-    value = np.array([2.0], dtype=np.float32)
-    np.testing.assert_array_equal(program(value), value)

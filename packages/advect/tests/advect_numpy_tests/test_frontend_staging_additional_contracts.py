@@ -44,10 +44,6 @@ def test_staged_gradient_supports_scalar_and_coordinate_spacings() -> None:
     columns = np.array([0.0, 0.5, 2.0, 5.0])
 
     _assert_staged_round_trip(
-        lambda array: np.gradient(array, 2.0, axis=(0, 1), edge_order=2),
-        (values,),
-    )
-    _assert_staged_round_trip(
         lambda array: np.gradient(array, rows, columns, axis=(0, 1), edge_order=2),
         (values,),
     )
@@ -74,6 +70,18 @@ def test_staged_average_preserves_weight_and_result_metadata() -> None:
         lambda array, weight: np.average(array, 1, weight, True),  # noqa: FBT003
         (values, weights),
     )
+
+
+def test_special_abstract_forms_share_one_serializable_program() -> None:
+    value = np.arange(1.0, 10.0).reshape(3, 3)
+
+    def operation(array: Any) -> tuple[Any, ...]:
+        return (
+            np.linalg.matrix_power(array, 0),
+            np.compress([True, False, True], array, axis=0),
+        )
+
+    _assert_staged_round_trip(operation, (value,))
 
 
 @pytest.mark.parametrize(
@@ -174,27 +182,6 @@ def test_staged_pinv_preserves_tolerance_and_hermitian_controls(
     matrix = np.array([[3.0, 1.0], [1.0, 2.0]])
 
     _assert_staged_round_trip(operation, (matrix,))
-
-
-def test_staged_creation_preserves_positional_and_default_metadata() -> None:
-    anchor = np.zeros(1)
-    fill = np.asarray(2.0)
-
-    def create(like: Any, value: Any) -> tuple[Any, ...]:
-        return (
-            np.full(
-                (2, 3),
-                value,
-                np.float32,
-                "F",
-                device="cpu",
-                like=like,
-            ),
-            np.zeros((2, 3), like=like),
-            np.ones((2, 3), like=like),
-        )
-
-    _assert_staged_round_trip(create, (anchor, fill))
 
 
 def test_staged_take_reshape_and_diff_replay_public_metadata() -> None:

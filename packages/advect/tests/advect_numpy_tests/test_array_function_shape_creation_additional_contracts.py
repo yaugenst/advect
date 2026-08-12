@@ -220,32 +220,20 @@ def test_sort_rejects_the_unimplemented_descending_option() -> None:
         )
 
 
-def test_pad_differentiates_scalar_boundary_parameters() -> None:
+@pytest.mark.parametrize(
+    ("boundary", "widths"),
+    [
+        (np.asarray(2.0), ((1, 0), (0, 2))),
+        (np.array([[1.0, 2.0], [3.0, 4.0]]), ((1, 2), (2, 1))),
+        (np.asarray(2.0), ((1, 2),)),
+    ],
+    ids=("scalar", "per-axis", "broadcast-width"),
+)
+def test_pad_differentiates_boundary_parameters(
+    boundary: np.ndarray[Any, Any],
+    widths: tuple[tuple[int, int], ...],
+) -> None:
     value = np.arange(6.0).reshape(2, 3)
-    boundary = np.asarray(2.0)
-    widths = ((1, 0), (0, 2))
-
-    def pad(x: Any, edge: Any) -> Any:
-        return np.pad(x, widths, "constant", constant_values=edge)
-
-    directions = (np.full_like(value, 0.1), np.asarray(0.25))
-    primal, tangent = ad.jvp(pad, argnums=(0, 1))(
-        value,
-        boundary,
-        tangents=directions,
-    )
-
-    np.testing.assert_array_equal(primal, pad(value, boundary))
-    np.testing.assert_array_equal(
-        tangent,
-        np.pad(directions[0], widths, mode="constant", constant_values=directions[1]),
-    )
-
-
-def test_pad_differentiates_per_axis_boundary_parameters() -> None:
-    value = np.arange(6.0).reshape(2, 3)
-    boundary = np.array([[1.0, 2.0], [3.0, 4.0]])
-    widths = ((1, 2), (2, 1))
 
     def pad(x: Any, edges: Any) -> Any:
         return np.pad(x, widths, mode="constant", constant_values=edges)
@@ -261,6 +249,10 @@ def test_pad_differentiates_per_axis_boundary_parameters() -> None:
     np.testing.assert_array_equal(
         tangent,
         np.pad(directions[0], widths, mode="constant", constant_values=directions[1]),
+    )
+    np.testing.assert_array_equal(
+        ad.grad(lambda x: np.sum(pad(x, boundary)))(value),
+        np.ones_like(value),
     )
 
 

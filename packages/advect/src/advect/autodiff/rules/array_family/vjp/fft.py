@@ -199,23 +199,10 @@ def _vjp_rfft(
     _ = ans, rest, attrs
     normalized_axis = _normalize_axis(axis, ndim=x.ndim)
     transform_length = int(x.shape[normalized_axis]) if n is None else n
-    half_length = int(g.shape[normalized_axis])
-    missing_length = transform_length - half_length
-    if missing_length < 0:
+    if transform_length < int(g.shape[normalized_axis]):
         msg = "rfft cotangent is longer than its full transform length"
         raise ValueError(msg)
-    if missing_length:
-        zeros_shape = list(g.shape)
-        zeros_shape[normalized_axis] = missing_length
-        zeros = _array_constructor_like(
-            g,
-            "zeros",
-            tuple(zeros_shape),
-            dtype=g.dtype,
-        )
-        spectrum = xp.concatenate((g, zeros), axis=normalized_axis)
-    else:
-        spectrum = g
+    spectrum = _resize_axis_adjoint(g, target_length=transform_length, axis=normalized_axis)
     transformed = xp.real(
         xp.fft.ifft(
             spectrum,
@@ -253,22 +240,10 @@ def _vjp_rfftn(
         tuple(int(x.shape[axis]) for axis in normalized_axes) if s is None else tuple(s)
     )
     real_axis = normalized_axes[-1]
-    missing_length = transform_shape[-1] - int(g.shape[real_axis])
-    if missing_length < 0:
+    if transform_shape[-1] < int(g.shape[real_axis]):
         msg = "rfftn cotangent is longer than its full transform axis"
         raise ValueError(msg)
-    if missing_length:
-        zeros_shape = list(g.shape)
-        zeros_shape[real_axis] = missing_length
-        zeros = _array_constructor_like(
-            g,
-            "zeros",
-            tuple(zeros_shape),
-            dtype=g.dtype,
-        )
-        spectrum = xp.concatenate((g, zeros), axis=real_axis)
-    else:
-        spectrum = g
+    spectrum = _resize_axis_adjoint(g, target_length=transform_shape[-1], axis=real_axis)
     transformed = xp.real(
         xp.fft.ifftn(
             spectrum,
