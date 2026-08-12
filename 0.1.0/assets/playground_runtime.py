@@ -685,10 +685,11 @@ def playground_evaluate_json(x: float) -> str:
         value = float(cast("SupportsFloat", item))
         return value if math.isfinite(value) else None
 
+    point = np.asarray(x, dtype=np.float64)
     with np.errstate(all="ignore"):
-        value, derivative = jvp_program(np.asarray(x))
+        value, derivative = jvp_program(point)
         try:
-            second = to_json(hessian(np.asarray(x)))
+            second = to_json(hessian(point))
         except Exception:  # noqa: BLE001 - curvature is an optional readout
             second = None
     return json.dumps([to_json(value), to_json(derivative), second])
