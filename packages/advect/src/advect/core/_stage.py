@@ -1052,8 +1052,13 @@ def _decode_artifact(payload: object) -> _CompiledStage:
             raise ValueError("Staged output specs do not match their pytree")
         graph = _deserialize_staged_graph(payload["graph"])
         _validate_custom_calls(graph)
-        if len(graph.inputs) != sum(isinstance(spec, ArraySpec) for spec in call_specs):
-            raise ValueError("Staged graph input count does not match its call specs")
+        input_specs = tuple(spec for spec in call_specs if isinstance(spec, ArraySpec))
+        input_nodes = tuple(graph.get_node(node_id) for node_id in graph.inputs)
+        if len(input_nodes) != len(input_specs) or any(
+            tuple(node.shape) != spec.shape or _dtype_name(node.dtype) != _dtype_name(spec.dtype)
+            for node, spec in zip(input_nodes, input_specs, strict=True)
+        ):
+            raise ValueError("Staged graph inputs do not match its call specs")
         if len(graph.outputs) != output_treedef.num_leaves:
             raise ValueError("Staged graph output count does not match its output pytree")
         for node_id, spec in zip(graph.outputs, output_specs, strict=True):
@@ -1363,10 +1368,14 @@ def _execute_staged(
     namespace = _runtime_namespace(inputs, array_api_version=array_api_version)
     if namespace is None:
         namespace = _default_array_namespace(array_api_version=array_api_version)
-    device, device_key = _runtime_device(
-        inputs,
-        namespace,
-        array_api_version=array_api_version,
+    device, device_key = (
+        _runtime_device(
+            inputs,
+            namespace,
+            array_api_version=array_api_version,
+        )
+        if compiled.constants
+        else (None, None)
     )
     constants = _materialize_constants(
         compiled,

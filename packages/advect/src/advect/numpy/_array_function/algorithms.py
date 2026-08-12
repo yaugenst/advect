@@ -688,7 +688,12 @@ def _insert_handler(
     source_markers = np.arange(int(array.size), dtype=np.int64).reshape(array_shape)
     inserted_markers = np.arange(int(inserted.size), dtype=np.int64).reshape(inserted_shape)
     try:
-        source_map = _numpy.insert(source_markers, obj, -1, axis=axis)
+        source_map = _numpy.insert(
+            source_markers,
+            obj,
+            np.full(inserted_shape, -1, dtype=np.int64),
+            axis=axis,
+        )
         inserted_map = _numpy.insert(
             np.full(array_shape, -1, dtype=np.int64),
             obj,

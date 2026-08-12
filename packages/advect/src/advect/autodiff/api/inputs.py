@@ -104,6 +104,9 @@ def _get_signature(f: Callable[..., object]) -> inspect.Signature:
 
 
 def _validate_argnames(sig: inspect.Signature, argnames: tuple[str, ...]) -> None:
+    if len(set(argnames)) != len(argnames):
+        msg = f"argnames contains duplicates: {argnames}"
+        raise ValueError(msg)
     param_names = list(sig.parameters.keys())
     for name in argnames:
         if name not in sig.parameters:

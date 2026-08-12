@@ -116,6 +116,8 @@ def _static_scalar(value: object) -> object:
 
 
 def _normalize_sequence(value: object, rank: int) -> tuple[object, ...]:
+    if _is_traced_value(value):
+        _static_scalar(value)
     if not isinstance(value, str) and isinstance(value, Iterable):
         normalized = tuple(_static_scalar(item) for item in value)
         if len(normalized) != rank:

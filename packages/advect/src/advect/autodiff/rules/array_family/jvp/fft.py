@@ -216,7 +216,7 @@ def _jvp_irfftn(
     if tangent is None:
         return _zeros_output_tangent(ans, tangents)
     if s is not None and axes is None:
-        axes = tuple(range(len(s)))
+        axes = tuple(range(tangent.ndim - len(s), tangent.ndim))
     return cast("xp.ndarray[Any, Any]", xp.fft.irfftn(tangent, s=s, axes=axes, norm=norm))
 
 
