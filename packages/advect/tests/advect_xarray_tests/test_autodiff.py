@@ -125,7 +125,14 @@ def test_dataset_autodiff_preserves_each_data_variable() -> None:
     )
     xr.testing.assert_identical(gradient, expected)
 
-    tangent = xr.ones_like(dataset)
+    tangent = dataset.copy(
+        data={name: np.ones_like(variable.data) for name, variable in dataset.data_vars.items()}
+    )
+    expected_cotangent = dataset.copy(
+        data={
+            name: np.full_like(variable.data, 3.0) for name, variable in dataset.data_vars.items()
+        }
+    )
     output, output_tangent = ad.jvp(lambda value: 3.0 * value)(dataset, tangents=tangent)
     primal, pullback = ad.vjp(lambda value: 3.0 * value)(dataset)
     try:
@@ -136,7 +143,7 @@ def test_dataset_autodiff_preserves_each_data_variable() -> None:
     xr.testing.assert_identical(output, 3.0 * dataset)
     xr.testing.assert_identical(output_tangent, 3.0 * tangent)
     xr.testing.assert_identical(primal, output)
-    xr.testing.assert_identical(input_cotangent, 3.0 * tangent)
+    xr.testing.assert_identical(input_cotangent, expected_cotangent)
 
 
 def test_xarray_alignment_runs_normally_inside_dynamic_trace() -> None:

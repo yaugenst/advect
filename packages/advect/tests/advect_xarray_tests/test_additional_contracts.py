@@ -29,7 +29,7 @@ def test_complex_dataarray_jvp_preserves_supported_static_metadata() -> None:
             "object_array": np.array([{"kind": "sample"}], dtype=object),
         },
     )
-    tangent = xr.ones_like(value) * (1.0 + 1.0j)
+    tangent = value.copy(data=np.ones_like(value.data) * (1.0 + 1.0j))
     scale = 2.0 + 1.0j
 
     output, output_tangent = ad.jvp(lambda field: scale * field)(value, tangents=tangent)
