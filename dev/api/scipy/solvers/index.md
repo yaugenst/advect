@@ -1,6 +1,10 @@
 # Solver Callbacks
 
+The [implicit differentiation tutorial](https://yaugenst.github.io/advect/dev/tutorials/implicit-differentiation/#use-the-scipy-callbacks) shows both callbacks together. They plug into [`implicit_root`](https://yaugenst.github.io/advect/dev/api/transforms/#advect.implicit_root) and keep opaque solver iterations outside the derivative trace.
+
 ## Nonlinear solver callback
+
+The callback follows the contract of [`scipy.optimize.root`](https://docs.scipy.org/doc/scipy/reference/generated/scipy.optimize.root.html).
 
 ## optimize
 
@@ -36,6 +40,8 @@ Notes
 This is an opaque, first-order dynamic callback. Stage explicit traceable iterations or a closed custom primitive when a durable program is needed.
 
 ## Linear solver callback
+
+The callback follows the contract of [`scipy.sparse.linalg.gmres`](https://docs.scipy.org/doc/scipy/reference/generated/scipy.sparse.linalg.gmres.html).
 
 ## linalg
 

@@ -1,8 +1,8 @@
 # Gradients and Pytrees
 
-## Differentiate a NumPy function
+Start with the NumPy function you want to differentiate. If it returns one real scalar, [`grad`](https://yaugenst.github.io/advect/dev/api/transforms/#advect.grad) produces a new function that accepts the same inputs and returns the gradient.
 
-`grad` expects a real scalar output and differentiates the first argument by default:
+## Differentiate a NumPy function
 
 ```python
 import numpy as np
@@ -15,45 +15,46 @@ def loss(x):
 
 
 x = np.linspace(-0.5, 0.5, 8)
-gradient = ad.grad(loss)(x)
+loss_gradient = ad.grad(loss)
+gradient = loss_gradient(x)
+
 np.testing.assert_allclose(gradient, 2 * np.sin(x) * np.cos(x))
+print("gradient:", np.round(gradient, 6))
 ```
 
-The function is traced with the concrete value on every call. Python branches, loops, and data-dependent shapes therefore behave as they do in an ordinary call, provided every numerical operation is supported by the frontend.
+The transform traces the concrete call, runs reverse mode, and releases the trace before returning. A later call can take different branches, shapes, or loop counts; [Dynamic control flow](https://yaugenst.github.io/advect/dev/tutorials/control-flow/index.md) develops that model.
 
-Real Python scalar inputs use the same array tracer. Advect lifts them to zero-dimensional `float64` arrays at the transform boundary and returns their derivatives as Python scalars:
+Use [`value_and_grad`](https://yaugenst.github.io/advect/dev/api/transforms/#advect.value_and_grad) when an optimizer needs the objective and gradient from the same evaluation:
 
 ```python
-gradient = ad.grad(lambda value: value * value)(3.0)
-assert gradient == 6.0
+loss_and_gradient = ad.value_and_grad(loss)
+value, gradient = loss_and_gradient(x)
+step_size = 0.1
+updated = x - step_size * gradient
+
+print(f"loss: {value:.6f}")
+print(f"loss after one step: {loss(updated):.6f}")
 ```
 
-This is boundary convenience rather than a parallel scalar-operation frontend. Use provider operations inside functions that need transcendental functions or mixed array/scalar behavior.
-
-## Construct arrays from traced values
-
-Keep ordinary NumPy and give its constructor a live dispatch anchor through the standard `like=` parameter:
+If the function also returns diagnostics, set [`has_aux=True`](https://yaugenst.github.io/advect/dev/api/transforms/#advect.value_and_grad). The auxiliary value follows the call but is not differentiated:
 
 ```python
-def constructor_loss(x):
-    coefficients = np.array(
-        [[x[0], x[1]], [x[1], 2 * x[0]]],
-        like=x,
-    )
-    return coefficients.sum().item()
+def loss_with_metrics(x):
+    value = loss(x)
+    return value, {"maximum": np.max(np.abs(x)), "size": x.size}
 
 
-gradient = ad.grad(constructor_loss)(np.array([1.0, 2.0]))
-np.testing.assert_allclose(gradient, np.array([3.0, 2.0]))
+loss_and_gradient = ad.value_and_grad(
+    loss_with_metrics,
+    has_aux=True,
+)
+value, gradient, metrics = loss_and_gradient(x)
+print(f"loss: {value:.6f}; metrics: {metrics}")
 ```
 
-`like=x` selects Advect's constructor handling and x's array provider; it does not itself create a mathematical dependence on `x`. `np.array` creates an owned value by default, while `np.asarray` preserves a direct tracer when no conversion is required. Both accept rectangular nested lists or tuples.
+## Select arguments and preserve structure
 
-`ad.array` and `ad.asarray` remain explicit provider-neutral alternatives. For constructor-heavy migration code, `import advect.numpy as np` is a secondary convenience: it overrides the traced constructors and delegates every other attribute directly to the installed NumPy module.
-
-## Multiple arguments and pytrees
-
-Use `argnums` to select positional arguments. Dictionaries, lists, tuples, and custom pytree nodes preserve their structure:
+[Pytrees](https://yaugenst.github.io/advect/dev/api/pytree/index.md) keep the structure of lists, tuples, dictionaries, and registered application nodes. The [`argnums` and `argnames`](https://yaugenst.github.io/advect/dev/api/transforms/#advect.grad) parameters select positional and named arguments.
 
 ```python
 parameters = {
@@ -63,42 +64,40 @@ parameters = {
 features = np.array([2.0, -1.0, 0.5])
 
 
-def model_loss(params, inputs):
+def model_loss(params, inputs, *, scale):
     prediction = params["weight"] * inputs + params["bias"]
-    return np.sum(prediction**2)
+    return scale * np.sum(prediction**2)
 
 
-dparameters, dfeatures = ad.grad(
+model_gradient = ad.grad(
     model_loss,
     argnums=(0, 1),
-)(parameters, features)
-```
-
-The first result has the same dictionary structure as `parameters`. Keyword arguments can be selected with `argnames`:
-
-```python
-def scaled_loss(value, *, scale):
-    return np.sum(scale * value**2)
-
-
-positional, named = ad.grad(
-    scaled_loss,
-    argnums=(0,),
     argnames=("scale",),
-)(features, scale=0.5)
+)
+(dparameters, dfeatures), named = model_gradient(parameters, features, scale=0.5)
+
+print("weight gradient:", dparameters["weight"])
+print("feature gradient:", dfeatures)
+print("scale gradient:", named["scale"])
 ```
 
-`jacobian` uses the same selection model and preserves both sides of the derivative. For an output leaf with shape `(m,)` and an input leaf with shape `(n,)`, its block has shape `(m, n)`. Output and input pytrees remain nested rather than being flattened into one package-specific matrix:
+The gradient tree mirrors the selected input tree. Real Python scalars are accepted at the boundary and return Python-scalar derivatives; numerical work inside the function still follows the [active array provider](https://yaugenst.github.io/advect/dev/tutorials/scientific-python/#write-provider-neutral-array-code).
+
+## Stop one dependency explicitly
+
+[`stop_gradient`](https://yaugenst.github.io/advect/dev/api/arrays/#advect.stop_gradient) keeps a concrete dynamic value in the computation while removing its derivative contribution. Here the normalization scale is measured from the input but treated as fixed during differentiation:
 
 ```python
-def model(params, inputs):
-    return {
-        "prediction": params["weight"] * inputs + params["bias"],
-        "energy": np.sum(inputs**2),
-    }
+def normalized_loss(x):
+    scale = ad.stop_gradient(np.max(np.abs(x)))
+    return np.sum((x / scale) ** 2)
 
 
-blocks = ad.jacobian(model, argnums=(0, 1))(parameters, features)
-assert blocks["prediction"][0]["weight"].shape == (3, 3)
-assert blocks["energy"][1].shape == (3,)
+sample = np.array([-2.0, 1.0])
+gradient = ad.grad(normalized_loss)(sample)
+print("gradient with fixed scale:", gradient)
 ```
+
+Stopping a gradient is an explicit modeling choice, not a way to hide an unsupported operation. It is available only for dynamic calls because a [staged trace](https://yaugenst.github.io/advect/dev/tutorials/staging/index.md) has no concrete value to detach.
+
+Next, see how the same transform handles [branches, loops, and local mutation](https://yaugenst.github.io/advect/dev/tutorials/control-flow/index.md).

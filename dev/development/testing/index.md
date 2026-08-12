@@ -20,11 +20,10 @@ The [operation-authoring guide](https://yaugenst.github.io/advect/dev/developmen
 
 ## Python gates
 
-Set up the locked development environment with Python 3.12 or newer:
+Set up the locked development environment with Python 3.12 through 3.14:
 
 ```bash
-uv sync --all-groups
-uv lock --check
+uv sync --all-groups --locked
 uv run pre-commit install --install-hooks
 ```
 
@@ -34,19 +33,20 @@ Hook installation is per clone. Before review, verify the complete repository hy
 uv run pre-commit run --all-files
 ```
 
-The installed `pre-commit` hook may fix files and require restaging. The `commit-msg` hook enforces Conventional Commits. An intentional direct commit to `main` may skip only the branch guard with `SKIP=no-commit-to-branch git commit`; avoid `--no-verify`, which bypasses all checks.
+The installed `pre-commit` hook may fix files and require restaging. The `commit-msg` hook enforces Conventional Commits. Avoid `--no-verify`, which bypasses all checks.
 
 The canonical static and test gates are:
 
 ```bash
 uv run ruff format --check .
 uv run ruff check .
-uv run pyrefly check --config pyproject.toml --preset strict \
-  packages/advect/src
+uv run pyrefly check
 uv run pytest
 uv run pytest packages/advect/tests/advect_conformance_tests \
   --hypothesis-profile=thorough
 ```
+
+Pyrefly checks the runtime package and the release/browser-documentation scripts listed in `pyproject.toml`. Dynamic provider-qualification and benchmark scripts, plus tests, remain outside this production typing gate; their necessary boundary suppressions stay local.
 
 Run the owning suite while iterating. Run the full Python suite for changes to traced operations, derivative rules, shared transform behavior, or public support declarations.
 
@@ -59,12 +59,14 @@ Use Rust 1.94 or newer with Clippy and rustfmt:
 ```bash
 rustup toolchain install stable --component clippy rustfmt
 cargo fmt --all --check
-cargo clippy --workspace --all-targets --all-features -- -D warnings
-cargo test --workspace --all-targets
+cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+cargo test --locked --workspace --all-targets
 cargo deny --all-features check -W unmaintained
 uv run pytest packages/advect/tests/advect_native_tests
 uv build --package advect --wheel --out-dir dist/wheelhouse --clear
 ```
+
+CI runs the locked workspace Clippy and test gates on both Rust 1.94 and the current stable toolchain.
 
 For an internal `advect-runtime` change whose adapter contract is unchanged, the focused Clippy and test forms (`-p advect-runtime`) plus format and `cargo deny` are sufficient while iterating. Run the workspace forms above for a native change. A runtime change also needs the Python/native boundary tests and wheel build when it alters the accepted graph format, validation result, ownership, execution behavior, or another adapter-visible contract.
 
@@ -81,7 +83,7 @@ The native snippet runner is necessary but not sufficient for browser support. W
 
 ## Specialized evidence
 
-- NumPy surface changes run `uv run pytest packages/advect/tests/advect_numpy_tests/test_support_evidence.py` locally. NumPy 2.0–2.4 range evidence is owned by the `numpy-compatibility` matrix in `.github/workflows/ci.yml`; one locally installed minor is not range qualification.
+- NumPy surface changes run `uv run pytest packages/advect/tests/advect_numpy_tests/test_support_evidence.py` locally. NumPy 2.0–2.5 range evidence is owned by the `numpy-compatibility` matrix in `.github/workflows/ci.yml`; one locally installed minor is not range qualification.
 - Array API operation changes run `uv run pytest packages/advect/tests/advect_grad_tests/test_array_api_operation_qualification.py` and `uv run python -m scripts.qualify_array_api_operations` for every affected revision, as shown in the [operation-authoring guide](https://yaugenst.github.io/advect/dev/development/adding-operations/#array-api-forms-and-providers). Provider changes also run `uv run pytest packages/advect/tests/advect_array_api_compat_tests`. CuPy is qualified only on a CUDA host; record it as unverified when unavailable.
 - JAX, PyTorch, or HIPS changes run `uv run --no-sync pytest packages/advect/tests/advect_interop_tests` in an environment containing all qualified host dependencies.
 - xarray changes run `uv run pytest packages/advect/tests/advect_xarray_tests`.

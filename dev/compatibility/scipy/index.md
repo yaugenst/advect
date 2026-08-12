@@ -2,64 +2,60 @@
 
 SciPy 1.18.0 compatibility functions are explicit `advect.scipy` entry points rather than transparent interception of direct `scipy.*` calls. The module is installed by the `advect[scipy]` extra, and an artifact that contains one of these functions needs `import advect.scipy` before `StagedProgram.from_dict()`.
 
-The mode columns are public support claims: **yes** means the callable's declared contract is supported end to end in that execution mode (dynamic tracing, abstract staging, serialized artifacts). Restricted implementation paths may remain internal, but registration alone does not promote an additional upstream spelling into this catalog.
-
-`Abstract=yes` means that a primitive has a standalone abstract rule. A frontend may still be staged by an explicit method or composite lowering when its displayed primitive does not.
-
-Selection gradients recover the exact winning source and share ties across window slots. Fast paths cover unique values, low-cardinality full-footprint plateaus, and common non-flat `structure=` operands; irregular or high-cardinality ties retain exact candidate routing. The default `uv run python -m scripts.bench_scipy_runtime --check` matrix exercises these performance regimes at 256 by 256.
+Every listed function works in dynamic transforms. **Stage/save** says whether the same call can appear in a staged and serialized program. **Differentiate** reports user-visible derivative support. **No** means no derivative rule is available; **n/a** marks a structural or mathematically nondifferentiable operation.
 
 ## Compatible functions
 
-| Function                               | Advect entry point                            | Lowers to                                | Dynamic | Staged | Serialized | JVP       | VJP       | Abstract  |
-| -------------------------------------- | --------------------------------------------- | ---------------------------------------- | ------- | ------ | ---------- | --------- | --------- | --------- |
-| `scipy.ndimage.black_tophat`           | `advect.scipy.ndimage.black_tophat`           | composite                                | yes     | yes    | yes        | composite | composite | composite |
-| `scipy.ndimage.convolve`               | `advect.scipy.ndimage.convolve`               | `custom.scipy.ndimage.convolve`          | yes     | yes    | yes        | yes       | direct    | yes       |
-| `scipy.ndimage.convolve1d`             | `advect.scipy.ndimage.convolve1d`             | `custom.scipy.ndimage.convolve1d`        | yes     | yes    | yes        | yes       | direct    | yes       |
-| `scipy.ndimage.correlate`              | `advect.scipy.ndimage.correlate`              | `custom.scipy.ndimage.correlate`         | yes     | yes    | yes        | yes       | direct    | yes       |
-| `scipy.ndimage.correlate1d`            | `advect.scipy.ndimage.correlate1d`            | `custom.scipy.ndimage.correlate1d`       | yes     | yes    | yes        | yes       | direct    | yes       |
-| `scipy.ndimage.gaussian_filter`        | `advect.scipy.ndimage.gaussian_filter`        | `custom.scipy.ndimage.gaussian_filter`   | yes     | yes    | yes        | yes       | direct    | yes       |
-| `scipy.ndimage.gaussian_filter1d`      | `advect.scipy.ndimage.gaussian_filter1d`      | `custom.scipy.ndimage.gaussian_filter1d` | yes     | yes    | yes        | yes       | direct    | yes       |
-| `scipy.ndimage.gaussian_laplace`       | `advect.scipy.ndimage.gaussian_laplace`       | composite                                | yes     | yes    | yes        | composite | composite | composite |
-| `scipy.ndimage.grey_closing`           | `advect.scipy.ndimage.grey_closing`           | composite                                | yes     | yes    | yes        | composite | composite | composite |
-| `scipy.ndimage.grey_dilation`          | `advect.scipy.ndimage.grey_dilation`          | `custom.scipy.ndimage.grey_dilation`     | yes     | yes    | yes        | yes       | direct    | yes       |
-| `scipy.ndimage.grey_erosion`           | `advect.scipy.ndimage.grey_erosion`           | `custom.scipy.ndimage.grey_erosion`      | yes     | yes    | yes        | yes       | direct    | yes       |
-| `scipy.ndimage.grey_opening`           | `advect.scipy.ndimage.grey_opening`           | composite                                | yes     | yes    | yes        | composite | composite | composite |
-| `scipy.ndimage.laplace`                | `advect.scipy.ndimage.laplace`                | composite                                | yes     | yes    | yes        | composite | composite | composite |
-| `scipy.ndimage.maximum_filter`         | `advect.scipy.ndimage.maximum_filter`         | `custom.scipy.ndimage.maximum_filter`    | yes     | yes    | yes        | yes       | direct    | yes       |
-| `scipy.ndimage.maximum_filter1d`       | `advect.scipy.ndimage.maximum_filter1d`       | `custom.scipy.ndimage.maximum_filter1d`  | yes     | yes    | yes        | yes       | direct    | yes       |
-| `scipy.ndimage.median_filter`          | `advect.scipy.ndimage.median_filter`          | `custom.scipy.ndimage.median_filter`     | yes     | yes    | yes        | yes       | direct    | yes       |
-| `scipy.ndimage.minimum_filter`         | `advect.scipy.ndimage.minimum_filter`         | `custom.scipy.ndimage.minimum_filter`    | yes     | yes    | yes        | yes       | direct    | yes       |
-| `scipy.ndimage.minimum_filter1d`       | `advect.scipy.ndimage.minimum_filter1d`       | `custom.scipy.ndimage.minimum_filter1d`  | yes     | yes    | yes        | yes       | direct    | yes       |
-| `scipy.ndimage.morphological_gradient` | `advect.scipy.ndimage.morphological_gradient` | composite                                | yes     | yes    | yes        | composite | composite | composite |
-| `scipy.ndimage.morphological_laplace`  | `advect.scipy.ndimage.morphological_laplace`  | composite                                | yes     | yes    | yes        | composite | composite | composite |
-| `scipy.ndimage.percentile_filter`      | `advect.scipy.ndimage.percentile_filter`      | `custom.scipy.ndimage.percentile_filter` | yes     | yes    | yes        | yes       | direct    | yes       |
-| `scipy.ndimage.prewitt`                | `advect.scipy.ndimage.prewitt`                | composite                                | yes     | yes    | yes        | composite | composite | composite |
-| `scipy.ndimage.rank_filter`            | `advect.scipy.ndimage.rank_filter`            | `custom.scipy.ndimage.rank_filter`       | yes     | yes    | yes        | yes       | direct    | yes       |
-| `scipy.ndimage.sobel`                  | `advect.scipy.ndimage.sobel`                  | composite                                | yes     | yes    | yes        | composite | composite | composite |
-| `scipy.ndimage.uniform_filter`         | `advect.scipy.ndimage.uniform_filter`         | `custom.scipy.ndimage.uniform_filter`    | yes     | yes    | yes        | yes       | direct    | yes       |
-| `scipy.ndimage.uniform_filter1d`       | `advect.scipy.ndimage.uniform_filter1d`       | `custom.scipy.ndimage.uniform_filter1d`  | yes     | yes    | yes        | yes       | direct    | yes       |
-| `scipy.ndimage.white_tophat`           | `advect.scipy.ndimage.white_tophat`           | composite                                | yes     | yes    | yes        | composite | composite | composite |
-| `scipy.special.digamma`                | `advect.scipy.special.digamma`                | `custom.scipy.special.digamma`           | yes     | yes    | yes        | yes       | direct    | yes       |
-| `scipy.special.erf`                    | `advect.scipy.special.erf`                    | `custom.scipy.special.erf`               | yes     | yes    | yes        | yes       | direct    | yes       |
-| `scipy.special.erfc`                   | `advect.scipy.special.erfc`                   | `custom.scipy.special.erfc`              | yes     | yes    | yes        | yes       | direct    | yes       |
-| `scipy.special.erfcx`                  | `advect.scipy.special.erfcx`                  | `custom.scipy.special.erfcx`             | yes     | yes    | yes        | yes       | direct    | yes       |
-| `scipy.special.erfinv`                 | `advect.scipy.special.erfinv`                 | `custom.scipy.special.erfinv`            | yes     | yes    | yes        | yes       | direct    | yes       |
-| `scipy.special.expit`                  | `advect.scipy.special.expit`                  | `custom.scipy.special.expit`             | yes     | yes    | yes        | yes       | direct    | yes       |
-| `scipy.special.gammaln`                | `advect.scipy.special.gammaln`                | `custom.scipy.special.gammaln`           | yes     | yes    | yes        | yes       | direct    | yes       |
-| `scipy.special.log_expit`              | `advect.scipy.special.log_expit`              | `custom.scipy.special.log_expit`         | yes     | yes    | yes        | yes       | direct    | yes       |
-| `scipy.special.log_ndtr`               | `advect.scipy.special.log_ndtr`               | `custom.scipy.special.log_ndtr`          | yes     | yes    | yes        | yes       | direct    | yes       |
-| `scipy.special.log_softmax`            | `advect.scipy.special.log_softmax`            | `custom.scipy.special.log_softmax`       | yes     | yes    | yes        | yes       | direct    | yes       |
-| `scipy.special.logsumexp`              | `advect.scipy.special.logsumexp`              | `custom.scipy.special.logsumexp`         | yes     | yes    | yes        | yes       | direct    | yes       |
-| `scipy.special.ndtr`                   | `advect.scipy.special.ndtr`                   | `custom.scipy.special.ndtr`              | yes     | yes    | yes        | yes       | direct    | yes       |
-| `scipy.special.ndtri`                  | `advect.scipy.special.ndtri`                  | `custom.scipy.special.ndtri`             | yes     | yes    | yes        | yes       | direct    | yes       |
-| `scipy.special.polygamma`              | `advect.scipy.special.polygamma`              | `custom.scipy.special.polygamma`         | yes     | yes    | yes        | yes       | direct    | yes       |
-| `scipy.special.softmax`                | `advect.scipy.special.softmax`                | `custom.scipy.special.softmax`           | yes     | yes    | yes        | yes       | direct    | yes       |
+| Function                                      | Stage/save | Differentiate |
+| --------------------------------------------- | ---------- | ------------- |
+| `advect.scipy.ndimage.black_tophat`           | yes        | yes           |
+| `advect.scipy.ndimage.convolve`               | yes        | yes           |
+| `advect.scipy.ndimage.convolve1d`             | yes        | yes           |
+| `advect.scipy.ndimage.correlate`              | yes        | yes           |
+| `advect.scipy.ndimage.correlate1d`            | yes        | yes           |
+| `advect.scipy.ndimage.gaussian_filter`        | yes        | yes           |
+| `advect.scipy.ndimage.gaussian_filter1d`      | yes        | yes           |
+| `advect.scipy.ndimage.gaussian_laplace`       | yes        | yes           |
+| `advect.scipy.ndimage.grey_closing`           | yes        | yes           |
+| `advect.scipy.ndimage.grey_dilation`          | yes        | yes           |
+| `advect.scipy.ndimage.grey_erosion`           | yes        | yes           |
+| `advect.scipy.ndimage.grey_opening`           | yes        | yes           |
+| `advect.scipy.ndimage.laplace`                | yes        | yes           |
+| `advect.scipy.ndimage.maximum_filter`         | yes        | yes           |
+| `advect.scipy.ndimage.maximum_filter1d`       | yes        | yes           |
+| `advect.scipy.ndimage.median_filter`          | yes        | yes           |
+| `advect.scipy.ndimage.minimum_filter`         | yes        | yes           |
+| `advect.scipy.ndimage.minimum_filter1d`       | yes        | yes           |
+| `advect.scipy.ndimage.morphological_gradient` | yes        | yes           |
+| `advect.scipy.ndimage.morphological_laplace`  | yes        | yes           |
+| `advect.scipy.ndimage.percentile_filter`      | yes        | yes           |
+| `advect.scipy.ndimage.prewitt`                | yes        | yes           |
+| `advect.scipy.ndimage.rank_filter`            | yes        | yes           |
+| `advect.scipy.ndimage.sobel`                  | yes        | yes           |
+| `advect.scipy.ndimage.uniform_filter`         | yes        | yes           |
+| `advect.scipy.ndimage.uniform_filter1d`       | yes        | yes           |
+| `advect.scipy.ndimage.white_tophat`           | yes        | yes           |
+| `advect.scipy.special.digamma`                | yes        | yes           |
+| `advect.scipy.special.erf`                    | yes        | yes           |
+| `advect.scipy.special.erfc`                   | yes        | yes           |
+| `advect.scipy.special.erfcx`                  | yes        | yes           |
+| `advect.scipy.special.erfinv`                 | yes        | yes           |
+| `advect.scipy.special.expit`                  | yes        | yes           |
+| `advect.scipy.special.gammaln`                | yes        | yes           |
+| `advect.scipy.special.log_expit`              | yes        | yes           |
+| `advect.scipy.special.log_ndtr`               | yes        | yes           |
+| `advect.scipy.special.log_softmax`            | yes        | yes           |
+| `advect.scipy.special.logsumexp`              | yes        | yes           |
+| `advect.scipy.special.ndtr`                   | yes        | yes           |
+| `advect.scipy.special.ndtri`                  | yes        | yes           |
+| `advect.scipy.special.polygamma`              | yes        | yes           |
+| `advect.scipy.special.softmax`                | yes        | yes           |
 
 ## Solver adapters
 
 These callback factories are dynamic boundaries for `implicit_root`; they do not claim that direct SciPy solver calls are traceable.
 
-| Function                                  | Advect entry point                        | Lowers to | Dynamic | Staged | Serialized | JVP | VJP | Abstract |
-| ----------------------------------------- | ----------------------------------------- | --------- | ------- | ------ | ---------- | --- | --- | -------- |
-| `advect.scipy.optimize.root_solver`       | `advect.scipy.optimize.root_solver`       | adapter   | yes     | no     | no         | n/a | n/a | n/a      |
-| `advect.scipy.sparse.linalg.gmres_solver` | `advect.scipy.sparse.linalg.gmres_solver` | adapter   | yes     | no     | no         | n/a | n/a | n/a      |
+| Function                                  | Stage/save | Differentiate |
+| ----------------------------------------- | ---------- | ------------- |
+| `advect.scipy.optimize.root_solver`       | no         | n/a           |
+| `advect.scipy.sparse.linalg.gmres_solver` | no         | n/a           |

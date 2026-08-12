@@ -11,7 +11,7 @@ import json
 import math
 import time
 from importlib.metadata import version
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, cast, override
 
 import numpy as np
 
@@ -20,10 +20,10 @@ import advect as ad
 if TYPE_CHECKING:
     from collections.abc import Callable
     from types import CodeType
+    from typing import SupportsFloat
 
-# This browser-facing adapter reports ordinary input errors directly. Keeping
-# those messages next to their checks is clearer than defining exception types.
-# ruff: noqa: EM101, EM102, INP001, TRY003, TRY004
+# This browser-facing adapter reports ordinary input errors directly.
+# ruff: noqa: INP001, TRY004
 
 _FUNCTIONS = {
     "abs": np.abs,
@@ -175,16 +175,6 @@ def _payload_constant_label(payload: dict[str, object] | None) -> str:
     return f"{value:.5g}" if isinstance(value, float) else str(value)
 
 
-def _record_constant_label(record: ad.ConstantRecord | None) -> str:
-    if record is None or record.shape != ():
-        return "const"
-    try:
-        value = np.frombuffer(record.bytes, dtype=np.dtype(record.dtype)).item()
-    except (TypeError, ValueError):
-        return "const"
-    return f"{value:.5g}" if isinstance(value, float) else str(value)
-
-
 def _op_label(operation: str, attrs: object) -> str:
     if (
         operation == "array.astype"
@@ -319,7 +309,6 @@ def _trace_view(program: ad.StagedProgram, roles: dict[str, str]) -> dict[str, o
     trace = program.trace
     if trace is None:
         return None
-    records = {record.value_id: record for record in trace.constants}
     survivors: dict[int, int] = {}
     rows: list[dict[str, object]] = []
     removed = 0
@@ -328,7 +317,7 @@ def _trace_view(program: ad.StagedProgram, roles: dict[str, str]) -> dict[str, o
         if node.op == "advect.input":
             label = node.name or "x"
         elif node.op == "advect.const":
-            label = _record_constant_label(records.get(node.id))
+            label = "const"
         else:
             label = _op_label(node.op, None)
         arguments = ", ".join(f"%{item}" for item in node.inputs)
@@ -367,9 +356,8 @@ def _subexpression_probes(tree: ast.Expression) -> list[tuple[tuple[int, int], C
         if not any(isinstance(item, ast.Name) and item.id == "x" for item in ast.walk(node)):
             continue
         code = compile(ast.Expression(body=node), "<advect-playground-probe>", "eval")
-        probes.append(
-            ((node.col_offset, node.end_col_offset), code, not isinstance(node, ast.Name))
-        )
+        end_col_offset = node.end_col_offset if node.end_col_offset is not None else node.col_offset
+        probes.append(((node.col_offset, end_col_offset), code, not isinstance(node, ast.Name)))
     return probes
 
 
@@ -412,15 +400,19 @@ class _ProbeMarks(ast.NodeTransformer):
             keywords=[],
         )
 
+    @override
     def visit_BinOp(self, node: ast.BinOp) -> ast.expr:
         return self._mark(node)
 
+    @override
     def visit_UnaryOp(self, node: ast.UnaryOp) -> ast.expr:
         return self._mark(node)
 
+    @override
     def visit_Call(self, node: ast.Call) -> ast.expr:
         return self._mark(node)
 
+    @override
     def visit_Name(self, node: ast.Name) -> ast.expr:
         if isinstance(node.ctx, ast.Load):
             return self._mark(node)
@@ -513,12 +505,16 @@ def _source_spans(
         return {}, {}
     codes = [code for _, code, _ in probes]
     namespace = _namespace()
+
+    def probe_values(x: object) -> tuple[object, ...]:
+        return tuple(
+            eval(code, namespace, {"x": x})  # noqa: S307 - validated
+            for code in codes
+        )
+
     probe_program = cast(
         "ad.StagedProgram",
-        ad.stage(
-            lambda x: tuple(eval(code, namespace, {"x": x}) for code in codes),  # noqa: S307 - validated
-            np.asarray(0.0),
-        ),
+        ad.stage(probe_values, 0.0),
     )
     probe_artifact = cast("dict[str, object]", probe_program.to_dict()["program"])
     probe_graph = cast("dict[str, object]", probe_artifact["graph"])
@@ -564,7 +560,7 @@ def _def_source_spans(
                 values.append(value)
         return (result, *values)
 
-    probe_program = cast("ad.StagedProgram", ad.stage(probed, np.asarray(0.0)))
+    probe_program = cast("ad.StagedProgram", ad.stage(probed, 0.0))
     probe_artifact = cast("dict[str, object]", probe_program.to_dict()["program"])
     probe_graph = cast("dict[str, object]", probe_artifact["graph"])
     outputs = cast("list[int]", probe_graph["outputs"])
@@ -614,20 +610,20 @@ def playground_trace_json(source: str, mode: str = "expr", direction: str = "jvp
         expression_tree = _parse_expression(source)
         function = _expression_function(expression_tree)
 
-    sample = np.asarray(0.0)
-    tangent = np.asarray(1.0)
+    derivative = ad.jvp(function)
+    example_input = 0.0
 
     def first_derivative(x: object) -> object:
-        return ad.jvp(function)(x, tangents=tangent)
+        return derivative(x, tangents=1.0)
 
-    jvp_program = cast("ad.StagedProgram", ad.stage(first_derivative, sample))
+    jvp_program = cast("ad.StagedProgram", ad.stage(first_derivative, example_input))
     # staging rejects higher-order autodiff; the curvature readout runs the
     # dynamic transform instead — advect's define-by-run path, per evaluation
     _EVALUATE = (jvp_program, ad.hessian(function))
 
     if direction == "vjp":
-        primal_program = cast("ad.StagedProgram", ad.stage(function, sample))
-        display_program = cast("ad.StagedProgram", ad.vjp_program(primal_program))
+        primal_program = cast("ad.StagedProgram", ad.stage(function, example_input))
+        display_program = ad.vjp_program(primal_program)
     else:
         display_program = jvp_program
 
@@ -637,7 +633,7 @@ def playground_trace_json(source: str, mode: str = "expr", direction: str = "jvp
     eval_started = time.perf_counter()
     with np.errstate(all="ignore"):
         for x in xs:
-            value, derivative = jvp_program(np.asarray(x))
+            value, derivative = jvp_program(float(x))
             values.append(value)
             derivatives.append(derivative)
     eval_seconds = time.perf_counter() - eval_started
@@ -655,7 +651,8 @@ def playground_trace_json(source: str, mode: str = "expr", direction: str = "jvp
         else:
             spans, folds = _def_source_spans(source, graph)
     except Exception:  # noqa: BLE001 - highlighting is optional presentation
-        spans, folds = {}, {}
+        spans.clear()
+        folds.clear()
     view["spans"] = spans
     view["folds"] = folds
 
@@ -678,19 +675,21 @@ def playground_trace_json(source: str, mode: str = "expr", direction: str = "jvp
     )
 
 
-def playground_evaluate_json(x: float) -> str:
+def playground_evaluate_json(x: SupportsFloat) -> str:
     """Evaluate f and f' via the staged program, and f'' dynamically."""
     if _EVALUATE is None:
         raise RuntimeError("trace an expression before evaluating it")
     jvp_program, hessian = _EVALUATE
 
     def to_json(item: object) -> float | None:
-        return float(cast("float", item)) if np.isfinite(item) else None
+        value = float(cast("SupportsFloat", item))
+        return value if math.isfinite(value) else None
 
+    point = float(x)
     with np.errstate(all="ignore"):
-        value, derivative = jvp_program(np.asarray(float(x)))
+        value, derivative = jvp_program(point)
         try:
-            second = to_json(hessian(np.asarray(float(x))))
+            second = to_json(hessian(point))
         except Exception:  # noqa: BLE001 - curvature is an optional readout
             second = None
     return json.dumps([to_json(value), to_json(derivative), second])
@@ -728,8 +727,10 @@ def playground_load_json(text: str) -> str:
     direction = "jvp" if len(outputs) == _PAIR_OUTPUTS else "vjp"
     view = _graph_view(graph, direction)
     view["trace"] = None
-    view["spans"] = {}
-    view["folds"] = {}
+    empty_spans: dict[str, list[tuple[int, int]]] = {}
+    empty_folds: dict[str, int] = {}
+    view["spans"] = empty_spans
+    view["folds"] = empty_folds
     return json.dumps(
         {
             "graph": view,

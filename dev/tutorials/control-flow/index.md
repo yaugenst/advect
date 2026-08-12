@@ -1,10 +1,8 @@
-# Control Flow and Mutation
+# Dynamic Control Flow and Mutation
 
-Dynamic transforms trace the actual Python call, so loops, branches, and helper functions need no special forms. The boundaries appear where code mutates arrays or hides iteration behind an opaque callback — this page covers both.
+[Dynamic transforms](https://yaugenst.github.io/advect/dev/api/transforms/index.md) execute the Python function for every call and differentiate the path its inputs take. Conditions, loops, and helper functions remain ordinary Python.
 
-## Mutation is local and functional
-
-Advect records supported mutation syntax as immutable SSA updates. Inputs are not implicitly writable: copy first, then update the owned local value.
+## Follow data-dependent branches
 
 ```python
 import numpy as np
@@ -12,80 +10,68 @@ import numpy as np
 import advect as ad
 
 
-def stencil_loss(field):
+def piecewise_loss(x):
+    if np.sum(x) > 0:
+        return np.sum(np.sin(x))
+    return np.sum(x * x)
+
+
+gradient = ad.grad(piecewise_loss)
+positive = np.array([0.2, 0.4])
+negative = np.array([-0.2, -0.4])
+
+print("positive branch:", gradient(positive))
+print("negative branch:", gradient(negative))
+```
+
+The first call differentiates `sin`; the second differentiates the square. These are pathwise derivatives: Advect does not differentiate the discrete decision itself, so the derivative may jump where the branch changes.
+
+## Let loops run for the current input
+
+Iteration counts can also depend on traced values. [`has_aux=True`](https://yaugenst.github.io/advect/dev/api/transforms/#advect.grad) is handy when the function should report what happened without differentiating the report:
+
+```python
+def settle_loss(x):
+    state = x
+    steps = 0
+    while np.max(np.abs(state)) > 0.25:
+        state = 0.5 * state
+        steps += 1
+    return np.sum(state * state), steps
+
+
+initial_state = np.array([2.0, -1.0])
+settle_gradient = ad.grad(settle_loss, has_aux=True)
+gradient, steps = settle_gradient(initial_state)
+print(f"{steps} iterations; gradient:", gradient)
+```
+
+The loop is unrolled into this invocation's trace. A later call may run a different number of iterations and gets a fresh trace. Helper functions behave the same way: Advect records their supported numerical operations, not the Python call boundary.
+
+## Update an owned local array
+
+Supported mutation syntax becomes immutable updates on the trace. Inputs are not writable, so copy first and update the owned local value:
+
+```python
+def smooth(field):
     updated = field.copy()
     laplacian = field[2:] - 2 * field[1:-1] + field[:-2]
     updated[1:-1] += 0.1 * laplacian
+    return updated
+
+
+def stencil_loss(field):
+    updated = smooth(field)
     return np.sum(updated * updated)
 
 
-field = np.linspace(0.0, 1.0, 128)
-dfield = ad.grad(stencil_loss)(field)
+field = np.sin(np.linspace(0.0, 2 * np.pi, 128))
+updated = smooth(field)
+gradient = ad.grad(stencil_loss)(field)
+print("largest local update:", np.max(np.abs(updated - field)))
+print("edge and center gradients:", gradient[[0, len(gradient) // 2, -1]])
 ```
 
-Basic indexed updates and a direct named basic-slice view are supported by the NumPy frontend. Mutation of an input, advanced-index updates, and arbitrary mutation through transformed views raise with a suggested rewrite; see [Debugging](https://yaugenst.github.io/advect/dev/tutorials/debugging/index.md) for the full taxonomy.
+Basic indexed updates and direct named basic-slice views are supported. Mutating an input, updating through advanced indexing, or mutating through an ambiguous transformed view raises at the offending operation with a suggested rewrite. [Troubleshooting](https://yaugenst.github.io/advect/dev/tutorials/debugging/#common-rewrites) collects the common fixes.
 
-## Differentiate a converged solve
-
-`implicit_root` differentiates the equation defining a converged state rather than recording solver iterations:
-
-```python
-def newton_sqrt(residual, initial):
-    value = initial.copy()
-    for _ in range(12):
-        value = value - residual(value) / (2 * value)
-    return value
-
-
-def diagonal_solve(operator, right_hand_side):
-    diagonal = operator(np.ones_like(right_hand_side))
-    return right_hand_side / diagonal
-
-
-square_root = ad.implicit_root(
-    lambda solution, parameters: solution**2 - parameters,
-    solve=newton_sqrt,
-    linear_solve=diagonal_solve,
-)
-
-parameters = np.array([1.0, 4.0, 9.0])
-initial = np.ones_like(parameters)
-gradient = ad.grad(
-    lambda values: np.sum(square_root(values, initial=initial))
-)(parameters)
-np.testing.assert_allclose(gradient, 0.5 / np.sqrt(parameters))
-```
-
-The state and parameter may be built-in pytrees. `initial` selects a root but is nondifferentiable. A successful solver return certifies convergence; failed solves raise `ImplicitSolveError`. The derivative uses the matrix-free state-Jacobian and its real adjoint, so complex and non-holomorphic residuals follow the same convention.
-
-Opaque callback-based roots are dynamic. `stage` rejects them before invoking the solver. A traceable solver callback may support nested dynamic derivatives, but Advect never selects that path by catching a provider failure.
-
-## Use SciPy callbacks, special functions, and image filters
-
-The built-in `advect.scipy` module contains a deliberately small function surface when `advect[scipy]` is installed:
-
-```python
-from advect.scipy import ndimage, special
-from advect.scipy.optimize import root_solver
-from advect.scipy.sparse.linalg import gmres_solver
-
-
-def likelihood_loss(value):
-    normalized = special.logsumexp(value, axis=-1, keepdims=True)
-    return np.sum(special.gammaln(value) + special.ndtr(value) - normalized)
-
-
-gradient = ad.grad(likelihood_loss)(np.array([[0.7, 1.4, 2.8]]))
-
-smoothed_gradient = ad.grad(
-    lambda value: np.sum(ndimage.gaussian_filter(value, 1.2, mode="reflect"))
-)(np.array([[0.7, 1.4, 2.8]]))
-
-scipy_square_root = ad.implicit_root(
-    lambda solution, parameters: solution**2 - parameters,
-    solve=root_solver(),
-    linear_solve=gmres_solver(rtol=1e-10, atol=1e-12),
-)
-```
-
-The supported special surface covers gamma/error/normal-distribution functions, logistic transforms, `logsumexp`, and softmax forms. The `ndimage` surface covers Gaussian and uniform filters, convolution/correlation, derivative filters, extrema and rank filters, and greyscale morphology. These NumPy-backed calls preserve their SciPy 1.18 signatures, output forms, modes, axes, and neighborhood configuration, and may be staged and serialized. `root_solver` and `gmres_solver` accept NumPy arrays, NumPy scalars, and Python numeric scalars. They preserve array shape and scalar container category, turn SciPy nonconvergence into `ImplicitSolveError`, and form a first-order dynamic boundary. `root_solver` follows SciPy's dtype promotion; `gmres_solver` restores the inexact right-hand-side dtype. A traceable callback can support higher-order dynamic differentiation. Staging requires explicit traceable iterations or a closed custom primitive, not an opaque callback.
+Dynamic tracing is the right model when the executed path is part of the computation. If iterations only search for a converged state, use [implicit differentiation](https://yaugenst.github.io/advect/dev/tutorials/implicit-differentiation/index.md) instead of recording the solver's steps.

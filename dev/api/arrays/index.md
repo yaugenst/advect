@@ -1,8 +1,8 @@
 # Arrays
 
-Advect preserves the provider selected by traced inputs. `array` and `asarray` are explicit construction helpers for direct tracers and rectangular nested tracer sequences; ordinary NumPy code should normally use NumPy constructors, including `like=` dispatch.
+Advect preserves the provider selected by traced inputs. [`array`](https://yaugenst.github.io/advect/dev/api/arrays/#advect.array) and [`asarray`](https://yaugenst.github.io/advect/dev/api/arrays/#advect.asarray) are construction helpers for live tracers and rectangular nested tracer sequences. Ordinary NumPy code can keep using NumPy constructors, including `like=` dispatch. Use [`is_traced`](https://yaugenst.github.io/advect/dev/api/arrays/#advect.is_traced) only when code genuinely needs to distinguish a live trace, and [`stop_gradient`](https://yaugenst.github.io/advect/dev/api/arrays/#advect.stop_gradient) to remove one dependency explicitly.
 
-For Array API inputs, a dynamic call selects the newest supported revision common to every input. Mixed providers fail. Staging records one explicit revision in the program rather than inferring a minimum from the operations used. See the [NumPy frontend](https://yaugenst.github.io/advect/dev/api/numpy/index.md), [pytree utilities](https://yaugenst.github.io/advect/dev/api/pytree/index.md), and [support catalog](https://yaugenst.github.io/advect/dev/api/support/index.md) for their separate public contracts.
+For [Array API inputs](https://yaugenst.github.io/advect/dev/compatibility/array-api/index.md), a dynamic call selects the newest supported revision common to every input. Mixed providers fail. Staging records one explicit revision in the program rather than inferring a minimum from the operations used. See the [NumPy frontend](https://yaugenst.github.io/advect/dev/api/numpy/index.md), [pytree utilities](https://yaugenst.github.io/advect/dev/api/pytree/index.md), and [support catalog](https://yaugenst.github.io/advect/dev/api/support/index.md) for their separate public contracts.
 
 ## array
 

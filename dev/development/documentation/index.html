@@ -2,26 +2,29 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="description" content="A small extensible automatic-differentiation core for Python">
+<meta name="description" content="Automatic differentiation for the NumPy code you already write">
 <link rel="canonical" href="https://yaugenst.github.io/advect/dev/development/documentation/">
 <title>documentation(1) · advect</title>
 <link rel="icon" href="../../img/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="../../css/fonts.css">
-<link rel="stylesheet" href="../../css/theme.css?v=86c97aee1cb2">
+<link rel="stylesheet" href="../../css/theme.css?v=bf544137efc8">
 <link rel="stylesheet" href="../../assets/_mkdocstrings.css">
 <script>
 var base_url = "../..";
-/* pre-paint: apply persisted display mode and tree state to avoid a theme
-   flash and the tree pane animating open on every navigation */
+/* pre-paint: apply persisted display mode and pane state to avoid a theme
+   flash and the panes animating open on every navigation */
 (function () {
-  var m = null, t = null;
+  var m = null, t = null, o = null;
   try {
     m = localStorage.getItem("advect-mode");
     t = localStorage.getItem("advect-tree");
+    o = localStorage.getItem("advect-outline");
   } catch (e) { /* private mode */ }
-  if (m) document.documentElement.dataset.theme = m;
+  if (m === "light" || m === "dark") document.documentElement.dataset.theme = m;
   var open = t === null ? window.innerWidth > 1100 : t === "1";
   if (open) document.documentElement.classList.add("tree-open");
+  open = o === null ? window.innerWidth > 1500 : o === "1";
+  if (open) document.documentElement.classList.add("outline-open");
 })();
 </script>
 
@@ -31,7 +34,7 @@ var base_url = "../..";
 <div class="desktop" id="desktop">
   <aside class="tile treetile" id="treetile" aria-label="Documentation tree" aria-hidden="true">
     <span class="ptitle"><span class="pn">tree</span> docs/</span>
-    <pre class="tree"><span class="trow">docs/</span><span class="trow" style="--ti:4ch"><span class="dim">├── </span><a href="../.." title="Home">index</a></span><span class="trow" style="--ti:4ch"><span class="dim">├── </span>tutorials/</span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/" title="Tutorials">index</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/gradients/" title="Gradients and Pytrees">gradients</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/control-flow/" title="Control Flow and Mutation">control-flow</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/staging/" title="Staging and Serialization">staging</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/interop/" title="Providers and Interop">interop</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/primitives/" title="Custom Primitives">primitives</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   └── </span><a href="../../tutorials/debugging/" title="Debugging">debugging</a></span><span class="trow" style="--ti:4ch"><span class="dim">├── </span><a href="../../architecture/" title="Architecture">architecture</a></span><span class="trow" style="--ti:4ch"><span class="dim">├── </span>compatibility/</span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../compatibility/" title="Compatibility">index</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../compatibility/numpy/" title="NumPy">numpy</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../compatibility/array-api/" title="Array API">array-api</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../compatibility/cupy/" title="CuPy">cupy</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../compatibility/scipy/" title="SciPy">scipy</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   └── </span><a href="../../compatibility/xarray/" title="xarray">xarray</a></span><span class="trow" style="--ti:4ch"><span class="dim">├── </span>api-reference/</span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../api/" title="Overview">index</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span>core-api/</span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="../../api/transforms/" title="Transforms">transforms</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="../../api/staging/" title="Staging">staging</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="../../api/primitives/" title="Primitives">primitives</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="../../api/arrays/" title="Arrays">arrays</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="../../api/pytree/" title="Pytrees">pytree</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="../../api/testing/" title="Testing Utilities">testing</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="../../api/support/" title="Support Catalog">support</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   └── </span><a href="../../api/errors/" title="Errors">errors</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   └── </span>public-modules/</span><span class="trow" style="--ti:12ch"><span class="dim">│       ├── </span><a href="../../api/numpy/" title="NumPy Frontend">numpy</a></span><span class="trow" style="--ti:12ch"><span class="dim">│       ├── </span>scipy/</span><span class="trow" style="--ti:16ch"><span class="dim">│       │   ├── </span><a href="../../api/scipy/" title="SciPy Overview">index</a></span><span class="trow" style="--ti:16ch"><span class="dim">│       │   ├── </span><a href="../../api/scipy/special/" title="Special Functions">special</a></span><span class="trow" style="--ti:16ch"><span class="dim">│       │   ├── </span><a href="../../api/scipy/ndimage/" title="Image Filters">ndimage</a></span><span class="trow" style="--ti:16ch"><span class="dim">│       │   └── </span><a href="../../api/scipy/solvers/" title="Solver Callbacks">solvers</a></span><span class="trow" style="--ti:12ch"><span class="dim">│       ├── </span><a href="../../api/xarray/" title="xarray">xarray</a></span><span class="trow" style="--ti:12ch"><span class="dim">│       └── </span>host-autodiff-interop/</span><span class="trow" style="--ti:16ch"><span class="dim">│           ├── </span><a href="../../api/interop/" title="Host Interop Overview">index</a></span><span class="trow" style="--ti:16ch"><span class="dim">│           ├── </span><a href="../../api/interop/torch/" title="PyTorch">torch</a></span><span class="trow" style="--ti:16ch"><span class="dim">│           ├── </span><a href="../../api/interop/jax/" title="JAX">jax</a></span><span class="trow" style="--ti:16ch"><span class="dim">│           └── </span><a href="../../api/interop/autograd/" title="HIPS Autograd">autograd</a></span><span class="trow" style="--ti:4ch"><span class="dim">└── </span>developer-guide/</span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="../" title="Overview">index</a></span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="../codebase/" title="Codebase Map">codebase</a></span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="../adding-operations/" title="Adding Operations">adding-operations</a></span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="../testing/" title="Testing">testing</a></span><span class="trow" style="--ti:8ch"><span class="dim">    └── </span><a href="./" class="cur" aria-current="page" title="Documentation">documentation</a></span></pre>
+    <pre class="tree"><span class="trow"><a href="../.." title="Home">docs/</a></span><span class="trow" style="--ti:4ch"><span class="dim">├── </span><a href="../../tutorials/" title="Tutorials">tutorials/</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/gradients/" title="Gradients and Pytrees">gradients</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/control-flow/" title="Dynamic Control Flow and Mutation">control-flow</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/linear-maps/" title="JVPs, VJPs, and Linear Maps">linear-maps</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/advanced-differentiation/" title="Higher-Order Differentiation">advanced-differentiation</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/implicit-differentiation/" title="Implicit Differentiation">implicit-differentiation</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/staging/" title="Staging and Serialization">staging</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/scientific-python/" title="Arrays and Scientific Python">scientific-python</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/host-frameworks/" title="Host Autodiff Frameworks">host-frameworks</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/primitives/" title="Custom Primitives">primitives</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   └── </span><a href="../../tutorials/debugging/" title="Troubleshooting">debugging</a></span><span class="trow" style="--ti:4ch"><span class="dim">├── </span><a href="../../architecture/" title="Architecture">architecture</a></span><span class="trow" style="--ti:4ch"><span class="dim">├── </span><a href="../../compatibility/" title="Compatibility">compatibility/</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../compatibility/numpy/" title="NumPy">numpy</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../compatibility/array-api/" title="Array API">array-api</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../compatibility/cupy/" title="CuPy">cupy</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../compatibility/scipy/" title="SciPy">scipy</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   └── </span><a href="../../compatibility/xarray/" title="xarray">xarray</a></span><span class="trow" style="--ti:4ch"><span class="dim">├── </span><a href="../../api/" title="API Reference">api-reference/</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span>core-api/</span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="../../api/transforms/" title="Transforms">transforms</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="../../api/staging/" title="Staging">staging</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="../../api/primitives/" title="Primitives">primitives</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="../../api/arrays/" title="Arrays">arrays</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="../../api/pytree/" title="Pytrees">pytree</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="../../api/testing/" title="Testing Utilities">testing</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="../../api/support/" title="Support Catalog">support</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   └── </span><a href="../../api/errors/" title="Errors">errors</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   └── </span>public-modules/</span><span class="trow" style="--ti:12ch"><span class="dim">│       ├── </span><a href="../../api/numpy/" title="NumPy Frontend">numpy</a></span><span class="trow" style="--ti:12ch"><span class="dim">│       ├── </span><a href="../../api/scipy/" title="SciPy">scipy/</a></span><span class="trow" style="--ti:16ch"><span class="dim">│       │   ├── </span><a href="../../api/scipy/special/" title="Special Functions">special</a></span><span class="trow" style="--ti:16ch"><span class="dim">│       │   ├── </span><a href="../../api/scipy/ndimage/" title="Image Processing">ndimage</a></span><span class="trow" style="--ti:16ch"><span class="dim">│       │   └── </span><a href="../../api/scipy/solvers/" title="Solver Callbacks">solvers</a></span><span class="trow" style="--ti:12ch"><span class="dim">│       ├── </span><a href="../../api/xarray/" title="xarray">xarray</a></span><span class="trow" style="--ti:12ch"><span class="dim">│       └── </span><a href="../../api/interop/" title="Host Autodiff Interop">host-autodiff-interop/</a></span><span class="trow" style="--ti:16ch"><span class="dim">│           ├── </span><a href="../../api/interop/torch/" title="PyTorch">torch</a></span><span class="trow" style="--ti:16ch"><span class="dim">│           ├── </span><a href="../../api/interop/jax/" title="JAX">jax</a></span><span class="trow" style="--ti:16ch"><span class="dim">│           └── </span><a href="../../api/interop/autograd/" title="HIPS Autograd">autograd</a></span><span class="trow" style="--ti:4ch"><span class="dim">└── </span><a href="../" title="Developer Guide">developer-guide/</a></span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="../codebase/" title="Codebase Map">codebase</a></span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="../adding-operations/" title="Adding Operations">adding-operations</a></span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="../testing/" title="Testing">testing</a></span><span class="trow" style="--ti:8ch"><span class="dim">    └── </span><a href="./" class="cur" aria-current="page" title="Documentation">documentation</a></span></pre>
   </aside>
 
   <article class="tile manwin" aria-label="Manual page">
@@ -49,7 +52,7 @@ teach supported behavior; developer pages explain ownership; module docstrings
 state local responsibility; scoped <code>AGENTS.md</code> files route automated work to
 those authorities.</p>
 <h2 id="published-documentation">Published documentation<a class="headerlink" href="#published-documentation" title="Permanent link">&para;</a></h2>
-<p>Use the smallest public surface that owns the statement:</p>
+<p>Put each statement at the narrowest level that owns it:</p>
 <ul>
 <li><code>docs/tutorials/</code> teaches complete user tasks with runnable examples.</li>
 <li><code>docs/architecture.md</code> explains the public execution and extension model.</li>
@@ -64,7 +67,7 @@ those authorities.</p>
   evidence contracts; it is not a second public API reference.</li>
 </ul>
 <p>Keep exhaustive callable inventories in the generated compatibility report or
-mkdocstrings output. Narrative pages should explain semantics and boundaries,
+mkdocstrings output. Narrative pages explain behavior and boundaries,
 then link to the owning inventory.</p>
 <h2 id="module-and-object-docstrings">Module and object docstrings<a class="headerlink" href="#module-and-object-docstrings" title="Permanent link">&para;</a></h2>
 <p>Every production Python module and package, including type stubs and package
@@ -115,15 +118,18 @@ contract changes; it is intentionally narrative rather than generated.</p>
 <p>Mark a runnable Python fence with <code>```{.python .run}</code>. A page is one
 Python session: running a block first executes any unexecuted runnable blocks
 above it. Each marked block must therefore run cleanly in order with only
-NumPy, Advect, and anything defined by earlier marked blocks.</p>
+NumPy, Advect, and anything defined by earlier marked blocks. Every runnable
+block must also print a meaningful result so its browser output confirms what
+the example demonstrated.</p>
 <p>Run all snippets natively:</p>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>scripts/run_doc_snippets.py<span class="w"> </span>docs
 </span></code></pre></div>
-<p>For browser-facing changes, build the wheel once before the strict docs build;
-the MkDocs hook stages the wheel, playground adapter, and examples:</p>
+<p>The ordinary strict build does not require a browser wheel. For browser-facing
+changes and release builds, build the wheel and require the MkDocs hook to
+stage it with the playground adapter and examples:</p>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>mkdir<span class="w"> </span>-p<span class="w"> </span>dist
 </span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>uvx<span class="w"> </span>--from<span class="w"> </span>pyodide-build<span class="o">==</span><span class="m">0</span>.36.0<span class="w"> </span>pyodide<span class="w"> </span>build<span class="w"> </span>.<span class="w"> </span>--outdir<span class="w"> </span>dist/pyodide
-</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>uv<span class="w"> </span>run<span class="w"> </span>mkdocs<span class="w"> </span>build<span class="w"> </span>--strict
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="nv">ADVECT_REQUIRE_BROWSER_WHEEL</span><span class="o">=</span><span class="m">1</span><span class="w"> </span>uv<span class="w"> </span>run<span class="w"> </span>mkdocs<span class="w"> </span>build<span class="w"> </span>--strict
 </span></code></pre></div>
 <p>The Pyodide CI lane also runs the snippets inside its browser-compatible
 environment.</p>
@@ -145,35 +151,52 @@ find ownership without loading the design archive first.</p>
       <p class="prompt">$ <span class="cursor">█</span></p>
     </div></div>
   </article>
+
+  <aside class="tile outlinetile" id="outlinetile" aria-label="Page outline" aria-hidden="true">
+    <span class="ptitle"><span class="pn">outline</span> this-page</span>
+    <nav class="outlinelinks" id="outlinelinks"><a href="#published-documentation">Published documentation</a><a href="#module-and-object-docstrings">Module and object docstrings</a><a href="#repository-guidance">Repository guidance</a><a href="#generated-compatibility-pages">Generated compatibility pages</a><a href="#runnable-examples-and-browser-docs">Runnable examples and browser docs</a><a href="#build-and-llm-index">Build and LLM index</a></nav>
+  </aside>
 </div>
 
 <div class="overlay" id="help" role="dialog" aria-label="Keyboard shortcuts">
   <h3>Keys</h3>
   <table>
+    
     <tr><td class="kk">j k d u g G</td><td>scroll the page</td></tr>
     <tr><td class="kk">n / p</td><td>next / previous page</td></tr>
     <tr><td class="kk">e</td><td>toggle the docs tree pane</td></tr>
-    <tr><td class="kk">/</td><td>search the manual</td></tr>
+    <tr><td class="kk">o</td><td>toggle the page outline</td></tr>
     <tr><td class="kk">2</td><td>open the playground</td></tr>
-    <tr><td class="kk">t</td><td>lp0 → dark → crt</td></tr>
+    
+    <tr><td class="kk">/</td><td>search the manual</td></tr>
+    <tr><td class="kk">t</td><td>system → light → dark</td></tr>
     <tr><td class="kk">?</td><td>close this help</td></tr>
   </table>
 </div>
 
-<div class="overlay search-box" id="search" role="dialog" aria-label="Search">
-  <div class="search-in"><span class="ps">/</span><input id="searchq" spellcheck="false" autocomplete="off" aria-label="Search query" placeholder="search the manual…"></div>
-  <div class="search-hits" id="searchhits"></div>
+<div class="overlay search-box" id="search" role="dialog" aria-hidden="true" aria-label="Search">
+  <div class="search-in"><span class="ps">/</span><input type="search" id="mkdocs-search-query" spellcheck="false" autocomplete="off" aria-label="Search query" placeholder="search the manual…"></div>
+  <div class="search-hits" id="mkdocs-search-results" data-no-results-text="No manual entry found" aria-live="polite"></div>
 </div>
 
+<aside class="link-preview" id="linkpreview" role="tooltip" aria-hidden="true">
+  <div class="preview-path" id="previewpath"></div>
+  <strong class="preview-title" id="previewtitle"></strong>
+  <pre class="preview-signature" id="previewsignature"><code></code></pre>
+  <p class="preview-description" id="previewdescription"></p>
+</aside>
+
 <div class="bar">
-  <a href="../.." class="b" aria-current="true">[1:docs]</a>
-  <a href="../../playground/" class="b" id="wsplay">[2:playground]</a>
+  <a href="../.." class="b" data-short="[1]" aria-current="true">[1:docs]</a>
+  <a href="../../playground/" class="b" id="wsplay" data-short="[2]">[2:playground]</a>
+  <a href="https://github.com/yaugenst/advect" class="b" data-short="[git]">[git:source]</a>
   <span class="path hidesm">$ man advect/development/documentation</span>
   <span class="grow"></span>
-  <button class="tbtn" id="treebtn" aria-label="Toggle documentation tree">[e] tree</button>
-  <button class="tbtn" id="searchbtn" aria-label="Search">[/] search</button>
+  <button class="tbtn" id="treebtn" data-short="[e]" aria-label="Toggle documentation tree">[e] tree</button>
+  <button class="tbtn" id="outlinebtn" data-short="[o]" aria-label="Toggle page outline" aria-controls="outlinetile" aria-expanded="false">[o] outline</button>
+  <button class="tbtn" id="searchbtn" data-short="[/]" aria-label="Search" aria-controls="search" aria-expanded="false">[/] search</button>
   <button class="tbtn hidesm" id="helpbtn" aria-label="Keyboard help">[?] keys</button>
-  <button class="tbtn" id="themeToggle" aria-label="Cycle display mode">[ mode: … ]</button>
+  <button class="tbtn" id="themeToggle" data-short="[mode]" aria-label="Cycle system, light, and dark display modes">[ mode: … ]</button>
 </div>
 
 <script src="../../js/theme.js"></script>

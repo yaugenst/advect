@@ -1,6 +1,6 @@
 # Pytrees
 
-Pytrees let transforms preserve nested tuples, lists, dictionaries, and registered application containers while differentiating their array leaves. Static values remain structural metadata. Custom classes may register a node type or provide Advect's inherited flatten/unflatten hooks.
+[Pytrees](https://yaugenst.github.io/advect/dev/tutorials/gradients/#select-arguments-and-preserve-structure) let transforms preserve nested tuples, lists, dictionaries, and registered application containers while differentiating the arrays inside them. Other values remain part of the structure. Custom classes may [register a node type](https://yaugenst.github.io/advect/dev/api/pytree/#advect.pytree.register_pytree_node) for dynamic transforms; [staged programs](https://yaugenst.github.io/advect/dev/api/staging/index.md) accept the built-in portable container forms rather than arbitrary Python class registrations.
 
 ## pytree
 

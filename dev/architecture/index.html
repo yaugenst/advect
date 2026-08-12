@@ -2,26 +2,29 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="description" content="A small extensible automatic-differentiation core for Python">
+<meta name="description" content="Automatic differentiation for the NumPy code you already write">
 <link rel="canonical" href="https://yaugenst.github.io/advect/dev/architecture/">
 <title>architecture(7) · advect</title>
 <link rel="icon" href="../img/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="../css/fonts.css">
-<link rel="stylesheet" href="../css/theme.css?v=86c97aee1cb2">
+<link rel="stylesheet" href="../css/theme.css?v=bf544137efc8">
 <link rel="stylesheet" href="../assets/_mkdocstrings.css">
 <script>
 var base_url = "..";
-/* pre-paint: apply persisted display mode and tree state to avoid a theme
-   flash and the tree pane animating open on every navigation */
+/* pre-paint: apply persisted display mode and pane state to avoid a theme
+   flash and the panes animating open on every navigation */
 (function () {
-  var m = null, t = null;
+  var m = null, t = null, o = null;
   try {
     m = localStorage.getItem("advect-mode");
     t = localStorage.getItem("advect-tree");
+    o = localStorage.getItem("advect-outline");
   } catch (e) { /* private mode */ }
-  if (m) document.documentElement.dataset.theme = m;
+  if (m === "light" || m === "dark") document.documentElement.dataset.theme = m;
   var open = t === null ? window.innerWidth > 1100 : t === "1";
   if (open) document.documentElement.classList.add("tree-open");
+  open = o === null ? window.innerWidth > 1500 : o === "1";
+  if (open) document.documentElement.classList.add("outline-open");
 })();
 </script>
 
@@ -31,7 +34,7 @@ var base_url = "..";
 <div class="desktop" id="desktop">
   <aside class="tile treetile" id="treetile" aria-label="Documentation tree" aria-hidden="true">
     <span class="ptitle"><span class="pn">tree</span> docs/</span>
-    <pre class="tree"><span class="trow">docs/</span><span class="trow" style="--ti:4ch"><span class="dim">├── </span><a href=".." title="Home">index</a></span><span class="trow" style="--ti:4ch"><span class="dim">├── </span>tutorials/</span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../tutorials/" title="Tutorials">index</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../tutorials/gradients/" title="Gradients and Pytrees">gradients</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../tutorials/control-flow/" title="Control Flow and Mutation">control-flow</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../tutorials/staging/" title="Staging and Serialization">staging</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../tutorials/interop/" title="Providers and Interop">interop</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../tutorials/primitives/" title="Custom Primitives">primitives</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   └── </span><a href="../tutorials/debugging/" title="Debugging">debugging</a></span><span class="trow" style="--ti:4ch"><span class="dim">├── </span><a href="./" class="cur" aria-current="page" title="Architecture">architecture</a></span><span class="trow" style="--ti:4ch"><span class="dim">├── </span>compatibility/</span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../compatibility/" title="Compatibility">index</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../compatibility/numpy/" title="NumPy">numpy</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../compatibility/array-api/" title="Array API">array-api</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../compatibility/cupy/" title="CuPy">cupy</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../compatibility/scipy/" title="SciPy">scipy</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   └── </span><a href="../compatibility/xarray/" title="xarray">xarray</a></span><span class="trow" style="--ti:4ch"><span class="dim">├── </span>api-reference/</span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../api/" title="Overview">index</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span>core-api/</span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="../api/transforms/" title="Transforms">transforms</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="../api/staging/" title="Staging">staging</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="../api/primitives/" title="Primitives">primitives</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="../api/arrays/" title="Arrays">arrays</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="../api/pytree/" title="Pytrees">pytree</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="../api/testing/" title="Testing Utilities">testing</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="../api/support/" title="Support Catalog">support</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   └── </span><a href="../api/errors/" title="Errors">errors</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   └── </span>public-modules/</span><span class="trow" style="--ti:12ch"><span class="dim">│       ├── </span><a href="../api/numpy/" title="NumPy Frontend">numpy</a></span><span class="trow" style="--ti:12ch"><span class="dim">│       ├── </span>scipy/</span><span class="trow" style="--ti:16ch"><span class="dim">│       │   ├── </span><a href="../api/scipy/" title="SciPy Overview">index</a></span><span class="trow" style="--ti:16ch"><span class="dim">│       │   ├── </span><a href="../api/scipy/special/" title="Special Functions">special</a></span><span class="trow" style="--ti:16ch"><span class="dim">│       │   ├── </span><a href="../api/scipy/ndimage/" title="Image Filters">ndimage</a></span><span class="trow" style="--ti:16ch"><span class="dim">│       │   └── </span><a href="../api/scipy/solvers/" title="Solver Callbacks">solvers</a></span><span class="trow" style="--ti:12ch"><span class="dim">│       ├── </span><a href="../api/xarray/" title="xarray">xarray</a></span><span class="trow" style="--ti:12ch"><span class="dim">│       └── </span>host-autodiff-interop/</span><span class="trow" style="--ti:16ch"><span class="dim">│           ├── </span><a href="../api/interop/" title="Host Interop Overview">index</a></span><span class="trow" style="--ti:16ch"><span class="dim">│           ├── </span><a href="../api/interop/torch/" title="PyTorch">torch</a></span><span class="trow" style="--ti:16ch"><span class="dim">│           ├── </span><a href="../api/interop/jax/" title="JAX">jax</a></span><span class="trow" style="--ti:16ch"><span class="dim">│           └── </span><a href="../api/interop/autograd/" title="HIPS Autograd">autograd</a></span><span class="trow" style="--ti:4ch"><span class="dim">└── </span>developer-guide/</span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="../development/" title="Overview">index</a></span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="../development/codebase/" title="Codebase Map">codebase</a></span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="../development/adding-operations/" title="Adding Operations">adding-operations</a></span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="../development/testing/" title="Testing">testing</a></span><span class="trow" style="--ti:8ch"><span class="dim">    └── </span><a href="../development/documentation/" title="Documentation">documentation</a></span></pre>
+    <pre class="tree"><span class="trow"><a href=".." title="Home">docs/</a></span><span class="trow" style="--ti:4ch"><span class="dim">├── </span><a href="../tutorials/" title="Tutorials">tutorials/</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../tutorials/gradients/" title="Gradients and Pytrees">gradients</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../tutorials/control-flow/" title="Dynamic Control Flow and Mutation">control-flow</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../tutorials/linear-maps/" title="JVPs, VJPs, and Linear Maps">linear-maps</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../tutorials/advanced-differentiation/" title="Higher-Order Differentiation">advanced-differentiation</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../tutorials/implicit-differentiation/" title="Implicit Differentiation">implicit-differentiation</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../tutorials/staging/" title="Staging and Serialization">staging</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../tutorials/scientific-python/" title="Arrays and Scientific Python">scientific-python</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../tutorials/host-frameworks/" title="Host Autodiff Frameworks">host-frameworks</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../tutorials/primitives/" title="Custom Primitives">primitives</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   └── </span><a href="../tutorials/debugging/" title="Troubleshooting">debugging</a></span><span class="trow" style="--ti:4ch"><span class="dim">├── </span><a href="./" class="cur" aria-current="page" title="Architecture">architecture</a></span><span class="trow" style="--ti:4ch"><span class="dim">├── </span><a href="../compatibility/" title="Compatibility">compatibility/</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../compatibility/numpy/" title="NumPy">numpy</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../compatibility/array-api/" title="Array API">array-api</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../compatibility/cupy/" title="CuPy">cupy</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../compatibility/scipy/" title="SciPy">scipy</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   └── </span><a href="../compatibility/xarray/" title="xarray">xarray</a></span><span class="trow" style="--ti:4ch"><span class="dim">├── </span><a href="../api/" title="API Reference">api-reference/</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span>core-api/</span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="../api/transforms/" title="Transforms">transforms</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="../api/staging/" title="Staging">staging</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="../api/primitives/" title="Primitives">primitives</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="../api/arrays/" title="Arrays">arrays</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="../api/pytree/" title="Pytrees">pytree</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="../api/testing/" title="Testing Utilities">testing</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="../api/support/" title="Support Catalog">support</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   └── </span><a href="../api/errors/" title="Errors">errors</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   └── </span>public-modules/</span><span class="trow" style="--ti:12ch"><span class="dim">│       ├── </span><a href="../api/numpy/" title="NumPy Frontend">numpy</a></span><span class="trow" style="--ti:12ch"><span class="dim">│       ├── </span><a href="../api/scipy/" title="SciPy">scipy/</a></span><span class="trow" style="--ti:16ch"><span class="dim">│       │   ├── </span><a href="../api/scipy/special/" title="Special Functions">special</a></span><span class="trow" style="--ti:16ch"><span class="dim">│       │   ├── </span><a href="../api/scipy/ndimage/" title="Image Processing">ndimage</a></span><span class="trow" style="--ti:16ch"><span class="dim">│       │   └── </span><a href="../api/scipy/solvers/" title="Solver Callbacks">solvers</a></span><span class="trow" style="--ti:12ch"><span class="dim">│       ├── </span><a href="../api/xarray/" title="xarray">xarray</a></span><span class="trow" style="--ti:12ch"><span class="dim">│       └── </span><a href="../api/interop/" title="Host Autodiff Interop">host-autodiff-interop/</a></span><span class="trow" style="--ti:16ch"><span class="dim">│           ├── </span><a href="../api/interop/torch/" title="PyTorch">torch</a></span><span class="trow" style="--ti:16ch"><span class="dim">│           ├── </span><a href="../api/interop/jax/" title="JAX">jax</a></span><span class="trow" style="--ti:16ch"><span class="dim">│           └── </span><a href="../api/interop/autograd/" title="HIPS Autograd">autograd</a></span><span class="trow" style="--ti:4ch"><span class="dim">└── </span><a href="../development/" title="Developer Guide">developer-guide/</a></span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="../development/codebase/" title="Codebase Map">codebase</a></span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="../development/adding-operations/" title="Adding Operations">adding-operations</a></span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="../development/testing/" title="Testing">testing</a></span><span class="trow" style="--ti:8ch"><span class="dim">    └── </span><a href="../development/documentation/" title="Documentation">documentation</a></span></pre>
   </aside>
 
   <article class="tile manwin" aria-label="Manual page">
@@ -44,58 +47,36 @@ var base_url = "..";
       <div class="md">
         
         <h1 id="architecture">Architecture<a class="headerlink" href="#architecture" title="Permanent link">&para;</a></h1>
-<p>Advect is an autodiff core, not an array library. NumPy — or another Array API
-provider — keeps doing the numerics; Advect's job is to record what a function
-does to its arrays, differentiate that record, and, when asked, turn it into a
-durable program. Everything in the design follows from keeping that job small.</p>
-<h2 id="three-frontend-paths-one-semantic-core">Three frontend paths, one semantic core<a class="headerlink" href="#three-frontend-paths-one-semantic-core" title="Permanent link">&para;</a></h2>
-<p>NumPy and the Array API are separate calling contracts. The concrete NumPy
-frontend owns <code>numpy.*</code> signatures, ufunc methods, aliases, <code>out=</code>, and
-functionalized mutation. The provider-neutral Array API frontend owns the
-versioned namespace returned by <code>x.__array_namespace__()</code>. Their array-valued
-calls share code only after each frontend has bound its foreign call to a
-canonical operation.</p>
-<p>Compile-time metadata takes a third path. NumPy structural queries and the
-Array API metadata functions resolve directly from the active concrete or
-abstract namespace. They return the dtype, shape, or scalar metadata needed by
-the trace instead of emitting a numerical graph node. A traced composition can
-use that result for static attributes or trace-time control flow, but the query
-does not become a primitive.</p>
+<p>NumPy or another Array API provider still performs the numerical work. Advect
+records how the array values were produced, then uses that record to calculate
+derivatives immediately or build a reusable program that can be saved and
+loaded. This separation keeps Advect focused on differentiation while the
+array library remains responsible for execution.</p>
+<h2 id="different-array-apis-one-set-of-operations">Different array APIs, one set of operations<a class="headerlink" href="#different-array-apis-one-set-of-operations" title="Permanent link">&para;</a></h2>
+<p>NumPy and the Array API expose similar numerical work through different Python
+interfaces. Advect understands NumPy ufuncs, array functions, methods, <code>out=</code>,
+constructors, and local mutation. It also understands the versioned namespace
+returned by <code>x.__array_namespace__()</code>. Each path interprets its own public call,
+then records the same internal operation.</p>
+<p>Shape, dtype, and other trace-time queries take a shorter path. They return
+metadata needed by Python or by an operation attribute without adding a
+numerical graph node.</p>
 <div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>numpy.* ─────────────&gt; NumPy frontend ────┐
-</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>                                         ├─ array call ─&gt; canonical operation
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>                                          ├─ array call ─&gt; canonical operation
 </span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>__array_namespace__ → Array API frontend ─┤                  ├─ dynamic tape
-</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>        ↑                                │                  ├─ staged graph
-</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>        └─ NumPy or CuPy provider        │                  └─ derivative rules
-</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>                                         └─ metadata ─&gt; trace-time metadata
-</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>                                                        (no graph node)
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>        ↑                                 │                  ├─ staged graph
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>        └─ NumPy or CuPy provider         │                  └─ derivative rules
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>                                          └─ metadata ─&gt; trace-time metadata
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>                                                         (no graph node)
 </span></code></pre></div>
-<p>CuPy reaches Advect through the designated Array API provider path; Advect does
-not maintain a speculative direct <code>cupy.*</code> frontend. Its historical GPU record
-is source-only until a retained report and digest verify the current gate. A
-future direct frontend would bind its own calling convention and join at the
-same canonical-operation boundary.</p>
-<h2 id="one-semantic-core-two-lifetimes">One semantic core, two lifetimes<a class="headerlink" href="#one-semantic-core-two-lifetimes" title="Permanent link">&para;</a></h2>
-<p>A supported frontend call takes one of three paths: resolve compile-time
-metadata without a node, emit a canonical operation, or expand into a traceable
-composition of existing operations. Each canonical operation records stable
-identity and arity plus the semantic capabilities it actually supports:
-abstract shape/dtype semantics for staging and a JVP when it supports forward
-mode. Built-in concrete execution remains with the frontend and array provider;
-a custom primitive calls its authored implementation. Reverse mode structurally
-transposes the recorded JVP where possible.
-The smaller set that needs a direct real adjoint carries an explicit transpose;
-that rule can also stand alone to supply reverse mode without forward mode or
-structural transposition. A traceable non-residual transpose can compose under
-reverse mode, while a residual-bearing transpose is inherently first-order.
-Canonical records mark mathematically non-differentiable operations with a
-reason rather than placeholder rules. Frontend invocation evidence and public
-support declarations separately say whether each call form is dynamic-only or
-also stageable.</p>
-<p>The transforms you call — <code>grad</code>, <code>jvp</code>, <code>vjp</code>, <code>jacobian</code>, and <code>stage</code> —
-consume those declared capabilities. A traceable frontend composition reuses
-them; it does not become another primitive merely because it has a public name.</p>
-<p>What differs between the two execution modes is not the math but the
-<em>lifetime</em> of the record:</p>
+<p>This shared model lets one derivative rule describe the numerical operation
+rather than every Python spelling that can reach it. The public interfaces
+remain separate because they can still differ in signatures and supported
+execution modes.</p>
+<h2 id="one-set-of-rules-two-ways-to-run">One set of rules, two ways to run<a class="headerlink" href="#one-set-of-rules-two-ways-to-run" title="Permanent link">&para;</a></h2>
+<p>Dynamic transforms and staged programs use the same operation identities,
+abstract shape and dtype rules, and derivative rules. They differ in how long
+the recorded computation lives.</p>
 <div class="language-text highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>              ┌─────────────────────────────────────┐
 </span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>              │ User code                           │
 </span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>              │   z = np.sin(x) + y                 │
@@ -111,27 +92,24 @@ them; it does not become another primitive merely because it has a public name.<
 </span><span id="__span-1-13"><a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a>    ┌──────────────────▼────────┐ ┌────────▼──────────────────┐
 </span><span id="__span-1-14"><a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a>    │ Dynamic lifetime          │ │ Staged lifetime           │
 </span><span id="__span-1-15"><a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a>    │   concrete SSA tape       │ │   abstract trace →        │
-</span><span id="__span-1-16"><a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a>    │   → pullback              │ │   durable optimized graph │
+</span><span id="__span-1-16"><a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a>    │   → pullback              │ │   saved optimized graph   │
 </span><span id="__span-1-17"><a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a>    └───────────────────────────┘ └───────────────────────────┘
 </span></code></pre></div>
-<h2 id="the-dynamic-path">The dynamic path<a class="headerlink" href="#the-dynamic-path" title="Permanent link">&para;</a></h2>
-<p><code>grad(f)(x)</code> runs <code>f</code> with the real values, wrapped in tracers that record
-each emitted canonical operation onto an invocation-local SSA tape. Because
-the trace happens inside an ordinary call, Python control flow needs no special
-forms: loops unroll to the iterations that actually ran, branches take the
-branch the data took. The reverse sweep walks that tape backwards through the
-transpose rules and then releases it. Consuming transforms such as <code>grad</code>
-release before returning; <code>vjp</code> and <code>linearize</code> transfer that one invocation's
-tape to the returned <code>Pullback</code> or <code>LinearMap</code> until it is consumed or closed.
-None of these handles is a cross-call trace cache.</p>
-<p>That per-call freshness is the point of the dynamic mode: a new trace can have
-new shapes, new branches, even a different number of loop iterations. The cost
-is that tracing work is repeated on every call.</p>
-<h2 id="the-staged-path">The staged path<a class="headerlink" href="#the-staged-path" title="Permanent link">&para;</a></h2>
-<p><code>stage(f, example)</code> runs the same trace once with <em>abstract</em> values — shape
-and dtype, no data — and keeps the result. The recorded graph is validated,
-then run through a fixed optimization pipeline (dead-code elimination,
-simplification, common-subexpression elimination) into an immutable program:</p>
+<h3 id="dynamic-execution-follows-python">Dynamic execution follows Python<a class="headerlink" href="#dynamic-execution-follows-python" title="Permanent link">&para;</a></h3>
+<p><code>grad(f)(x)</code> runs <code>f</code> with concrete values wrapped in tracers. Each supported
+array operation appends to an invocation-local tape, and reverse mode walks
+that tape backward before releasing it. Because tracing happens inside an
+ordinary call, branches take the branch selected by the data and loops run for
+the current number of iterations.</p>
+<p>Tracing each call afresh lets a later call take a different path or use a
+different shape. <code>vjp</code> keeps one call's tape in a single-use <code>Pullback</code>;
+applying or closing it releases the tape. <code>linearize</code> returns a reusable
+<code>LinearMap</code> that keeps its tape until closed. Both objects belong to the call
+that created them.</p>
+<h3 id="staging-fixes-one-signature">Staging fixes one signature<a class="headerlink" href="#staging-fixes-one-signature" title="Permanent link">&para;</a></h3>
+<p><code>stage(f, example)</code> traces with abstract values—shape and dtype without data—so
+it can build a graph before execution. Advect validates that graph and runs a
+fixed cleanup pipeline before returning an immutable <code>StagedProgram</code>.</p>
 <div class="language-python run highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
 </span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>
 </span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="kn">import</span><span class="w"> </span><span class="nn">advect</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">ad</span>
@@ -141,135 +119,115 @@ simplification, common-subexpression elimination) into an immutable program:</p>
 </span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>    <span class="k">return</span> <span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">sin</span><span class="p">(</span><span class="n">x</span><span class="p">)</span> <span class="o">**</span> <span class="mi">2</span><span class="p">)</span>
 </span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>
 </span><span id="__span-2-9"><a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>
-</span><span id="__span-2-10"><a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="n">gradient_program</span> <span class="o">=</span> <span class="n">ad</span><span class="o">.</span><span class="n">grad</span><span class="p">(</span><span class="n">ad</span><span class="o">.</span><span class="n">stage</span><span class="p">(</span><span class="n">loss</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">linspace</span><span class="p">(</span><span class="mf">0.0</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">,</span> <span class="mi">4</span><span class="p">)))</span>
-</span><span id="__span-2-11"><a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="k">for</span> <span class="n">node_id</span> <span class="ow">in</span> <span class="n">gradient_program</span><span class="o">.</span><span class="n">graph</span><span class="o">.</span><span class="n">node_ids</span><span class="p">():</span>
-</span><span id="__span-2-12"><a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a>    <span class="n">node</span> <span class="o">=</span> <span class="n">gradient_program</span><span class="o">.</span><span class="n">graph</span><span class="o">.</span><span class="n">get_node</span><span class="p">(</span><span class="n">node_id</span><span class="p">)</span>
-</span><span id="__span-2-13"><a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a>    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;%</span><span class="si">{</span><span class="n">node_id</span><span class="si">}</span><span class="s2"> = </span><span class="si">{</span><span class="n">node</span><span class="o">.</span><span class="n">op</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">node</span><span class="o">.</span><span class="n">inputs</span><span class="si">}</span><span class="s2">  # </span><span class="si">{</span><span class="n">node</span><span class="o">.</span><span class="n">shape</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">node</span><span class="o">.</span><span class="n">dtype</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+</span><span id="__span-2-10"><a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="n">example</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">linspace</span><span class="p">(</span><span class="mf">0.0</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">,</span> <span class="mi">4</span><span class="p">)</span>
+</span><span id="__span-2-11"><a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="n">loss_program</span> <span class="o">=</span> <span class="n">ad</span><span class="o">.</span><span class="n">stage</span><span class="p">(</span><span class="n">loss</span><span class="p">,</span> <span class="n">example</span><span class="p">)</span>
+</span><span id="__span-2-12"><a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="n">gradient_program</span> <span class="o">=</span> <span class="n">ad</span><span class="o">.</span><span class="n">grad</span><span class="p">(</span><span class="n">loss_program</span><span class="p">)</span>
+</span><span id="__span-2-13"><a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="nb">print</span><span class="p">(</span><span class="s2">&quot;staged gradient:&quot;</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">round</span><span class="p">(</span><span class="n">gradient_program</span><span class="p">(</span><span class="n">example</span><span class="p">),</span> <span class="mi">6</span><span class="p">))</span>
+</span><span id="__span-2-14"><a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a><span class="nb">print</span><span class="p">(</span>
+</span><span id="__span-2-15"><a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a>    <span class="s2">&quot;optimized nodes:&quot;</span><span class="p">,</span>
+</span><span id="__span-2-16"><a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a>    <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">gradient_program</span><span class="o">.</span><span class="n">optimization</span><span class="o">.</span><span class="n">nodes_before</span><span class="si">}</span><span class="s2"> -&gt; &quot;</span>
+</span><span id="__span-2-17"><a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a>    <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">gradient_program</span><span class="o">.</span><span class="n">optimization</span><span class="o">.</span><span class="n">nodes_after</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span>
+</span><span id="__span-2-18"><a id="__codelineno-2-18" name="__codelineno-2-18" href="#__codelineno-2-18"></a><span class="p">)</span>
 </span></code></pre></div>
-<p>A <code>StagedProgram</code> is compiled for exactly one shape/dtype signature — it is
-never a hidden multi-signature cache. The staged-producing transforms
-<code>grad(program)</code>, <code>value_and_grad(program)</code>, and <code>vjp_program(program)</code> compile
-the derivative graph once and return programs whose warm calls execute with no
-tape and no reverse sweep. Dense higher-order transforms remain concrete
-invocation-time callables even when their input function is a staged program.</p>
-<p>Its serialized form has two nested contracts. Python core owns the versioned
-outer envelope: call and output pytrees, their leaf specifications, the
-constant manifest, the optimization report, and consistency among those
-records and the graph. <code>advect-runtime</code> owns the enclosed canonical graph
-artifact and validates the <code>GraphStore</code> before accepting it. The combined JSON
-is a Python <code>StagedProgram</code> artifact because its outer envelope uses Python
-pytree and codec identities. Only the enclosed flat runtime graph is portable
-to a non-Python host; that host consumes the runtime contract, links the named
-operations, and supplies flat inputs and outputs.</p>
-<p>Because the staged trace has no data, it is also stricter: Python truth tests
-on traced values, ambient randomness, and data-dependent shapes are rejected
-at trace time rather than silently frozen. The <a href="../tutorials/debugging/">debugging
-tutorial</a> maps those errors to their rewrites.</p>
-<h2 id="derivatives-are-jvp-first">Derivatives are JVP-first<a class="headerlink" href="#derivatives-are-jvp-first" title="Permanent link">&para;</a></h2>
-<p>The preferred derivative rule is a JVP written as ordinary traceable code.
-Advect obtains reverse mode by transposing it and validates the required
-real-linearity instead of trusting it. A primitive may instead provide an
-explicit transpose without a JVP: it has reverse mode but no forward mode or
-structural transposition. That rule can support reverse-over-reverse when its
-body is traceable and non-residual. Residual-bearing primitives use an
-inherently first-order boundary when their exact adjoint needs
-invocation-local state. Derivatives are real-linear throughout, which gives
-complex and non-holomorphic functions one consistent convention, and a missing
-rule is a named error — Advect never substitutes a numeric approximation
-silently at runtime.</p>
-<h2 id="mutation-is-functionalized">Mutation is functionalized<a class="headerlink" href="#mutation-is-functionalized" title="Permanent link">&para;</a></h2>
-<p>Traced arrays are not writable in place. Supported mutation syntax — indexed
-updates, augmented assignment through basic slices — is rewritten at the
-tracer boundary into immutable SSA updates, and everything else raises with a
-suggested rewrite. Inputs are never implicitly writable: copy first, then
-update the owned copy. This keeps the recorded graph a pure dataflow program,
-which is what makes transposition, optimization, and serialization tractable.</p>
-<h2 id="the-native-layer">The native layer<a class="headerlink" href="#the-native-layer" title="Permanent link">&para;</a></h2>
-<p>Advect ships as one Python distribution with a required native extension, in
-three pieces:</p>
-<ul>
-<li><strong><code>advect</code></strong> (Python) owns Python-language integration and authored
-  numerical/autodiff semantics: tracer frontends, primitive bindings and
-  derivative rules, pytrees, the user API, and the outer <code>StagedProgram</code>
-  envelope with its cross-record validation.</li>
-<li><strong><code>advect-runtime</code></strong> (pure Rust, no Python bindings) owns structural graph
-  semantics and policy: the canonical artifact, closed graph data,
-  <code>GraphStore</code> validation, fixed cleanup with conservative op-aware rewrites,
-  execution planning, and host-independent value lifetimes.</li>
-<li><strong><code>advect-native</code></strong> (PyO3) translates between Python and that runtime and
-  owns the invocation-local dynamic tape.</li>
-</ul>
-<p>The split is deliberate: Python never mirrors the graph with per-node objects,
-and the pure runtime interprets only the portable graph structure and closed
-metadata needed to validate, optimize, and execute a plan. The host supplies
-the linked operation behavior and array kernels. Advect contains no kernel
-compiler, code generation, or fusion; a staged program's speed comes from
-tracing once, optimizing once, and executing with native traversal over
-provider operations.</p>
-<h2 id="deliberate-boundaries">Deliberate boundaries<a class="headerlink" href="#deliberate-boundaries" title="Permanent link">&para;</a></h2>
-<ul>
-<li><strong>No dispatch patching.</strong> NumPy is intercepted through its own protocols
-  (<code>__array_ufunc__</code>, <code>__array_function__</code>, <code>like=</code>); integrations register
-  explicitly on import, never through entry-point discovery. The sole
-  process-visible patch is a lock-protected, depth-counted guard around NumPy's
-  ambient RNG entry points during abstract staging. Non-staging callers reach
-  the originals, and the last staging scope restores the original attributes.</li>
-<li><strong>Deterministic frontend hooks.</strong> Core's private dependency-inversion seam is
-  populated at import time. A hook name is single-assignment: registering the
-  same callable again is harmless, while a different callable is rejected;
-  there is no unregister or reset path.</li>
-<li><strong>No compiler ambitions.</strong> Kernel compilation, backend lowering, and
-  automatic checkpoint placement are out of scope; the staged optimizer's
-  pass list is fixed and raw graph rewriting is not a user API.</li>
-<li><strong>No hidden fallbacks.</strong> Unsupported behavior fails with a rewrite
-  suggestion rather than detaching gradients or degrading precision.</li>
-<li><strong>No orchestration.</strong> Workflow scheduling, artifact storage, and remote
-  execution are independent layers above the serialized program.</li>
-</ul>
-<p>The contributor-level specifications behind this page — requirements, data
-structures, and the architecture decision records — live in the repository's
-<a href="https://github.com/yaugenst/advect/tree/main/design"><code>design/</code> directory</a>.</p>
+<p>The program accepts the same input structure, shapes, dtypes, devices, Python
+scalar categories, and static values it was compiled for. Later calls execute
+the graph without retracing Python. <code>grad(program)</code>,
+<code>value_and_grad(program)</code>, and <code>vjp_program(program)</code> build reusable derivative
+programs in the same way.</p>
+<p>A saved <code>StagedProgram</code> combines a Python call envelope with an enclosed flat
+runtime graph. The envelope owns Python pytrees, input and output
+specifications, the constant manifest, and cross-record consistency. The
+runtime graph owns provider-neutral operations, portable constant bytes,
+optimization, scheduling, and value lifetimes. Another host can consume the
+flat graph contract, but the complete <code>StagedProgram</code> remains a Python artifact.</p>
+<p>Abstract tracing is stricter by design. Data-dependent Python branches,
+ambient randomness, and data-dependent shapes cannot define one reusable graph
+and therefore fail during staging rather than being frozen accidentally.</p>
+<h2 id="derivatives-and-mutation-stay-composable">Derivatives and mutation stay composable<a class="headerlink" href="#derivatives-and-mutation-stay-composable" title="Permanent link">&para;</a></h2>
+<p>Advect prefers JVP rules written as ordinary traceable code. Forward mode uses
+them directly; reverse mode structurally transposes them when possible. The
+smaller set of operations that needs a direct real adjoint provides an explicit
+transpose. Missing rules raise a named error instead of silently substituting a
+numerical approximation.</p>
+<p>Advect treats every derivative as a real-linear map. This gives complex and
+non-holomorphic functions one consistent convention: a real loss can use
+<code>grad</code>, while a complex output uses <code>jvp</code>, <code>vjp</code>, or <code>linearize</code>.</p>
+<p>Supported mutation syntax is functionalized into immutable updates. Inputs are
+never implicitly writable: copy first, then update the owned local array. This
+keeps both the dynamic tape and staged graph as pure dataflow, which is what
+makes transposition, optimization, and serialization fit together.</p>
+<h2 id="the-array-provider-remains-the-numerical-backend">The array provider remains the numerical backend<a class="headerlink" href="#the-array-provider-remains-the-numerical-backend" title="Permanent link">&para;</a></h2>
+<p>The provider continues to own numerical kernels and device execution. Advect
+records, differentiates, and schedules provider calls; it does not replace
+them with a new numerical backend. Staging saves the work of tracing and
+constructing derivatives, while each operation still runs through the
+provider.</p>
+<p>Each integration keeps that ownership clear. NumPy uses its protocols, Array
+API providers use their namespaces, xarray registers container structure, and
+host-autodiff bridges wrap one Advect function. When an operation cannot cross
+one of these boundaries, Advect raises an error instead of silently detaching
+gradients or changing precision.</p>
+<p>Workflow scheduling, artifact storage, and remote execution belong above the
+serialized program. Contributor-level ownership and dependency rules live in
+the <a href="../development/">developer guide</a>.</p>
       </div>
       
 
       
       <nav class="seealso" aria-label="Adjacent pages">
-        <span><a href="../tutorials/debugging/">← debugging</a></span>
+        <span><a href="../tutorials/debugging/">← troubleshooting</a></span>
         <span class="nn"><a href="../compatibility/">compatibility →</a></span>
       </nav>
       
       <p class="prompt">$ <span class="cursor">█</span></p>
     </div></div>
   </article>
+
+  <aside class="tile outlinetile" id="outlinetile" aria-label="Page outline" aria-hidden="true">
+    <span class="ptitle"><span class="pn">outline</span> this-page</span>
+    <nav class="outlinelinks" id="outlinelinks"><a href="#different-array-apis-one-set-of-operations">Different array APIs, one set of operations</a><a href="#one-set-of-rules-two-ways-to-run">One set of rules, two ways to run</a><a href="#dynamic-execution-follows-python" class="outline-sub">Dynamic execution follows Python</a><a href="#staging-fixes-one-signature" class="outline-sub">Staging fixes one signature</a><a href="#derivatives-and-mutation-stay-composable">Derivatives and mutation stay composable</a><a href="#the-array-provider-remains-the-numerical-backend">The array provider remains the numerical backend</a></nav>
+  </aside>
 </div>
 
 <div class="overlay" id="help" role="dialog" aria-label="Keyboard shortcuts">
   <h3>Keys</h3>
   <table>
+    
     <tr><td class="kk">j k d u g G</td><td>scroll the page</td></tr>
     <tr><td class="kk">n / p</td><td>next / previous page</td></tr>
     <tr><td class="kk">e</td><td>toggle the docs tree pane</td></tr>
-    <tr><td class="kk">/</td><td>search the manual</td></tr>
+    <tr><td class="kk">o</td><td>toggle the page outline</td></tr>
     <tr><td class="kk">2</td><td>open the playground</td></tr>
-    <tr><td class="kk">t</td><td>lp0 → dark → crt</td></tr>
+    
+    <tr><td class="kk">/</td><td>search the manual</td></tr>
+    <tr><td class="kk">t</td><td>system → light → dark</td></tr>
     <tr><td class="kk">?</td><td>close this help</td></tr>
   </table>
 </div>
 
-<div class="overlay search-box" id="search" role="dialog" aria-label="Search">
-  <div class="search-in"><span class="ps">/</span><input id="searchq" spellcheck="false" autocomplete="off" aria-label="Search query" placeholder="search the manual…"></div>
-  <div class="search-hits" id="searchhits"></div>
+<div class="overlay search-box" id="search" role="dialog" aria-hidden="true" aria-label="Search">
+  <div class="search-in"><span class="ps">/</span><input type="search" id="mkdocs-search-query" spellcheck="false" autocomplete="off" aria-label="Search query" placeholder="search the manual…"></div>
+  <div class="search-hits" id="mkdocs-search-results" data-no-results-text="No manual entry found" aria-live="polite"></div>
 </div>
 
+<aside class="link-preview" id="linkpreview" role="tooltip" aria-hidden="true">
+  <div class="preview-path" id="previewpath"></div>
+  <strong class="preview-title" id="previewtitle"></strong>
+  <pre class="preview-signature" id="previewsignature"><code></code></pre>
+  <p class="preview-description" id="previewdescription"></p>
+</aside>
+
 <div class="bar">
-  <a href=".." class="b" aria-current="true">[1:docs]</a>
-  <a href="../playground/" class="b" id="wsplay">[2:playground]</a>
+  <a href=".." class="b" data-short="[1]" aria-current="true">[1:docs]</a>
+  <a href="../playground/" class="b" id="wsplay" data-short="[2]">[2:playground]</a>
+  <a href="https://github.com/yaugenst/advect" class="b" data-short="[git]">[git:source]</a>
   <span class="path hidesm">$ man advect/architecture</span>
   <span class="grow"></span>
-  <button class="tbtn" id="treebtn" aria-label="Toggle documentation tree">[e] tree</button>
-  <button class="tbtn" id="searchbtn" aria-label="Search">[/] search</button>
+  <button class="tbtn" id="treebtn" data-short="[e]" aria-label="Toggle documentation tree">[e] tree</button>
+  <button class="tbtn" id="outlinebtn" data-short="[o]" aria-label="Toggle page outline" aria-controls="outlinetile" aria-expanded="false">[o] outline</button>
+  <button class="tbtn" id="searchbtn" data-short="[/]" aria-label="Search" aria-controls="search" aria-expanded="false">[/] search</button>
   <button class="tbtn hidesm" id="helpbtn" aria-label="Keyboard help">[?] keys</button>
-  <button class="tbtn" id="themeToggle" aria-label="Cycle display mode">[ mode: … ]</button>
+  <button class="tbtn" id="themeToggle" data-short="[mode]" aria-label="Cycle system, light, and dark display modes">[ mode: … ]</button>
 </div>
 
 <script src="../js/theme.js"></script>

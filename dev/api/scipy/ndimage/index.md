@@ -1,4 +1,6 @@
-# Image Filters
+# Image Processing
+
+These are explicit differentiable counterparts to [`scipy.ndimage`](https://docs.scipy.org/doc/scipy/reference/ndimage.html). Use the [compatibility table](https://yaugenst.github.io/advect/dev/compatibility/scipy/index.md) for exact dynamic, staged, and serialized coverage.
 
 ## ndimage
 

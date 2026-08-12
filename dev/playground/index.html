@@ -2,26 +2,29 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="description" content="Explore a real Advect value-and-gradient graph in the browser with Python and Pyodide.">
+<meta name="description" content="Differentiate and stage a NumPy expression in your browser, then inspect its graph.">
 <link rel="canonical" href="https://yaugenst.github.io/advect/dev/playground/">
 <title>playground(1) · advect</title>
 <link rel="icon" href="../img/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="../css/fonts.css">
-<link rel="stylesheet" href="../css/theme.css?v=86c97aee1cb2">
+<link rel="stylesheet" href="../css/theme.css?v=bf544137efc8">
 <link rel="stylesheet" href="../assets/_mkdocstrings.css">
 <script>
 var base_url = "..";
-/* pre-paint: apply persisted display mode and tree state to avoid a theme
-   flash and the tree pane animating open on every navigation */
+/* pre-paint: apply persisted display mode and pane state to avoid a theme
+   flash and the panes animating open on every navigation */
 (function () {
-  var m = null, t = null;
+  var m = null, t = null, o = null;
   try {
     m = localStorage.getItem("advect-mode");
     t = localStorage.getItem("advect-tree");
+    o = localStorage.getItem("advect-outline");
   } catch (e) { /* private mode */ }
-  if (m) document.documentElement.dataset.theme = m;
+  if (m === "light" || m === "dark") document.documentElement.dataset.theme = m;
   var open = t === null ? window.innerWidth > 1100 : t === "1";
   if (open) document.documentElement.classList.add("tree-open");
+  open = o === null ? window.innerWidth > 1500 : o === "1";
+  if (open) document.documentElement.classList.add("outline-open");
 })();
 </script>
 
@@ -54,12 +57,12 @@ var base_url = "..";
         <span class="ptitle"><span class="pn">[b]</span> graph — hover links f(x) ↔ program · click to pin</span>
         <span class="ptitle pr"><button class="tbtn" id="dirToggle">[ graph: jvp ]</button></span>
         <div class="treewrap"><pre class="ctree" id="ctree"><span class="irplain dim"># loading Python — Pyodide, NumPy, and Advect download once…</span></pre></div>
-        <div class="pfoot"><span class="dim">↖ = this exact SSA node already appears above · hover any line to find its copies</span></div>
+        <div class="pfoot"><span class="dim">↖ = this operation already appears above · hover any line to find its copies</span></div>
       </section>
 
       <section class="pane pane-prog" aria-label="Staged program">
-        <span class="ptitle"><span class="pn">[c]</span> program — the staged derivative, as SSA</span>
-        <span class="ptitle pr"><button class="tbtn" id="tapeToggle">[ tape: live ]</button></span>
+        <span class="ptitle"><span class="pn">[c]</span> program — staged derivative</span>
+        <span class="ptitle pr"><button class="tbtn" id="tapeToggle">[ view: optimized ]</button></span>
         <div class="tapewrap"><pre class="tape" id="tape"><span class="irplain dim"># loading Python…</span></pre></div>
         <div class="pfoot" id="report"></div>
         <div class="pfoot" id="legend"></div>
@@ -89,30 +92,40 @@ var base_url = "..";
 <div class="overlay" id="help" role="dialog" aria-label="Keyboard shortcuts">
   <h3>Keys</h3>
   <table>
-    <tr><td class="kk">j k d u g G</td><td>scroll the page</td></tr>
-    <tr><td class="kk">n / p</td><td>next / previous page</td></tr>
-    <tr><td class="kk">e</td><td>toggle the docs tree pane</td></tr>
+    
+    <tr><td class="kk">← →</td><td>move x₀</td></tr>
+    <tr><td class="kk">o / v</td><td>optimized / traced view · JVP / VJP</td></tr>
+    <tr><td class="kk">1</td><td>return to the docs</td></tr>
+    
     <tr><td class="kk">/</td><td>search the manual</td></tr>
-    <tr><td class="kk">2</td><td>open the playground</td></tr>
-    <tr><td class="kk">t</td><td>lp0 → dark → crt</td></tr>
+    <tr><td class="kk">t</td><td>system → light → dark</td></tr>
     <tr><td class="kk">?</td><td>close this help</td></tr>
   </table>
 </div>
 
-<div class="overlay search-box" id="search" role="dialog" aria-label="Search">
-  <div class="search-in"><span class="ps">/</span><input id="searchq" spellcheck="false" autocomplete="off" aria-label="Search query" placeholder="search the manual…"></div>
-  <div class="search-hits" id="searchhits"></div>
+<div class="overlay search-box" id="search" role="dialog" aria-hidden="true" aria-label="Search">
+  <div class="search-in"><span class="ps">/</span><input type="search" id="mkdocs-search-query" spellcheck="false" autocomplete="off" aria-label="Search query" placeholder="search the manual…"></div>
+  <div class="search-hits" id="mkdocs-search-results" data-no-results-text="No manual entry found" aria-live="polite"></div>
 </div>
 
+<aside class="link-preview" id="linkpreview" role="tooltip" aria-hidden="true">
+  <div class="preview-path" id="previewpath"></div>
+  <strong class="preview-title" id="previewtitle"></strong>
+  <pre class="preview-signature" id="previewsignature"><code></code></pre>
+  <p class="preview-description" id="previewdescription"></p>
+</aside>
+
 <div class="bar">
-  <a href=".." class="b">[1:docs]</a>
-  <a href="./" class="b" id="wsplay" aria-current="true">[2:playground]</a>
+  <a href=".." class="b" data-short="[1]">[1:docs]</a>
+  <a href="./" class="b" id="wsplay" data-short="[2]" aria-current="true">[2:playground]</a>
+  <a href="https://github.com/yaugenst/advect" class="b" data-short="[git]">[git:source]</a>
   <span class="path hidesm">$ man advect/playground</span>
   <span class="grow"></span>
-  <button class="tbtn" id="treebtn" aria-label="Toggle documentation tree">[e] tree</button>
-  <button class="tbtn" id="searchbtn" aria-label="Search">[/] search</button>
+  <button class="tbtn" id="treebtn" data-short="[e]" aria-label="Toggle documentation tree">[e] tree</button>
+  <button class="tbtn" id="outlinebtn" data-short="[o]" aria-label="Toggle page outline" aria-controls="outlinetile" aria-expanded="false">[o] outline</button>
+  <button class="tbtn" id="searchbtn" data-short="[/]" aria-label="Search" aria-controls="search" aria-expanded="false">[/] search</button>
   <button class="tbtn hidesm" id="helpbtn" aria-label="Keyboard help">[?] keys</button>
-  <button class="tbtn" id="themeToggle" aria-label="Cycle display mode">[ mode: … ]</button>
+  <button class="tbtn" id="themeToggle" data-short="[mode]" aria-label="Cycle system, light, and dark display modes">[ mode: … ]</button>
 </div>
 
 <script src="../js/theme.js"></script>

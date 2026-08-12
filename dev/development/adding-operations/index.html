@@ -2,26 +2,29 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="description" content="A small extensible automatic-differentiation core for Python">
+<meta name="description" content="Automatic differentiation for the NumPy code you already write">
 <link rel="canonical" href="https://yaugenst.github.io/advect/dev/development/adding-operations/">
 <title>adding-operations(1) · advect</title>
 <link rel="icon" href="../../img/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="../../css/fonts.css">
-<link rel="stylesheet" href="../../css/theme.css?v=86c97aee1cb2">
+<link rel="stylesheet" href="../../css/theme.css?v=bf544137efc8">
 <link rel="stylesheet" href="../../assets/_mkdocstrings.css">
 <script>
 var base_url = "../..";
-/* pre-paint: apply persisted display mode and tree state to avoid a theme
-   flash and the tree pane animating open on every navigation */
+/* pre-paint: apply persisted display mode and pane state to avoid a theme
+   flash and the panes animating open on every navigation */
 (function () {
-  var m = null, t = null;
+  var m = null, t = null, o = null;
   try {
     m = localStorage.getItem("advect-mode");
     t = localStorage.getItem("advect-tree");
+    o = localStorage.getItem("advect-outline");
   } catch (e) { /* private mode */ }
-  if (m) document.documentElement.dataset.theme = m;
+  if (m === "light" || m === "dark") document.documentElement.dataset.theme = m;
   var open = t === null ? window.innerWidth > 1100 : t === "1";
   if (open) document.documentElement.classList.add("tree-open");
+  open = o === null ? window.innerWidth > 1500 : o === "1";
+  if (open) document.documentElement.classList.add("outline-open");
 })();
 </script>
 
@@ -31,7 +34,7 @@ var base_url = "../..";
 <div class="desktop" id="desktop">
   <aside class="tile treetile" id="treetile" aria-label="Documentation tree" aria-hidden="true">
     <span class="ptitle"><span class="pn">tree</span> docs/</span>
-    <pre class="tree"><span class="trow">docs/</span><span class="trow" style="--ti:4ch"><span class="dim">├── </span><a href="../.." title="Home">index</a></span><span class="trow" style="--ti:4ch"><span class="dim">├── </span>tutorials/</span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/" title="Tutorials">index</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/gradients/" title="Gradients and Pytrees">gradients</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/control-flow/" title="Control Flow and Mutation">control-flow</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/staging/" title="Staging and Serialization">staging</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/interop/" title="Providers and Interop">interop</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/primitives/" title="Custom Primitives">primitives</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   └── </span><a href="../../tutorials/debugging/" title="Debugging">debugging</a></span><span class="trow" style="--ti:4ch"><span class="dim">├── </span><a href="../../architecture/" title="Architecture">architecture</a></span><span class="trow" style="--ti:4ch"><span class="dim">├── </span>compatibility/</span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../compatibility/" title="Compatibility">index</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../compatibility/numpy/" title="NumPy">numpy</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../compatibility/array-api/" title="Array API">array-api</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../compatibility/cupy/" title="CuPy">cupy</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../compatibility/scipy/" title="SciPy">scipy</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   └── </span><a href="../../compatibility/xarray/" title="xarray">xarray</a></span><span class="trow" style="--ti:4ch"><span class="dim">├── </span>api-reference/</span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../api/" title="Overview">index</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span>core-api/</span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="../../api/transforms/" title="Transforms">transforms</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="../../api/staging/" title="Staging">staging</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="../../api/primitives/" title="Primitives">primitives</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="../../api/arrays/" title="Arrays">arrays</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="../../api/pytree/" title="Pytrees">pytree</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="../../api/testing/" title="Testing Utilities">testing</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="../../api/support/" title="Support Catalog">support</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   └── </span><a href="../../api/errors/" title="Errors">errors</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   └── </span>public-modules/</span><span class="trow" style="--ti:12ch"><span class="dim">│       ├── </span><a href="../../api/numpy/" title="NumPy Frontend">numpy</a></span><span class="trow" style="--ti:12ch"><span class="dim">│       ├── </span>scipy/</span><span class="trow" style="--ti:16ch"><span class="dim">│       │   ├── </span><a href="../../api/scipy/" title="SciPy Overview">index</a></span><span class="trow" style="--ti:16ch"><span class="dim">│       │   ├── </span><a href="../../api/scipy/special/" title="Special Functions">special</a></span><span class="trow" style="--ti:16ch"><span class="dim">│       │   ├── </span><a href="../../api/scipy/ndimage/" title="Image Filters">ndimage</a></span><span class="trow" style="--ti:16ch"><span class="dim">│       │   └── </span><a href="../../api/scipy/solvers/" title="Solver Callbacks">solvers</a></span><span class="trow" style="--ti:12ch"><span class="dim">│       ├── </span><a href="../../api/xarray/" title="xarray">xarray</a></span><span class="trow" style="--ti:12ch"><span class="dim">│       └── </span>host-autodiff-interop/</span><span class="trow" style="--ti:16ch"><span class="dim">│           ├── </span><a href="../../api/interop/" title="Host Interop Overview">index</a></span><span class="trow" style="--ti:16ch"><span class="dim">│           ├── </span><a href="../../api/interop/torch/" title="PyTorch">torch</a></span><span class="trow" style="--ti:16ch"><span class="dim">│           ├── </span><a href="../../api/interop/jax/" title="JAX">jax</a></span><span class="trow" style="--ti:16ch"><span class="dim">│           └── </span><a href="../../api/interop/autograd/" title="HIPS Autograd">autograd</a></span><span class="trow" style="--ti:4ch"><span class="dim">└── </span>developer-guide/</span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="../" title="Overview">index</a></span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="../codebase/" title="Codebase Map">codebase</a></span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="./" class="cur" aria-current="page" title="Adding Operations">adding-operations</a></span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="../testing/" title="Testing">testing</a></span><span class="trow" style="--ti:8ch"><span class="dim">    └── </span><a href="../documentation/" title="Documentation">documentation</a></span></pre>
+    <pre class="tree"><span class="trow"><a href="../.." title="Home">docs/</a></span><span class="trow" style="--ti:4ch"><span class="dim">├── </span><a href="../../tutorials/" title="Tutorials">tutorials/</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/gradients/" title="Gradients and Pytrees">gradients</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/control-flow/" title="Dynamic Control Flow and Mutation">control-flow</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/linear-maps/" title="JVPs, VJPs, and Linear Maps">linear-maps</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/advanced-differentiation/" title="Higher-Order Differentiation">advanced-differentiation</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/implicit-differentiation/" title="Implicit Differentiation">implicit-differentiation</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/staging/" title="Staging and Serialization">staging</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/scientific-python/" title="Arrays and Scientific Python">scientific-python</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/host-frameworks/" title="Host Autodiff Frameworks">host-frameworks</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/primitives/" title="Custom Primitives">primitives</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   └── </span><a href="../../tutorials/debugging/" title="Troubleshooting">debugging</a></span><span class="trow" style="--ti:4ch"><span class="dim">├── </span><a href="../../architecture/" title="Architecture">architecture</a></span><span class="trow" style="--ti:4ch"><span class="dim">├── </span><a href="../../compatibility/" title="Compatibility">compatibility/</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../compatibility/numpy/" title="NumPy">numpy</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../compatibility/array-api/" title="Array API">array-api</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../compatibility/cupy/" title="CuPy">cupy</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../compatibility/scipy/" title="SciPy">scipy</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   └── </span><a href="../../compatibility/xarray/" title="xarray">xarray</a></span><span class="trow" style="--ti:4ch"><span class="dim">├── </span><a href="../../api/" title="API Reference">api-reference/</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span>core-api/</span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="../../api/transforms/" title="Transforms">transforms</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="../../api/staging/" title="Staging">staging</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="../../api/primitives/" title="Primitives">primitives</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="../../api/arrays/" title="Arrays">arrays</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="../../api/pytree/" title="Pytrees">pytree</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="../../api/testing/" title="Testing Utilities">testing</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="../../api/support/" title="Support Catalog">support</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   └── </span><a href="../../api/errors/" title="Errors">errors</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   └── </span>public-modules/</span><span class="trow" style="--ti:12ch"><span class="dim">│       ├── </span><a href="../../api/numpy/" title="NumPy Frontend">numpy</a></span><span class="trow" style="--ti:12ch"><span class="dim">│       ├── </span><a href="../../api/scipy/" title="SciPy">scipy/</a></span><span class="trow" style="--ti:16ch"><span class="dim">│       │   ├── </span><a href="../../api/scipy/special/" title="Special Functions">special</a></span><span class="trow" style="--ti:16ch"><span class="dim">│       │   ├── </span><a href="../../api/scipy/ndimage/" title="Image Processing">ndimage</a></span><span class="trow" style="--ti:16ch"><span class="dim">│       │   └── </span><a href="../../api/scipy/solvers/" title="Solver Callbacks">solvers</a></span><span class="trow" style="--ti:12ch"><span class="dim">│       ├── </span><a href="../../api/xarray/" title="xarray">xarray</a></span><span class="trow" style="--ti:12ch"><span class="dim">│       └── </span><a href="../../api/interop/" title="Host Autodiff Interop">host-autodiff-interop/</a></span><span class="trow" style="--ti:16ch"><span class="dim">│           ├── </span><a href="../../api/interop/torch/" title="PyTorch">torch</a></span><span class="trow" style="--ti:16ch"><span class="dim">│           ├── </span><a href="../../api/interop/jax/" title="JAX">jax</a></span><span class="trow" style="--ti:16ch"><span class="dim">│           └── </span><a href="../../api/interop/autograd/" title="HIPS Autograd">autograd</a></span><span class="trow" style="--ti:4ch"><span class="dim">└── </span><a href="../" title="Developer Guide">developer-guide/</a></span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="../codebase/" title="Codebase Map">codebase</a></span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="./" class="cur" aria-current="page" title="Adding Operations">adding-operations</a></span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="../testing/" title="Testing">testing</a></span><span class="trow" style="--ti:8ch"><span class="dim">    └── </span><a href="../documentation/" title="Documentation">documentation</a></span></pre>
   </aside>
 
   <article class="tile manwin" aria-label="Manual page">
@@ -105,71 +108,36 @@ different authorities and therefore different evidence.</p>
 </table>
 <h2 id="public-custom-primitives">Public custom primitives<a class="headerlink" href="#public-custom-primitives" title="Permanent link">&para;</a></h2>
 <p>Use <code>@advect.primitive</code> when application or library code needs one closed
-operation that Advect cannot see through. The decorated handle is the single
-authoring surface. Its implementation must use fixed named parameters:
-positional-or-keyword and keyword-only parameters are valid, but positional-only
-parameters, <code>*args</code>, and <code>**kwargs</code> are not. Calls still follow that signature.</p>
-<p><code>static_argnames</code> removes complete named arguments from the traced operands.
-Those values become operation attributes, are passed by name to every rule, and
-must be valid durable attributes when the primitive is staged.
-<code>nondiff_argnames</code> keeps complete arguments dynamic but gives every leaf a
-<code>None</code> tangent and suppresses every transpose contribution. An argument cannot
-be both static and nondifferentiable.</p>
-<p>The concrete implementation and abstract rule receive the authored argument
-pytrees. Derivative rules instead receive one flat <code>primals</code> tuple and one flat
-<code>tangents</code> tuple containing every dynamic array/scalar leaf, in implementation
-parameter and pytree order. Keep non-array configuration static rather than
-smuggling it into a dynamic leaf.</p>
-<p>Attach the rules to the handle returned by the decorator:</p>
-<ol>
-<li><code>@handle.def_abstract</code> has the implementation signature. Dynamic leaves are
-   <code>AbstractValue</code> objects; return the output pytree with <code>ArraySpec</code> or
-   <code>AbstractValue</code> leaves. This rule is required for staging.</li>
-<li><code>@handle.def_jvp</code> receives
-   <code>(output, primals, tangents, **static_attrs)</code> and returns the output tangent
-   pytree. This is the preferred derivative rule and is required for forward
-   mode and structural transposition. Write it as traceable real-linear code so
-   those paths and their higher-order compositions can reuse it.</li>
-<li><code>@handle.def_transpose</code> ordinarily receives
-   <code>(cotangent, primals, output, **static_attrs)</code> and returns one contribution
-   per flattened dynamic leaf. Add it only when structural transposition cannot
-   express the correct real adjoint or measurement justifies a direct rule.
-   A keyword-only <code>active_input_indices=None</code> is available when skipping unused
-   contributions matters. An explicit transpose may also stand alone without a
-   JVP. That primitive does not support forward mode or structural
-   transposition, but a traceable non-residual transpose can still participate
-   in reverse-over-reverse differentiation. A residual-bearing transpose is
-   the deliberate first-order boundary described below.</li>
-</ol>
-<p>For exact invocation-local reverse data, declare <code>residual=True</code> and return
-<code>PrimitiveResult(output, residual, release=...)</code> from the implementation. The
-caller receives only <code>output</code>; the transpose receives
-<code>(cotangent, primals, output, residual, **static_attrs)</code>. The JVP never receives
-the residual. Advect retains the exact residual until the owning pullback or
-linear map releases it and calls <code>release</code> exactly once. The output must remain
-valid after release. Without a reverse consumer, a direct call, JVP, or plain
-staged replay releases the residual before returning; a reusable <code>LinearMap</code>
-retains it until the map is closed. Residual primitives require an explicit
-transpose and are first-order boundaries: they may execute in a primal staged
-program, but they cannot be embedded in a staged or higher-order derivative or
-in <code>checkpoint</code>.</p>
-<p>Use a stable explicit name when a serialized artifact needs identity independent
-of the Python module path; the name is a link key, not semantic versioning, and
-must resolve to the matching registered implementation when loaded.</p>
-<p><code>advect.testing.check_primitive</code> always runs one concrete representative call.
-Its default <code>("abstract", "jvp", "transpose")</code> is a first-order smoke check; it
-does not stage the primitive or check input preservation. Add <code>"nested"</code> for
-higher-order traceability, <code>"complex"</code> in a separate complex-valued case, and
-<code>"stage"</code> to compile and restore the program, compare values and exact output
-metadata, and verify staged input preservation. Run these cases for every
-materially different shape, dtype, pytree, and static-argument form. Choose the
-tuple that matches the primitive's capabilities: for a transpose-only boundary,
-start with <code>("transpose",)</code>. Add <code>"abstract"</code> and <code>"stage"</code> together only when
-it has an abstract rule and is intended to stage. The checker validates that
-explicit transpose against a central finite difference; <code>"jvp"</code>, <code>"complex"</code>,
-and <code>"nested"</code> require a JVP. Then run <code>advect.testing.check_gradient</code> on a
-representative composition. These author checks do not create a built-in
-support claim and do not require an internal <code>InvocationCase</code>.</p>
+operation that Advect cannot see through. The <a href="../../tutorials/primitives/">tutorial</a>
+and <a href="../../api/primitives/">API reference</a> own the rule signatures and common
+JVP-first workflow; this page adds the repository-facing boundaries and
+evidence.</p>
+<p>The implementation uses fixed named parameters. Positional-or-keyword and
+keyword-only parameters are valid; positional-only parameters, <code>*args</code>, and
+<code>**kwargs</code> are not. <code>static_argnames</code> turns complete named arguments into
+operation attributes; staged calls require values that the artifact can
+serialize. <code>nondiff_argnames</code> keeps arguments dynamic but removes their tangent
+and transpose contributions. One argument cannot be both.</p>
+<p>Prefer a traceable real-linear JVP so forward mode, structural transposition,
+and higher-order paths can reuse it. Add an explicit transpose only when the
+real adjoint cannot be derived or a measured hot path justifies it. A
+transpose-only primitive supports reverse mode but not forward mode.</p>
+<p>Use <code>residual=True</code> only when reverse mode needs exact opaque data from the
+forward invocation. Return <code>PrimitiveResult(output, residual, release=...)</code>
+and provide an explicit transpose. Advect retains the residual until the owning
+pullback or linear map releases it, calling <code>release</code> exactly once. This is a
+first-order boundary: the primal may stage, but staged derivatives,
+higher-order derivatives, and <code>checkpoint</code> cannot retain the residual.</p>
+<p>Give the primitive an explicit stable name only when saved programs need an
+identity independent of the Python module path. The name is a link key, not
+semantic versioning; loading requires the matching implementation to be
+registered under that name.</p>
+<p>Run <code>check_primitive</code> for every materially different shape, dtype, pytree,
+static-argument, and complex case. Its default abstract/JVP/transpose tuple is a
+first-order smoke check. Add <code>nested</code> and <code>stage</code> only when the primitive claims
+those paths, then run <code>check_gradient</code> on a representative composition. These
+author checks do not create a built-in support claim or require an internal
+<code>InvocationCase</code>.</p>
 <h2 id="built-in-canonical-operations">Built-in canonical operations<a class="headerlink" href="#built-in-canonical-operations" title="Permanent link">&para;</a></h2>
 <p>A built-in operation is a stable <code>array.*</code>, <code>array_ext.*</code>, or explicit
 <code>advect.*</code> semantic record, not a Python public callable. The record is
@@ -183,7 +151,7 @@ assembled in <code>advect/_builtin_ops.py</code> from authorities that remain se
 <li>NumPy reachability belongs to its protocol path: ufunc admission in
   <code>numpy/_supported_ufuncs.py</code>, array-function handlers under
   <code>numpy/_array_function/</code>, canonical naming in <code>numpy/_op_bindings.py</code>, and
-  exceptional durable replay in <code>numpy/_eval.py</code>;</li>
+  exceptional serialized replay in <code>numpy/_eval.py</code>;</li>
 <li>Array API binding and provider execution belong in
   <code>core/_array_api/frontend.py</code>; NumPy and Array API reachability must be added
   independently; and</li>
@@ -320,7 +288,7 @@ masquerade as an array-valued result.</p>
 </span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span>packages/advect/tests/advect_numpy_tests/test_support_evidence.py
 </span></code></pre></div>
 <p>Changes sensitive to NumPy-minor behavior also require the repository's NumPy
-2.0–2.4 compatibility matrix. That matrix is owned by the
+2.0–2.5 compatibility matrix. That matrix is owned by the
 <code>numpy-compatibility</code> job in <code>.github/workflows/ci.yml</code>; the locked local
 environment proves only its installed NumPy minor. Do not report range-wide
 qualification until that CI matrix passes.</p>
@@ -402,7 +370,7 @@ for <code>implicit_root</code>. Test shape and scalar-category preservation, ups
 solver behavior, convergence failures, and integration with the implicit
 derivative boundary. Do not claim staging or serialization for opaque solver
 iterations; stage explicit iterations or define a closed primitive when a
-durable program is required.</p>
+staged program is required.</p>
 <p>Run the public SciPy suite after any of these changes:</p>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </span>packages/advect/tests/advect_scipy_tests
 </span></code></pre></div>
@@ -431,10 +399,9 @@ shape, version handling, cross-record mismatches, and public round trips in
 <p>For an envelope-only change, run:</p>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>uv<span class="w"> </span>run<span class="w"> </span>ruff<span class="w"> </span>format<span class="w"> </span>--check<span class="w"> </span>.
 </span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>uv<span class="w"> </span>run<span class="w"> </span>ruff<span class="w"> </span>check<span class="w"> </span>.
-</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>uv<span class="w"> </span>run<span class="w"> </span>pyrefly<span class="w"> </span>check<span class="w"> </span>--config<span class="w"> </span>pyproject.toml<span class="w"> </span>--preset<span class="w"> </span>strict<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-8-4"><a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="w">  </span>packages/advect/src
-</span><span id="__span-8-5"><a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </span>packages/advect/tests/advect_core_tests/test_stage_durability.py
-</span><span id="__span-8-6"><a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </span>packages/advect/tests/advect_core_tests
+</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>uv<span class="w"> </span>run<span class="w"> </span>pyrefly<span class="w"> </span>check
+</span><span id="__span-8-4"><a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </span>packages/advect/tests/advect_core_tests/test_stage_durability.py
+</span><span id="__span-8-5"><a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </span>packages/advect/tests/advect_core_tests
 </span></code></pre></div>
 <p>Run the full Python suite as well when public invocation, staging, or transform
 behavior changes. An envelope-only codec or validation change does not require
@@ -448,8 +415,8 @@ pure-Rust fixture execution where relevant. Do not mirror its node model or
 graph-local validators in Python.</p>
 <p>For an internal runtime change whose adapter contract is unchanged, run:</p>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>cargo<span class="w"> </span>fmt<span class="w"> </span>--all<span class="w"> </span>--check
-</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>cargo<span class="w"> </span>clippy<span class="w"> </span>-p<span class="w"> </span>advect-runtime<span class="w"> </span>--all-targets<span class="w"> </span>--all-features<span class="w"> </span>--<span class="w"> </span>-D<span class="w"> </span>warnings
-</span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>cargo<span class="w"> </span><span class="nb">test</span><span class="w"> </span>-p<span class="w"> </span>advect-runtime<span class="w"> </span>--all-targets
+</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>cargo<span class="w"> </span>clippy<span class="w"> </span>--locked<span class="w"> </span>-p<span class="w"> </span>advect-runtime<span class="w"> </span>--all-targets<span class="w"> </span>--all-features<span class="w"> </span>--<span class="w"> </span>-D<span class="w"> </span>warnings
+</span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>cargo<span class="w"> </span><span class="nb">test</span><span class="w"> </span>--locked<span class="w"> </span>-p<span class="w"> </span>advect-runtime<span class="w"> </span>--all-targets
 </span><span id="__span-9-4"><a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>cargo<span class="w"> </span>deny<span class="w"> </span>--all-features<span class="w"> </span>check<span class="w"> </span>-W<span class="w"> </span>unmaintained
 </span></code></pre></div>
 <p>If the accepted graph format, validation result, or Python-visible graph
@@ -464,8 +431,8 @@ rule.</p>
 <p>Run the workspace and adapter gates for a native change or adapter-visible
 runtime change:</p>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>cargo<span class="w"> </span>fmt<span class="w"> </span>--all<span class="w"> </span>--check
-</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>cargo<span class="w"> </span>clippy<span class="w"> </span>--workspace<span class="w"> </span>--all-targets<span class="w"> </span>--all-features<span class="w"> </span>--<span class="w"> </span>-D<span class="w"> </span>warnings
-</span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>cargo<span class="w"> </span><span class="nb">test</span><span class="w"> </span>--workspace<span class="w"> </span>--all-targets
+</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>cargo<span class="w"> </span>clippy<span class="w"> </span>--locked<span class="w"> </span>--workspace<span class="w"> </span>--all-targets<span class="w"> </span>--all-features<span class="w"> </span>--<span class="w"> </span>-D<span class="w"> </span>warnings
+</span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>cargo<span class="w"> </span><span class="nb">test</span><span class="w"> </span>--locked<span class="w"> </span>--workspace<span class="w"> </span>--all-targets
 </span><span id="__span-10-4"><a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>cargo<span class="w"> </span>deny<span class="w"> </span>--all-features<span class="w"> </span>check<span class="w"> </span>-W<span class="w"> </span>unmaintained
 </span><span id="__span-10-5"><a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </span>packages/advect/tests/advect_native_tests
 </span><span id="__span-10-6"><a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a>uv<span class="w"> </span>build<span class="w"> </span>--package<span class="w"> </span>advect<span class="w"> </span>--wheel<span class="w"> </span>--out-dir<span class="w"> </span>dist/wheelhouse<span class="w"> </span>--clear
@@ -497,35 +464,52 @@ metadata boundary changes.</p>
       <p class="prompt">$ <span class="cursor">█</span></p>
     </div></div>
   </article>
+
+  <aside class="tile outlinetile" id="outlinetile" aria-label="Page outline" aria-hidden="true">
+    <span class="ptitle"><span class="pn">outline</span> this-page</span>
+    <nav class="outlinelinks" id="outlinelinks"><a href="#public-custom-primitives">Public custom primitives</a><a href="#built-in-canonical-operations">Built-in canonical operations</a><a href="#numpy-forms">NumPy forms</a><a href="#array-api-forms-and-providers">Array API forms and providers</a><a href="#scipy-forms">SciPy forms</a><a href="#direct-primitive" class="outline-sub">Direct primitive</a><a href="#traceable-composite" class="outline-sub">Traceable composite</a><a href="#solver-callback" class="outline-sub">Solver callback</a><a href="#staged-program-runtime-graph-and-native-changes">Staged-program, runtime-graph, and native changes</a><a href="#python-stagedprogram-envelope" class="outline-sub">Python StagedProgram envelope</a><a href="#canonical-runtime-graph-artifact" class="outline-sub">Canonical runtime graph artifact</a><a href="#native-translation-and-dynamic-tape" class="outline-sub">Native translation and dynamic tape</a><a href="#publish-the-support-claim">Publish the support claim</a></nav>
+  </aside>
 </div>
 
 <div class="overlay" id="help" role="dialog" aria-label="Keyboard shortcuts">
   <h3>Keys</h3>
   <table>
+    
     <tr><td class="kk">j k d u g G</td><td>scroll the page</td></tr>
     <tr><td class="kk">n / p</td><td>next / previous page</td></tr>
     <tr><td class="kk">e</td><td>toggle the docs tree pane</td></tr>
-    <tr><td class="kk">/</td><td>search the manual</td></tr>
+    <tr><td class="kk">o</td><td>toggle the page outline</td></tr>
     <tr><td class="kk">2</td><td>open the playground</td></tr>
-    <tr><td class="kk">t</td><td>lp0 → dark → crt</td></tr>
+    
+    <tr><td class="kk">/</td><td>search the manual</td></tr>
+    <tr><td class="kk">t</td><td>system → light → dark</td></tr>
     <tr><td class="kk">?</td><td>close this help</td></tr>
   </table>
 </div>
 
-<div class="overlay search-box" id="search" role="dialog" aria-label="Search">
-  <div class="search-in"><span class="ps">/</span><input id="searchq" spellcheck="false" autocomplete="off" aria-label="Search query" placeholder="search the manual…"></div>
-  <div class="search-hits" id="searchhits"></div>
+<div class="overlay search-box" id="search" role="dialog" aria-hidden="true" aria-label="Search">
+  <div class="search-in"><span class="ps">/</span><input type="search" id="mkdocs-search-query" spellcheck="false" autocomplete="off" aria-label="Search query" placeholder="search the manual…"></div>
+  <div class="search-hits" id="mkdocs-search-results" data-no-results-text="No manual entry found" aria-live="polite"></div>
 </div>
 
+<aside class="link-preview" id="linkpreview" role="tooltip" aria-hidden="true">
+  <div class="preview-path" id="previewpath"></div>
+  <strong class="preview-title" id="previewtitle"></strong>
+  <pre class="preview-signature" id="previewsignature"><code></code></pre>
+  <p class="preview-description" id="previewdescription"></p>
+</aside>
+
 <div class="bar">
-  <a href="../.." class="b" aria-current="true">[1:docs]</a>
-  <a href="../../playground/" class="b" id="wsplay">[2:playground]</a>
+  <a href="../.." class="b" data-short="[1]" aria-current="true">[1:docs]</a>
+  <a href="../../playground/" class="b" id="wsplay" data-short="[2]">[2:playground]</a>
+  <a href="https://github.com/yaugenst/advect" class="b" data-short="[git]">[git:source]</a>
   <span class="path hidesm">$ man advect/development/adding-operations</span>
   <span class="grow"></span>
-  <button class="tbtn" id="treebtn" aria-label="Toggle documentation tree">[e] tree</button>
-  <button class="tbtn" id="searchbtn" aria-label="Search">[/] search</button>
+  <button class="tbtn" id="treebtn" data-short="[e]" aria-label="Toggle documentation tree">[e] tree</button>
+  <button class="tbtn" id="outlinebtn" data-short="[o]" aria-label="Toggle page outline" aria-controls="outlinetile" aria-expanded="false">[o] outline</button>
+  <button class="tbtn" id="searchbtn" data-short="[/]" aria-label="Search" aria-controls="search" aria-expanded="false">[/] search</button>
   <button class="tbtn hidesm" id="helpbtn" aria-label="Keyboard help">[?] keys</button>
-  <button class="tbtn" id="themeToggle" aria-label="Cycle display mode">[ mode: … ]</button>
+  <button class="tbtn" id="themeToggle" data-short="[mode]" aria-label="Cycle system, light, and dark display modes">[ mode: … ]</button>
 </div>
 
 <script src="../../js/theme.js"></script>

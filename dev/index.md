@@ -1,10 +1,10 @@
 # Advect
 
-A small, extensible automatic-differentiation core for Python array programs. User code stays ordinary NumPy or Array API code; Advect owns differentiation, functionalization, and the staged program boundary.
+Advect is a focused automatic differentiation library for scientific Python, with broad NumPy API coverage and first-class support for the Python Array API standard. For repeated workloads, it can stage a function into a reusable, optimized program that can itself be differentiated, saved, and loaded.
 
-Work in Progress
+Try Advect in your browser
 
-Advect is under active development. APIs may change.
+Open the [playground](https://yaugenst.github.io/advect/dev/playground/index.md) to trace a NumPy expression, inspect its derivative graph, and run it without installing anything.
 
 ## Install
 
@@ -12,11 +12,11 @@ Advect is under active development. APIs may change.
 python -m pip install advect
 ```
 
-The single distribution installs the core, the differentiation transforms, the NumPy frontend, and the required Array API compatibility bridge. SciPy helpers and xarray labels are extras: `advect[scipy]`, `advect[xarray]`, or `advect[scientific]` for the pair. First-order host-autodiff bridges are installed individually with `advect[torch]`, `advect[jax]`, or `advect[autograd]`.
+Add optional integrations with extras such as `advect[scipy]`, `advect[xarray]`, `advect[jax]`, `advect[torch]`, or `advect[autograd]`.
 
-## Quickstart
+## Your first gradient
 
-`grad` differentiates a plain Python function — press `[ run ]` to execute it in your browser:
+[`value_and_grad`](https://yaugenst.github.io/advect/dev/api/transforms/#advect.value_and_grad) evaluates a scalar function and returns its gradient in the same call. Press `[ run ]` to execute the example in your browser:
 
 ```python
 import numpy as np
@@ -25,19 +25,21 @@ import advect as ad
 
 
 def energy(x):
-    centered = x - np.mean(x)
-    return np.sum(centered**2)
+    return np.sum(np.sin(x) ** 2)
 
 
-x = np.linspace(0.0, 1.0, 5)
-print(ad.grad(energy)(x))
+x = np.array([0.0, 0.5, 1.0])
+energy_and_gradient = ad.value_and_grad(energy)
+value, gradient = energy_and_gradient(x)
+print(f"loss: {value:.6f}")
+print("gradient:", np.round(gradient, 6))
 ```
 
-The function is traced with its concrete inputs on every call, so ordinary Python control flow just works. When one signature runs repeatedly — or a program needs to be saved and loaded elsewhere — `stage` builds a durable, serializable graph from the same code.
+Advect differentiates the path its inputs take, so [Python branches, loops, helper functions, and supported local mutation](https://yaugenst.github.io/advect/dev/tutorials/control-flow/index.md) keep their normal meaning.
 
-## Where next
+## Keep going
 
-- [Tutorials](https://yaugenst.github.io/advect/dev/tutorials/index.md) — runnable pages from the first gradient to custom primitives
-- [Architecture](https://yaugenst.github.io/advect/dev/architecture/index.md) — how the pieces fit together and why
-- [API Reference](https://yaugenst.github.io/advect/dev/api/index.md) — the public surface, auto-generated from docstrings
-- The [playground](https://yaugenst.github.io/advect/dev/playground/index.md) — `[2:playground]` in the bar — traces expressions live and draws their derivative graphs
+- Follow the [tutorials](https://yaugenst.github.io/advect/dev/tutorials/index.md) from gradients through staged programs and custom primitives.
+- Check exact callable coverage in [Compatibility](https://yaugenst.github.io/advect/dev/compatibility/index.md).
+- Use the [API reference](https://yaugenst.github.io/advect/dev/api/index.md) for signatures and contracts.
+- Read [Architecture](https://yaugenst.github.io/advect/dev/architecture/index.md) for the execution model and its boundaries.

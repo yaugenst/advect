@@ -1,5 +1,7 @@
 # Special Functions
 
+Use these explicit Advect counterparts when a [`scipy.special`](https://docs.scipy.org/doc/scipy/reference/special.html) function must remain differentiable or stageable. See the [Scientific Python tutorial](https://yaugenst.github.io/advect/dev/tutorials/scientific-python/#use-the-differentiable-scipy-namespace) for a `logsumexp` gradient and the [compatibility table](https://yaugenst.github.io/advect/dev/compatibility/scipy/index.md) for exact coverage.
+
 ## special
 
 Traceable high-value counterparts to `scipy.special`.

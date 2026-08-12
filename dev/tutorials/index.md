@@ -1,12 +1,21 @@
 # Tutorials
 
-Advect has two execution modes. Use `grad` directly when ordinary Python control flow and a fresh trace per call are what you want. Use `stage` when one shape/dtype signature will run repeatedly or when you need a serializable program.
+Start with one NumPy gradient, then build the model a piece at a time: how Advect follows Python, how derivatives act as linear maps, and when to use higher-order, implicit, or staged differentiation. These six pages form the main path through the library.
 
-The tutorials are built from runnable snippets. Press `[ run ]` under a snippet to execute it in your browser; each page is one Python session, and running a snippet first runs the ones above it.
+Most examples can run directly in the browser. Each page is one Python session, so pressing `[ run ]` also runs any earlier runnable blocks on that page.
 
-- [Gradients and pytrees](https://yaugenst.github.io/advect/dev/tutorials/gradients/index.md) — `grad`, scalar inputs, traced constructors, multiple arguments, `jacobian`
-- [Control flow and mutation](https://yaugenst.github.io/advect/dev/tutorials/control-flow/index.md) — loops, in-place updates, converged solves, SciPy callbacks
-- [Staging and serialization](https://yaugenst.github.io/advect/dev/tutorials/staging/index.md) — `stage`, derivative programs, durable artifacts
-- [Providers and interop](https://yaugenst.github.io/advect/dev/tutorials/interop/index.md) — provider-neutral functions, Array API providers, xarray labels
-- [Custom primitives](https://yaugenst.github.io/advect/dev/tutorials/primitives/index.md) — `@ad.primitive` and the authoring checks
-- [Debugging](https://yaugenst.github.io/advect/dev/tutorials/debugging/index.md) — scoped inspection, numerical failures, staged context, and suspicious-gradient checks
+| Step | Tutorial                                                                                                          | What it teaches                                                                                                                                                                                                                                                                                  |
+| ---- | ----------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1    | [Gradients and pytrees](https://yaugenst.github.io/advect/dev/tutorials/gradients/index.md)                       | [`grad`](https://yaugenst.github.io/advect/dev/api/transforms/#advect.grad), [`value_and_grad`](https://yaugenst.github.io/advect/dev/api/transforms/#advect.value_and_grad), auxiliary results, argument selection, and structured parameters                                                   |
+| 2    | [Dynamic control flow and mutation](https://yaugenst.github.io/advect/dev/tutorials/control-flow/index.md)        | Data-dependent branches and loops, helper functions, and owned local updates                                                                                                                                                                                                                     |
+| 3    | [JVPs, VJPs, and linear maps](https://yaugenst.github.io/advect/dev/tutorials/linear-maps/index.md)               | [`jvp`](https://yaugenst.github.io/advect/dev/api/transforms/#advect.jvp), [`vjp`](https://yaugenst.github.io/advect/dev/api/transforms/#advect.vjp), reusable [`LinearMap`](https://yaugenst.github.io/advect/dev/api/transforms/#advect.LinearMap) objects, Jacobians, and complex derivatives |
+| 4    | [Higher-order differentiation](https://yaugenst.github.io/advect/dev/tutorials/advanced-differentiation/index.md) | Nested derivatives, [`hvp`](https://yaugenst.github.io/advect/dev/api/transforms/#advect.hvp), Hessians, and [`checkpoint`](https://yaugenst.github.io/advect/dev/api/transforms/#advect.checkpoint)                                                                                             |
+| 5    | [Implicit differentiation](https://yaugenst.github.io/advect/dev/tutorials/implicit-differentiation/index.md)     | Differentiate a converged equation with [`implicit_root`](https://yaugenst.github.io/advect/dev/api/transforms/#advect.implicit_root)                                                                                                                                                            |
+| 6    | [Staging and serialization](https://yaugenst.github.io/advect/dev/tutorials/staging/index.md)                     | Exact signatures, reusable derivative programs, and [`StagedProgram`](https://yaugenst.github.io/advect/dev/api/staging/#advect.StagedProgram) artifacts                                                                                                                                         |
+
+## Connect and extend
+
+- [Arrays and Scientific Python](https://yaugenst.github.io/advect/dev/tutorials/scientific-python/index.md) explains providers, differentiable SciPy functions, and xarray labels.
+- [Host autodiff frameworks](https://yaugenst.github.io/advect/dev/tutorials/host-frameworks/index.md) wraps an Advect function as one PyTorch, JAX, or HIPS Autograd operation.
+- [Custom primitives](https://yaugenst.github.io/advect/dev/tutorials/primitives/index.md) adds an atomic operation with its abstract and derivative rules.
+- [Troubleshooting](https://yaugenst.github.io/advect/dev/tutorials/debugging/index.md) turns common tracing, numerical, and staging failures into concrete rewrites.

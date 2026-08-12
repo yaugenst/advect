@@ -4,7 +4,7 @@ Advect documents the same architecture at different altitudes. Public pages teac
 
 ## Published documentation
 
-Use the smallest public surface that owns the statement:
+Put each statement at the narrowest level that owns it:
 
 - `docs/tutorials/` teaches complete user tasks with runnable examples.
 - `docs/architecture.md` explains the public execution and extension model.
@@ -13,7 +13,7 @@ Use the smallest public surface that owns the statement:
 - `docs/development/` is the contributor authority for code ownership, operation authoring, testing, and documentation.
 - `design/` records requirements, decisions, implementation status, and evidence contracts; it is not a second public API reference.
 
-Keep exhaustive callable inventories in the generated compatibility report or mkdocstrings output. Narrative pages should explain semantics and boundaries, then link to the owning inventory.
+Keep exhaustive callable inventories in the generated compatibility report or mkdocstrings output. Narrative pages explain behavior and boundaries, then link to the owning inventory.
 
 ## Module and object docstrings
 
@@ -50,7 +50,7 @@ Tests pin the generated pages to the live declarations. Update `docs/compatibili
 
 ## Runnable examples and browser docs
 
-Mark a runnable Python fence with ```` ```{.python .run} ````. A page is one Python session: running a block first executes any unexecuted runnable blocks above it. Each marked block must therefore run cleanly in order with only NumPy, Advect, and anything defined by earlier marked blocks.
+Mark a runnable Python fence with ```` ```{.python .run} ````. A page is one Python session: running a block first executes any unexecuted runnable blocks above it. Each marked block must therefore run cleanly in order with only NumPy, Advect, and anything defined by earlier marked blocks. Every runnable block must also print a meaningful result so its browser output confirms what the example demonstrated.
 
 Run all snippets natively:
 
@@ -58,12 +58,12 @@ Run all snippets natively:
 uv run python scripts/run_doc_snippets.py docs
 ```
 
-For browser-facing changes, build the wheel once before the strict docs build; the MkDocs hook stages the wheel, playground adapter, and examples:
+The ordinary strict build does not require a browser wheel. For browser-facing changes and release builds, build the wheel and require the MkDocs hook to stage it with the playground adapter and examples:
 
 ```bash
 mkdir -p dist
 uvx --from pyodide-build==0.36.0 pyodide build . --outdir dist/pyodide
-uv run mkdocs build --strict
+ADVECT_REQUIRE_BROWSER_WHEEL=1 uv run mkdocs build --strict
 ```
 
 The Pyodide CI lane also runs the snippets inside its browser-compatible environment.

@@ -2,26 +2,29 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="description" content="A small extensible automatic-differentiation core for Python">
+<meta name="description" content="Automatic differentiation for the NumPy code you already write">
 <link rel="canonical" href="https://yaugenst.github.io/advect/dev/compatibility/array-api/">
 <title>array-api(7) · advect</title>
 <link rel="icon" href="../../img/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="../../css/fonts.css">
-<link rel="stylesheet" href="../../css/theme.css?v=86c97aee1cb2">
+<link rel="stylesheet" href="../../css/theme.css?v=bf544137efc8">
 <link rel="stylesheet" href="../../assets/_mkdocstrings.css">
 <script>
 var base_url = "../..";
-/* pre-paint: apply persisted display mode and tree state to avoid a theme
-   flash and the tree pane animating open on every navigation */
+/* pre-paint: apply persisted display mode and pane state to avoid a theme
+   flash and the panes animating open on every navigation */
 (function () {
-  var m = null, t = null;
+  var m = null, t = null, o = null;
   try {
     m = localStorage.getItem("advect-mode");
     t = localStorage.getItem("advect-tree");
+    o = localStorage.getItem("advect-outline");
   } catch (e) { /* private mode */ }
-  if (m) document.documentElement.dataset.theme = m;
+  if (m === "light" || m === "dark") document.documentElement.dataset.theme = m;
   var open = t === null ? window.innerWidth > 1100 : t === "1";
   if (open) document.documentElement.classList.add("tree-open");
+  open = o === null ? window.innerWidth > 1500 : o === "1";
+  if (open) document.documentElement.classList.add("outline-open");
 })();
 </script>
 
@@ -31,7 +34,7 @@ var base_url = "../..";
 <div class="desktop" id="desktop">
   <aside class="tile treetile" id="treetile" aria-label="Documentation tree" aria-hidden="true">
     <span class="ptitle"><span class="pn">tree</span> docs/</span>
-    <pre class="tree"><span class="trow">docs/</span><span class="trow" style="--ti:4ch"><span class="dim">├── </span><a href="../.." title="Home">index</a></span><span class="trow" style="--ti:4ch"><span class="dim">├── </span>tutorials/</span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/" title="Tutorials">index</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/gradients/" title="Gradients and Pytrees">gradients</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/control-flow/" title="Control Flow and Mutation">control-flow</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/staging/" title="Staging and Serialization">staging</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/interop/" title="Providers and Interop">interop</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/primitives/" title="Custom Primitives">primitives</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   └── </span><a href="../../tutorials/debugging/" title="Debugging">debugging</a></span><span class="trow" style="--ti:4ch"><span class="dim">├── </span><a href="../../architecture/" title="Architecture">architecture</a></span><span class="trow" style="--ti:4ch"><span class="dim">├── </span>compatibility/</span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../" title="Compatibility">index</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../numpy/" title="NumPy">numpy</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="./" class="cur" aria-current="page" title="Array API">array-api</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../cupy/" title="CuPy">cupy</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../scipy/" title="SciPy">scipy</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   └── </span><a href="../xarray/" title="xarray">xarray</a></span><span class="trow" style="--ti:4ch"><span class="dim">├── </span>api-reference/</span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../api/" title="Overview">index</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span>core-api/</span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="../../api/transforms/" title="Transforms">transforms</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="../../api/staging/" title="Staging">staging</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="../../api/primitives/" title="Primitives">primitives</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="../../api/arrays/" title="Arrays">arrays</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="../../api/pytree/" title="Pytrees">pytree</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="../../api/testing/" title="Testing Utilities">testing</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="../../api/support/" title="Support Catalog">support</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   └── </span><a href="../../api/errors/" title="Errors">errors</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   └── </span>public-modules/</span><span class="trow" style="--ti:12ch"><span class="dim">│       ├── </span><a href="../../api/numpy/" title="NumPy Frontend">numpy</a></span><span class="trow" style="--ti:12ch"><span class="dim">│       ├── </span>scipy/</span><span class="trow" style="--ti:16ch"><span class="dim">│       │   ├── </span><a href="../../api/scipy/" title="SciPy Overview">index</a></span><span class="trow" style="--ti:16ch"><span class="dim">│       │   ├── </span><a href="../../api/scipy/special/" title="Special Functions">special</a></span><span class="trow" style="--ti:16ch"><span class="dim">│       │   ├── </span><a href="../../api/scipy/ndimage/" title="Image Filters">ndimage</a></span><span class="trow" style="--ti:16ch"><span class="dim">│       │   └── </span><a href="../../api/scipy/solvers/" title="Solver Callbacks">solvers</a></span><span class="trow" style="--ti:12ch"><span class="dim">│       ├── </span><a href="../../api/xarray/" title="xarray">xarray</a></span><span class="trow" style="--ti:12ch"><span class="dim">│       └── </span>host-autodiff-interop/</span><span class="trow" style="--ti:16ch"><span class="dim">│           ├── </span><a href="../../api/interop/" title="Host Interop Overview">index</a></span><span class="trow" style="--ti:16ch"><span class="dim">│           ├── </span><a href="../../api/interop/torch/" title="PyTorch">torch</a></span><span class="trow" style="--ti:16ch"><span class="dim">│           ├── </span><a href="../../api/interop/jax/" title="JAX">jax</a></span><span class="trow" style="--ti:16ch"><span class="dim">│           └── </span><a href="../../api/interop/autograd/" title="HIPS Autograd">autograd</a></span><span class="trow" style="--ti:4ch"><span class="dim">└── </span>developer-guide/</span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="../../development/" title="Overview">index</a></span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="../../development/codebase/" title="Codebase Map">codebase</a></span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="../../development/adding-operations/" title="Adding Operations">adding-operations</a></span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="../../development/testing/" title="Testing">testing</a></span><span class="trow" style="--ti:8ch"><span class="dim">    └── </span><a href="../../development/documentation/" title="Documentation">documentation</a></span></pre>
+    <pre class="tree"><span class="trow"><a href="../.." title="Home">docs/</a></span><span class="trow" style="--ti:4ch"><span class="dim">├── </span><a href="../../tutorials/" title="Tutorials">tutorials/</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/gradients/" title="Gradients and Pytrees">gradients</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/control-flow/" title="Dynamic Control Flow and Mutation">control-flow</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/linear-maps/" title="JVPs, VJPs, and Linear Maps">linear-maps</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/advanced-differentiation/" title="Higher-Order Differentiation">advanced-differentiation</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/implicit-differentiation/" title="Implicit Differentiation">implicit-differentiation</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/staging/" title="Staging and Serialization">staging</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/scientific-python/" title="Arrays and Scientific Python">scientific-python</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/host-frameworks/" title="Host Autodiff Frameworks">host-frameworks</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/primitives/" title="Custom Primitives">primitives</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   └── </span><a href="../../tutorials/debugging/" title="Troubleshooting">debugging</a></span><span class="trow" style="--ti:4ch"><span class="dim">├── </span><a href="../../architecture/" title="Architecture">architecture</a></span><span class="trow" style="--ti:4ch"><span class="dim">├── </span><a href="../" title="Compatibility">compatibility/</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../numpy/" title="NumPy">numpy</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="./" class="cur" aria-current="page" title="Array API">array-api</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../cupy/" title="CuPy">cupy</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../scipy/" title="SciPy">scipy</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   └── </span><a href="../xarray/" title="xarray">xarray</a></span><span class="trow" style="--ti:4ch"><span class="dim">├── </span><a href="../../api/" title="API Reference">api-reference/</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span>core-api/</span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="../../api/transforms/" title="Transforms">transforms</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="../../api/staging/" title="Staging">staging</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="../../api/primitives/" title="Primitives">primitives</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="../../api/arrays/" title="Arrays">arrays</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="../../api/pytree/" title="Pytrees">pytree</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="../../api/testing/" title="Testing Utilities">testing</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="../../api/support/" title="Support Catalog">support</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   └── </span><a href="../../api/errors/" title="Errors">errors</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   └── </span>public-modules/</span><span class="trow" style="--ti:12ch"><span class="dim">│       ├── </span><a href="../../api/numpy/" title="NumPy Frontend">numpy</a></span><span class="trow" style="--ti:12ch"><span class="dim">│       ├── </span><a href="../../api/scipy/" title="SciPy">scipy/</a></span><span class="trow" style="--ti:16ch"><span class="dim">│       │   ├── </span><a href="../../api/scipy/special/" title="Special Functions">special</a></span><span class="trow" style="--ti:16ch"><span class="dim">│       │   ├── </span><a href="../../api/scipy/ndimage/" title="Image Processing">ndimage</a></span><span class="trow" style="--ti:16ch"><span class="dim">│       │   └── </span><a href="../../api/scipy/solvers/" title="Solver Callbacks">solvers</a></span><span class="trow" style="--ti:12ch"><span class="dim">│       ├── </span><a href="../../api/xarray/" title="xarray">xarray</a></span><span class="trow" style="--ti:12ch"><span class="dim">│       └── </span><a href="../../api/interop/" title="Host Autodiff Interop">host-autodiff-interop/</a></span><span class="trow" style="--ti:16ch"><span class="dim">│           ├── </span><a href="../../api/interop/torch/" title="PyTorch">torch</a></span><span class="trow" style="--ti:16ch"><span class="dim">│           ├── </span><a href="../../api/interop/jax/" title="JAX">jax</a></span><span class="trow" style="--ti:16ch"><span class="dim">│           └── </span><a href="../../api/interop/autograd/" title="HIPS Autograd">autograd</a></span><span class="trow" style="--ti:4ch"><span class="dim">└── </span><a href="../../development/" title="Developer Guide">developer-guide/</a></span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="../../development/codebase/" title="Codebase Map">codebase</a></span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="../../development/adding-operations/" title="Adding Operations">adding-operations</a></span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="../../development/testing/" title="Testing">testing</a></span><span class="trow" style="--ti:8ch"><span class="dim">    └── </span><a href="../../development/documentation/" title="Documentation">documentation</a></span></pre>
   </aside>
 
   <article class="tile manwin" aria-label="Manual page">
@@ -52,25 +55,21 @@ var base_url = "../..";
 <thead>
 <tr>
 <th>Provider</th>
-<th>Route into Advect</th>
 <th>Status</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td>NumPy</td>
-<td>first-class protocol frontend</td>
-<td>qualified — see <a href="../numpy/">NumPy</a> for the minor-to-revision mapping</td>
+<td>Qualified through its first-class frontend; see <a href="../numpy/">NumPy</a> for the minor-to-revision mapping</td>
 </tr>
 <tr>
 <td><code>array-api-strict</code></td>
-<td><code>__array_namespace__()</code> directly</td>
-<td>qualified for all three revisions below</td>
+<td>Qualified through <code>__array_namespace__()</code> for all three revisions below</td>
 </tr>
 <tr>
 <td>CuPy</td>
-<td>the built-in fallback — install the matching CuPy build and pass CuPy arrays directly</td>
-<td>manual qualification gate; CuPy <code>14.0.1</code>, <code>14.1.1</code> has source records for Array API <code>2022.12</code>, <code>2023.12</code>, <code>2024.12</code>; no published immutable artifact currently verifies release support — see <a href="../cupy/">CuPy</a></td>
+<td>Built-in single-device compatibility path; see <a href="../cupy/">CuPy</a></td>
 </tr>
 </tbody>
 </table>
@@ -102,1678 +101,844 @@ var base_url = "../..";
 </tr>
 </tbody>
 </table>
-<p>The <code>2022.12</code> revision is the baseline; later revisions extend it. The full baseline surface is listed below, followed by what each revision adds or changes; the official callables whose claim stays incomplete are collected at the end.</p>
-<p>The mode columns are public support claims: <strong>yes</strong> means the callable's declared contract is supported end to end in that execution mode (dynamic tracing, abstract staging, serialized artifacts). Restricted implementation paths may remain internal, but registration alone does not promote an additional upstream spelling into this catalog.</p>
-<p><code>Abstract=yes</code> means that a primitive has a standalone abstract rule. A frontend may still be staged by an explicit method or composite lowering when its displayed primitive does not.</p>
+<p>The <code>2022.12</code> revision is the baseline; later revisions extend it. Its callable set appears below, followed by additions, changes, and the few official functions with a remaining boundary.</p>
+<p>Every listed function works in dynamic transforms. <strong>Stage/save</strong> says whether the same call can appear in a staged and serialized program. <strong>Differentiate</strong> reports user-visible derivative support. <strong>No</strong> means no derivative rule is available; <strong>n/a</strong> marks a structural or mathematically nondifferentiable operation.</p>
 <h2 id="array-api-202212-baseline">Array API 2022.12 baseline<a class="headerlink" href="#array-api-202212-baseline" title="Permanent link">&para;</a></h2>
-<details class="compat-columns">
-<summary>capability details</summary>
-</details>
-
 <table>
 <thead>
 <tr>
 <th>Function</th>
-<th>Lowers to</th>
-<th style="text-align: center;">Dynamic</th>
-<th style="text-align: center;">Staged</th>
-<th style="text-align: center;">Serialized</th>
-<th style="text-align: center;">JVP</th>
-<th style="text-align: center;">VJP</th>
-<th style="text-align: center;">Abstract</th>
+<th style="text-align: center;">Stage/save</th>
+<th style="text-align: center;">Differentiate</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td><code>abs</code></td>
-<td><code>array.absolute</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">direct</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>acos</code></td>
-<td><code>array.arccos</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">from JVP</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>acosh</code></td>
-<td><code>array.arccosh</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">from JVP</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>add</code></td>
-<td><code>array.add</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">direct</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>all</code></td>
-<td><code>array.all</code></td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
 <td style="text-align: center;">yes</td>
 <td style="text-align: center;">n/a</td>
-<td style="text-align: center;">n/a</td>
-<td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>any</code></td>
-<td><code>array.any</code></td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
 <td style="text-align: center;">yes</td>
 <td style="text-align: center;">n/a</td>
-<td style="text-align: center;">n/a</td>
-<td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>arange</code></td>
-<td><code>array.arange</code></td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
 <td style="text-align: center;">yes</td>
 <td style="text-align: center;">no</td>
-<td style="text-align: center;">no</td>
-<td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>argmax</code></td>
-<td><code>array.argmax</code></td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
 <td style="text-align: center;">yes</td>
 <td style="text-align: center;">n/a</td>
-<td style="text-align: center;">n/a</td>
-<td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>argmin</code></td>
-<td><code>array.argmin</code></td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
 <td style="text-align: center;">yes</td>
 <td style="text-align: center;">n/a</td>
-<td style="text-align: center;">n/a</td>
-<td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>argsort</code></td>
-<td><code>array.argsort</code></td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
 <td style="text-align: center;">yes</td>
 <td style="text-align: center;">n/a</td>
-<td style="text-align: center;">n/a</td>
-<td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>asarray</code></td>
-<td><code>array.astype</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">direct</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>asin</code></td>
-<td><code>array.arcsin</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">from JVP</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>asinh</code></td>
-<td><code>array.arcsinh</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">from JVP</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>astype</code></td>
-<td><code>array.astype</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">direct</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>atan</code></td>
-<td><code>array.arctan</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">from JVP</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>atan2</code></td>
-<td><code>array.arctan2</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">from JVP</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>atanh</code></td>
-<td><code>array.arctanh</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">from JVP</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>bitwise_and</code></td>
-<td><code>array.bitwise_and</code></td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
 <td style="text-align: center;">yes</td>
 <td style="text-align: center;">n/a</td>
-<td style="text-align: center;">n/a</td>
-<td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>bitwise_invert</code></td>
-<td><code>array.invert</code></td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
 <td style="text-align: center;">yes</td>
 <td style="text-align: center;">n/a</td>
-<td style="text-align: center;">n/a</td>
-<td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>bitwise_left_shift</code></td>
-<td><code>array.left_shift</code></td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
 <td style="text-align: center;">yes</td>
 <td style="text-align: center;">no</td>
-<td style="text-align: center;">no</td>
-<td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>bitwise_or</code></td>
-<td><code>array.bitwise_or</code></td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
 <td style="text-align: center;">yes</td>
 <td style="text-align: center;">n/a</td>
-<td style="text-align: center;">n/a</td>
-<td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>bitwise_right_shift</code></td>
-<td><code>array.right_shift</code></td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
 <td style="text-align: center;">yes</td>
 <td style="text-align: center;">no</td>
-<td style="text-align: center;">no</td>
-<td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>bitwise_xor</code></td>
-<td><code>array.bitwise_xor</code></td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
 <td style="text-align: center;">yes</td>
 <td style="text-align: center;">n/a</td>
-<td style="text-align: center;">n/a</td>
-<td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>broadcast_arrays</code></td>
-<td>composite</td>
 <td style="text-align: center;">yes</td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">composite</td>
-<td style="text-align: center;">composite</td>
-<td style="text-align: center;">composite</td>
 </tr>
 <tr>
 <td><code>broadcast_to</code></td>
-<td><code>array.broadcast_to</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">direct</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>can_cast</code></td>
-<td>metadata</td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">n/a</td>
-<td style="text-align: center;">n/a</td>
 <td style="text-align: center;">n/a</td>
 </tr>
 <tr>
 <td><code>ceil</code></td>
-<td><code>array.ceil</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">direct</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>concat</code></td>
-<td><code>array.concatenate</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">direct</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>conj</code></td>
-<td><code>array.conjugate</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">direct</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>cos</code></td>
-<td><code>array.cos</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">direct</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>cosh</code></td>
-<td><code>array.cosh</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">from JVP</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>divide</code></td>
-<td><code>array.divide</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">direct</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>empty</code></td>
-<td><code>array.empty</code></td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
 <td style="text-align: center;">yes</td>
 <td style="text-align: center;">no</td>
-<td style="text-align: center;">no</td>
-<td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>empty_like</code></td>
-<td><code>array.empty_like</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">from JVP</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>equal</code></td>
-<td><code>array.equal</code></td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
 <td style="text-align: center;">yes</td>
 <td style="text-align: center;">n/a</td>
-<td style="text-align: center;">n/a</td>
-<td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>exp</code></td>
-<td><code>array.exp</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">direct</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>expand_dims</code></td>
-<td><code>array.expand_dims</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">direct</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>expm1</code></td>
-<td><code>array.expm1</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">from JVP</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>eye</code></td>
-<td><code>array.eye</code></td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
 <td style="text-align: center;">yes</td>
 <td style="text-align: center;">no</td>
-<td style="text-align: center;">no</td>
-<td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>fft.fft</code></td>
-<td><code>array_ext.fft.fft</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">direct</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>fft.fftfreq</code></td>
-<td><code>array_ext.fft.fftfreq</code></td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
 <td style="text-align: center;">yes</td>
 <td style="text-align: center;">no</td>
-<td style="text-align: center;">no</td>
-<td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>fft.fftn</code></td>
-<td><code>array_ext.fft.fftn</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">direct</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>fft.fftshift</code></td>
-<td><code>array_ext.fft.fftshift</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">direct</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>fft.hfft</code></td>
-<td><code>array_ext.fft.hfft</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">from JVP</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>fft.ifft</code></td>
-<td><code>array_ext.fft.ifft</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">direct</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>fft.ifftn</code></td>
-<td><code>array_ext.fft.ifftn</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">direct</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>fft.ifftshift</code></td>
-<td><code>array_ext.fft.ifftshift</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">direct</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>fft.ihfft</code></td>
-<td><code>array_ext.fft.ihfft</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">from JVP</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>fft.irfft</code></td>
-<td><code>array_ext.fft.irfft</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">direct</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>fft.irfftn</code></td>
-<td><code>array_ext.fft.irfftn</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">direct</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>fft.rfft</code></td>
-<td><code>array_ext.fft.rfft</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">direct</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>fft.rfftfreq</code></td>
-<td><code>array_ext.fft.rfftfreq</code></td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
 <td style="text-align: center;">yes</td>
 <td style="text-align: center;">no</td>
-<td style="text-align: center;">no</td>
-<td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>fft.rfftn</code></td>
-<td><code>array_ext.fft.rfftn</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">direct</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>finfo</code></td>
-<td>metadata</td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">n/a</td>
-<td style="text-align: center;">n/a</td>
 <td style="text-align: center;">n/a</td>
 </tr>
 <tr>
 <td><code>flip</code></td>
-<td><code>array.flip</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">direct</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>floor</code></td>
-<td><code>array.floor</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">direct</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>floor_divide</code></td>
-<td><code>array.floor_divide</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">direct</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>full</code></td>
-<td><code>array.full</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">from JVP</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>full_like</code></td>
-<td><code>array.full_like</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">from JVP</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>greater</code></td>
-<td><code>array.greater</code></td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
 <td style="text-align: center;">yes</td>
 <td style="text-align: center;">n/a</td>
-<td style="text-align: center;">n/a</td>
-<td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>greater_equal</code></td>
-<td><code>array.greater_equal</code></td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
 <td style="text-align: center;">yes</td>
 <td style="text-align: center;">n/a</td>
-<td style="text-align: center;">n/a</td>
-<td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>iinfo</code></td>
-<td>metadata</td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">n/a</td>
-<td style="text-align: center;">n/a</td>
 <td style="text-align: center;">n/a</td>
 </tr>
 <tr>
 <td><code>imag</code></td>
-<td><code>array.imag</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">direct</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>isdtype</code></td>
-<td>metadata</td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">n/a</td>
-<td style="text-align: center;">n/a</td>
 <td style="text-align: center;">n/a</td>
 </tr>
 <tr>
 <td><code>isfinite</code></td>
-<td><code>array.isfinite</code></td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
 <td style="text-align: center;">yes</td>
 <td style="text-align: center;">n/a</td>
-<td style="text-align: center;">n/a</td>
-<td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>isinf</code></td>
-<td><code>array.isinf</code></td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
 <td style="text-align: center;">yes</td>
 <td style="text-align: center;">n/a</td>
-<td style="text-align: center;">n/a</td>
-<td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>isnan</code></td>
-<td><code>array.isnan</code></td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
 <td style="text-align: center;">yes</td>
 <td style="text-align: center;">n/a</td>
-<td style="text-align: center;">n/a</td>
-<td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>less</code></td>
-<td><code>array.less</code></td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
 <td style="text-align: center;">yes</td>
 <td style="text-align: center;">n/a</td>
-<td style="text-align: center;">n/a</td>
-<td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>less_equal</code></td>
-<td><code>array.less_equal</code></td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
 <td style="text-align: center;">yes</td>
 <td style="text-align: center;">n/a</td>
-<td style="text-align: center;">n/a</td>
-<td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>linalg.cholesky</code></td>
-<td><code>array_ext.linalg.cholesky</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">direct</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>linalg.cross</code></td>
-<td><code>array.cross</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">direct</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>linalg.det</code></td>
-<td><code>array_ext.linalg.det</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">from JVP</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>linalg.diagonal</code></td>
-<td><code>array.diagonal</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">direct</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>linalg.eigh</code></td>
-<td><code>array_ext.linalg.eigh</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">direct</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>linalg.eigvalsh</code></td>
-<td><code>array_ext.linalg.eigvalsh</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">direct</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>linalg.inv</code></td>
-<td><code>array_ext.linalg.inv</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">from JVP</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>linalg.matmul</code></td>
-<td><code>array.matmul</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">direct</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>linalg.matrix_norm</code></td>
-<td><code>array_ext.linalg.matrix_norm</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">from JVP</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>linalg.matrix_power</code></td>
-<td>composite</td>
 <td style="text-align: center;">yes</td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">composite</td>
-<td style="text-align: center;">composite</td>
-<td style="text-align: center;">composite</td>
 </tr>
 <tr>
 <td><code>linalg.matrix_rank</code></td>
-<td>composite</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
 <td style="text-align: center;">yes</td>
 <td style="text-align: center;">n/a</td>
-<td style="text-align: center;">n/a</td>
-<td style="text-align: center;">composite</td>
 </tr>
 <tr>
 <td><code>linalg.matrix_transpose</code></td>
-<td><code>array.transpose</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">direct</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>linalg.outer</code></td>
-<td><code>array.outer</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">direct</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>linalg.pinv</code></td>
-<td><code>array_ext.linalg.pinv</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">direct</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>linalg.qr</code></td>
-<td><code>array_ext.linalg.qr</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">direct</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>linalg.slogdet</code></td>
-<td><code>array_ext.linalg.slogdet</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">from JVP</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>linalg.solve</code></td>
-<td><code>array_ext.linalg.solve</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">direct</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>linalg.svd</code></td>
-<td><code>array_ext.linalg.svd</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">direct</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>linalg.svdvals</code></td>
-<td><code>array_ext.linalg.svdvals</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">direct</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>linalg.tensordot</code></td>
-<td><code>array.tensordot</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">direct</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>linalg.trace</code></td>
-<td><code>array.trace</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">direct</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>linalg.vecdot</code></td>
-<td><code>array.vecdot</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">direct</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>linalg.vector_norm</code></td>
-<td><code>array_ext.linalg.vector_norm</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">from JVP</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>linspace</code></td>
-<td><code>array.linspace</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">direct</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>log</code></td>
-<td><code>array.log</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">from JVP</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>log10</code></td>
-<td><code>array.log10</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">from JVP</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>log1p</code></td>
-<td><code>array.log1p</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">from JVP</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>log2</code></td>
-<td><code>array.log2</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">from JVP</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>logaddexp</code></td>
-<td><code>array.logaddexp</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">from JVP</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>logical_and</code></td>
-<td><code>array.logical_and</code></td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
 <td style="text-align: center;">yes</td>
 <td style="text-align: center;">n/a</td>
-<td style="text-align: center;">n/a</td>
-<td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>logical_not</code></td>
-<td><code>array.logical_not</code></td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
 <td style="text-align: center;">yes</td>
 <td style="text-align: center;">n/a</td>
-<td style="text-align: center;">n/a</td>
-<td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>logical_or</code></td>
-<td><code>array.logical_or</code></td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
 <td style="text-align: center;">yes</td>
 <td style="text-align: center;">n/a</td>
-<td style="text-align: center;">n/a</td>
-<td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>logical_xor</code></td>
-<td><code>array.logical_xor</code></td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
 <td style="text-align: center;">yes</td>
 <td style="text-align: center;">n/a</td>
-<td style="text-align: center;">n/a</td>
-<td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>matmul</code></td>
-<td><code>array.matmul</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">direct</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>matrix_transpose</code></td>
-<td><code>array.transpose</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">direct</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>max</code></td>
-<td><code>array.max</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">from JVP</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>mean</code></td>
-<td><code>array.mean</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">direct</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>meshgrid</code></td>
-<td>composite</td>
 <td style="text-align: center;">yes</td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">composite</td>
-<td style="text-align: center;">composite</td>
-<td style="text-align: center;">composite</td>
 </tr>
 <tr>
 <td><code>min</code></td>
-<td><code>array.min</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">from JVP</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>multiply</code></td>
-<td><code>array.multiply</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">direct</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>negative</code></td>
-<td><code>array.negative</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">direct</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>nonzero</code></td>
-<td>composite</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">no</td>
 <td style="text-align: center;">no</td>
 <td style="text-align: center;">n/a</td>
-<td style="text-align: center;">n/a</td>
-<td style="text-align: center;">no</td>
 </tr>
 <tr>
 <td><code>not_equal</code></td>
-<td><code>array.not_equal</code></td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
 <td style="text-align: center;">yes</td>
 <td style="text-align: center;">n/a</td>
-<td style="text-align: center;">n/a</td>
-<td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>ones</code></td>
-<td><code>array.ones</code></td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
 <td style="text-align: center;">yes</td>
 <td style="text-align: center;">no</td>
-<td style="text-align: center;">no</td>
-<td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>ones_like</code></td>
-<td><code>array.ones_like</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">direct</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>permute_dims</code></td>
-<td><code>array.transpose</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">direct</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>positive</code></td>
-<td><code>array.positive</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">direct</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>pow</code></td>
-<td><code>array.power</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">direct</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>prod</code></td>
-<td><code>array.prod</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">from JVP</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>real</code></td>
-<td><code>array.real</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">direct</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>remainder</code></td>
-<td><code>array.remainder</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">from JVP</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>reshape</code></td>
-<td><code>array.reshape</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">direct</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>result_type</code></td>
-<td>metadata</td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">n/a</td>
-<td style="text-align: center;">n/a</td>
 <td style="text-align: center;">n/a</td>
 </tr>
 <tr>
 <td><code>roll</code></td>
-<td><code>array.roll</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">direct</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>round</code></td>
-<td><code>array.rint</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">direct</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>sign</code></td>
-<td><code>array.sign</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">direct</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>sin</code></td>
-<td><code>array.sin</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">direct</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>sinh</code></td>
-<td><code>array.sinh</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">from JVP</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>sort</code></td>
-<td><code>array.sort</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">from JVP</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>sqrt</code></td>
-<td><code>array.sqrt</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">from JVP</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>square</code></td>
-<td><code>array.square</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">from JVP</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>squeeze</code></td>
-<td><code>array.squeeze</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">direct</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>stack</code></td>
-<td><code>array.stack</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">direct</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>std</code></td>
-<td><code>array.std</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">from JVP</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>subtract</code></td>
-<td><code>array.subtract</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">direct</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>sum</code></td>
-<td><code>array.sum</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">direct</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>take</code></td>
-<td><code>array.take</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">direct</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>tan</code></td>
-<td><code>array.tan</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">from JVP</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>tanh</code></td>
-<td><code>array.tanh</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">from JVP</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>tensordot</code></td>
-<td><code>array.tensordot</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">direct</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>tril</code></td>
-<td><code>array.tril</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">direct</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>triu</code></td>
-<td><code>array.triu</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">direct</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>trunc</code></td>
-<td><code>array.trunc</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">direct</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>unique_all</code></td>
-<td>composite</td>
+<td style="text-align: center;">no</td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">no</td>
-<td style="text-align: center;">no</td>
-<td style="text-align: center;">composite</td>
-<td style="text-align: center;">composite</td>
-<td style="text-align: center;">no</td>
 </tr>
 <tr>
 <td><code>unique_counts</code></td>
-<td>composite</td>
+<td style="text-align: center;">no</td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">no</td>
-<td style="text-align: center;">no</td>
-<td style="text-align: center;">composite</td>
-<td style="text-align: center;">composite</td>
-<td style="text-align: center;">no</td>
 </tr>
 <tr>
 <td><code>unique_inverse</code></td>
-<td>composite</td>
+<td style="text-align: center;">no</td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">no</td>
-<td style="text-align: center;">no</td>
-<td style="text-align: center;">composite</td>
-<td style="text-align: center;">composite</td>
-<td style="text-align: center;">no</td>
 </tr>
 <tr>
 <td><code>unique_values</code></td>
-<td>composite</td>
+<td style="text-align: center;">no</td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">no</td>
-<td style="text-align: center;">no</td>
-<td style="text-align: center;">composite</td>
-<td style="text-align: center;">composite</td>
-<td style="text-align: center;">no</td>
 </tr>
 <tr>
 <td><code>var</code></td>
-<td><code>array.var</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">from JVP</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>vecdot</code></td>
-<td><code>array.vecdot</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">direct</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>where</code></td>
-<td><code>array.where</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">direct</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>zeros</code></td>
-<td><code>array.zeros</code></td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
 <td style="text-align: center;">yes</td>
 <td style="text-align: center;">no</td>
-<td style="text-align: center;">no</td>
-<td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>zeros_like</code></td>
-<td><code>array.zeros_like</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">direct</td>
 <td style="text-align: center;">yes</td>
 </tr>
 </tbody>
 </table>
 <h2 id="added-in-202312">Added in 2023.12<a class="headerlink" href="#added-in-202312" title="Permanent link">&para;</a></h2>
-<details class="compat-columns">
-<summary>capability details</summary>
-</details>
-
 <table>
 <thead>
 <tr>
 <th>Function</th>
-<th>Lowers to</th>
-<th style="text-align: center;">Dynamic</th>
-<th style="text-align: center;">Staged</th>
-<th style="text-align: center;">Serialized</th>
-<th style="text-align: center;">JVP</th>
-<th style="text-align: center;">VJP</th>
-<th style="text-align: center;">Abstract</th>
+<th style="text-align: center;">Stage/save</th>
+<th style="text-align: center;">Differentiate</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td><code>clip</code></td>
-<td><code>array.clip</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">from JVP</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>copysign</code></td>
-<td><code>array.copysign</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">from JVP</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>cumulative_sum</code></td>
-<td><code>array.cumsum</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">direct</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>hypot</code></td>
-<td><code>array.hypot</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">from JVP</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>maximum</code></td>
-<td><code>array.maximum</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">from JVP</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>minimum</code></td>
-<td><code>array.minimum</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">from JVP</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>moveaxis</code></td>
-<td><code>array.moveaxis</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">direct</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>repeat</code></td>
-<td><code>array.repeat</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">direct</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>searchsorted</code></td>
-<td><code>array.searchsorted</code></td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
 <td style="text-align: center;">yes</td>
 <td style="text-align: center;">n/a</td>
-<td style="text-align: center;">n/a</td>
-<td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>signbit</code></td>
-<td><code>array.signbit</code></td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
 <td style="text-align: center;">yes</td>
 <td style="text-align: center;">n/a</td>
-<td style="text-align: center;">n/a</td>
-<td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>tile</code></td>
-<td><code>array.tile</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">direct</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>unstack</code></td>
-<td>composite</td>
 <td style="text-align: center;">yes</td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">composite</td>
-<td style="text-align: center;">composite</td>
-<td style="text-align: center;">composite</td>
 </tr>
 </tbody>
 </table>
@@ -1797,82 +962,43 @@ var base_url = "../..";
 </tbody>
 </table>
 <h2 id="added-in-202412">Added in 2024.12<a class="headerlink" href="#added-in-202412" title="Permanent link">&para;</a></h2>
-<details class="compat-columns">
-<summary>capability details</summary>
-</details>
-
 <table>
 <thead>
 <tr>
 <th>Function</th>
-<th>Lowers to</th>
-<th style="text-align: center;">Dynamic</th>
-<th style="text-align: center;">Staged</th>
-<th style="text-align: center;">Serialized</th>
-<th style="text-align: center;">JVP</th>
-<th style="text-align: center;">VJP</th>
-<th style="text-align: center;">Abstract</th>
+<th style="text-align: center;">Stage/save</th>
+<th style="text-align: center;">Differentiate</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td><code>count_nonzero</code></td>
-<td><code>array.count_nonzero</code></td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
 <td style="text-align: center;">yes</td>
 <td style="text-align: center;">n/a</td>
-<td style="text-align: center;">n/a</td>
-<td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>cumulative_prod</code></td>
-<td><code>array.cumprod</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">from JVP</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>diff</code></td>
-<td><code>array.diff</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">direct</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>nextafter</code></td>
-<td><code>array.nextafter</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">from JVP</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>reciprocal</code></td>
-<td><code>array.reciprocal</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">from JVP</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>take_along_axis</code></td>
-<td><code>array.take_along_axis</code></td>
 <td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">yes</td>
-<td style="text-align: center;">direct</td>
 <td style="text-align: center;">yes</td>
 </tr>
 </tbody>
@@ -1896,29 +1022,26 @@ var base_url = "../..";
 </tr>
 </tbody>
 </table>
-<h2 id="incomplete-claims">Incomplete claims<a class="headerlink" href="#incomplete-claims" title="Permanent link">&para;</a></h2>
-<p>This table is the gap between the official-callable and complete-contract counts above. Advect claims support only on executable evidence — a qualification case that exercises the callable end to end. A row without one carries no claim: whatever a provider path happens to do with it today is incidental, not contract. A row with a recorded boundary is claimed except for that boundary.</p>
+<h2 id="limits">Limits<a class="headerlink" href="#limits" title="Permanent link">&para;</a></h2>
+<p>These official functions are either unsupported or supported with the boundary shown. Unlisted provider behavior is not a public claim.</p>
 <table>
 <thead>
 <tr>
 <th>Callable</th>
-<th>Kind</th>
 <th>Since</th>
-<th>Claim</th>
+<th>Boundary</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td><code>from_dlpack</code></td>
-<td>function</td>
 <td><code>2022.12</code></td>
-<td>none — no qualification case exercises it</td>
+<td>unsupported — no qualification case exercises it</td>
 </tr>
 <tr>
 <td><code>repeat</code></td>
-<td>function</td>
 <td><code>2023.12</code></td>
-<td>claimed with a boundary: array-valued repeats are not traceable</td>
+<td>array-valued repeats are not traceable</td>
 </tr>
 </tbody>
 </table>
@@ -1934,35 +1057,52 @@ var base_url = "../..";
       <p class="prompt">$ <span class="cursor">█</span></p>
     </div></div>
   </article>
+
+  <aside class="tile outlinetile" id="outlinetile" aria-label="Page outline" aria-hidden="true">
+    <span class="ptitle"><span class="pn">outline</span> this-page</span>
+    <nav class="outlinelinks" id="outlinelinks"><a href="#providers">Providers</a><a href="#qualified-revisions">Qualified revisions</a><a href="#array-api-202212-baseline">Array API 2022.12 baseline</a><a href="#added-in-202312">Added in 2023.12</a><a href="#changed-in-202312">Changed in 2023.12</a><a href="#added-in-202412">Added in 2024.12</a><a href="#changed-in-202412">Changed in 2024.12</a><a href="#limits">Limits</a></nav>
+  </aside>
 </div>
 
 <div class="overlay" id="help" role="dialog" aria-label="Keyboard shortcuts">
   <h3>Keys</h3>
   <table>
+    
     <tr><td class="kk">j k d u g G</td><td>scroll the page</td></tr>
     <tr><td class="kk">n / p</td><td>next / previous page</td></tr>
     <tr><td class="kk">e</td><td>toggle the docs tree pane</td></tr>
-    <tr><td class="kk">/</td><td>search the manual</td></tr>
+    <tr><td class="kk">o</td><td>toggle the page outline</td></tr>
     <tr><td class="kk">2</td><td>open the playground</td></tr>
-    <tr><td class="kk">t</td><td>lp0 → dark → crt</td></tr>
+    
+    <tr><td class="kk">/</td><td>search the manual</td></tr>
+    <tr><td class="kk">t</td><td>system → light → dark</td></tr>
     <tr><td class="kk">?</td><td>close this help</td></tr>
   </table>
 </div>
 
-<div class="overlay search-box" id="search" role="dialog" aria-label="Search">
-  <div class="search-in"><span class="ps">/</span><input id="searchq" spellcheck="false" autocomplete="off" aria-label="Search query" placeholder="search the manual…"></div>
-  <div class="search-hits" id="searchhits"></div>
+<div class="overlay search-box" id="search" role="dialog" aria-hidden="true" aria-label="Search">
+  <div class="search-in"><span class="ps">/</span><input type="search" id="mkdocs-search-query" spellcheck="false" autocomplete="off" aria-label="Search query" placeholder="search the manual…"></div>
+  <div class="search-hits" id="mkdocs-search-results" data-no-results-text="No manual entry found" aria-live="polite"></div>
 </div>
 
+<aside class="link-preview" id="linkpreview" role="tooltip" aria-hidden="true">
+  <div class="preview-path" id="previewpath"></div>
+  <strong class="preview-title" id="previewtitle"></strong>
+  <pre class="preview-signature" id="previewsignature"><code></code></pre>
+  <p class="preview-description" id="previewdescription"></p>
+</aside>
+
 <div class="bar">
-  <a href="../.." class="b" aria-current="true">[1:docs]</a>
-  <a href="../../playground/" class="b" id="wsplay">[2:playground]</a>
+  <a href="../.." class="b" data-short="[1]" aria-current="true">[1:docs]</a>
+  <a href="../../playground/" class="b" id="wsplay" data-short="[2]">[2:playground]</a>
+  <a href="https://github.com/yaugenst/advect" class="b" data-short="[git]">[git:source]</a>
   <span class="path hidesm">$ man advect/compatibility/array-api</span>
   <span class="grow"></span>
-  <button class="tbtn" id="treebtn" aria-label="Toggle documentation tree">[e] tree</button>
-  <button class="tbtn" id="searchbtn" aria-label="Search">[/] search</button>
+  <button class="tbtn" id="treebtn" data-short="[e]" aria-label="Toggle documentation tree">[e] tree</button>
+  <button class="tbtn" id="outlinebtn" data-short="[o]" aria-label="Toggle page outline" aria-controls="outlinetile" aria-expanded="false">[o] outline</button>
+  <button class="tbtn" id="searchbtn" data-short="[/]" aria-label="Search" aria-controls="search" aria-expanded="false">[/] search</button>
   <button class="tbtn hidesm" id="helpbtn" aria-label="Keyboard help">[?] keys</button>
-  <button class="tbtn" id="themeToggle" aria-label="Cycle display mode">[ mode: … ]</button>
+  <button class="tbtn" id="themeToggle" data-short="[mode]" aria-label="Cycle system, light, and dark display modes">[ mode: … ]</button>
 </div>
 
 <script src="../../js/theme.js"></script>

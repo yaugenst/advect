@@ -1,13 +1,13 @@
 # Errors
 
-Advect fails loudly at the offending line rather than returning a silently wrong derivative. All exceptions derive from `AdvectError`.
+When Advect cannot differentiate a call safely, it raises an error at the offending line instead of returning a plausible but wrong derivative. All exceptions derive from [`AdvectError`](https://yaugenst.github.io/advect/dev/api/errors/#advect.AdvectError). The [troubleshooting guide](https://yaugenst.github.io/advect/dev/tutorials/debugging/index.md) shows how to use [`debug`](https://yaugenst.github.io/advect/dev/api/errors/#advect.debug) and act on the common tracing, numerical, and staging failures.
 
 ## Diagnostic scope
 
 ## debug
 
 ```python
-debug(*, numerics: bool = False) -> Iterator[None]
+debug(*, numerics: bool = False) -> Generator[None]
 ```
 
 Enable scoped trace diagnostics.

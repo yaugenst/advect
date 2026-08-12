@@ -1,15 +1,26 @@
 # Staging
 
-The explicit durable-graph boundary: compile one signature into one immutable, optimized, serializable program.
+[`stage`](https://yaugenst.github.io/advect/dev/api/staging/#advect.stage) compiles one input signature into an immutable, optimized program that can be called repeatedly, differentiated, saved, and loaded. The [staging tutorial](https://yaugenst.github.io/advect/dev/tutorials/staging/index.md) develops the complete workflow.
 
-Advect stages against one explicit Array API contract. The supported targets are `2022.12`, `2023.12`, and `2024.12`:
+Advect stages against one explicit [Array API contract](https://data-apis.org/array-api/latest/). The supported targets are `2022.12`, `2023.12`, and `2024.12`:
 
 ```python
-program = ad.stage(function, example, array_api_version="2023.12")
-assert program.array_api_version == "2023.12"
+import numpy as np
+
+import advect as ad
+
+
+def energy(x):
+    return np.sum(x**2)
+
+
+example = np.array([1.0, 2.0])
+program = ad.stage(energy, example, array_api_version="2023.12")
+print(program.array_api_version)
+# 2023.12
 ```
 
-When examples are supplied without a target, `stage` selects the newest revision every example provider can serve. With `specs=` and no concrete provider, it defaults to `2024.12`. The selected target is stored in the graph, preserved by `grad` and `vjp_program`, and enforced before runtime graph evaluation. Choosing an older target is the deliberate way to build a more portable artifact; Advect does not infer a minimum revision from the operations used by the function.
+When examples are supplied without a target, [`stage`](https://yaugenst.github.io/advect/dev/api/staging/#advect.stage) selects the newest revision every example provider can serve. With [`specs=`](https://yaugenst.github.io/advect/dev/api/staging/#advect.stage) and no concrete provider, it defaults to `2024.12`. The selected target is stored in the graph, preserved by [`grad`](https://yaugenst.github.io/advect/dev/api/transforms/#advect.grad) and [`vjp_program`](https://yaugenst.github.io/advect/dev/api/staging/#advect.vjp_program), and enforced before runtime graph evaluation. Choosing an older target is the deliberate way to build a more portable artifact; Advect does not infer a minimum revision from the operations used by the function.
 
 ## ArraySpec
 
@@ -98,7 +109,10 @@ Infer a direct-call signature from a concrete array:
 ```pycon
 >>> import advect as ad
 >>> import numpy as np
->>> program = ad.stage(lambda x: x + 1, np.array([1.0, 2.0]))
+>>> def add_one(x):
+...     return x + 1
+>>> example_input = np.array([1.0, 2.0])
+>>> program = ad.stage(add_one, example_input)
 >>> program(np.array([3.0, 4.0])).tolist()
 [4.0, 5.0]
 ```
@@ -262,7 +276,7 @@ Returns:
 Raises:
 
 - `IndexError` – If a positional selection is out of range for the staged signature.
-- `TypeError` – If f is not a StagedProgram, or a selected weak scalar signature is not real floating-point.
+- `TypeError` – If f is not a StagedProgram, a selected input leaf is static, or a selected weak scalar signature is not real floating-point.
 - `ValueError` – If positional selections are duplicated, a selected input is absent from the staged signature, or the primal signature already reserves the cotangent keyword.
 - `NoVJPError` – If an operation on the differentiated path has no reverse-mode rule.
 

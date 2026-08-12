@@ -1,10 +1,10 @@
 # Primitives
 
-A primitive makes one closed implementation atomic to Advect. The decorator returns the callable authoring handle; that same handle owns abstract staging, an optional JVP, and any explicit transpose. There is no separately imported or constructed primitive class. A JVP is the preferred derivative rule because it supports forward mode and structural transposition. An explicit transpose may instead supply reverse mode without a JVP; a traceable non-residual rule can participate in reverse-over-reverse differentiation. Residual-bearing transposes are the first-order-only boundary.
+[`primitive`](https://yaugenst.github.io/advect/dev/api/primitives/#advect.primitive) makes one function appear as a single operation to Advect. The decorator returns the callable with methods for adding its abstract, JVP, and optional transpose rules. Prefer a [JVP](https://yaugenst.github.io/advect/dev/api/transforms/#advect.jvp) because it supports forward mode and structural transposition. An explicit transpose can instead provide [reverse mode](https://yaugenst.github.io/advect/dev/api/transforms/#advect.vjp) when no JVP is available.
 
 Concrete and abstract calls retain the implementation's named parameters and pytrees. JVP and transpose rules operate on the dynamic array/scalar leaves in one stable flattened order. Static arguments remain named configuration; nondifferentiable arguments remain dynamic values but have no derivative contribution.
 
-Use the [testing utilities](https://yaugenst.github.io/advect/dev/api/testing/index.md) to validate a custom primitive and a representative composition. The [custom primitive tutorial](https://yaugenst.github.io/advect/dev/tutorials/primitives/index.md) shows the complete public authoring workflow.
+The [custom primitive tutorial](https://yaugenst.github.io/advect/dev/tutorials/primitives/index.md) shows the common JVP-first workflow. Use [`check_primitive`](https://yaugenst.github.io/advect/dev/api/testing/#advect.testing.check_primitive) and [`check_gradient`](https://yaugenst.github.io/advect/dev/api/testing/#advect.testing.check_gradient) to validate both the primitive and a representative composition.
 
 ## Define the operation
 
@@ -82,18 +82,28 @@ Examples:
 >>> @ad.primitive(name="examples.cube")
 ... def cube(value):
 ...     return value**3
+>>> @cube.def_abstract
+... def cube_abstract(value):
+...     return value.spec
 >>> @cube.def_jvp
 ... def cube_jvp(output, primals, tangents):
 ...     del output
 ...     (value,), (tangent,) = primals, tangents
-...     return 3 * value**2 * tangent
->>> ad.grad(lambda value: np.sum(cube(value)))(np.array([2.0])).tolist()
+...     return np.zeros_like(value) if tangent is None else 3 * value**2 * tangent
+>>> from advect.testing import check_primitive
+>>> sample = np.array([2.0])
+>>> check_primitive(
+...     cube,
+...     primals=(sample,),
+...     check=("abstract", "jvp", "transpose", "nested", "stage"),
+... )
+>>> ad.grad(lambda value: np.sum(cube(value)))(sample).tolist()
 [12.0]
 ```
 
 ## Attach rules to the returned handle
 
-The following methods are used on the object returned by `advect.primitive`; their source location is private so application code has only one public authoring entry point.
+These methods belong to the object returned by `advect.primitive`:
 
 ## def_abstract
 
@@ -133,7 +143,7 @@ A rule may accept the optional keyword-only `active_input_indices=None` and retu
 
 ## Exact residuals
 
-Set `residual=True` only when reverse mode needs opaque data from the exact forward invocation. A direct call, JVP, or plain staged replay releases it before returning; a reusable linear map retains it until the map is closed. Residual primitives require an explicit transpose and are first-order boundaries: their primal can be staged, but a staged or higher-order derivative cannot retain the opaque residual. They may omit a JVP when only reverse mode is supported.
+Set `residual=True` only when reverse mode needs exact opaque data from the forward invocation. Residual primitives require an explicit transpose and form a first-order boundary; the object docstring below defines their lifetime and cleanup contract.
 
 ## PrimitiveResult
 

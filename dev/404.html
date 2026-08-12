@@ -6,12 +6,12 @@
 <title>404 · advect</title>
 <link rel="icon" href="/advect/dev/img/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/advect/dev/css/fonts.css">
-<link rel="stylesheet" href="/advect/dev/css/theme.css?v=86c97aee1cb2">
+<link rel="stylesheet" href="/advect/dev/css/theme.css?v=bf544137efc8">
 <script>
 (function () {
   var m = null;
   try { m = localStorage.getItem("advect-mode"); } catch (e) { /* private mode */ }
-  if (m) document.documentElement.dataset.theme = m;
+  if (m === "light" || m === "dark") document.documentElement.dataset.theme = m;
 })();
 </script>
 </head>

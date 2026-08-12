@@ -1,10 +1,10 @@
 # Testing Utilities
 
-`check_gradient` checks an ordinary unary composition against directional finite differences and reverse-mode consistency. `check_primitive` validates the narrower rule contract of one custom primitive authoring handle.
+[`check_gradient`](https://yaugenst.github.io/advect/dev/api/testing/#advect.testing.check_gradient) checks one representative composition against directional finite differences and reverse-mode consistency. [`check_primitive`](https://yaugenst.github.io/advect/dev/api/testing/#advect.testing.check_primitive) validates the capabilities requested for one representative custom-primitive call.
 
-The primitive check defaults to `abstract`, `jvp`, and `transpose`: a useful first-order smoke test, but not a staging or mutation claim. Request `stage` explicitly to compile and restore the program, validate output metadata, and check input preservation during both staged executions. Request `nested` and a separate complex-valued `complex` case when those capabilities are supported. Choose a check tuple that matches the rules the primitive promises. A transpose-only primitive can request `transpose` without a JVP; the checker compares its explicit transpose with a central finite difference. Forward-mode `jvp`, `complex`, and `nested` checks require a JVP.
+They complement application tests; neither utility can prove that the implemented function is the mathematics you intended.
 
-These utilities help extension authors; they do not replace application tests or prove that the implemented function represents the intended mathematics.
+See [Troubleshooting](https://yaugenst.github.io/advect/dev/tutorials/debugging/#check-a-suspicious-gradient) for a composed gradient check and [Custom primitives](https://yaugenst.github.io/advect/dev/tutorials/primitives/#check-the-promised-capabilities) for the extension-author workflow.
 
 ## testing
 

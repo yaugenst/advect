@@ -1,32 +1,28 @@
 # Architecture
 
-Advect is an autodiff core, not an array library. NumPy — or another Array API provider — keeps doing the numerics; Advect's job is to record what a function does to its arrays, differentiate that record, and, when asked, turn it into a durable program. Everything in the design follows from keeping that job small.
+NumPy or another Array API provider still performs the numerical work. Advect records how the array values were produced, then uses that record to calculate derivatives immediately or build a reusable program that can be saved and loaded. This separation keeps Advect focused on differentiation while the array library remains responsible for execution.
 
-## Three frontend paths, one semantic core
+## Different array APIs, one set of operations
 
-NumPy and the Array API are separate calling contracts. The concrete NumPy frontend owns `numpy.*` signatures, ufunc methods, aliases, `out=`, and functionalized mutation. The provider-neutral Array API frontend owns the versioned namespace returned by `x.__array_namespace__()`. Their array-valued calls share code only after each frontend has bound its foreign call to a canonical operation.
+NumPy and the Array API expose similar numerical work through different Python interfaces. Advect understands NumPy ufuncs, array functions, methods, `out=`, constructors, and local mutation. It also understands the versioned namespace returned by `x.__array_namespace__()`. Each path interprets its own public call, then records the same internal operation.
 
-Compile-time metadata takes a third path. NumPy structural queries and the Array API metadata functions resolve directly from the active concrete or abstract namespace. They return the dtype, shape, or scalar metadata needed by the trace instead of emitting a numerical graph node. A traced composition can use that result for static attributes or trace-time control flow, but the query does not become a primitive.
+Shape, dtype, and other trace-time queries take a shorter path. They return metadata needed by Python or by an operation attribute without adding a numerical graph node.
 
 ```text
 numpy.* ─────────────> NumPy frontend ────┐
-                                         ├─ array call ─> canonical operation
+                                          ├─ array call ─> canonical operation
 __array_namespace__ → Array API frontend ─┤                  ├─ dynamic tape
-        ↑                                │                  ├─ staged graph
-        └─ NumPy or CuPy provider        │                  └─ derivative rules
-                                         └─ metadata ─> trace-time metadata
-                                                        (no graph node)
+        ↑                                 │                  ├─ staged graph
+        └─ NumPy or CuPy provider         │                  └─ derivative rules
+                                          └─ metadata ─> trace-time metadata
+                                                         (no graph node)
 ```
 
-CuPy reaches Advect through the designated Array API provider path; Advect does not maintain a speculative direct `cupy.*` frontend. Its historical GPU record is source-only until a retained report and digest verify the current gate. A future direct frontend would bind its own calling convention and join at the same canonical-operation boundary.
+This shared model lets one derivative rule describe the numerical operation rather than every Python spelling that can reach it. The public interfaces remain separate because they can still differ in signatures and supported execution modes.
 
-## One semantic core, two lifetimes
+## One set of rules, two ways to run
 
-A supported frontend call takes one of three paths: resolve compile-time metadata without a node, emit a canonical operation, or expand into a traceable composition of existing operations. Each canonical operation records stable identity and arity plus the semantic capabilities it actually supports: abstract shape/dtype semantics for staging and a JVP when it supports forward mode. Built-in concrete execution remains with the frontend and array provider; a custom primitive calls its authored implementation. Reverse mode structurally transposes the recorded JVP where possible. The smaller set that needs a direct real adjoint carries an explicit transpose; that rule can also stand alone to supply reverse mode without forward mode or structural transposition. A traceable non-residual transpose can compose under reverse mode, while a residual-bearing transpose is inherently first-order. Canonical records mark mathematically non-differentiable operations with a reason rather than placeholder rules. Frontend invocation evidence and public support declarations separately say whether each call form is dynamic-only or also stageable.
-
-The transforms you call — `grad`, `jvp`, `vjp`, `jacobian`, and `stage` — consume those declared capabilities. A traceable frontend composition reuses them; it does not become another primitive merely because it has a public name.
-
-What differs between the two execution modes is not the math but the *lifetime* of the record:
+Dynamic transforms and staged programs use the same operation identities, abstract shape and dtype rules, and derivative rules. They differ in how long the recorded computation lives.
 
 ```text
               ┌─────────────────────────────────────┐
@@ -44,19 +40,19 @@ What differs between the two execution modes is not the math but the *lifetime* 
     ┌──────────────────▼────────┐ ┌────────▼──────────────────┐
     │ Dynamic lifetime          │ │ Staged lifetime           │
     │   concrete SSA tape       │ │   abstract trace →        │
-    │   → pullback              │ │   durable optimized graph │
+    │   → pullback              │ │   saved optimized graph   │
     └───────────────────────────┘ └───────────────────────────┘
 ```
 
-## The dynamic path
+### Dynamic execution follows Python
 
-`grad(f)(x)` runs `f` with the real values, wrapped in tracers that record each emitted canonical operation onto an invocation-local SSA tape. Because the trace happens inside an ordinary call, Python control flow needs no special forms: loops unroll to the iterations that actually ran, branches take the branch the data took. The reverse sweep walks that tape backwards through the transpose rules and then releases it. Consuming transforms such as `grad` release before returning; `vjp` and `linearize` transfer that one invocation's tape to the returned `Pullback` or `LinearMap` until it is consumed or closed. None of these handles is a cross-call trace cache.
+`grad(f)(x)` runs `f` with concrete values wrapped in tracers. Each supported array operation appends to an invocation-local tape, and reverse mode walks that tape backward before releasing it. Because tracing happens inside an ordinary call, branches take the branch selected by the data and loops run for the current number of iterations.
 
-That per-call freshness is the point of the dynamic mode: a new trace can have new shapes, new branches, even a different number of loop iterations. The cost is that tracing work is repeated on every call.
+Tracing each call afresh lets a later call take a different path or use a different shape. `vjp` keeps one call's tape in a single-use `Pullback`; applying or closing it releases the tape. `linearize` returns a reusable `LinearMap` that keeps its tape until closed. Both objects belong to the call that created them.
 
-## The staged path
+### Staging fixes one signature
 
-`stage(f, example)` runs the same trace once with *abstract* values — shape and dtype, no data — and keeps the result. The recorded graph is validated, then run through a fixed optimization pipeline (dead-code elimination, simplification, common-subexpression elimination) into an immutable program:
+`stage(f, example)` traces with abstract values—shape and dtype without data—so it can build a graph before execution. Advect validates that graph and runs a fixed cleanup pipeline before returning an immutable `StagedProgram`.
 
 ```python
 import numpy as np
@@ -68,42 +64,35 @@ def loss(x):
     return np.sum(np.sin(x) ** 2)
 
 
-gradient_program = ad.grad(ad.stage(loss, np.linspace(0.0, 1.0, 4)))
-for node_id in gradient_program.graph.node_ids():
-    node = gradient_program.graph.get_node(node_id)
-    print(f"%{node_id} = {node.op} {node.inputs}  # {node.shape} {node.dtype}")
+example = np.linspace(0.0, 1.0, 4)
+loss_program = ad.stage(loss, example)
+gradient_program = ad.grad(loss_program)
+print("staged gradient:", np.round(gradient_program(example), 6))
+print(
+    "optimized nodes:",
+    f"{gradient_program.optimization.nodes_before} -> "
+    f"{gradient_program.optimization.nodes_after}",
+)
 ```
 
-A `StagedProgram` is compiled for exactly one shape/dtype signature — it is never a hidden multi-signature cache. The staged-producing transforms `grad(program)`, `value_and_grad(program)`, and `vjp_program(program)` compile the derivative graph once and return programs whose warm calls execute with no tape and no reverse sweep. Dense higher-order transforms remain concrete invocation-time callables even when their input function is a staged program.
+The program accepts the same input structure, shapes, dtypes, devices, Python scalar categories, and static values it was compiled for. Later calls execute the graph without retracing Python. `grad(program)`, `value_and_grad(program)`, and `vjp_program(program)` build reusable derivative programs in the same way.
 
-Its serialized form has two nested contracts. Python core owns the versioned outer envelope: call and output pytrees, their leaf specifications, the constant manifest, the optimization report, and consistency among those records and the graph. `advect-runtime` owns the enclosed canonical graph artifact and validates the `GraphStore` before accepting it. The combined JSON is a Python `StagedProgram` artifact because its outer envelope uses Python pytree and codec identities. Only the enclosed flat runtime graph is portable to a non-Python host; that host consumes the runtime contract, links the named operations, and supplies flat inputs and outputs.
+A saved `StagedProgram` combines a Python call envelope with an enclosed flat runtime graph. The envelope owns Python pytrees, input and output specifications, the constant manifest, and cross-record consistency. The runtime graph owns provider-neutral operations, portable constant bytes, optimization, scheduling, and value lifetimes. Another host can consume the flat graph contract, but the complete `StagedProgram` remains a Python artifact.
 
-Because the staged trace has no data, it is also stricter: Python truth tests on traced values, ambient randomness, and data-dependent shapes are rejected at trace time rather than silently frozen. The [debugging tutorial](https://yaugenst.github.io/advect/dev/tutorials/debugging/index.md) maps those errors to their rewrites.
+Abstract tracing is stricter by design. Data-dependent Python branches, ambient randomness, and data-dependent shapes cannot define one reusable graph and therefore fail during staging rather than being frozen accidentally.
 
-## Derivatives are JVP-first
+## Derivatives and mutation stay composable
 
-The preferred derivative rule is a JVP written as ordinary traceable code. Advect obtains reverse mode by transposing it and validates the required real-linearity instead of trusting it. A primitive may instead provide an explicit transpose without a JVP: it has reverse mode but no forward mode or structural transposition. That rule can support reverse-over-reverse when its body is traceable and non-residual. Residual-bearing primitives use an inherently first-order boundary when their exact adjoint needs invocation-local state. Derivatives are real-linear throughout, which gives complex and non-holomorphic functions one consistent convention, and a missing rule is a named error — Advect never substitutes a numeric approximation silently at runtime.
+Advect prefers JVP rules written as ordinary traceable code. Forward mode uses them directly; reverse mode structurally transposes them when possible. The smaller set of operations that needs a direct real adjoint provides an explicit transpose. Missing rules raise a named error instead of silently substituting a numerical approximation.
 
-## Mutation is functionalized
+Advect treats every derivative as a real-linear map. This gives complex and non-holomorphic functions one consistent convention: a real loss can use `grad`, while a complex output uses `jvp`, `vjp`, or `linearize`.
 
-Traced arrays are not writable in place. Supported mutation syntax — indexed updates, augmented assignment through basic slices — is rewritten at the tracer boundary into immutable SSA updates, and everything else raises with a suggested rewrite. Inputs are never implicitly writable: copy first, then update the owned copy. This keeps the recorded graph a pure dataflow program, which is what makes transposition, optimization, and serialization tractable.
+Supported mutation syntax is functionalized into immutable updates. Inputs are never implicitly writable: copy first, then update the owned local array. This keeps both the dynamic tape and staged graph as pure dataflow, which is what makes transposition, optimization, and serialization fit together.
 
-## The native layer
+## The array provider remains the numerical backend
 
-Advect ships as one Python distribution with a required native extension, in three pieces:
+The provider continues to own numerical kernels and device execution. Advect records, differentiates, and schedules provider calls; it does not replace them with a new numerical backend. Staging saves the work of tracing and constructing derivatives, while each operation still runs through the provider.
 
-- **`advect`** (Python) owns Python-language integration and authored numerical/autodiff semantics: tracer frontends, primitive bindings and derivative rules, pytrees, the user API, and the outer `StagedProgram` envelope with its cross-record validation.
-- **`advect-runtime`** (pure Rust, no Python bindings) owns structural graph semantics and policy: the canonical artifact, closed graph data, `GraphStore` validation, fixed cleanup with conservative op-aware rewrites, execution planning, and host-independent value lifetimes.
-- **`advect-native`** (PyO3) translates between Python and that runtime and owns the invocation-local dynamic tape.
+Each integration keeps that ownership clear. NumPy uses its protocols, Array API providers use their namespaces, xarray registers container structure, and host-autodiff bridges wrap one Advect function. When an operation cannot cross one of these boundaries, Advect raises an error instead of silently detaching gradients or changing precision.
 
-The split is deliberate: Python never mirrors the graph with per-node objects, and the pure runtime interprets only the portable graph structure and closed metadata needed to validate, optimize, and execute a plan. The host supplies the linked operation behavior and array kernels. Advect contains no kernel compiler, code generation, or fusion; a staged program's speed comes from tracing once, optimizing once, and executing with native traversal over provider operations.
-
-## Deliberate boundaries
-
-- **No dispatch patching.** NumPy is intercepted through its own protocols (`__array_ufunc__`, `__array_function__`, `like=`); integrations register explicitly on import, never through entry-point discovery. The sole process-visible patch is a lock-protected, depth-counted guard around NumPy's ambient RNG entry points during abstract staging. Non-staging callers reach the originals, and the last staging scope restores the original attributes.
-- **Deterministic frontend hooks.** Core's private dependency-inversion seam is populated at import time. A hook name is single-assignment: registering the same callable again is harmless, while a different callable is rejected; there is no unregister or reset path.
-- **No compiler ambitions.** Kernel compilation, backend lowering, and automatic checkpoint placement are out of scope; the staged optimizer's pass list is fixed and raw graph rewriting is not a user API.
-- **No hidden fallbacks.** Unsupported behavior fails with a rewrite suggestion rather than detaching gradients or degrading precision.
-- **No orchestration.** Workflow scheduling, artifact storage, and remote execution are independent layers above the serialized program.
-
-The contributor-level specifications behind this page — requirements, data structures, and the architecture decision records — live in the repository's [`design/` directory](https://github.com/yaugenst/advect/tree/main/design).
+Workflow scheduling, artifact storage, and remote execution belong above the serialized program. Contributor-level ownership and dependency rules live in the [developer guide](https://yaugenst.github.io/advect/dev/development/index.md).

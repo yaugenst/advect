@@ -1,8 +1,8 @@
 # API Reference
 
-Advect's public API has a small root namespace and a few explicit modules. The [tutorials](https://yaugenst.github.io/advect/dev/tutorials/index.md) teach complete workflows; these pages render the installed signatures and docstrings.
+Most work begins with functions imported directly from `advect`. Optional NumPy, SciPy, xarray, and host-framework integrations live in their own modules. The [tutorials](https://yaugenst.github.io/advect/dev/tutorials/index.md) teach complete workflows; these pages collect the installed signatures and exact API contracts.
 
-| Public surface                                                                      | Responsibility                                                                      |
+| Public API                                                                          | Responsibility                                                                      |
 | ----------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
 | [Transforms](https://yaugenst.github.io/advect/dev/api/transforms/index.md)         | Dynamic differentiation, higher-order transforms, checkpointing, and implicit roots |
 | [Staging](https://yaugenst.github.io/advect/dev/api/staging/index.md)               | Immutable programs, serialization, and staged differentiation                       |
@@ -13,14 +13,14 @@ Advect's public API has a small root namespace and a few explicit modules. The [
 | [Support catalog](https://yaugenst.github.io/advect/dev/api/support/index.md)       | Machine-readable operation and lifetime claims                                      |
 | [Errors](https://yaugenst.github.io/advect/dev/api/errors/index.md)                 | Public diagnostics and exception hierarchy                                          |
 | [NumPy frontend](https://yaugenst.github.io/advect/dev/api/numpy/index.md)          | Explicit constructors and transparent NumPy namespace behavior                      |
-| [SciPy](https://yaugenst.github.io/advect/dev/api/scipy/index.md)                   | Optional special functions, image filters, and solver callbacks                     |
+| [SciPy](https://yaugenst.github.io/advect/dev/api/scipy/index.md)                   | Optional special functions, image processing, and solver callbacks                  |
 | [xarray](https://yaugenst.github.io/advect/dev/api/xarray/index.md)                 | Optional labeled-container pytree registration                                      |
 | [Host autodiff interop](https://yaugenst.github.io/advect/dev/api/interop/index.md) | Optional JAX, PyTorch, and HIPS Autograd VJP bridges                                |
 
 ## Shared semantics
 
-Dynamic transforms trace concrete values for each call and preserve the Python control flow that ran. `stage` instead compiles one shape-and-dtype signature into an immutable graph; staged and serialized support are therefore separate claims from dynamic support.
+Dynamic [transforms](https://yaugenst.github.io/advect/dev/api/transforms/index.md) trace concrete values for each call and preserve the Python control flow that ran. [`stage`](https://yaugenst.github.io/advect/dev/api/staging/#advect.stage) instead compiles one shape-and-dtype signature into an immutable graph; staged and serialized support are therefore separate claims from dynamic support.
 
-Selected real Python scalars are lifted to zero-dimensional `float64` arrays and their derivative results return as Python scalars. Structured inputs and outputs use pytrees. Complex differentiation is real-linear; use `jvp`, `vjp`, or `linearize` when the output is complex.
+Selected real Python scalars are lifted to zero-dimensional `float64` arrays and their derivative results return as Python scalars. Structured inputs and outputs use [pytrees](https://yaugenst.github.io/advect/dev/api/pytree/index.md). Complex differentiation is real-linear; use [`jvp`](https://yaugenst.github.io/advect/dev/api/transforms/#advect.jvp), [`vjp`](https://yaugenst.github.io/advect/dev/api/transforms/#advect.vjp), or [`linearize`](https://yaugenst.github.io/advect/dev/api/transforms/#advect.linearize) when the output is complex.
 
-The root `advect` import installs the required NumPy frontend and Array API compatibility bridge. SciPy, xarray, and host-framework integrations remain explicit optional imports. Consult the generated [compatibility catalog](https://yaugenst.github.io/advect/dev/compatibility/index.md) for exact callable and lifetime coverage; the presence of an internal registered operation is not a public support claim.
+Importing `advect` is enough for NumPy and Array API code. SciPy, xarray, and host-framework integrations use their own optional imports. The generated [compatibility catalog](https://yaugenst.github.io/advect/dev/compatibility/index.md) lists which calls can run dynamically, be staged, be saved, and be differentiated.

@@ -1,6 +1,6 @@
 # Advect
 
-> A small extensible automatic-differentiation core for Python
+> Automatic differentiation for the NumPy code you already write
 
 Advect has two explicit execution lifetimes. Dynamic transforms trace
 one concrete call, while stage() compiles one immutable, serializable
@@ -22,11 +22,15 @@ docstrings.
 ## Tutorials
 
 - [Gradients and Pytrees](https://yaugenst.github.io/advect/dev/tutorials/gradients/index.md)
-- [Control Flow and Mutation](https://yaugenst.github.io/advect/dev/tutorials/control-flow/index.md)
+- [Dynamic Control Flow and Mutation](https://yaugenst.github.io/advect/dev/tutorials/control-flow/index.md)
+- [JVPs, VJPs, and Linear Maps](https://yaugenst.github.io/advect/dev/tutorials/linear-maps/index.md)
+- [Higher-Order Differentiation](https://yaugenst.github.io/advect/dev/tutorials/advanced-differentiation/index.md)
+- [Implicit Differentiation](https://yaugenst.github.io/advect/dev/tutorials/implicit-differentiation/index.md)
 - [Staging and Serialization](https://yaugenst.github.io/advect/dev/tutorials/staging/index.md)
-- [Providers and Interop](https://yaugenst.github.io/advect/dev/tutorials/interop/index.md)
+- [Arrays and Scientific Python](https://yaugenst.github.io/advect/dev/tutorials/scientific-python/index.md)
+- [Host Autodiff Frameworks](https://yaugenst.github.io/advect/dev/tutorials/host-frameworks/index.md)
 - [Custom Primitives](https://yaugenst.github.io/advect/dev/tutorials/primitives/index.md)
-- [Debugging](https://yaugenst.github.io/advect/dev/tutorials/debugging/index.md)
+- [Troubleshooting](https://yaugenst.github.io/advect/dev/tutorials/debugging/index.md)
 
 ## API reference
 
@@ -41,7 +45,7 @@ docstrings.
 - [NumPy Frontend](https://yaugenst.github.io/advect/dev/api/numpy/index.md): NumPy frontend and explicit constructors
 - [SciPy Overview](https://yaugenst.github.io/advect/dev/api/scipy/index.md): SciPy frontend boundaries and module routing
 - [Special Functions](https://yaugenst.github.io/advect/dev/api/scipy/special/index.md): Differentiable scipy.special counterparts
-- [Image Filters](https://yaugenst.github.io/advect/dev/api/scipy/ndimage/index.md): Differentiable scipy.ndimage filters
+- [Image Processing](https://yaugenst.github.io/advect/dev/api/scipy/ndimage/index.md): Differentiable scipy.ndimage processing
 - [Solver Callbacks](https://yaugenst.github.io/advect/dev/api/scipy/solvers/index.md): Root and GMRES callbacks for implicit differentiation
 - [xarray](https://yaugenst.github.io/advect/dev/api/xarray/index.md): Optional labeled-container pytrees
 - [Host Interop Overview](https://yaugenst.github.io/advect/dev/api/interop/index.md): Shared host-autodiff bridge contract

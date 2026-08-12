@@ -1,19 +1,59 @@
 # Transforms
 
-Most entries on this page are dynamic: an ordinary callable is traced from its concrete values on each invocation. `grad` and `value_and_grad` also accept a `StagedProgram`; in that form they compile and return another immutable staged program with the same input signature and Array API revision. `vjp_program` is the explicit staged pullback transform and is documented with [staging](https://yaugenst.github.io/advect/dev/api/staging/index.md). The remaining transforms do not produce staged programs.
+Most transforms on this page run the callable and trace the path taken by its concrete inputs. [`grad`](https://yaugenst.github.io/advect/dev/api/transforms/#advect.grad) and [`value_and_grad`](https://yaugenst.github.io/advect/dev/api/transforms/#advect.value_and_grad) also accept a [`StagedProgram`](https://yaugenst.github.io/advect/dev/api/staging/#advect.StagedProgram); they return another staged program with the same input signature and Array API revision. [`vjp_program`](https://yaugenst.github.io/advect/dev/api/staging/#advect.vjp_program) builds a reusable staged pullback. The other transforms operate dynamically.
 
-See the [API overview](https://yaugenst.github.io/advect/dev/api/index.md) for semantics shared across transforms and the [target API](https://github.com/yaugenst/advect/blob/main/design/target-api.md) for normative examples.
+The [gradient](https://yaugenst.github.io/advect/dev/tutorials/gradients/index.md), [linear-map](https://yaugenst.github.io/advect/dev/tutorials/linear-maps/index.md), [higher-order](https://yaugenst.github.io/advect/dev/tutorials/advanced-differentiation/index.md), and [implicit-differentiation](https://yaugenst.github.io/advect/dev/tutorials/implicit-differentiation/index.md) tutorials connect these transforms through complete examples.
 
 ## grad
 
 ```python
 grad(
-    f: Callable[..., Any],
+    f: StagedProgram,
     argnums: int | tuple[int, ...] | None = None,
     *,
     argnames: tuple[str, ...] | None = None,
     has_aux: bool = False,
-) -> Callable[..., Any]
+) -> StagedProgram
+```
+
+```python
+grad(
+    f: Callable[CallP, tuple[object, AuxT]],
+    argnums: int | tuple[int, ...] | None = None,
+    *,
+    argnames: tuple[str, ...] | None = None,
+    has_aux: Literal[True],
+) -> Callable[CallP, tuple[object, AuxT]]
+```
+
+```python
+grad(
+    f: Callable[CallP, object],
+    argnums: int | tuple[int, ...] | None = None,
+    *,
+    argnames: tuple[str, ...] | None = None,
+    has_aux: Literal[False] = False,
+) -> Callable[CallP, object]
+```
+
+```python
+grad(
+    f: Callable[CallP, object],
+    argnums: int | tuple[int, ...] | None = None,
+    *,
+    argnames: tuple[str, ...] | None = None,
+    has_aux: bool,
+) -> Callable[CallP, object]
+```
+
+```python
+grad(
+    f: Callable[CallP, object],
+    argnums: int | tuple[int, ...] | None = None,
+    *,
+    argnames: tuple[str, ...] | None = None,
+    has_aux: bool = False,
+) -> Callable[CallP, object] | StagedProgram
 ```
 
 Differentiate a scalar-valued function with reverse mode.
@@ -22,7 +62,7 @@ An ordinary callable is traced from concrete inputs on every invocation; no trac
 
 Parameters:
 
-- **`f`** (`Callable[..., Any]`) – Callable whose differentiated value is a real scalar or a one-leaf pytree containing a real scalar. With has_aux=True, it instead returns (value, auxiliary), where only value is differentiated. A StagedProgram is also accepted.
+- **`f`** (`Callable[CallP, object]`) – Callable whose differentiated value is a real scalar or a one-leaf pytree containing a real scalar. With has_aux=True, it instead returns (value, auxiliary), where only value is differentiated. A StagedProgram is also accepted.
 - **`argnums`** (`int | tuple[int, ...] | None`, default: `None` ) – Positional arguments to differentiate. An integer returns that argument's gradient pytree directly, while a tuple returns a tuple in the given order. None selects argument zero unless argnames is provided, in which case it selects no positional arguments. Negative indices are resolved for each call.
 - **`argnames`** (`tuple[str, ...] | None`, default: `None` ) – Named arguments to differentiate. Their gradients are returned in a dictionary keyed by name. For an ordinary callable, a selected name may be passed positionally or by keyword; staged named inputs must be passed by keyword. When positional and named inputs are both selected, the result is (positional_gradients, named_gradients), with the positional part following the integer-versus-tuple rule above.
 - **`has_aux`** (`bool`, default: `False` ) – Whether f returns (value, auxiliary). The auxiliary value is excluded from differentiation. A dynamic call materializes it as a concrete sidecar; a staged transform records it as an ordinary staged output.
@@ -34,7 +74,7 @@ Returns:
 Raises:
 
 - `IndexError` – If a positional selection is out of range for the transformed call.
-- `TypeError` – If a selected input is an unsupported Python complex scalar, or a selected staged weak-scalar signature is not real floating-point.
+- `TypeError` – If a selected input is an unsupported Python complex scalar, or a selected staged input leaf is static, or a selected staged weak-scalar signature is not real floating-point.
 - `ValueError` – If positional selections are duplicated, an ordinary callable argument is selected both positionally and by name, a selected name is unavailable, or the differentiated output is not a real scalar.
 - `NoVJPError` – If an operation on the differentiated path has no reverse-mode rule.
 
@@ -43,8 +83,11 @@ Examples:
 ```pycon
 >>> import advect as ad
 >>> import numpy as np
+>>> def squared_norm(x):
+...     return np.sum(x**2)
 >>> x = np.array([1.0, 2.0, 3.0])
->>> ad.grad(lambda value: np.sum(value**2))(x).tolist()
+>>> gradient = ad.grad(squared_norm)
+>>> gradient(x).tolist()
 [2.0, 4.0, 6.0]
 ```
 
@@ -52,12 +95,52 @@ Examples:
 
 ```python
 value_and_grad(
-    f: Callable[..., Any],
+    f: StagedProgram,
     argnums: int | tuple[int, ...] | None = None,
     *,
     argnames: tuple[str, ...] | None = None,
     has_aux: bool = False,
-) -> Callable[..., tuple[Any, ...]]
+) -> StagedProgram
+```
+
+```python
+value_and_grad(
+    f: Callable[CallP, ResultT],
+    argnums: int | tuple[int, ...] | None = None,
+    *,
+    argnames: tuple[str, ...] | None = None,
+    has_aux: Literal[False] = False,
+) -> Callable[CallP, tuple[ResultT, object]]
+```
+
+```python
+value_and_grad(
+    f: Callable[CallP, tuple[ResultT, AuxT]],
+    argnums: int | tuple[int, ...] | None = None,
+    *,
+    argnames: tuple[str, ...] | None = None,
+    has_aux: Literal[True],
+) -> Callable[CallP, tuple[ResultT, object, AuxT]]
+```
+
+```python
+value_and_grad(
+    f: Callable[CallP, object],
+    argnums: int | tuple[int, ...] | None = None,
+    *,
+    argnames: tuple[str, ...] | None = None,
+    has_aux: bool,
+) -> Callable[CallP, tuple[object, ...]]
+```
+
+```python
+value_and_grad(
+    f: Callable[CallP, object],
+    argnums: int | tuple[int, ...] | None = None,
+    *,
+    argnames: tuple[str, ...] | None = None,
+    has_aux: bool = False,
+) -> Callable[CallP, tuple[object, ...]] | StagedProgram
 ```
 
 Compute a scalar value and its reverse-mode gradient together.
@@ -66,7 +149,7 @@ An ordinary callable is traced from concrete inputs on every invocation; no trac
 
 Parameters:
 
-- **`f`** (`Callable[..., Any]`) – Callable whose differentiated value is a real scalar or a one-leaf pytree containing a real scalar. With has_aux=True, it instead returns (value, auxiliary), where only value is differentiated. A StagedProgram is also accepted.
+- **`f`** (`Callable[CallP, object]`) – Callable whose differentiated value is a real scalar or a one-leaf pytree containing a real scalar. With has_aux=True, it instead returns (value, auxiliary), where only value is differentiated. A StagedProgram is also accepted.
 - **`argnums`** (`int | tuple[int, ...] | None`, default: `None` ) – Positional arguments to differentiate. An integer returns that argument's gradient pytree directly, while a tuple returns a tuple in the given order. None selects argument zero unless argnames is provided, in which case it selects no positional arguments. Negative indices are resolved for each call.
 - **`argnames`** (`tuple[str, ...] | None`, default: `None` ) – Named arguments to differentiate. Their gradients are returned in a dictionary keyed by name. For an ordinary callable, a selected name may be passed positionally or by keyword; staged named inputs must be passed by keyword. When positional and named inputs are both selected, the gradient is (positional_gradients, named_gradients), with the positional part following the integer-versus-tuple rule above.
 - **`has_aux`** (`bool`, default: `False` ) – Whether f returns (value, auxiliary). The auxiliary value is excluded from differentiation. A dynamic call materializes it as a concrete sidecar; a staged transform records it as an ordinary staged output.
@@ -78,7 +161,7 @@ Returns:
 Raises:
 
 - `IndexError` – If a positional selection is out of range for the transformed call.
-- `TypeError` – If a selected input is an unsupported Python complex scalar, or a selected staged weak-scalar signature is not real floating-point.
+- `TypeError` – If a selected input is an unsupported Python complex scalar, or a selected staged input leaf is static, or a selected staged weak-scalar signature is not real floating-point.
 - `ValueError` – If positional selections are duplicated, an ordinary callable argument is selected both positionally and by name, a selected name is unavailable, or the differentiated output is not a real scalar.
 - `NoVJPError` – If an operation on the differentiated path has no reverse-mode rule.
 
@@ -87,8 +170,11 @@ Examples:
 ```pycon
 >>> import advect as ad
 >>> import numpy as np
+>>> def squared_norm(x):
+...     return np.sum(x**2)
 >>> x = np.array([1.0, 2.0, 3.0])
->>> value, gradient = ad.value_and_grad(lambda v: np.sum(v**2))(x)
+>>> value_and_gradient = ad.value_and_grad(squared_norm)
+>>> value, gradient = value_and_gradient(x)
 >>> float(value), gradient.tolist()
 (14.0, [2.0, 4.0, 6.0])
 ```
@@ -97,16 +183,15 @@ Examples:
 
 ```python
 jvp(
-    f: Callable[..., Any],
-    argnums: int | tuple[int, ...] = 0,
-) -> Callable[..., tuple[Any, Any]]
+    f: Callable[..., R], argnums: int | tuple[int, ...] = 0
+) -> Callable[..., tuple[R, object]]
 ```
 
 Return a concrete-tracing Jacobian-vector product transform.
 
 Parameters:
 
-- **`f`** (`Callable[..., Any]`) – Callable to differentiate. Its output may be any supported array or pytree. Passing a StagedProgram executes it inside a concrete trace; this transform does not compile a new staged program.
+- **`f`** (`Callable[..., R]`) – Callable to differentiate. Its output may be any supported array or pytree. Passing a StagedProgram executes it inside a concrete trace; this transform does not compile a new staged program.
 - **`argnums`** (`int | tuple[int, ...]`, default: `0` ) – Positional arguments to differentiate. An integer expects one tangent pytree directly. A tuple expects a tuple of tangent pytrees in the given order, including for a one-element tuple. Negative indices are resolved for each transformed call.
 
 Returns:
@@ -129,7 +214,12 @@ Examples:
 ```pycon
 >>> import advect as ad
 >>> import numpy as np
->>> value, tangent = ad.jvp(lambda x: x**2)(np.array([1.0, 2.0]), tangents=np.ones(2))
+>>> def square(x):
+...     return x**2
+>>> x = np.array([1.0, 2.0])
+>>> direction = np.ones_like(x)
+>>> directional_derivative = ad.jvp(square)
+>>> value, tangent = directional_derivative(x, tangents=direction)
 >>> value.tolist(), tangent.tolist()
 ([1.0, 4.0], [2.0, 4.0])
 ```
@@ -138,9 +228,9 @@ Examples:
 
 ```python
 vjp(
-    f: Callable[..., Any],
+    f: Callable[CallP, ResultT],
     argnums: int | tuple[int, ...] = 0,
-) -> Callable[..., tuple[Any, Pullback]]
+) -> Callable[CallP, tuple[ResultT, Pullback]]
 ```
 
 Return a concrete value and a one-shot reverse pullback.
@@ -149,7 +239,7 @@ Return a concrete value and a one-shot reverse pullback.
 
 Parameters:
 
-- **`f`** (`Callable[..., Any]`) – Callable to linearize. Its output may be any supported array or pytree.
+- **`f`** (`Callable[CallP, ResultT]`) – Callable to linearize. Its output may be any supported array or pytree.
 - **`argnums`** (`int | tuple[int, ...]`, default: `0` ) – Positional arguments to differentiate. An integer makes the pullback return that argument's gradient pytree directly; a tuple makes it return a tuple in the given order. Negative indices are resolved for each call.
 
 Returns:
@@ -184,11 +274,11 @@ Examples:
 
 ```python
 linearize(
-    f: Callable[..., Any],
-    *primals: Any,
+    f: Callable[..., R],
+    *primals: object,
     argnums: int | tuple[int, ...] = 0,
-    **kwargs: Any,
-) -> tuple[Any, LinearMap]
+    **kwargs: object,
+) -> tuple[R, LinearMap]
 ```
 
 Linearize one concrete call and return its reusable real-linear map.
@@ -197,10 +287,10 @@ The call is traced immediately from `primals` and `kwargs`. The returned `Linear
 
 Parameters:
 
-- **`f`** (`Callable[..., Any]`) – Callable to linearize. Its output may be any supported array or pytree. A StagedProgram is accepted, but the surrounding linearization is still concrete and invocation-local.
-- **`*primals`** (`Any`, default: `()` ) – Positional arguments for this call. Only the arguments selected by argnums are tangent inputs; the others remain primal coefficients.
+- **`f`** (`Callable[..., R]`) – Callable to linearize. Its output may be any supported array or pytree. A StagedProgram is accepted, but the surrounding linearization is still concrete and invocation-local.
+- **`*primals`** (`object`, default: `()` ) – Positional arguments for this call. Only the arguments selected by argnums are tangent inputs; the others remain primal coefficients.
 - **`argnums`** (`int | tuple[int, ...]`, default: `0` ) – Positional arguments to differentiate. An integer makes linear(tangents) accept that argument's tangent pytree directly; a tuple makes it accept a tuple of tangent pytrees in the given order. Negative indices are resolved against primals.
-- **`**kwargs`** (`Any`, default: `{}` ) – Keyword arguments forwarded to f. linearize does not select keyword arguments for differentiation.
+- **`**kwargs`** (`object`, default: `{}` ) – Keyword arguments forwarded to f. linearize does not select keyword arguments for differentiation.
 
 Returns:
 
@@ -237,18 +327,18 @@ Examples:
 
 ```python
 jacobian(
-    f: Callable[..., Any],
+    f: Callable[P, object],
     argnums: int | tuple[int, ...] | None = None,
     *,
     argnames: tuple[str, ...] | None = None,
-) -> Callable[..., Any]
+) -> Callable[P, object]
 ```
 
 Return a shape-preserving dense Jacobian for real pytree inputs and outputs.
 
 Parameters:
 
-- **`f`** (`Callable[..., Any]`) – Callable to differentiate. Its selected inputs and output may be pytrees of real arrays or real Python scalars. A StagedProgram is accepted, but each call still uses a concrete, invocation-local linearization.
+- **`f`** (`Callable[P, object]`) – Callable to differentiate. Its selected inputs and output may be pytrees of real arrays or real Python scalars. A StagedProgram is accepted, but each call still uses a concrete, invocation-local linearization.
 - **`argnums`** (`int | tuple[int, ...] | None`, default: `None` ) – Positional arguments to differentiate. An integer represents that input directly in every output block; a tuple represents the selected inputs as a tuple in the given order. None selects argument zero unless argnames is provided, in which case it selects no positional arguments. Negative indices are resolved for each call.
 - **`argnames`** (`tuple[str, ...] | None`, default: `None` ) – Named arguments to differentiate. Each output leaf contains their derivative blocks in a dictionary keyed by name. For an ordinary callable, a selected name may be passed positionally or by keyword; staged named inputs must be passed by keyword. With both positional and named selections, each output leaf contains (positional_blocks, named_blocks).
 
@@ -285,9 +375,8 @@ Examples:
 
 ```python
 hvp(
-    f: Callable[..., Any],
-    argnums: int | tuple[int, ...] = 0,
-) -> Callable[..., tuple[Any, Any]]
+    f: Callable[..., R], argnums: int | tuple[int, ...] = 0
+) -> _HvpTransform[R]
 ```
 
 Return a dynamic value-and-Hessian-vector-product transform.
@@ -296,7 +385,7 @@ The returned function evaluates `f` and applies its Hessian to one selected inpu
 
 Parameters:
 
-- **`f`** (`Callable[..., Any]`) – Callable producing a real scalar or a one-leaf pytree containing a real scalar. A StagedProgram is accepted, but the returned transform is still an ordinary dynamic callable.
+- **`f`** (`Callable[..., R]`) – Callable producing a real scalar or a one-leaf pytree containing a real scalar. A StagedProgram is accepted, but the returned transform is still an ordinary dynamic callable.
 - **`argnums`** (`int | tuple[int, ...]`, default: `0` ) – One or more positional arguments to differentiate. An integer selects one input and uses its pytree directly. A tuple preserves a tuple of selected input pytrees in the given order, including for a one-element tuple. Negative indices are resolved for each call.
 
 Returns:
@@ -332,9 +421,9 @@ Examples:
 
 ```python
 hessian(
-    f: Callable[..., Any],
+    f: Callable[P, object],
     argnums: int | tuple[int, ...] = 0,
-) -> Callable[..., Any]
+) -> Callable[P, object]
 ```
 
 Return a dynamic transform that assembles an exact dense Hessian.
@@ -343,7 +432,7 @@ Each selected positional argument is one dense real input block. For selected sh
 
 Parameters:
 
-- **`f`** (`Callable[..., Any]`) – Callable producing a real scalar or a one-leaf pytree containing a real scalar. A StagedProgram is accepted, but the returned transform is still an ordinary dynamic callable.
+- **`f`** (`Callable[P, object]`) – Callable producing a real scalar or a one-leaf pytree containing a real scalar. A StagedProgram is accepted, but the returned transform is still an ordinary dynamic callable.
 - **`argnums`** (`int | tuple[int, ...]`, default: `0` ) – One or more positional arguments to differentiate. An integer selects one input and returns its dense block directly. A tuple preserves both selected-argument axes in the given order and returns a tuple of tuple blocks, including a one-by-one structure for a one-element tuple. Negative indices are resolved for each call.
 
 Returns:
@@ -378,9 +467,9 @@ Examples:
 
 ```python
 hessian_diag(
-    f: Callable[..., Any],
+    f: Callable[P, object],
     argnums: int | tuple[int, ...] = 0,
-) -> Callable[..., Any]
+) -> Callable[P, object]
 ```
 
 Return a dynamic transform that assembles exact Hessian diagonals.
@@ -389,7 +478,7 @@ For each selected positional argument, the result contains the diagonal of that 
 
 Parameters:
 
-- **`f`** (`Callable[..., Any]`) – Callable producing a real scalar or a one-leaf pytree containing a real scalar. A StagedProgram is accepted, but the returned transform is still an ordinary dynamic callable.
+- **`f`** (`Callable[P, object]`) – Callable producing a real scalar or a one-leaf pytree containing a real scalar. A StagedProgram is accepted, but the returned transform is still an ordinary dynamic callable.
 - **`argnums`** (`int | tuple[int, ...]`, default: `0` ) – One or more positional arguments to differentiate. An integer selects one input and returns its diagonal directly. A tuple returns one diagonal per selected input in the given order, including a one-tuple for a one-element tuple. Negative indices are resolved for each call.
 
 Returns:
@@ -423,9 +512,7 @@ Examples:
 ## checkpoint
 
 ```python
-checkpoint(
-    function: Callable[..., Any],
-) -> Callable[..., Any]
+checkpoint(function: Callable[P, R]) -> Callable[P, R]
 ```
 
 Return a dynamic rematerialization wrapper for `function`.
@@ -434,7 +521,7 @@ An ordinary call invokes `function` directly. During concrete autodiff, Advect r
 
 Parameters:
 
-- **`function`** (`Callable[..., Any]`) – Pure callable to rematerialize. Its positional arguments, keyword arguments, and result may be pytrees. Replaying the same explicit inputs must produce the same result; observed mutable state and side effects are therefore outside the contract.
+- **`function`** (`Callable[P, R]`) – Pure callable to rematerialize. Its positional arguments, keyword arguments, and result may be pytrees. Replaying the same explicit inputs must produce the same result; observed mutable state and side effects are therefore outside the contract.
 
 Returns:
 
@@ -467,12 +554,12 @@ Examples:
 
 ```python
 implicit_root(
-    residual: ResidualFunction,
+    residual: _ResidualFunction[SolutionT, ParamsT],
     *,
-    solve: RootSolver,
-    linear_solve: LinearSolver,
-    transpose_solve: LinearSolver | None = None,
-) -> Callable[..., Any]
+    solve: _RootSolver[SolutionT],
+    linear_solve: _LinearSolver[SolutionT],
+    transpose_solve: _LinearSolver[SolutionT] | None = None,
+) -> _ImplicitRootCallable[ParamsT, SolutionT]
 ```
 
 Build a dynamic transform for a converged implicit solution.
@@ -481,10 +568,10 @@ The returned callable solves `residual(solution, params) == 0` and differentiate
 
 Parameters:
 
-- **`residual`** (`ResidualFunction`) – Trace-compatible callable with signature residual(solution, params). Its result must have the same pytree structure and leaf shape, dtype, array provider, and device as solution.
-- **`solve`** (`RootSolver`) – Nonlinear callback with signature solve(residual_at_params, initial) -> solution. Advect supplies residual_at_params(candidate) with params fixed. Returning certifies convergence. The solution must match initial in pytree structure, leaf shape, provider, and device; its dtype may be promoted.
-- **`linear_solve`** (`LinearSolver`) – Matrix-free callback with signature linear_solve(operator, rhs) -> solution_tangent. For a JVP, operator(direction) applies the residual's state Jacobian and rhs is the negative parameter-forcing tangent. The returned value must match the solved solution's pytree and leaf specifications.
-- **`transpose_solve`** (`LinearSolver | None`, default: `None` ) – Matrix-free callback with signature transpose_solve(operator, rhs) -> residual_cotangent. In reverse mode, operator applies the real adjoint of the residual's state Jacobian and rhs is the solution cotangent. The result must match the residual value's pytree and leaf specifications. None reuses linear_solve with this adjoint operator.
+- **`residual`** (`_ResidualFunction[SolutionT, ParamsT]`) – Trace-compatible callable with signature residual(solution, params). Its result must have the same pytree structure and leaf shape, dtype, array provider, and device as solution.
+- **`solve`** (`_RootSolver[SolutionT]`) – Nonlinear callback with signature solve(residual_at_params, initial) -> solution. Advect supplies residual_at_params(candidate) with params fixed. Returning certifies convergence. The solution must match initial in pytree structure, leaf shape, provider, and device; its dtype may be promoted.
+- **`linear_solve`** (`_LinearSolver[SolutionT]`) – Matrix-free callback with signature linear_solve(operator, rhs) -> solution_tangent. For a JVP, operator(direction) applies the residual's state Jacobian and rhs is the negative parameter-forcing tangent. The returned value must match the solved solution's pytree and leaf specifications.
+- **`transpose_solve`** (`_LinearSolver[SolutionT] | None`, default: `None` ) – Matrix-free callback with signature transpose_solve(operator, rhs) -> residual_cotangent. In reverse mode, operator applies the real adjoint of the residual's state Jacobian and rhs is the solution cotangent. The result must match the residual value's pytree and leaf specifications. None reuses linear_solve with this adjoint operator.
 
 Returns:
 
@@ -542,7 +629,7 @@ Examples:
 ### __call__
 
 ```python
-__call__(cotangent: Any) -> Any
+__call__(cotangent: object) -> object
 ```
 
 Apply the pullback once and release its retained trace.
