@@ -118,13 +118,14 @@ a:hover { background: var(--accent); color: var(--bg); }
 
 /* ---------- rendered markdown ---------- */
 .md h1 {
-  font-size: 15px; font-weight: 700; letter-spacing: .04em;
+  font-size: 16px; font-weight: 700; letter-spacing: .04em;
   text-transform: uppercase; margin: 4px 0 14px;
 }
 .md h1::before { content: "§ "; color: var(--accent); }
 .md h2 {
   font-size: 14px; font-weight: 700; letter-spacing: .06em;
-  margin: 26px 0 8px; text-transform: uppercase;
+  margin: 28px 0 10px; padding-bottom: 4px; border-bottom: 1px solid var(--faint);
+  text-transform: uppercase; max-width: 80ch;
 }
 .md h2::before { content: "§ "; color: var(--accent); }
 .md h3 { font-size: 14px; font-weight: 700; margin: 20px 0 6px; }
@@ -186,6 +187,7 @@ a:hover { background: var(--accent); color: var(--bg); }
 }
 .md pre {
   margin: 8px 0 12px; padding: 10px 12px; border: 1px solid var(--faint);
+  background: color-mix(in srgb, var(--faint) 24%, var(--bg));
   overflow-x: auto; line-height: 1.5; position: relative; max-width: 88ch;
 }
 .md pre code { background: none; padding: 0; border-radius: 0; }
@@ -237,7 +239,10 @@ a:hover { background: var(--accent); color: var(--bg); }
 .md .highlight .k, .md .highlight .kd, .md .highlight .kn,
 .md .highlight .kr, .md .highlight .kc, .md .highlight .ow { font-weight: 700; }
 .md .highlight .kt, .md .highlight .nb, .md .highlight .nd,
-.md .highlight .ne, .md .highlight .nf, .md .highlight .nc { color: inherit; }
+.md .highlight .ne, .md .highlight .nf, .md .highlight .nc,
+.md .highlight .fm { color: var(--add); }
+.md .highlight .nf, .md .highlight .nc { font-weight: 700; }
+.md .highlight .nn { color: var(--accent); }
 .md .highlight .s, .md .highlight .s1, .md .highlight .s2,
 .md .highlight .sd, .md .highlight .sb, .md .highlight .sa,
 .md .highlight .se, .md .highlight .si { color: var(--accent); }
