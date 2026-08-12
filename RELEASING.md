@@ -15,8 +15,10 @@ Before changing the version, confirm that:
 
 - `main` is current and its required CI checks pass;
 - the target version is unused as a Git tag and on TestPyPI and PyPI;
-- TestPyPI trusts only `rehearse-release.yml`, and PyPI trusts only
-  `publish-release.yml`;
+- TestPyPI and PyPI trust only `publish-release.yml`, each through its matching
+  GitHub environment;
+- the `release` environment requires operator approval and accepts deployments
+  only from `main`;
 - the retired legacy `release.yml` workflow is disabled in GitHub Actions;
 - the publishing environments allow only the `main`-anchored release workflows
   and exclude tag refs;
@@ -35,28 +37,10 @@ Before changing the version, confirm that:
 Do not use `cz bump`; Commitizen validates commit messages but does not own the
 package version.
 
-## Rehearse on TestPyPI
-
-Run the [release rehearsal](.github/workflows/rehearse-release.yml) manually on
-`main` with the planned `vX.Y.Z` tag. It builds and smoke-tests the complete
-configured native wheel family plus the source distribution, rejects an
-incomplete artifact family, checks package metadata, publishes the whole
-candidate to TestPyPI, and verifies a clean scientific install from TestPyPI.
-
-TestPyPI files are treated as immutable. If the candidate is wrong, fix it,
-choose the next version, and repeat the rehearsal.
-
 ## Publish
 
-After the TestPyPI run and main CI both pass, tag that exact commit:
-
-```bash
-git tag -a vX.Y.Z -m "Advect X.Y.Z"
-git push origin vX.Y.Z
-```
-
-The supported publication path is a separate repository dispatch from an
-authorized GitHub CLI session:
+After main CI passes, start the publication workflow from an authorized GitHub
+CLI session. The tag names the intended version but must not exist yet:
 
 ```bash
 gh api --method POST repos/{owner}/{repo}/dispatches \
@@ -65,12 +49,28 @@ gh api --method POST repos/{owner}/{repo}/dispatches \
 ```
 
 The default-branch [publication workflow](.github/workflows/publish-release.yml)
-resolves the annotated tag to an immutable commit, then stops before building
-unless that exact commit is on `main` and its `CI Success` job passed in a
-`main` push workflow. It rebuilds and validates the distributions, publishes
-versioned documentation, creates the GitHub Release, publishes to PyPI, and
-verifies a clean public install. Wait for the workflow to finish, then confirm
-that:
+pins the current `main` commit, then stops before building unless its
+`CI Success` job passed in a `main` push workflow. It builds and smoke-tests the
+complete configured native wheel family plus the source distribution, rejects
+an incomplete artifact family, checks package metadata, publishes the candidate
+to TestPyPI, and verifies a clean scientific install.
+
+After the `Approve production release` job begins waiting, create the annotated
+tag at the exact candidate revision shown in the workflow summary, push it, and
+approve the `release` environment:
+
+```bash
+git tag -a vX.Y.Z CANDIDATE_SHA -m "Advect X.Y.Z"
+git push origin vX.Y.Z
+```
+
+The workflow verifies that the protected tag still targets the tested candidate
+before publishing versioned documentation, creating the GitHub Release,
+publishing the same candidate to PyPI, and verifying a clean public install.
+
+TestPyPI files, version tags, and public release files are immutable. If the
+TestPyPI candidate is wrong, fix it, choose the next version, and repeat the
+release. Wait for the workflow to finish, then confirm that:
 
 - the GitHub Release contains the complete wheel family, one source
   distribution, checksums, and the provenance manifest;
