@@ -47,7 +47,7 @@ RULES: dict[str, AbstractRule] = {
         positional=("ord", "axis", "keepdims"),
         allowed=("axis", "keepdims", "ord"),
     ),
-    "array_ext.linalg.pinv": rule("pinv", 1),
+    "array_ext.linalg.pinv": rule("pinv", 1, allowed=("hermitian",)),
     "array_ext.linalg.qr": rule(
         "qr",
         1,

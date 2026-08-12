@@ -7,7 +7,7 @@ import operator
 from collections.abc import Callable, Iterable
 from typing import TYPE_CHECKING, Any, cast
 
-from advect.core._abstract_helpers import accumulation_dtype, dtype_name
+from advect.core._abstract_helpers import accumulation_dtype, dtype_name, normalize_axis
 from advect.core._array_api.providers import (
     _array_namespace_can_donate,
     _get_array_namespace,
@@ -597,8 +597,16 @@ def _evaluate_array_op(  # noqa: PLR0912, PLR0915 - one explicit portable execut
             kwargs[str(tolerance)] = inputs[1]
         return _namespace_function(namespace, path)(inputs[0], **kwargs)
     if leaf_name in {"diagonal", "trace"} and getattr(namespace, "__name__", "") != "numpy":
-        kwargs.pop("axis1", None)
-        kwargs.pop("axis2", None)
+        rank = len(inputs[0].shape)
+        first_axis = normalize_axis(kwargs.pop("axis1", 0), rank)
+        second_axis = normalize_axis(kwargs.pop("axis2", 1), rank)
+        axes = (
+            *(axis for axis in range(rank) if axis not in {first_axis, second_axis}),
+            first_axis,
+            second_axis,
+        )
+        if axes != tuple(range(rank)):
+            inputs = (_namespace_function(namespace, "permute_dims")(inputs[0], axes),)
     if leaf_name in {"empty", "ones", "zeros"}:
         return _namespace_function(namespace, path)(kwargs.pop("shape"), **kwargs)
     if leaf_name == "eye":

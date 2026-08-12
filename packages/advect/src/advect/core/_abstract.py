@@ -1146,6 +1146,16 @@ def _array_api_asarray(  # noqa: C901 - one constructor contract
         if isinstance(value, AbstractArray):
             return value
         if not isinstance(value, (tuple, list)):
+            if type(value) in {bool, complex, float, int}:
+                spec = ArraySpec(
+                    (), _dtype_name(dtype) if dtype is not None else _scalar_spec(value).dtype
+                )
+                return _new_abstract_array(
+                    trace,
+                    trace.add_constant(_StrongScalarConstant(value, spec.dtype), spec),
+                    spec,
+                    owned=False,
+                )
             return _lift(trace, value)
         if not value:
             spec = _nested_sequence_spec(value, dtype)
@@ -1156,6 +1166,20 @@ def _array_api_asarray(  # noqa: C901 - one constructor contract
                 owned=False,
             )
         children = tuple(assemble(item) for item in value)
+        stack_dtype = (
+            _dtype_name(dtype)
+            if dtype is not None
+            else _promote_dtype([child.spec for child in children])
+        )
+        children = tuple(
+            child
+            if _dtype_name(child.dtype) == stack_dtype
+            else cast(
+                "AbstractArray",
+                _apply_array_api(trace, "astype", (child, stack_dtype), {}),
+            )
+            for child in children
+        )
         return cast(
             "AbstractArray",
             _apply_array_api(trace, "stack", (children,), {"axis": 0}),

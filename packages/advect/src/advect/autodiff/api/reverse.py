@@ -139,7 +139,7 @@ def _staged_gradient_scalar_mask(
     selected_leaves, _selected_treedef = tree_flatten((tuple(positional), named))
     for spec in selected_leaves:
         if not isinstance(spec, ArraySpec):
-            continue
+            raise TypeError("Staged autodiff cannot select static input leaves")
         dtype = str(spec.dtype).lower()
         if spec.weak and not dtype.startswith("float"):
             msg = (
@@ -406,8 +406,8 @@ def vjp_program(
     IndexError
         If a positional selection is out of range for the staged signature.
     TypeError
-        If `f` is not a `StagedProgram`, or a selected weak scalar signature is
-        not real floating-point.
+        If `f` is not a `StagedProgram`, a selected input leaf is static, or a
+        selected weak scalar signature is not real floating-point.
     ValueError
         If positional selections are duplicated, a selected input is absent
         from the staged signature, or the primal signature already reserves
@@ -675,7 +675,8 @@ def grad[**CallP](
         If a positional selection is out of range for the transformed call.
     TypeError
         If a selected input is an unsupported Python complex scalar, or a
-        selected staged weak-scalar signature is not real floating-point.
+        selected staged input leaf is static, or a selected staged weak-scalar
+        signature is not real floating-point.
     ValueError
         If positional selections are duplicated, an ordinary callable
         argument is selected both positionally and by name, a selected name is
@@ -815,7 +816,8 @@ def value_and_grad[**CallP](
         If a positional selection is out of range for the transformed call.
     TypeError
         If a selected input is an unsupported Python complex scalar, or a
-        selected staged weak-scalar signature is not real floating-point.
+        selected staged input leaf is static, or a selected staged weak-scalar
+        signature is not real floating-point.
     ValueError
         If positional selections are duplicated, an ordinary callable
         argument is selected both positionally and by name, a selected name is

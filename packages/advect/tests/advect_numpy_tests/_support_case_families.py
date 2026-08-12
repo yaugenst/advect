@@ -116,6 +116,7 @@ def _algorithm_cases() -> tuple[NumpySupportCase, ...]:
     y_samples = ArrayInput([0.2, 0.7, 0.9, 0.6], "float64")
     weights = ArrayInput([1.0, 2.0, 3.0, 0.5], "float64")
     edges = [0.0, 0.5, 1.0]
+    edge_rows = ArrayInput([edges, [0.0, 0.25, 1.0]], "float64")
     return (
         _case(
             "apply_along_axis",
@@ -239,6 +240,14 @@ def _algorithm_cases() -> tuple[NumpySupportCase, ...]:
             ((0,), (1,), (0, 1)),
             (("bins", 3),),
             variant="unweighted-integer-bins",
+        ),
+        _case(
+            "histogram2d",
+            (samples, y_samples, edge_rows),
+            (Input(0), Input(1)),
+            ((2,),),
+            (("bins", Input(2)),),
+            variant="ndarray-edge-rows",
         ),
         _case(
             "histogramdd",
@@ -570,6 +579,13 @@ def _ordering_and_predicate_cases() -> tuple[NumpySupportCase, ...]:
         _unary("nonzero", derivative=False),
         _case("digitize", (_REAL, _POSITIVE), (Input(0), Input(1)), None),
         _case("lexsort", (_REAL, _RIGHT), ((Input(0), Input(1)),), None),
+        _case(
+            "lexsort",
+            (_MATRIX,),
+            (Input(0),),
+            None,
+            variant="key-matrix",
+        ),
         _case("isin", (_REAL, membership_values), (Input(0), Input(1)), None),
         _case("ix_", (_SHORT, _VECTOR), (Input(0), Input(1)), None),
         _binary("setdiff1d"),
@@ -785,6 +801,13 @@ def _linalg_cases() -> tuple[NumpySupportCase, ...]:
         "float64",
     )
     return (
+        _unary(
+            "linalg.pinv",
+            _MATRIX,
+            modes=_ALL_MODES,
+            kwargs=(("hermitian", True),),
+            variant="hermitian",
+        ),
         _unary("linalg.cond", _MATRIX),
         _unary("linalg.matrix_rank", _RECTANGULAR, derivative=False),
         _case(

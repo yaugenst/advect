@@ -292,6 +292,9 @@ def _collect_array_api_operands(
         if not isinstance(value, (tuple, list)):
             msg = f"Array API {path}() expects {canonical_name!r} to be a list or tuple"
             raise TypeError(msg)
+        if not value:
+            msg = f"Array API {path}() requires a non-empty list or tuple of arrays"
+            raise ValueError(msg)
         operands.extend(value)
     return operands
 
