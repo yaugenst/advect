@@ -70,15 +70,16 @@ var base_url = "{{ base_url }}";
    flash and the panes animating open on every navigation */
 (function () {
   var m = null, t = null, o = null;
+  var home = {% if page and page.is_homepage %}true{% else %}false{% endif %};
   try {
     m = localStorage.getItem("advect-mode");
     t = localStorage.getItem("advect-tree");
     o = localStorage.getItem("advect-outline");
   } catch (e) { /* private mode */ }
   if (m === "light" || m === "dark") document.documentElement.dataset.theme = m;
-  var open = t === null ? window.innerWidth > 1100 : t === "1";
+  var open = t === null ? home && window.innerWidth > 1100 : t === "1";
   if (open) document.documentElement.classList.add("tree-open");
-  open = o === null ? window.innerWidth > 1500 : o === "1";
+  open = o === null ? !home && window.innerWidth > 1100 : o === "1";
   if (open) document.documentElement.classList.add("outline-open");
 })();
 </script>
