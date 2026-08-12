@@ -161,8 +161,8 @@ def _partials_maximum(
     _ = ans, rest, attrs
     choose_x = _maximum_choice_mask(x, y)
     return (
-        xp.astype(choose_x, x.dtype),
-        xp.astype(xp.logical_not(choose_x), y.dtype),
+        xp.astype(choose_x, ans.dtype),
+        xp.astype(xp.logical_not(choose_x), ans.dtype),
     )
 
 
@@ -176,8 +176,8 @@ def _partials_minimum(
     _ = ans, rest, attrs
     choose_x = _minimum_choice_mask(x, y)
     return (
-        xp.astype(choose_x, x.dtype),
-        xp.astype(xp.logical_not(choose_x), y.dtype),
+        xp.astype(choose_x, ans.dtype),
+        xp.astype(xp.logical_not(choose_x), ans.dtype),
     )
 
 

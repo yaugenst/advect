@@ -442,6 +442,7 @@ def _polynomial_cases() -> tuple[NumpySupportCase, ...]:
     other = ArrayInput([0.5, 1.0], "float64")
     coordinates = ArrayInput([0.0, 1.0, 2.0, 3.0], "float64")
     observations = ArrayInput([0.2, 1.1, 3.8, 9.2], "float64")
+    weights = ArrayInput([1.0, 0.5, 2.0, 1.5], "float64")
     return (
         _unary("poly", _VECTOR),
         _binary("polyadd", coefficients, other),
@@ -450,6 +451,22 @@ def _polynomial_cases() -> tuple[NumpySupportCase, ...]:
         _binary("polydiv", coefficients, other),
         _case(
             "polyfit", (coordinates, observations), (Input(0), Input(1), 2), ((0,), (1,), (0, 1))
+        ),
+        _case(
+            "polyfit",
+            (coordinates, observations, weights),
+            (Input(0), Input(1), 2),
+            ((0,), (1,), (2,), (0, 1, 2)),
+            (("w", Input(2)), ("cov", True)),
+            variant="weighted-covariance",
+        ),
+        _case(
+            "polyfit",
+            (coordinates, observations, weights),
+            (Input(0), Input(1), 2),
+            ((0,), (1,), (2,), (0, 1, 2)),
+            (("w", Input(2)), ("cov", "unscaled")),
+            variant="weighted-unscaled-covariance",
         ),
         _case("polyder", (coefficients,), (Input(0),), ((0,),), (("m", 1),)),
         _case("polyint", (coefficients,), (Input(0),), ((0,),), (("m", 1),)),
@@ -465,6 +482,7 @@ def _polynomial_cases() -> tuple[NumpySupportCase, ...]:
 
 def _statistics_and_unique_cases() -> tuple[NumpySupportCase, ...]:
     quantiles = ArrayInput([0.25, 0.75], "float64")
+    quantile_weights = ArrayInput([1.0, 4.0, 2.0, 1.0], "float64")
     nan_values = ArrayInput([0.0, float("nan"), 2.0, 5.0], "float64")
     quantile_cases = tuple(
         _case(
@@ -477,6 +495,7 @@ def _statistics_and_unique_cases() -> tuple[NumpySupportCase, ...]:
         for name in ("quantile", "nanquantile")
     )
     percentile_coordinates = ArrayInput([25.0, 75.0], "float64")
+    percentile_weights = ArrayInput([[1.0, 2.0], [3.0, 4.0]], "float64")
     percentile_cases = (
         _case(
             "percentile",
@@ -497,6 +516,27 @@ def _statistics_and_unique_cases() -> tuple[NumpySupportCase, ...]:
     return (
         *quantile_cases,
         *percentile_cases,
+        _case(
+            "quantile",
+            (_REAL, quantiles, quantile_weights),
+            (Input(0), Input(1)),
+            ((0,), (1,), (2,), (0, 1, 2)),
+            (("method", "inverted_cdf"), ("weights", Input(2))),
+            variant="weighted",
+        ),
+        _case(
+            "percentile",
+            (_MATRIX, percentile_coordinates, percentile_weights),
+            (Input(0), Input(1)),
+            ((0,), (1,), (2,), (0, 1, 2)),
+            (
+                ("axis", 1),
+                ("keepdims", True),
+                ("method", "inverted_cdf"),
+                ("weights", Input(2)),
+            ),
+            variant="weighted-axis-keepdims",
+        ),
         _unary("median"),
         _unary("nanmedian", nan_values),
         _unary("unique", unique_values, derivative=False),
@@ -522,6 +562,13 @@ def _scientific_cases() -> tuple[NumpySupportCase, ...]:
         _binary("convolve", modes=_ALL_MODES),
         _binary("correlate", modes=_ALL_MODES),
         _case("einsum", (_MATRIX, _MATRIX), ("ij,ij->", Input(0), Input(1)), ((0,), (1,), (0, 1))),
+        _case(
+            "einsum",
+            (_MATRIX, _MATRIX),
+            (Input(0), [0, 1], Input(1), [0, 1], []),
+            ((0,), (1,), (0, 1)),
+            variant="sublist",
+        ),
         _unary("fft.fft2", fft_complex, modes=_ALL_MODES),
         _unary("fft.ifft2", fft_complex, modes=_ALL_MODES),
         _unary("fft.rfft2", fft_real, modes=_ALL_MODES),
