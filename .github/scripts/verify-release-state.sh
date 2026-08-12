@@ -188,6 +188,16 @@ self_test() {
     echo "A run without CI Success passed the release guard" >&2
     return 1
   fi
+
+  if [[ -e .github/workflows/rehearse-release.yml ]] \
+    || ! grep -Fq 'target: testpypi' .github/workflows/publish-release.yml \
+    || ! grep -Fq 'needs: [candidate, verify-testpypi]' \
+      .github/workflows/publish-release.yml \
+    || ! grep -Fq 'needs: [candidate, promote]' \
+      .github/workflows/publish-release.yml; then
+    echo "Production publication is not gated by TestPyPI verification" >&2
+    return 1
+  fi
 }
 
 if [[ "${1:-}" == "--self-test" ]]; then

@@ -7,11 +7,11 @@ permissions: {}
 
 jobs:
   retired:
-    name: Use the rehearsal or publication workflow
+    name: Use the publication workflow
     runs-on: ubuntu-22.04
     steps:
       - name: Refuse the retired path
         run: |
           echo "This legacy workflow is retired and must remain disabled." >&2
-          echo "Use rehearse-release.yml or publish-release.yml." >&2
+          echo "Use publish-release.yml." >&2
           exit 1

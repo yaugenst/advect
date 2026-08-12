@@ -17,14 +17,112 @@ jobs:
     uses: ./.github/workflows/release-candidate.yml
     with:
       release_tag: ${{ github.event.client_payload.tag }}
-      target: pypi
+      target: testpypi
     permissions:
       actions: read
       contents: read
 
+  testpypi:
+    name: Publish candidate to TestPyPI
+    needs: candidate
+    runs-on: ubuntu-22.04
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/advect
+    permissions:
+      id-token: write # TestPyPI trusted publishing exchanges the OIDC identity
+    steps:
+      - name: Download release distributions
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: advect-release-distributions-${{ needs.candidate.outputs.version }}
+          path: dist
+
+      - name: Publish distributions with trusted publishing
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # release/v1
+        with:
+          packages-dir: dist
+          repository-url: https://test.pypi.org/legacy/
+
+  verify-testpypi:
+    name: Verify TestPyPI installation
+    needs: [candidate, testpypi]
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ needs.candidate.outputs.source_revision }}
+
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: false
+          version-file: pyproject.toml
+
+      - name: Install and smoke-test the candidate
+        env:
+          RELEASE_VERSION: ${{ needs.candidate.outputs.version }}
+        run: |
+          uv venv .testpypi-smoke --python 3.14
+          uv pip install \
+            --python .testpypi-smoke/bin/python \
+            --no-cache \
+            'numpy>=2.0,<2.6' \
+            'array-api-compat>=1.11.2,<2' \
+            'scipy>=1.18,<2' \
+            'xarray>=2024.6'
+          uv pip install \
+            --python .testpypi-smoke/bin/python \
+            --no-cache \
+            --no-deps \
+            --index-url https://test.pypi.org/simple/ \
+            "advect==$RELEASE_VERSION"
+          uv pip check --python .testpypi-smoke/bin/python
+          .testpypi-smoke/bin/python scripts/smoke_wheel_install.py scientific
+
+      - name: Record the candidate awaiting promotion
+        env:
+          RELEASE_TAG: ${{ needs.candidate.outputs.release_tag }}
+          SOURCE_REVISION: ${{ needs.candidate.outputs.source_revision }}
+        run: |
+          echo "## Candidate ready for promotion" >> "$GITHUB_STEP_SUMMARY"
+          echo "Tag \`$RELEASE_TAG\` at \`$SOURCE_REVISION\`, then approve production." \
+            >> "$GITHUB_STEP_SUMMARY"
+
+  promote:
+    name: Approve production release
+    needs: [candidate, verify-testpypi]
+    runs-on: ubuntu-22.04
+    environment: release
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ needs.candidate.outputs.source_revision }}
+
+      - name: Verify the operator-created release tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.candidate.outputs.release_tag }}
+          SOURCE_REVISION: ${{ needs.candidate.outputs.source_revision }}
+        run: |
+          tag_revision="$(
+            bash .github/scripts/verify-release-state.sh \
+              "$SOURCE_REVISION" "$GH_REPO" pypi "$RELEASE_TAG"
+          )"
+          if [[ "$tag_revision" != "$SOURCE_REVISION" ]]; then
+            echo "Release tag $RELEASE_TAG does not target the tested candidate" >&2
+            exit 1
+          fi
+
   docs:
     name: Publish versioned documentation
-    needs: candidate
+    needs: [candidate, promote]
     uses: ./.github/workflows/docs.yml
     with:
       source_revision: ${{ needs.candidate.outputs.source_revision }}
