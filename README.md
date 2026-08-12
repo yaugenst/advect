@@ -1,5 +1,5 @@
 <!-- markdownlint-disable-next-line MD033 -->
-<h1 align="center"><img src="docs-theme/img/logo.svg" alt="Advect"></h1>
+<h1 align="center"><img src="https://raw.githubusercontent.com/yaugenst/advect/main/docs-theme/img/logo.svg" alt="Advect"></h1>
 
 <!-- markdownlint-disable MD033 -->
 <p align="center">
