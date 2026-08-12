@@ -1709,7 +1709,10 @@ def stage(
 
     >>> import advect as ad
     >>> import numpy as np
-    >>> program = ad.stage(lambda x: x + 1, np.array([1.0, 2.0]))
+    >>> def add_one(x):
+    ...     return x + 1
+    >>> example_input = np.array([1.0, 2.0])
+    >>> program = ad.stage(add_one, example_input)
     >>> program(np.array([3.0, 4.0])).tolist()
     [4.0, 5.0]
 

@@ -23,11 +23,6 @@ program = ad.stage(loss, sample)
 
 print(f"sample loss: {program(sample):.6f}")
 print(f"shifted loss: {program(sample + 0.1):.6f}")
-print("Array API target:", program.array_api_version)
-print(
-    "optimized nodes:",
-    f"{program.optimization.nodes_before} -> {program.optimization.nodes_after}",
-)
 ```
 
 The example fixes the positional pytree, shape, dtype, device, and Python
@@ -83,7 +78,7 @@ input for a reusable pullback:
 value_and_gradient = ad.value_and_grad(program)
 value, gradient = value_and_gradient(sample)
 
-field_program = ad.stage(lambda x: np.sin(x), sample)
+field_program = ad.stage(np.sin, sample)
 pullback_program = ad.vjp_program(field_program)
 cotangent = np.linspace(1.0, 2.0, sample.size)
 input_cotangent = pullback_program(sample, cotangent=cotangent)

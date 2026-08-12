@@ -180,7 +180,12 @@ def jvp[R](
     --------
     >>> import advect as ad
     >>> import numpy as np
-    >>> value, tangent = ad.jvp(lambda x: x**2)(np.array([1.0, 2.0]), tangents=np.ones(2))
+    >>> def square(x):
+    ...     return x**2
+    >>> x = np.array([1.0, 2.0])
+    >>> direction = np.ones_like(x)
+    >>> directional_derivative = ad.jvp(square)
+    >>> value, tangent = directional_derivative(x, tangents=direction)
     >>> value.tolist(), tangent.tolist()
     ([1.0, 4.0], [2.0, 4.0])
     """
