@@ -7,7 +7,7 @@
 <title>gradients(1) · advect</title>
 <link rel="icon" href="../../img/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="../../css/fonts.css">
-<link rel="stylesheet" href="../../css/theme.css?v=bf544137efc8">
+<link rel="stylesheet" href="../../css/theme.css?v=6c7554a0ba07">
 <link rel="stylesheet" href="../../assets/_mkdocstrings.css">
 <script>
 var base_url = "../..";
@@ -15,15 +15,16 @@ var base_url = "../..";
    flash and the panes animating open on every navigation */
 (function () {
   var m = null, t = null, o = null;
+  var home = false;
   try {
     m = localStorage.getItem("advect-mode");
     t = localStorage.getItem("advect-tree");
     o = localStorage.getItem("advect-outline");
   } catch (e) { /* private mode */ }
   if (m === "light" || m === "dark") document.documentElement.dataset.theme = m;
-  var open = t === null ? window.innerWidth > 1100 : t === "1";
+  var open = t === null ? home && window.innerWidth > 1100 : t === "1";
   if (open) document.documentElement.classList.add("tree-open");
-  open = o === null ? window.innerWidth > 1500 : o === "1";
+  open = o === null ? !home && window.innerWidth > 1100 : o === "1";
   if (open) document.documentElement.classList.add("outline-open");
 })();
 </script>
