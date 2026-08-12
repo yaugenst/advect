@@ -266,13 +266,6 @@ def _polyfit_handler(  # noqa: C901, PLR0912, PLR0915 - mirrors NumPy's output c
 
     scale = np.sqrt(np.sum(lhs * lhs, axis=0))
     scaled_lhs = lhs / scale
-    q_factor, r_factor = np.linalg.qr(scaled_lhs, mode="reduced")
-    projected = np.matmul(np.swapaxes(np.conjugate(q_factor), -1, -2), rhs)
-    coefficients = np.linalg.solve(r_factor, projected)
-    coefficients = (
-        coefficients / scale[:, None] if coefficients.ndim == _MATRIX_RANK else coefficients / scale
-    )
-
     singular_values = np.linalg.svdvals(scaled_lhs)
     _node_id, concrete_singular_values = _snapshot_traced(singular_values)
     singular_array = np.asarray(concrete_singular_values)
@@ -289,6 +282,13 @@ def _polyfit_handler(  # noqa: C901, PLR0912, PLR0915 - mirrors NumPy's output c
             "rank-switching derivative is not supported"
         )
         raise TracingError(msg)
+
+    q_factor, r_factor = np.linalg.qr(scaled_lhs, mode="reduced")
+    projected = np.matmul(np.swapaxes(np.conjugate(q_factor), -1, -2), rhs)
+    coefficients = np.linalg.solve(r_factor, projected)
+    coefficients = (
+        coefficients / scale[:, None] if coefficients.ndim == _MATRIX_RANK else coefficients / scale
+    )
 
     residual = (
         np.matmul(
