@@ -1,0 +1,24 @@
+name: Deploy docs
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_revision:
+        description: Immutable source commit to document; defaults to the triggering commit
+        required: false
+        type: string
+        default: ""
+      version:
+        description: Released version label to replace and publish with mike
+        required: true
+        type: string
+
+jobs:
+  docs:
+    name: Publish versioned documentation
+    uses: ./.github/workflows/docs.yml
+    with:
+      source_revision: ${{ inputs.source_revision }}
+      version: ${{ inputs.version }}
+    permissions:
+      contents: write # the reusable docs workflow pushes gh-pages

@@ -84,10 +84,10 @@ existing version tag; fix the issue under a new version.
 ## Refresh released documentation
 
 To publish a documentation correction without releasing another package, run
-the [Docs workflow](.github/workflows/docs.yml) manually. Set `version` to the
-existing release version `X.Y.Z`, corresponding to the immutable `vX.Y.Z` tag,
-and set `source_revision` to the exact commit containing the documentation to
-publish.
+the [Deploy docs workflow](.github/workflows/deploy-docs.yml) manually. Set
+`version` to the existing release version `X.Y.Z`, corresponding to the
+immutable `vX.Y.Z` tag, and set `source_revision` to the exact commit containing
+the documentation to publish.
 
 The deployed version remains the release identity even when its documentation
 comes from a later commit. The workflow replaces `/X.Y.Z/`, updates `/latest/`,
