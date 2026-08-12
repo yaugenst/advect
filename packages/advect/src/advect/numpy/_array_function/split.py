@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 
 np: Any = _numpy
 
-_REQUIRED_SPLIT_ARGS = 2
+_SPLIT_AXIS_POSITION = 2
 
 
 def _split_to_getitems(
@@ -52,20 +52,14 @@ def _split_handler(
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
 ) -> ArrayFunctionResult:
-    if len(args) < _REQUIRED_SPLIT_ARGS:
-        msg = "numpy.split expects (ary, indices_or_sections) during tracing"
-        raise TracingError(msg)
-    unsupported = set(kwargs) - {"axis"}
-    if unsupported:
-        msg = f"numpy.split kwargs not supported during tracing: {sorted(unsupported)}"
-        raise TracingError(msg)
-
     ary = args[0]
     if not isinstance(ary, traced_type):
         msg = "numpy.split tracing requires a traced first argument"
         raise TracingError(msg)
     indices_or_sections = args[1]
-    axis = int(kwargs.get("axis", 0))
+    axis = int(
+        args[_SPLIT_AXIS_POSITION] if len(args) > _SPLIT_AXIS_POSITION else kwargs.get("axis", 0)
+    )
     outputs = tuple(np.split(_get_value(ary, traced_type), indices_or_sections, axis=axis))
     return _split_to_getitems(traced_array=ary, outputs=outputs, axis=axis)
 
@@ -76,20 +70,14 @@ def _array_split_handler(
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
 ) -> ArrayFunctionResult:
-    if len(args) < _REQUIRED_SPLIT_ARGS:
-        msg = "numpy.array_split expects (ary, indices_or_sections) during tracing"
-        raise TracingError(msg)
-    unsupported = set(kwargs) - {"axis"}
-    if unsupported:
-        msg = f"numpy.array_split kwargs not supported during tracing: {sorted(unsupported)}"
-        raise TracingError(msg)
-
     ary = args[0]
     if not isinstance(ary, traced_type):
         msg = "numpy.array_split tracing requires a traced first argument"
         raise TracingError(msg)
     indices_or_sections = args[1]
-    axis = int(kwargs.get("axis", 0))
+    axis = int(
+        args[_SPLIT_AXIS_POSITION] if len(args) > _SPLIT_AXIS_POSITION else kwargs.get("axis", 0)
+    )
     outputs = tuple(np.array_split(_get_value(ary, traced_type), indices_or_sections, axis=axis))
     return _split_to_getitems(traced_array=ary, outputs=outputs, axis=axis)
 
@@ -98,20 +86,12 @@ def _hsplit_handler(
     _graph: DynamicTape,
     traced_type: type[TracedArrayLike],
     args: tuple[Any, ...],
-    kwargs: dict[str, Any],
+    _kwargs: dict[str, Any],
 ) -> ArrayFunctionResult:
-    if len(args) != _REQUIRED_SPLIT_ARGS:
-        msg = "numpy.hsplit expects (ary, indices_or_sections) during tracing"
-        raise TracingError(msg)
-    if kwargs:
-        msg = f"numpy.hsplit kwargs not supported during tracing: {sorted(kwargs)}"
-        raise TracingError(msg)
-
     ary = args[0]
     if not isinstance(ary, traced_type):
         msg = "numpy.hsplit tracing requires a traced first argument"
         raise TracingError(msg)
-
     outputs = tuple(np.hsplit(_get_value(ary, traced_type), args[1]))
     axis = 1 if _snapshot_traced(ary)[1].ndim > 1 else 0
     return _split_to_getitems(traced_array=ary, outputs=outputs, axis=axis)
@@ -121,20 +101,12 @@ def _vsplit_handler(
     _graph: DynamicTape,
     traced_type: type[TracedArrayLike],
     args: tuple[Any, ...],
-    kwargs: dict[str, Any],
+    _kwargs: dict[str, Any],
 ) -> ArrayFunctionResult:
-    if len(args) != _REQUIRED_SPLIT_ARGS:
-        msg = "numpy.vsplit expects (ary, indices_or_sections) during tracing"
-        raise TracingError(msg)
-    if kwargs:
-        msg = f"numpy.vsplit kwargs not supported during tracing: {sorted(kwargs)}"
-        raise TracingError(msg)
-
     ary = args[0]
     if not isinstance(ary, traced_type):
         msg = "numpy.vsplit tracing requires a traced first argument"
         raise TracingError(msg)
-
     outputs = tuple(np.vsplit(_get_value(ary, traced_type), args[1]))
     return _split_to_getitems(traced_array=ary, outputs=outputs, axis=0)
 
@@ -143,19 +115,11 @@ def _dsplit_handler(
     _graph: DynamicTape,
     traced_type: type[TracedArrayLike],
     args: tuple[Any, ...],
-    kwargs: dict[str, Any],
+    _kwargs: dict[str, Any],
 ) -> ArrayFunctionResult:
-    if len(args) != _REQUIRED_SPLIT_ARGS:
-        msg = "numpy.dsplit expects (ary, indices_or_sections) during tracing"
-        raise TracingError(msg)
-    if kwargs:
-        msg = f"numpy.dsplit kwargs not supported during tracing: {sorted(kwargs)}"
-        raise TracingError(msg)
-
     ary = args[0]
     if not isinstance(ary, traced_type):
         msg = "numpy.dsplit tracing requires a traced first argument"
         raise TracingError(msg)
-
     outputs = tuple(np.dsplit(_get_value(ary, traced_type), args[1]))
     return _split_to_getitems(traced_array=ary, outputs=outputs, axis=2)

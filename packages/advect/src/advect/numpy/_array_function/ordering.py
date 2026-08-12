@@ -219,14 +219,14 @@ def _lexsort_handler(
         msg = "numpy.lexsort received axis twice"
         raise TracingError(msg)
     keys = args[0]
-    if not isinstance(keys, (tuple, list)) or not keys:
+    if isinstance(keys, (tuple, list)) and not keys:
         msg = "numpy.lexsort keys must be a non-empty sequence during tracing"
         raise TracingError(msg)
     anchor = _first_traced(keys, traced_type=traced_type)
     if anchor is None:
         msg = "numpy.lexsort requires at least one traced key"
         raise TracingError(msg)
-    concrete_keys = tuple(_concrete(key, traced_type) for key in keys)
+    concrete_keys = _concrete(keys, traced_type)
     axis = int(args[1] if len(args) == _BINARY_ARITY else kwargs.get("axis", -1))
     return _finish_discrete(
         np.lexsort(concrete_keys, axis=axis),

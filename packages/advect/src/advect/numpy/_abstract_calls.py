@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import math
-from itertools import product
 from typing import TYPE_CHECKING, Any, cast
 
 from advect.core._abstract import AbstractArray, _lift, _new_abstract_array, _record_abstract_op
@@ -414,6 +413,12 @@ def _controlled_reduction(
     count = _numpy_array(trace, "astype", (count, squared.dtype), {})
     typed_correction = _numpy_array(trace, "astype", (_lift(trace, correction), squared.dtype), {})
     denominator = _numpy_array(trace, "subtract", (count, typed_correction), {})
+    denominator = _numpy_array(
+        trace,
+        "maximum",
+        (denominator, _numpy_array(trace, "zeros_like", (denominator,), {})),
+        {},
+    )
     result = _numpy_array(trace, "divide", (numerator, denominator), {})
     return _numpy_array(trace, "sqrt", (result,), {}) if raw_name in {"nanstd", "std"} else result
 
@@ -578,18 +583,12 @@ def _compress(
                 "Staged numpy.compress requires a captured concrete condition; "
                 "a live traced condition has a data-dependent output shape"
             )
-        shape = getattr(value, "shape", None)
-        if shape is not None:
-            normalized_shape = tuple(int(size) for size in shape)
-            if not normalized_shape:
-                return (bool(value),)
-            return tuple(
-                bool(cast("Any", value)[index])
-                for index in product(*(range(size) for size in normalized_shape))
-            )
-        if isinstance(value, (tuple, list)):
-            return tuple(item for child in value for item in condition_values(child))
-        return (bool(value),)
+        import numpy as np  # noqa: PLC0415 - static NumPy frontend metadata
+
+        condition = np.asarray(value)
+        if condition.ndim != 1:
+            raise ValueError("condition must be a 1-d array")
+        return tuple(bool(item) for item in condition)
 
     source = _lift(trace, source_raw)
     axis_raw = raw_args[2] if len(raw_args) == 3 else raw_kwargs.get("axis")
@@ -696,10 +695,7 @@ def _pinv(
         operands.append(kwargs.pop(tolerance_name))
         attrs["_advect_pinv_tolerance"] = tolerance_name
     if "hermitian" in kwargs:
-        hermitian = kwargs.pop("hermitian")
-        if type(hermitian) is not bool:
-            raise TypeError("pinv hermitian must be a bool")
-        attrs["hermitian"] = hermitian
+        attrs["hermitian"] = bool(kwargs.pop("hermitian"))
     return cast(
         "AbstractArray",
         _record_abstract_op(

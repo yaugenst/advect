@@ -892,7 +892,7 @@ def _histogram_bin_edges_handler(
     return _finish(edges, traced_type=traced_type)
 
 
-def _histogram2d_bin_specs(bins: object) -> tuple[object, object]:
+def _histogram2d_bin_specs(bins: Any) -> tuple[object, object]:
     if isinstance(bins, (tuple, list)) and len(bins) == _BINARY_ARITY:
         return bins[0], bins[1]
     ndim = getattr(bins, "ndim", None)
@@ -902,7 +902,7 @@ def _histogram2d_bin_specs(bins: object) -> tuple[object, object]:
         return bins, bins
     if not isinstance(bins, (tuple, list)) and int(ndim) == 1:
         return bins, bins
-    return bins, bins
+    return (bins[0], bins[1]) if int(ndim) == _BINARY_ARITY else (bins, bins)
 
 
 def _histogram2d_handler(
