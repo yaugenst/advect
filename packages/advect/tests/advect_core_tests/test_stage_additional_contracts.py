@@ -574,3 +574,100 @@ def test_staged_call_allows_multiple_devices_when_no_constants_are_materialized(
     )
     with pytest.raises(TypeError, match="cannot materialize constants across multiple devices"):
         with_constant(left, right)
+
+
+@pytest.mark.parametrize(
+    ("kind", "error", "match"),
+    [
+        pytest.param(
+            "missing",
+            ad.MissingPrimitiveRuleError,
+            "missing 'abstract'",
+            id="missing",
+        ),
+        pytest.param("empty", TypeError, "returned no values", id="empty"),
+        pytest.param("invalid-leaf", TypeError, "must return ArraySpec", id="invalid-leaf"),
+    ],
+)
+def test_stage_rejects_invalid_primitive_abstract_contracts(
+    kind: str,
+    error: type[Exception],
+    match: str,
+) -> None:
+    @ad.primitive(name=f"tests.additional_stage_{kind}")
+    def identity(value: object) -> object:
+        return value
+
+    if kind != "missing":
+
+        @identity.def_abstract
+        def identity_abstract(value: ad.AbstractValue) -> object:
+            del value
+            return () if kind == "empty" else object()
+
+    with pytest.raises(error, match=match):
+        ad.stage(identity, specs=(ad.ArraySpec((1,), "float32"),))
+
+
+def test_stage_rejects_untraceable_dynamic_primitive_arguments() -> None:
+    @ad.primitive(name="tests.additional_stage_dynamic_config")
+    def identity(value: object, config: object) -> object:
+        del config
+        return value
+
+    with pytest.raises(TypeError, match="argument 'config' is not traceable"):
+        ad.stage(
+            lambda value: identity(value, config=object()),
+            specs=(ad.ArraySpec((1,), "float32"),),
+        )
+
+
+def test_stage_folds_concrete_primitive_calls_into_captured_constants() -> None:
+    @ad.primitive(name="tests.additional_stage_concrete_primitive")
+    def double(value: int) -> int:
+        return 2 * value
+
+    program = ad.stage(
+        lambda value: value + double(2),
+        specs=(ad.ArraySpec((1,), "int64"),),
+    )
+
+    np.testing.assert_array_equal(program(np.array([3], dtype=np.int64)), np.array([7]))
+
+
+def test_stage_accepts_bound_methods_with_captured_array_state() -> None:
+    class Model:
+        def __init__(self) -> None:
+            self.offset = np.array([1.0, 2.0], dtype=np.float32)
+
+        def apply(self, value: object) -> object:
+            return value + self.offset
+
+    model = Model()
+    program = ad.stage(model.apply, specs=(ad.ArraySpec((2,), "float32"),))
+    model.offset[:] = 0
+
+    np.testing.assert_array_equal(
+        program(np.array([3.0, 4.0], dtype=np.float32)),
+        np.array([4.0, 6.0], dtype=np.float32),
+    )
+
+
+def test_stage_accepts_functions_with_empty_closure_cells() -> None:
+    def make_function() -> Any:
+        captured = object()
+
+        def identity(value: object) -> object:
+            return captured if value is None else value
+
+        assert identity.__closure__ is not None
+        del identity.__closure__[0].cell_contents
+        return identity
+
+    program = ad.stage(
+        make_function(),
+        specs=(ad.ArraySpec((1,), "float32"),),
+    )
+
+    value = np.array([2.0], dtype=np.float32)
+    np.testing.assert_array_equal(program(value), value)
