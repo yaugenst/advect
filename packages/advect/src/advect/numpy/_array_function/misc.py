@@ -99,17 +99,6 @@ def _angle_handler(
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
 ) -> tuple[Any, int]:
-    if len(args) not in {1, 2}:
-        msg = "numpy.angle expects (z, deg=False) during tracing"
-        raise TracingError(msg)
-    unsupported = set(kwargs) - {"deg"}
-    if unsupported:
-        msg = f"numpy.angle kwargs not supported during tracing: {sorted(unsupported)}"
-        raise TracingError(msg)
-    if len(args) == _ANGLE_POSITIONAL_ARGS and "deg" in kwargs:
-        msg = "numpy.angle received deg twice"
-        raise TracingError(msg)
-
     x = args[0]
     deg = bool(args[1] if len(args) == _ANGLE_POSITIONAL_ARGS else kwargs.get("deg", False))
     result = np.angle(_get_value(x, traced_type), deg=deg)
@@ -135,19 +124,7 @@ def _nan_to_num_handler(
     kwargs: dict[str, Any],
 ) -> tuple[Any, int]:
     positional_names = ("copy", "nan", "posinf", "neginf")
-    if not args or len(args) > len(positional_names) + 1:
-        msg = "numpy.nan_to_num expects (x, copy=True, nan=0, posinf=None, neginf=None)"
-        raise TracingError(msg)
-    unsupported = set(kwargs) - set(positional_names)
-    if unsupported:
-        msg = f"numpy.nan_to_num kwargs not supported during tracing: {sorted(unsupported)}"
-        raise TracingError(msg)
-    values = dict(kwargs)
-    for name, value in zip(positional_names, args[1:], strict=False):
-        if name in values:
-            msg = f"numpy.nan_to_num received {name} twice"
-            raise TracingError(msg)
-        values[name] = value
+    values = dict(zip(positional_names, args[1:], strict=False)) | kwargs
 
     x = args[0]
     copy = bool(values.get("copy", True))
@@ -203,15 +180,8 @@ def _sinc_handler(
     graph: DynamicTape,
     traced_type: type[TracedArrayLike],
     args: tuple[Any, ...],
-    kwargs: dict[str, Any],
+    _kwargs: dict[str, Any],
 ) -> tuple[Any, int]:
-    if len(args) != 1:
-        msg = "numpy.sinc expects one input array during tracing"
-        raise TracingError(msg)
-    if kwargs:
-        msg = f"numpy.sinc kwargs not supported during tracing: {sorted(kwargs)}"
-        raise TracingError(msg)
-
     x = args[0]
     result = np.sinc(_get_value(x, traced_type))
     node_id = _add_backend_node(
@@ -234,19 +204,7 @@ def _copy_handler(
     kwargs: dict[str, Any],
 ) -> tuple[Any, int]:
     positional_names = ("order", "subok")
-    if not args or len(args) > len(positional_names) + 1:
-        msg = "numpy.copy expects (a, order='K', subok=False) during tracing"
-        raise TracingError(msg)
-    unsupported = set(kwargs) - set(positional_names)
-    if unsupported:
-        msg = f"numpy.copy kwargs not supported during tracing: {sorted(unsupported)}"
-        raise TracingError(msg)
-    values = dict(kwargs)
-    for name, value in zip(positional_names, args[1:], strict=False):
-        if name in values:
-            msg = f"numpy.copy received {name} twice"
-            raise TracingError(msg)
-        values[name] = value
+    values = dict(zip(positional_names, args[1:], strict=False)) | kwargs
     order = str(values.get("order", "K"))
     subok = bool(values.get("subok", False))
     if subok:
@@ -278,19 +236,7 @@ def _take_handler(
     kwargs: dict[str, Any],
 ) -> tuple[Any, int]:
     positional_names = ("axis", "out", "mode")
-    if len(args) < _TAKE_ARGS or len(args) > _TAKE_ARGS + len(positional_names):
-        msg = "numpy.take expects (a, indices, axis=None, out=None, mode='raise')"
-        raise TracingError(msg)
-    unsupported = set(kwargs) - set(positional_names)
-    if unsupported:
-        msg = f"numpy.take kwargs not supported during tracing: {sorted(unsupported)}"
-        raise TracingError(msg)
-    values = dict(kwargs)
-    for name, value in zip(positional_names, args[_TAKE_ARGS:], strict=False):
-        if name in values:
-            msg = f"numpy.take received {name} twice"
-            raise TracingError(msg)
-        values[name] = value
+    values = dict(zip(positional_names, args[_TAKE_ARGS:], strict=False)) | kwargs
     if values.get("out") is not None:
         msg = "numpy.take positional out= is not supported; pass out= by keyword"
         raise TracingError(msg)
@@ -330,17 +276,7 @@ def _take_along_axis_handler(
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
 ) -> tuple[Any, int]:
-    if len(args) not in {2, 3}:
-        msg = "numpy.take_along_axis expects (arr, indices, axis) during tracing"
-        raise TracingError(msg)
-    unsupported = set(kwargs) - {"axis"}
-    if unsupported:
-        msg = f"numpy.take_along_axis kwargs not supported during tracing: {sorted(unsupported)}"
-        raise TracingError(msg)
     if len(args) == _TAKE_ALONG_AXIS_ARGS:
-        if "axis" in kwargs:
-            msg = "numpy.take_along_axis axis was provided twice"
-            raise TracingError(msg)
         axis_value = args[2]
     elif "axis" in kwargs:
         axis_value = kwargs["axis"]
@@ -381,19 +317,11 @@ def _sort_handler(
     kwargs: dict[str, Any],
 ) -> tuple[Any, int]:
     positional_names = ("axis", "kind", "order")
-    if not args or len(args) > len(positional_names) + 1:
-        msg = "numpy.sort expects (a, axis=-1, kind=None, order=None, *, stable=None)"
-        raise TracingError(msg)
     unsupported = set(kwargs) - {*positional_names, "stable"}
     if unsupported:
         msg = f"numpy.sort kwargs not supported during tracing: {sorted(unsupported)}"
         raise TracingError(msg)
-    values = dict(kwargs)
-    for name, value in zip(positional_names, args[1:], strict=False):
-        if name in values:
-            msg = f"numpy.sort received {name} twice"
-            raise TracingError(msg)
-        values[name] = value
+    values = dict(zip(positional_names, args[1:], strict=False)) | kwargs
 
     x = args[0]
     axis = int(values.get("axis", -1))
@@ -435,26 +363,9 @@ def _partition_handler(
     kwargs: dict[str, Any],
 ) -> tuple[Any, int]:
     positional_names = ("kth", "axis", "kind", "order")
-    if not args or len(args) > len(positional_names) + 1:
-        msg = "numpy.partition expects (a, kth) during tracing"
-        raise TracingError(msg)
-    unsupported = set(kwargs) - set(positional_names)
-    if unsupported:
-        msg = f"numpy.partition kwargs not supported during tracing: {sorted(unsupported)}"
-        raise TracingError(msg)
-
-    values = dict(kwargs)
-    for name, value in zip(positional_names, args[1:], strict=False):
-        if name in values:
-            msg = f"numpy.partition received {name} twice"
-            raise TracingError(msg)
-        values[name] = value
+    values = dict(zip(positional_names, args[1:], strict=False)) | kwargs
     x = args[0]
-    if "kth" in values:
-        kth = _normalize_kth(values["kth"])
-    else:
-        msg = "numpy.partition requires kth during tracing"
-        raise TracingError(msg)
+    kth = _normalize_kth(values["kth"])
     axis = int(values.get("axis", -1))
     kind = values.get("kind", "introselect")
     order = values.get("order")
@@ -485,14 +396,6 @@ def _gradient_handler(
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
 ) -> ArrayFunctionResult:
-    if not args:
-        msg = "numpy.gradient requires an input array during tracing"
-        raise TracingError(msg)
-    unsupported = set(kwargs) - {"axis", "edge_order"}
-    if unsupported:
-        msg = f"numpy.gradient kwargs not supported during tracing: {sorted(unsupported)}"
-        raise TracingError(msg)
-
     a = args[0]
     axis = kwargs.get("axis")
     edge_order = cast("Literal[1, 2]", int(kwargs.get("edge_order", 1)))

@@ -28,7 +28,6 @@ _BINARY_ARITY = 2
 _MATRIX_RANK = 2
 _NEGATIVE_SPECTRAL_ORDER = -2
 _TERNARY_ARITY = 3
-_QUATERNARY_ARITY = 4
 
 
 def _ndim(value: object) -> int:
@@ -88,11 +87,7 @@ def _finish(
 def _sequence_arg(
     name: str,
     args: tuple[Any, ...],
-    kwargs: dict[str, Any],
 ) -> tuple[Any, ...]:
-    if len(args) != 1 or kwargs:
-        msg = f"numpy.{name} expects one array sequence during tracing"
-        raise TracingError(msg)
     arrays = args[0]
     if not isinstance(arrays, (tuple, list)) or not arrays:
         msg = f"numpy.{name} requires a non-empty tuple or list during tracing"
@@ -106,10 +101,6 @@ def _hstack_handler(
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
 ) -> CompositeResult:
-    unsupported = set(kwargs) - {"dtype", "casting"}
-    if len(args) != 1 or unsupported:
-        msg = f"numpy.hstack kwargs not supported during tracing: {sorted(unsupported)}"
-        raise TracingError(msg)
     arrays = args[0]
     if not isinstance(arrays, (tuple, list)) or not arrays:
         msg = "numpy.hstack requires a non-empty tuple or list during tracing"
@@ -128,10 +119,6 @@ def _vstack_handler(
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
 ) -> CompositeResult:
-    unsupported = set(kwargs) - {"dtype", "casting"}
-    if len(args) != 1 or unsupported:
-        msg = f"numpy.vstack kwargs not supported during tracing: {sorted(unsupported)}"
-        raise TracingError(msg)
     arrays = args[0]
     if not isinstance(arrays, (tuple, list)) or not arrays:
         msg = "numpy.vstack requires a non-empty tuple or list during tracing"
@@ -147,9 +134,9 @@ def _dstack_handler(
     _graph: DynamicTape,
     traced_type: type[TracedArrayLike],
     args: tuple[Any, ...],
-    kwargs: dict[str, Any],
+    _kwargs: dict[str, Any],
 ) -> CompositeResult:
-    arrays = _sequence_arg("dstack", args, kwargs)
+    arrays = _sequence_arg("dstack", args)
     promoted = tuple(np.atleast_3d(item) for item in arrays)
     return _finish(np.concatenate(promoted, axis=2), traced_type=traced_type)
 
@@ -158,9 +145,9 @@ def _column_stack_handler(
     _graph: DynamicTape,
     traced_type: type[TracedArrayLike],
     args: tuple[Any, ...],
-    kwargs: dict[str, Any],
+    _kwargs: dict[str, Any],
 ) -> CompositeResult:
-    arrays = _sequence_arg("column_stack", args, kwargs)
+    arrays = _sequence_arg("column_stack", args)
     columns = tuple(
         np.reshape(item, (-1, 1)) if _ndim(item) < _MATRIX_RANK else item for item in arrays
     )
@@ -173,12 +160,6 @@ def _append_handler(
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
 ) -> CompositeResult:
-    if len(args) not in {_BINARY_ARITY, _TERNARY_ARITY} or set(kwargs) - {"axis"}:
-        msg = "numpy.append expects (arr, values, axis=None) during tracing"
-        raise TracingError(msg)
-    if len(args) == _TERNARY_ARITY and "axis" in kwargs:
-        msg = "numpy.append received axis twice"
-        raise TracingError(msg)
     array, values = args[:2]
     axis = args[2] if len(args) == _TERNARY_ARITY else kwargs.get("axis")
     if axis is None:
@@ -197,12 +178,6 @@ def _delete_handler(
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
 ) -> CompositeResult:
-    if len(args) not in {_BINARY_ARITY, _TERNARY_ARITY} or set(kwargs) - {"axis"}:
-        msg = "numpy.delete expects (arr, obj, axis=None) during tracing"
-        raise TracingError(msg)
-    if len(args) == _TERNARY_ARITY and "axis" in kwargs:
-        msg = "numpy.delete received axis twice"
-        raise TracingError(msg)
     array, obj = args[:2]
     if isinstance(obj, traced_type):
         msg = "numpy.delete obj= must be static because it controls the output shape"
@@ -224,12 +199,6 @@ def _diagflat_handler(
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
 ) -> CompositeResult:
-    if len(args) not in {1, _BINARY_ARITY} or set(kwargs) - {"k"}:
-        msg = "numpy.diagflat expects (v, k=0) during tracing"
-        raise TracingError(msg)
-    if len(args) == _BINARY_ARITY and "k" in kwargs:
-        msg = "numpy.diagflat received k twice"
-        raise TracingError(msg)
     k = int(args[1] if len(args) == _BINARY_ARITY else kwargs.get("k", 0))
     return _finish(np.diag(np.ravel(args[0]), k=k), traced_type=traced_type)
 
@@ -241,15 +210,8 @@ def _ediff1d_handler(
     kwargs: dict[str, Any],
 ) -> CompositeResult:
     positional_names = ("to_end", "to_begin")
-    if not args or len(args) > len(positional_names) + 1 or set(kwargs) - set(positional_names):
-        msg = "numpy.ediff1d expects (ary, to_end=None, to_begin=None) during tracing"
-        raise TracingError(msg)
     values = dict(kwargs)
-    for name, value in zip(positional_names, args[1:], strict=False):
-        if name in values:
-            msg = f"numpy.ediff1d received {name} twice"
-            raise TracingError(msg)
-        values[name] = value
+    values.update(zip(positional_names, args[1:], strict=False))
     pieces: list[object] = []
     if values.get("to_begin") is not None:
         pieces.append(np.atleast_1d(values["to_begin"]))
@@ -264,11 +226,8 @@ def _resize_handler(
     _graph: DynamicTape,
     traced_type: type[TracedArrayLike],
     args: tuple[Any, ...],
-    kwargs: dict[str, Any],
+    _kwargs: dict[str, Any],
 ) -> CompositeResult:
-    if len(args) != _BINARY_ARITY or kwargs:
-        msg = "numpy.resize expects (a, new_shape) during tracing"
-        raise TracingError(msg)
     array, new_shape_raw = args
     if isinstance(new_shape_raw, traced_type):
         msg = "numpy.resize new_shape must be static during tracing"
@@ -299,10 +258,6 @@ def _meshgrid_handler(
 ) -> CompositeResult:
     if not args:
         msg = "numpy.meshgrid requires at least one input during tracing"
-        raise TracingError(msg)
-    unsupported = set(kwargs) - {"copy", "indexing", "sparse"}
-    if unsupported:
-        msg = f"numpy.meshgrid kwargs not supported during tracing: {sorted(unsupported)}"
         raise TracingError(msg)
     if not bool(kwargs.get("copy", True)):
         msg = "numpy.meshgrid(copy=False) returns aliasing views; use copy=True during tracing"
@@ -346,19 +301,8 @@ def _average_handler(
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
 ) -> CompositeResult:
-    if len(args) not in {1, _BINARY_ARITY, _TERNARY_ARITY, _QUATERNARY_ARITY}:
-        msg = "numpy.average received too many positional arguments during tracing"
-        raise TracingError(msg)
-    unsupported = set(kwargs) - {"axis", "keepdims", "returned", "weights"}
-    if unsupported:
-        msg = f"numpy.average kwargs not supported during tracing: {sorted(unsupported)}"
-        raise TracingError(msg)
     values = dict(kwargs)
-    for name, value in zip(("axis", "weights", "returned"), args[1:], strict=False):
-        if name in values:
-            msg = f"numpy.average received {name} twice"
-            raise TracingError(msg)
-        values[name] = value
+    values.update(zip(("axis", "weights", "returned"), args[1:], strict=False))
     array = args[0]
     axis = values.get("axis")
     weights = values.get("weights")
@@ -410,19 +354,9 @@ def _ptp_handler(
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
 ) -> CompositeResult:
-    positional_names = ("axis", "out", "keepdims")
-    if not args or len(args) > len(positional_names) + 1 or set(kwargs) - set(positional_names):
-        msg = "numpy.ptp expects (a, axis=None, keepdims=False) during tracing"
-        raise TracingError(msg)
+    positional_names = ("axis",)
     values = dict(kwargs)
-    for name, value in zip(positional_names, args[1:], strict=False):
-        if name in values:
-            msg = f"numpy.ptp received {name} twice"
-            raise TracingError(msg)
-        values[name] = value
-    if values.get("out") is not None:
-        msg = "numpy.ptp positional out= is not supported; pass out= by keyword"
-        raise TracingError(msg)
+    values.update(zip(positional_names, args[1:], strict=False))
     axis = values.get("axis")
     keepdims = bool(values.get("keepdims", False))
     result = np.max(args[0], axis=axis, keepdims=keepdims) - np.min(
@@ -440,15 +374,8 @@ def _trapezoid_handler(
     kwargs: dict[str, Any],
 ) -> CompositeResult:
     positional_names = ("x", "dx", "axis")
-    if not args or len(args) > len(positional_names) + 1 or set(kwargs) - set(positional_names):
-        msg = "numpy.trapezoid expects (y, x=None, dx=1.0, axis=-1) during tracing"
-        raise TracingError(msg)
     values = dict(kwargs)
-    for name, value in zip(positional_names, args[1:], strict=False):
-        if name in values:
-            msg = f"numpy.trapezoid received {name} twice"
-            raise TracingError(msg)
-        values[name] = value
+    values.update(zip(positional_names, args[1:], strict=False))
     y = args[0]
     x = values.get("x")
     axis = int(values.get("axis", -1))
@@ -477,22 +404,9 @@ def _nan_scan_handler(
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
 ) -> CompositeResult:
-    positional_names = ("axis", "dtype", "out")
-    if not args or len(args) > len(positional_names) + 1 or set(kwargs) - set(positional_names):
-        name = "nancumprod" if product else "nancumsum"
-        msg = f"numpy.{name} expects one array with axis=/dtype= during tracing"
-        raise TracingError(msg)
+    positional_names = ("axis", "dtype")
     values = dict(kwargs)
-    for attr_name, attr_value in zip(positional_names, args[1:], strict=False):
-        if attr_name in values:
-            name = "nancumprod" if product else "nancumsum"
-            msg = f"numpy.{name} received {attr_name} twice"
-            raise TracingError(msg)
-        values[attr_name] = attr_value
-    if values.pop("out", None) is not None:
-        name = "nancumprod" if product else "nancumsum"
-        msg = f"numpy.{name} positional out= is not supported; pass out= by keyword"
-        raise TracingError(msg)
+    values.update(zip(positional_names, args[1:], strict=False))
     replacement = 1.0 if product else 0.0
     cleaned = np.where(np.isnan(args[0]), replacement, args[0])
     function = np.cumprod if product else np.cumsum
@@ -533,15 +447,6 @@ def _round_handler(
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
 ) -> CompositeResult:
-    if len(args) not in {1, _BINARY_ARITY} or set(kwargs) - {"decimals", "out"}:
-        msg = "numpy.round expects (a, decimals=0) during tracing"
-        raise TracingError(msg)
-    if len(args) == _BINARY_ARITY and "decimals" in kwargs:
-        msg = "numpy.round received decimals twice"
-        raise TracingError(msg)
-    if kwargs.get("out") is not None:
-        msg = "numpy.round out= is handled by tracer-level functionalization"
-        raise TracingError(msg)
     decimals = int(args[1] if len(args) == _BINARY_ARITY else kwargs.get("decimals", 0))
     scale = 10.0**decimals
     return _finish(np.rint(args[0] * scale) / scale, traced_type=traced_type)
@@ -551,14 +456,8 @@ def _fix_handler(
     _graph: DynamicTape,
     traced_type: type[TracedArrayLike],
     args: tuple[Any, ...],
-    kwargs: dict[str, Any],
+    _kwargs: dict[str, Any],
 ) -> CompositeResult:
-    if len(args) != 1 or set(kwargs) - {"out"}:
-        msg = "numpy.fix expects one array during tracing"
-        raise TracingError(msg)
-    if kwargs.get("out") is not None:
-        msg = "numpy.fix out= is handled by tracer-level functionalization"
-        raise TracingError(msg)
     x = args[0]
     return _finish(np.where(x >= 0, np.floor(x), np.ceil(x)), traced_type=traced_type)
 
@@ -582,11 +481,8 @@ def _matrix_power_handler(
     _graph: DynamicTape,
     traced_type: type[TracedArrayLike],
     args: tuple[Any, ...],
-    kwargs: dict[str, Any],
+    _kwargs: dict[str, Any],
 ) -> CompositeResult:
-    if len(args) != _BINARY_ARITY or kwargs:
-        msg = "numpy.linalg.matrix_power expects (a, n) during tracing"
-        raise TracingError(msg)
     matrix, exponent_raw = args
     if isinstance(exponent_raw, traced_type) or not isinstance(
         exponent_raw,
@@ -618,14 +514,8 @@ def _multi_dot_handler(
     _graph: DynamicTape,
     traced_type: type[TracedArrayLike],
     args: tuple[Any, ...],
-    kwargs: dict[str, Any],
+    _kwargs: dict[str, Any],
 ) -> CompositeResult:
-    if len(args) != 1 or set(kwargs) - {"out"}:
-        msg = "numpy.linalg.multi_dot expects one array sequence during tracing"
-        raise TracingError(msg)
-    if kwargs.get("out") is not None:
-        msg = "numpy.linalg.multi_dot out= is not supported during tracing"
-        raise TracingError(msg)
     arrays = args[0]
     if not isinstance(arrays, (tuple, list)) or len(arrays) < _BINARY_ARITY:
         msg = "numpy.linalg.multi_dot requires at least two arrays"
@@ -642,12 +532,6 @@ def _tensorinv_handler(
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
 ) -> CompositeResult:
-    if len(args) not in {1, _BINARY_ARITY} or set(kwargs) - {"ind"}:
-        msg = "numpy.linalg.tensorinv expects (a, ind=2) during tracing"
-        raise TracingError(msg)
-    if len(args) == _BINARY_ARITY and "ind" in kwargs:
-        msg = "numpy.linalg.tensorinv received ind twice"
-        raise TracingError(msg)
     tensor = args[0]
     ind_raw = args[1] if len(args) == _BINARY_ARITY else kwargs.get("ind", 2)
     if isinstance(ind_raw, traced_type) or not isinstance(ind_raw, (int, np.integer)):
@@ -677,12 +561,6 @@ def _tensorsolve_handler(
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
 ) -> CompositeResult:
-    if len(args) not in {_BINARY_ARITY, _TERNARY_ARITY} or set(kwargs) - {"axes"}:
-        msg = "numpy.linalg.tensorsolve expects (a, b, axes=None) during tracing"
-        raise TracingError(msg)
-    if len(args) == _TERNARY_ARITY and "axes" in kwargs:
-        msg = "numpy.linalg.tensorsolve received axes twice"
-        raise TracingError(msg)
     tensor, right = args[:2]
     axes_raw = args[2] if len(args) == _TERNARY_ARITY else kwargs.get("axes")
     if axes_raw is not None:
@@ -708,12 +586,6 @@ def _cond_handler(
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
 ) -> CompositeResult:
-    if len(args) not in {1, _BINARY_ARITY} or set(kwargs) - {"p"}:
-        msg = "numpy.linalg.cond expects (x, p=None) during tracing"
-        raise TracingError(msg)
-    if len(args) == _BINARY_ARITY and "p" in kwargs:
-        msg = "numpy.linalg.cond received p twice"
-        raise TracingError(msg)
     matrix = args[0]
     order = args[1] if len(args) == _BINARY_ARITY else kwargs.get("p")
     if order is None or order in {2, _NEGATIVE_SPECTRAL_ORDER}:
@@ -767,9 +639,6 @@ def _broadcast_arrays_handler(
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
 ) -> CompositeResult:
-    if not args or set(kwargs) - {"subok"}:
-        msg = "numpy.broadcast_arrays expects one or more arrays during tracing"
-        raise TracingError(msg)
     if bool(kwargs.get("subok", False)):
         msg = "numpy.broadcast_arrays(subok=True) is not supported during tracing"
         raise TracingError(msg)
@@ -794,12 +663,6 @@ def _select_handler(
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
 ) -> CompositeResult:
-    if len(args) not in {_BINARY_ARITY, _TERNARY_ARITY} or set(kwargs) - {"default"}:
-        msg = "numpy.select expects (condlist, choicelist, default=0) during tracing"
-        raise TracingError(msg)
-    if len(args) == _TERNARY_ARITY and "default" in kwargs:
-        msg = "numpy.select received default twice"
-        raise TracingError(msg)
     conditions, choices = args[:2]
     if not isinstance(conditions, (tuple, list)) or not isinstance(choices, (tuple, list)):
         msg = "numpy.select condlist and choicelist must be sequences"
@@ -829,9 +692,6 @@ def _piecewise_handler(
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
 ) -> CompositeResult:
-    if len(args) < _TERNARY_ARITY:
-        msg = "numpy.piecewise expects (x, condlist, funclist, *args) during tracing"
-        raise TracingError(msg)
     x, conditions_raw, functions_raw, *function_args = args
     conditions = (
         list(conditions_raw) if isinstance(conditions_raw, (tuple, list)) else [conditions_raw]
@@ -883,12 +743,6 @@ def _choose_handler(
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
 ) -> CompositeResult:
-    if len(args) != _BINARY_ARITY or set(kwargs) - {"mode", "out"}:
-        msg = "numpy.choose expects (a, choices, mode='raise') during tracing"
-        raise TracingError(msg)
-    if kwargs.get("out") is not None:
-        msg = "numpy.choose out= is not supported during tracing"
-        raise TracingError(msg)
     indices, choices = args
     if not isinstance(choices, (tuple, list)) or not choices:
         msg = "numpy.choose requires a non-empty choice sequence"
@@ -926,15 +780,6 @@ def _compress_handler(
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
 ) -> CompositeResult:
-    if len(args) not in {_BINARY_ARITY, _TERNARY_ARITY} or set(kwargs) - {"axis", "out"}:
-        msg = "numpy.compress expects (condition, a, axis=None) during tracing"
-        raise TracingError(msg)
-    if len(args) == _TERNARY_ARITY and "axis" in kwargs:
-        msg = "numpy.compress received axis twice"
-        raise TracingError(msg)
-    if kwargs.get("out") is not None:
-        msg = "numpy.compress out= is not supported during tracing"
-        raise TracingError(msg)
     condition, array = args[:2]
     condition_value = (
         _snapshot_traced(condition)[1]
@@ -957,11 +802,8 @@ def _extract_handler(
     graph: DynamicTape,
     traced_type: type[TracedArrayLike],
     args: tuple[Any, ...],
-    kwargs: dict[str, Any],
+    _kwargs: dict[str, Any],
 ) -> CompositeResult:
-    if len(args) != _BINARY_ARITY or kwargs:
-        msg = "numpy.extract expects (condition, arr) during tracing"
-        raise TracingError(msg)
     return _compress_handler(graph, traced_type, args, {"axis": None})
 
 
@@ -971,18 +813,8 @@ def _vander_handler(
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
 ) -> CompositeResult:
-    if len(args) not in {1, _BINARY_ARITY, _TERNARY_ARITY} or set(kwargs) - {
-        "N",
-        "increasing",
-    }:
-        msg = "numpy.vander expects (x, N=None, increasing=False) during tracing"
-        raise TracingError(msg)
     values = dict(kwargs)
-    for name, value in zip(("N", "increasing"), args[1:], strict=False):
-        if name in values:
-            msg = f"numpy.vander received {name} twice"
-            raise TracingError(msg)
-        values[name] = value
+    values.update(zip(("N", "increasing"), args[1:], strict=False))
     x = args[0]
     columns_raw = values.get("N")
     columns = int(x.size if columns_raw is None else columns_raw)
@@ -1001,26 +833,15 @@ def _vander_handler(
     return _finish(result, traced_type=traced_type)
 
 
-def _cov_handler(  # noqa: C901, PLR0912, PLR0915 - one closed NumPy signature
+def _cov_handler(  # noqa: C901, PLR0915 - one closed NumPy signature
     _graph: DynamicTape,
     traced_type: type[TracedArrayLike],
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
 ) -> CompositeResult:
     positional_names = ("y", "rowvar", "bias", "ddof", "fweights", "aweights")
-    if not args or len(args) > len(positional_names) + 1:
-        msg = "numpy.cov received too many positional arguments during tracing"
-        raise TracingError(msg)
-    unsupported = set(kwargs) - {*positional_names, "dtype"}
-    if unsupported:
-        msg = f"numpy.cov kwargs not supported during tracing: {sorted(unsupported)}"
-        raise TracingError(msg)
     values = dict(kwargs)
-    for name, value in zip(positional_names, args[1:], strict=False):
-        if name in values:
-            msg = f"numpy.cov received {name} twice"
-            raise TracingError(msg)
-        values[name] = value
+    values.update(zip(positional_names, args[1:], strict=False))
 
     matrix = args[0]
     additional = values.get("y")
@@ -1111,19 +932,8 @@ def _corrcoef_handler(
     kwargs: dict[str, Any],
 ) -> CompositeResult:
     positional_names = ("y", "rowvar", "bias", "ddof")
-    if not args or len(args) > len(positional_names) + 1:
-        msg = "numpy.corrcoef received too many positional arguments during tracing"
-        raise TracingError(msg)
-    unsupported = set(kwargs) - {*positional_names, "dtype"}
-    if unsupported:
-        msg = f"numpy.corrcoef kwargs not supported during tracing: {sorted(unsupported)}"
-        raise TracingError(msg)
     values = dict(kwargs)
-    for name, value in zip(positional_names, args[1:], strict=False):
-        if name in values:
-            msg = f"numpy.corrcoef received {name} twice"
-            raise TracingError(msg)
-        values[name] = value
+    values.update(zip(positional_names, args[1:], strict=False))
     covariance_args = (args[0],)
     covariance_kwargs = {
         key: value for key, value in values.items() if key in {"dtype", "rowvar", "y"}

@@ -44,7 +44,6 @@ _MIN_REQUIRED_ARGS = 2
 
 # ``numpy.linspace(start, stop, num, endpoint, retstep, dtype, axis)``
 _LINSPACE_TRAILING_PARAMETERS = ("num", "endpoint", "retstep", "dtype", "axis")
-_LINSPACE_MAX_ARGS = _MIN_REQUIRED_ARGS + len(_LINSPACE_TRAILING_PARAMETERS)
 _LINEAR_PAD_MODES = frozenset({"constant", "edge", "linear_ramp", "reflect", "symmetric", "wrap"})
 _STATISTICAL_PAD_MODES = frozenset({"maximum", "mean", "median", "minimum"})
 _CONSTRUCTOR_KEYWORD_ONLY = frozenset({"device", "like"})
@@ -57,19 +56,7 @@ def _full_handler(
     kwargs: dict[str, Any],
 ) -> tuple[Any, int]:
     positional_names = ("dtype", "order")
-    if len(args) < _MIN_REQUIRED_ARGS or len(args) > _MIN_REQUIRED_ARGS + len(positional_names):
-        msg = "numpy.full expects (shape, fill_value) during tracing"
-        raise TracingError(msg)
-    unsupported = set(kwargs) - {*positional_names, "device", "like"}
-    if unsupported:
-        msg = f"numpy.full kwargs not supported during tracing: {sorted(unsupported)}"
-        raise TracingError(msg)
-    values = dict(kwargs)
-    for name, value in zip(positional_names, args[_MIN_REQUIRED_ARGS:], strict=False):
-        if name in values:
-            msg = f"numpy.full received {name} twice"
-            raise TracingError(msg)
-        values[name] = value
+    values = dict(zip(positional_names, args[_MIN_REQUIRED_ARGS:], strict=False)) | kwargs
 
     shape = _normalize_shape(args[0])
     fill_value = args[1]
@@ -303,19 +290,7 @@ def _full_like_handler(
     kwargs: dict[str, Any],
 ) -> tuple[Any, int]:
     positional_names = ("dtype", "order", "subok", "shape")
-    if len(args) < _MIN_REQUIRED_ARGS or len(args) > _MIN_REQUIRED_ARGS + len(positional_names):
-        msg = "numpy.full_like expects (a, fill_value) during tracing"
-        raise TracingError(msg)
-    unsupported = set(kwargs) - {*positional_names, "device"}
-    if unsupported:
-        msg = f"numpy.full_like kwargs not supported during tracing: {sorted(unsupported)}"
-        raise TracingError(msg)
-    values = dict(kwargs)
-    for name, value in zip(positional_names, args[_MIN_REQUIRED_ARGS:], strict=False):
-        if name in values:
-            msg = f"numpy.full_like received {name} twice"
-            raise TracingError(msg)
-        values[name] = value
+    values = dict(zip(positional_names, args[_MIN_REQUIRED_ARGS:], strict=False)) | kwargs
 
     a = args[0]
     fill_value = args[1]
@@ -370,29 +345,11 @@ def _linspace_handler(
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
 ) -> CompositeResult:
-    if len(args) < _MIN_REQUIRED_ARGS:
-        msg = "numpy.linspace expects start and stop during tracing"
-        raise TracingError(msg)
-    if len(args) > _LINSPACE_MAX_ARGS:
-        msg = (
-            f"numpy.linspace accepts at most {_LINSPACE_MAX_ARGS} positional arguments "
-            f"during tracing, got {len(args)}"
-        )
-        raise TracingError(msg)
-    unsupported = set(kwargs) - {*_LINSPACE_TRAILING_PARAMETERS, "device"}
-    if unsupported:
-        msg = f"numpy.linspace kwargs not supported during tracing: {sorted(unsupported)}"
-        raise TracingError(msg)
-
     start, stop = args[0], args[1]
     # ``num``/``endpoint``/``retstep``/``dtype``/``axis`` may arrive positionally.
     # Reading them from kwargs alone silently substitutes NumPy's defaults into
     # both the recorded value and the derivative attrs.
     bound = dict(zip(_LINSPACE_TRAILING_PARAMETERS, args[_MIN_REQUIRED_ARGS:], strict=False))
-    duplicated = sorted(set(bound) & set(kwargs))
-    if duplicated:
-        msg = f"numpy.linspace got multiple values for argument(s): {duplicated}"
-        raise TracingError(msg)
     bound.update(kwargs)
 
     num = int(bound.get("num", 50))
@@ -466,12 +423,6 @@ def _pad_handler(
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
 ) -> CompositeResult:
-    if len(args) < _MIN_REQUIRED_ARGS or len(args) > _MIN_REQUIRED_ARGS + 1:
-        msg = "numpy.pad expects (array, pad_width) during tracing"
-        raise TracingError(msg)
-    if len(args) > _MIN_REQUIRED_ARGS and "mode" in kwargs:
-        msg = "numpy.pad received mode twice"
-        raise TracingError(msg)
     mode = str(args[2] if len(args) > _MIN_REQUIRED_ARGS else kwargs.get("mode", "constant"))
     mode_parameters = {
         "constant": frozenset({"constant_values"}),

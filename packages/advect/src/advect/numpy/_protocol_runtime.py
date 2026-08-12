@@ -100,8 +100,6 @@ class ArrayProtocolRuntime(_ArrayFunctionProtocolMixin):
             raise TracingError(msg)
 
         candidate = out_obj[0]
-        if candidate is None:
-            return None
         if isinstance(candidate, traced_type):
             return candidate
 
@@ -320,7 +318,7 @@ class ArrayProtocolRuntime(_ArrayFunctionProtocolMixin):
         )
         return out_arr
 
-    def array_ufunc(  # noqa: C901 - one protocol boundary owns dispatch validation
+    def array_ufunc(
         self,
         self_arr: object,
         ufunc: UfuncLike,
@@ -336,14 +334,6 @@ class ArrayProtocolRuntime(_ArrayFunctionProtocolMixin):
                 inputs=inputs,
                 out=out,
                 kwargs=dict(kwargs),
-            )
-
-        simple_call = out is None and not kwargs and len(inputs) == ufunc.nin and ufunc.nout == 1
-        if simple_call:
-            return self.run_simple_ufunc(
-                self_arr=self_arr,
-                ufunc=ufunc,
-                inputs=inputs,
             )
 
         owner_recorder = cast("Any", self_arr).recorder
