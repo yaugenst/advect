@@ -160,6 +160,7 @@ var base_url = "{{ base_url }}";
 <div class="bar">
   <a href="{{ '.'|url }}" class="b" data-short="[1]"{% if not (page and page.url.startswith('playground')) %} aria-current="true"{% endif %}>[1:docs]</a>
   <a href="{{ 'playground/'|url }}" class="b" id="wsplay" data-short="[2]"{% if page and page.url.startswith('playground') %} aria-current="true"{% endif %}>[2:playground]</a>
+  <a href="{{ config.repo_url }}" class="b" data-short="[git]">[git:source]</a>
   <span class="path hidesm">$ man advect{% if page and page.url and page.url != "." %}/{{ page.url.rstrip("/") }}{% endif %}</span>
   <span class="grow"></span>
   <button class="tbtn" id="treebtn" data-short="[e]" aria-label="Toggle documentation tree">[e] tree</button>
