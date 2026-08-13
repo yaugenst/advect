@@ -10,6 +10,19 @@ import advect as ad
 import advect.xarray  # Importing the optional package registers its nodes.
 
 
+class _DataArraySubclass(xr.DataArray):
+    __slots__ = ()
+
+
+def test_dataarray_subclass_pytree_round_trip_preserves_concrete_type() -> None:
+    value = _DataArraySubclass([1.0, 2.0], dims="x", coords={"x": [10, 20]})
+    leaves, tree = ad.pytree.tree_flatten(value)
+    rebuilt = ad.pytree.tree_unflatten(tree, leaves)
+
+    assert type(rebuilt) is type(value)
+    xr.testing.assert_identical(rebuilt, value)
+
+
 def test_dataarray_pytree_round_trip_preserves_labels_and_metadata() -> None:
     value = xr.DataArray(
         np.arange(6.0).reshape(2, 3),

@@ -25,11 +25,17 @@ def _validate_opdef(op_def: OpDef) -> OpDef:
     if type(op_def.vjp_needs_inputs) is not bool or type(op_def.vjp_needs_output) is not bool:
         msg = f"Op '{op_def.name}' has non-boolean VJP retention metadata"
         raise TypeError(msg)
+    if type(op_def.output_arity_known) is not bool:
+        msg = f"Op '{op_def.name}' has non-boolean output-arity state"
+        raise TypeError(msg)
     if op_def.schema_version < 1:
         msg = f"Op '{op_def.name}' has invalid schema version {op_def.schema_version}"
         raise ValueError(msg)
     if type(op_def.has_residual) is not bool:
         msg = f"Op '{op_def.name}' has a non-boolean residual capability"
+        raise TypeError(msg)
+    if type(op_def.variable_output_arity) is not bool:
+        msg = f"Op '{op_def.name}' has a non-boolean variable-output-arity capability"
         raise TypeError(msg)
     if op_def.name.startswith("custom.") and (
         op_def.implementation is None or op_def.signature is None
@@ -38,6 +44,9 @@ def _validate_opdef(op_def: OpDef) -> OpDef:
         raise ValueError(msg)
     if op_def.has_residual and not op_def.name.startswith("custom."):
         msg = f"Built-in op '{op_def.name}' cannot declare an opaque residual"
+        raise ValueError(msg)
+    if op_def.variable_output_arity and not op_def.name.startswith("custom."):
+        msg = f"Built-in op '{op_def.name}' cannot declare variable output arity"
         raise ValueError(msg)
     return op_def
 
@@ -193,7 +202,7 @@ class OpRegistry:
             msg = f"Op '{name}' not found in registry"
             raise KeyError(msg)
 
-        self.update(name, num_outputs=num_outputs)
+        self.update(name, num_outputs=num_outputs, output_arity_known=True)
 
     def has_vjp(self, name: str) -> bool:
         """Check if an operation has a registered VJP rule.

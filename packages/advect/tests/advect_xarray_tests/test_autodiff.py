@@ -20,6 +20,23 @@ def _field() -> xr.DataArray:
     )
 
 
+def test_dataset_selection_preserves_traced_data() -> None:
+    field = _field()
+
+    def energy(value: xr.DataArray) -> object:
+        selected = xr.Dataset({"field": value})["field"].sel(y=10).isel(x=slice(1, None))
+        assert type(selected) is xr.DataArray
+        assert ad.is_traced(selected.data)
+        return ((selected.data + 1.0) ** 2).sum()
+
+    gradient = ad.grad(energy)(field)
+
+    xr.testing.assert_identical(
+        gradient,
+        field.copy(data=np.array([[0.0, 4.0, 6.0], [0.0, 0.0, 0.0]])),
+    )
+
+
 def test_dataarray_grad_and_value_and_grad_preserve_labels() -> None:
     field = _field()
 

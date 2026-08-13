@@ -101,6 +101,63 @@ def test_tree_flatten_treats_subclassed_builtin_container_as_leaf() -> None:
     assert treedef.node_type is None
 
 
+def test_opt_in_pytree_registration_uses_nearest_registered_base() -> None:
+    class _Base:
+        def __init__(self, value: object) -> None:
+            self.value = value
+
+    class _Nearer(_Base):
+        pass
+
+    class _Child(_Nearer):
+        pass
+
+    def register(cls: type[_Base], tag: str) -> None:
+        ad.pytree.register_pytree_node(
+            cls,
+            flatten_fn=lambda tree: ((tree.value,), (type(tree), tag)),
+            unflatten_fn=lambda metadata, children: metadata[0](children[0]),
+            include_subclasses=True,
+        )
+
+    register(_Base, "base")
+    register(_Nearer, "nearer")
+    leaves, treedef = ad.pytree.tree_flatten(_Child(1.0))
+    restored = ad.pytree.tree_unflatten(treedef, leaves)
+
+    assert treedef.aux_data[1] == "nearer"
+    assert type(restored) is _Child
+
+
+def test_pytree_protocol_overrides_inherited_registration() -> None:
+    class _Base:
+        pass
+
+    class _Child(_Base):
+        def __advect_tree_flatten__(self) -> tuple[tuple[object, ...], object]:
+            return (2.0,), "protocol"
+
+        @classmethod
+        def __advect_tree_unflatten__(
+            cls, aux_data: object, children: tuple[object, ...]
+        ) -> _Child:
+            assert aux_data == "protocol"
+            return cls()
+
+    ad.pytree.register_pytree_node(
+        _Base,
+        flatten_fn=lambda _tree: ((), "base"),
+        unflatten_fn=lambda _metadata, _children: _Base(),
+        include_subclasses=True,
+    )
+
+    leaves, treedef = ad.pytree.tree_flatten(_Child())
+
+    assert leaves == [2.0]
+    assert treedef.aux_data == "protocol"
+    assert type(ad.pytree.tree_unflatten(treedef, leaves)) is _Child
+
+
 def test_inherited_pytree_protocol_preserves_the_concrete_subclass() -> None:
     tree = _ProtocolChild(1.0, 2.0, tag="parameters")
 

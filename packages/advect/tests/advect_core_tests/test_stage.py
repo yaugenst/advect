@@ -429,7 +429,7 @@ def test_staged_multi_output_primitive_round_trips_flat_node_outputs() -> None:
         lambda x: pair(x),  # noqa: PLW0108 - explicit trace boundary
         specs=(ad.ArraySpec((2,), "float32"),),
     )
-    get_registry().update_num_outputs(pair.op_name, num_outputs=1)
+    get_registry().update(pair.op_name, num_outputs=1, output_arity_known=False)
     restored = ad.StagedProgram.from_dict(program.to_dict())
     value = np.array([2.0, 3.0], dtype=np.float32)
     result = restored(value)
@@ -470,12 +470,13 @@ def test_failed_staged_load_rolls_back_custom_output_arity() -> None:
         specs=(ad.ArraySpec((2,), "float32"),),
     )
     payload = deepcopy(program.to_dict())
-    get_registry().update_num_outputs(pair.op_name, num_outputs=1)
+    get_registry().update(pair.op_name, num_outputs=1, output_arity_known=False)
     payload["program"]["graph"]["version"] = "invalid"
 
     with pytest.raises(ValueError, match="Unsupported graph version"):
         ad.StagedProgram.from_dict(payload)
     assert get_registry().get(pair.op_name).num_outputs == 1
+    assert not get_registry().get(pair.op_name).output_arity_known
 
 
 def test_custom_primitive_output_order_must_match_abstract_structure() -> None:

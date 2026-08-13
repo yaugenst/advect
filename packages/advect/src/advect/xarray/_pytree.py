@@ -220,6 +220,7 @@ def register_xarray_pytrees() -> None:
         xr.DataArray,
         flatten_fn=_flatten_dataarray,
         unflatten_fn=_unflatten_dataarray,
+        include_subclasses=True,
     )
     register_pytree_node(
         xr.Dataset,

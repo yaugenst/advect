@@ -14,6 +14,10 @@ The [gradient](../tutorials/gradients.md),
 [implicit-differentiation](../tutorials/implicit-differentiation.md) tutorials
 connect these transforms through complete examples.
 
+Library adapters may use `transform_state` for namespaced bookkeeping that
+lives only while one concrete transform is tracing. Differentiable primitive
+inputs and backward residuals must remain explicit.
+
 ::: advect.grad
 
 ::: advect.value_and_grad
@@ -39,3 +43,7 @@ connect these transforms through complete examples.
 ::: advect.Pullback
 
 ::: advect.LinearMap
+
+::: advect.transform_state
+
+::: advect.transform_states

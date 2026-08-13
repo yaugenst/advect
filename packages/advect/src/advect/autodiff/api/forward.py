@@ -93,8 +93,8 @@ def linearize[R](
         If positional selections are duplicated, or a tangent pytree or leaf
         shape does not match its selected primal.
     NoJVPError
-        If the returned map is applied forward through an operation without a
-        JVP rule.
+        If an operation on the differentiated path has no JVP rule. Public
+        primitives are rejected before their concrete implementation runs.
     NoVJPError
         If the returned map is transposed through an operation without an
         explicit or structurally derivable transpose rule.
@@ -126,6 +126,7 @@ def linearize[R](
         argnums=argnums_tuple,
         argnames=None,
         single_argnum=single_argnum,
+        require_jvp=True,
     )
     return cast("R", linear._unlift_outputs(value)), linear  # noqa: SLF001
 
@@ -204,6 +205,7 @@ def jvp[R](
             argnums=argnums_tuple,
             argnames=None,
             single_argnum=single_argnum,
+            require_jvp=True,
         )
         tangent = linear._consume(tangents)  # noqa: SLF001
         return (

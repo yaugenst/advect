@@ -29,6 +29,11 @@ def _astype(value: xp.ndarray, dtype: Any) -> xp.ndarray:
     return xp.astype(source, dtype, copy=False)
 
 
+def _dtype_of(value: Any) -> Any:
+    dtype = getattr(value, "dtype", None)
+    return xp.asarray(value).dtype if dtype is None else dtype
+
+
 def _cotangent_like(primal: xp.ndarray, cotangent: xp.ndarray) -> xp.ndarray:
     """Keep a local contribution in the primal's real tangent space."""
     primal_dtype = getattr(primal, "dtype", None)
@@ -318,7 +323,7 @@ def _vjp_real(
 ) -> tuple[xp.ndarray]:
     """Embed a real cotangent into the input's real tangent space."""
     _ = ans, rest, attrs
-    return (_astype(g, x.dtype),)
+    return (_astype(g, _dtype_of(x)),)
 
 
 def _vjp_where(
@@ -346,7 +351,7 @@ def _vjp_imag(
     """VJP for numpy.imag."""
     _ = ans, rest, attrs
     if xp.iscomplexobj(x):
-        return (_astype(_scalar_like(1j, x) * g, x.dtype),)
+        return (_astype(_scalar_like(1j, x) * g, _dtype_of(x)),)
     return (_zero_like_input(x, g),)
 
 

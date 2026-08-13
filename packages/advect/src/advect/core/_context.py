@@ -19,7 +19,7 @@ from advect.core._errors import TracingError
 _thread_local = threading.local()
 
 if TYPE_CHECKING:
-    from collections.abc import Generator, Iterable
+    from collections.abc import Callable, Generator, Iterable
 
 
 @dataclass(slots=True)
@@ -32,6 +32,8 @@ class TraceFrame:
     frame_id: int
     array_api_version: str | None = None
     pending_update: object | None = None
+    transform_state: dict[object, object] | None = None
+    require_jvp: bool = False
 
 
 def _get_trace_frames() -> list[TraceFrame]:
@@ -184,6 +186,12 @@ def _get_active_trace_kind() -> str | None:
     return None if frame is None else frame.trace_kind
 
 
+def _active_trace_requires_jvp() -> bool:
+    """Return whether the active transform requires forward-mode rules."""
+    frame = _get_active_trace_frame()
+    return frame is not None and frame.require_jvp
+
+
 def _has_active_trace_kind(trace_kind: str) -> bool:
     """Return whether any current-thread trace frame has ``trace_kind``."""
     frames = _get_trace_frames()
@@ -233,6 +241,7 @@ def _set_active_recorder(
     *,
     trace_kind: str = "trace",
     array_api_version: str | None = None,
+    require_jvp: bool = False,
 ) -> None:
     """Push or pop active recorder frames.
 
@@ -260,6 +269,7 @@ def _set_active_recorder(
         trace_kind=trace_kind,
         frame_id=_next_trace_frame_id(),
         array_api_version=array_api_version,
+        require_jvp=require_jvp,
     )
     frames.append(frame)
     bind_trace_frame = getattr(recorder, "bind_trace_frame", None)
@@ -315,6 +325,73 @@ def is_tracing() -> bool:
         True while a dynamic transform or staging trace is active.
     """
     return _get_active_trace_frame() is not None
+
+
+def transform_state[T](
+    namespace: object,
+    factory: Callable[[], T],
+) -> T | None:
+    """Return namespaced state owned by the active dynamic transform.
+
+    Libraries can use this to retain ordinary Python bookkeeping for exactly
+    one define-by-run transform invocation without wrapping the transform or
+    keeping process-global state. Repeated calls with the same namespace return
+    the same object. Nested transforms have independent state, and Advect drops
+    the state when its owning trace exits, including on exceptions.
+
+    State is not a hidden differentiable input or a backward residual. Pass
+    active leaves explicitly to primitives, and retain backward data with
+    ``PrimitiveResult``.
+
+    Outside a transform this returns ``None``. Abstract staging rejects the
+    operation because staged programs cannot retain invocation-local Python
+    state.
+
+    Parameters
+    ----------
+    namespace
+        Hashable library-owned key identifying the state.
+    factory
+        Zero-argument callable used once to create the state.
+
+    Returns
+    -------
+    object or None
+        The invocation-local state, or ``None`` outside dynamic tracing.
+    """
+    frame = _get_active_trace_frame()
+    if frame is None:
+        return None
+    if frame.trace_kind != "autodiff_dynamic":
+        msg = "transform_state is available only during concrete dynamic transforms"
+        raise TracingError(msg)
+    state = frame.transform_state
+    if state is None:
+        state = {}
+        frame.transform_state = state
+    if namespace not in state:
+        state[namespace] = factory()
+    return cast("T", state[namespace])
+
+
+def transform_states[T](namespace: object) -> tuple[T, ...]:
+    """Return existing namespaced states from inner to outer dynamic transforms.
+
+    This lets a library resolve state owned by an enclosing transform while a
+    nested transform is active. It never creates state. Outside a transform it
+    returns an empty tuple; abstract staging rejects the operation.
+    """
+    frame = _get_active_trace_frame()
+    if frame is not None and frame.trace_kind != "autodiff_dynamic":
+        msg = "transform_states is available only during concrete dynamic transforms"
+        raise TracingError(msg)
+    states = []
+    for frame in reversed(_get_trace_frames()):
+        if frame.trace_kind != "autodiff_dynamic" or frame.transform_state is None:
+            continue
+        if namespace in frame.transform_state:
+            states.append(frame.transform_state[namespace])
+    return cast("tuple[T, ...]", tuple(states))
 
 
 def _get_active_trace_level() -> int | None:

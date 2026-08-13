@@ -240,9 +240,13 @@ def test_pullback_context_closes_an_unconsumed_trace() -> None:
         pullback(np.ones_like(value))
 
 
-def test_jvp_reports_a_public_primitive_without_a_forward_rule() -> None:
+def test_forward_mode_rejects_a_public_primitive_before_running_its_primal() -> None:
+    calls = 0
+
     @ad.primitive(name="tests.additional_contracts.transpose_only")
     def transpose_only(value: np.ndarray) -> np.ndarray:
+        nonlocal calls
+        calls += 1
         return value * value
 
     @transpose_only.def_transpose
@@ -256,6 +260,34 @@ def test_jvp_reports_a_public_primitive_without_a_forward_rule() -> None:
 
     with pytest.raises(ad.NoJVPError, match="no JVP rule is installed"):
         ad.jvp(transpose_only)(np.ones(2), tangents=np.ones(2))
+    with pytest.raises(ad.NoJVPError, match="no JVP rule is installed"):
+        ad.linearize(transpose_only, np.ones(2))
+
+    assert calls == 0
+
+
+def test_forward_mode_allows_a_transpose_only_primitive_on_an_enclosing_value() -> None:
+    @ad.primitive(name="tests.additional_contracts.passive_transpose_only")
+    def transpose_only(value: np.ndarray) -> np.ndarray:
+        return value * value
+
+    @transpose_only.def_transpose
+    def transpose(
+        cotangent: np.ndarray,
+        primals: tuple[np.ndarray, ...],
+        output: np.ndarray,
+    ) -> tuple[np.ndarray]:
+        del output
+        return (2 * primals[0] * cotangent,)
+
+    def outer(value: np.ndarray) -> np.ndarray:
+        primal, _tangent = ad.jvp(lambda active: active + transpose_only(value))(
+            np.array(1.0),
+            tangents=np.array(1.0),
+        )
+        return primal
+
+    assert_allclose(ad.grad(outer)(np.array(2.0)), np.array(4.0))
 
 
 def test_checkpoint_partial_jvp_zero_fills_passive_inputs() -> None:

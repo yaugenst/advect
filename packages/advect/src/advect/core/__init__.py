@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from advect.core._abstract import AbstractValue, ArraySpec
-from advect.core._context import debug
+from advect.core._context import debug, transform_state, transform_states
 from advect.core._errors import (
     AdvectError,
     EscapedTracerError,
@@ -50,4 +50,6 @@ __all__ = [
     "debug",
     "primitive",
     "stage",
+    "transform_state",
+    "transform_states",
 ]
