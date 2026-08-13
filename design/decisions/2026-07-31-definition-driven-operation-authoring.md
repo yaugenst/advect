@@ -1,7 +1,7 @@
 # ADR: Definition-Driven Operation Authoring
 
 **Date:** 2026-07-31
-**Status:** Accepted (amended 2026-08-01)
+**Status:** Accepted (amended 2026-08-01 and 2026-08-13)
 **Implementation status:** Implemented
 
 ## Context
@@ -29,6 +29,12 @@ semantics into the operation records once.
 
 The only separate arity metadata is the small set of operations that return
 more than one value. Single output is the primitive default.
+
+Custom primitives also have fixed output arity by default. A custom primitive
+may declare variable output arity when its concrete result structure depends on
+invocation data. Each dynamic call records its realized output tree and leaf
+count; abstract staging rejects the primitive because no durable fixed-arity
+contract exists.
 
 The Array API binding surface is generated from the pinned upstream signatures
 and primitive schemas. Handwritten data is limited to actual differences:
@@ -86,6 +92,10 @@ primitive handle and its complete registry record in one step. Advect derives
 the call contract and default operation identity from that function;
 `def_abstract`, `def_jvp`, and `def_transpose` attach the remaining semantics to
 the same `OpDef`.
+
+The handle may opt into invocation-dependent output arity. This is a narrow
+concrete-dynamic capability, not a second primitive call path or a relaxation
+of fixed arity for built-in and staged operations.
 
 There is one concrete implementation. Primitive authors do not instantiate an
 empty object, rediscover a handle through a public string lookup, register

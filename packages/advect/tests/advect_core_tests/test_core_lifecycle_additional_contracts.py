@@ -35,6 +35,14 @@ import advect as ad
             "both static and nondifferentiable",
         ),
         ({"name": "tests.lifecycle.nonbool_residual", "residual": 1}, TypeError, "boolean"),
+        (
+            {
+                "name": "tests.lifecycle.nonbool_variable_arity",
+                "variable_output_arity": 1,
+            },
+            TypeError,
+            "boolean",
+        ),
     ],
 )
 def test_primitive_rejects_invalid_declarations(

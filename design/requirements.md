@@ -36,7 +36,8 @@ declares:
   the primitive supports forward mode or structural transposition;
 - an explicit transpose when it cannot be derived safely, including
   transpose-only reverse mode without a JVP;
-- whether its implementation returns an invocation-local residual.
+- whether its implementation returns an invocation-local residual; and
+- whether concrete calls may have invocation-dependent output arity.
 
 Transforms use the installed rules directly. Missing-rule errors name the
 primitive and required rule. Structural transposition validates a JVP's
@@ -59,6 +60,12 @@ node and transfers its residual to that outer tape. Residuals never enter
 Opaque residual primitives are first-order-only.
 Because `GraphStore` has no residual table, they are also barriers to staged
 derivative compilation.
+
+Output arity is fixed by default. A custom primitive may instead declare
+variable output arity for concrete dynamic transforms; each invocation records
+its realized output pytree and leaf count. Such a primitive cannot be staged.
+Direct `jvp` and `linearize` calls reject an active transpose-only primitive
+before running its concrete implementation.
 
 ## R3: Concrete dynamic tracing
 
@@ -92,6 +99,12 @@ derivative compilation.
 - Dynamic tracing does not compute durable hashes, fingerprints,
   canonicalization, serialization payloads, or optimization plans and never
   runs staged optimization passes.
+- A dynamic trace frame may hold library-namespaced Python bookkeeping. State
+  is unique to that invocation, isolated across nested transforms, thread-local,
+  and discarded when the frame exits. Enclosing states are discoverable only
+  while another dynamic transform is active. This state cannot replace explicit
+  primitive operands or `PrimitiveResult` residuals and is unavailable to
+  abstract staging.
 - A dynamic trace is thread-affine and closes after its transform completes.
 
 ## R4: Abstract staging
@@ -370,9 +383,11 @@ There is no `holomorphic=True` promise in the initial API.
 ## R14: Pytrees and call structure
 
 - Tuple, list, dict, and custom pytree nodes are supported by dynamic
-  transforms. Custom nodes may use exact process registration or inherited
-  `__advect_tree_flatten__` and `__advect_tree_unflatten__` hooks; exact
-  registration wins. Durable staging initially serializes only the built-in
+  transforms. Custom nodes may use exact process registration, inherited
+  `__advect_tree_flatten__` and `__advect_tree_unflatten__` hooks, or an
+  explicitly inheritable base registration. Exact registration wins, then the
+  class protocol, then the nearest opted-in registered base. Durable staging
+  initially serializes only the built-in
   container nodes and `Static`; a custom node requires an explicit stable codec
   before it can cross that boundary.
 - Gradient results preserve selected input structure.

@@ -208,7 +208,8 @@ An `@primitive` definition owns:
 - explicit static/nondifferentiable arguments;
 - a JVP rule;
 - an optional transpose rule;
-- an optional invocation-local residual contract.
+- an optional invocation-local residual contract; and
+- an optional concrete-only variable-output-arity contract.
 
 The implementation signature is the one call contract, including ordinary
 Python defaults. Concrete execution does not prevalidate those defaults.
@@ -231,6 +232,10 @@ unused residual before returning. Staged replay under dynamic autodiff records
 one atomic custom node and transfers the residual to the enclosing tape. Such
 primitives are first-order-only until residual dependence has an explicit
 derivative representation.
+
+Primitive output arity is fixed unless the author declares it variable. A
+variable-arity primitive records the concrete output tree on each dynamic call
+and cannot cross the abstract staging boundary.
 
 The optional `advect.testing` author kit includes concrete/abstract parity,
 finite-difference JVP/VJP checks, real-adjoint dot-product checks, complex

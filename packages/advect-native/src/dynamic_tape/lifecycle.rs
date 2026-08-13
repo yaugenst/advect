@@ -644,6 +644,11 @@ impl DynamicTape {
             .ok_or_else(|| PyRuntimeError::new_err("dynamic tape weak-scalar slot is unavailable"))
     }
 
+    fn node_is_active(&self, node_id: NodeId) -> PyResult<bool> {
+        let (_index, node) = self.require_node(node_id)?;
+        Ok(node.flags().is_active())
+    }
+
     fn weak_mask(&self, node_ids: Vec<NodeId>) -> PyResult<Vec<bool>> {
         node_ids
             .into_iter()

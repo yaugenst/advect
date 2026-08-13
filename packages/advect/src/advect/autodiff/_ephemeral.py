@@ -310,12 +310,14 @@ def _dynamic_trace(
     *,
     array_api_version: str,
     reverse_only: bool = False,
+    require_jvp: bool = False,
 ) -> Generator[DynamicTape, None, None]:
     tape = DynamicTape()
     _set_active_recorder(
         cast("Any", tape),
         trace_kind="autodiff_dynamic",
         array_api_version=array_api_version,
+        require_jvp=require_jvp,
     )
     error: BaseException | None = None
     try:
@@ -357,6 +359,7 @@ def trace_call(
     argnums: tuple[int, ...],
     argnames: tuple[str, ...] | None,
     reverse_only: bool = False,
+    require_jvp: bool = False,
 ) -> TraceResult:
     """Trace one concrete call without constructing a durable graph."""
     resolution = _negotiate_array_namespace_for_call(args=args, kwargs=kwargs)
@@ -373,6 +376,7 @@ def trace_call(
     with _dynamic_trace(
         array_api_version=selected_version,
         reverse_only=reverse_only,
+        require_jvp=require_jvp,
     ) as tape:
         normalized_argnums = _normalize_argnums_for_call(argnums, nargs=len(args))
         xp = None if resolution is None else resolution.raw_namespace
@@ -1323,6 +1327,7 @@ def linearize_call(
     argnames: tuple[str, ...] | None,
     single_argnum: bool,
     reverse_only: bool = False,
+    require_jvp: bool = False,
 ) -> tuple[Any, LinearMap]:
     trace = trace_call(
         f,
@@ -1331,6 +1336,7 @@ def linearize_call(
         argnums=argnums,
         argnames=argnames,
         reverse_only=reverse_only,
+        require_jvp=require_jvp,
     )
     return trace.output, LinearMap(trace, single_argnum=single_argnum)
 

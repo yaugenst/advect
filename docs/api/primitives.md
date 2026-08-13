@@ -13,6 +13,11 @@ one stable flattened order. Static arguments remain named configuration;
 nondifferentiable arguments remain dynamic values but have no derivative
 contribution.
 
+Output arity is fixed by default. Set `variable_output_arity=True` only when a
+concrete invocation determines its number of output leaves. Advect records that
+invocation's output pytree for differentiation; variable-arity primitives cannot
+be staged.
+
 The [custom primitive tutorial](../tutorials/primitives.md) shows the common
 JVP-first workflow. Use
 [`check_primitive`](testing.md#advect.testing.check_primitive) and

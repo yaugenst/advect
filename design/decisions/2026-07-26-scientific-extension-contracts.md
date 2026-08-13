@@ -133,6 +133,8 @@ explicit-namespace and optional-dependency decisions remain unchanged.
 
 The built-in `advect.xarray` module, enabled by the `xarray` extra, registers
 `DataArray` and `Dataset` as custom pytrees when the user imports it.
+`DataArray` subclasses inherit that registration; `Dataset` registration stays
+exact until a concrete subclass integration requires broader behavior.
 
 - floating- and complex-valued data buffers are differentiable children, while
   integer, boolean, string, and object buffers reject;
