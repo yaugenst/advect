@@ -387,6 +387,46 @@ def test_scalar_vjp_accepts_complex_cotangents_for_complex_outputs() -> None:
     assert gradient == pytest.approx(2.0)
 
 
+@pytest.mark.parametrize(
+    "real_part",
+    [
+        pytest.param(lambda value: value.real, id="attribute"),
+        pytest.param(np.real, id="numpy"),
+    ],
+)
+def test_complex_real_projection_transposes_weak_and_rank_zero_scalars(real_part: Any) -> None:
+    coefficient = 1.0 + 2.0j
+
+    weak_gradient = ad.grad(lambda value: real_part(coefficient * value))(2.0)
+    rank_zero_gradient = ad.grad(lambda value: real_part(coefficient * value))(
+        np.asarray(2.0 + 3.0j)
+    )
+
+    assert weak_gradient == pytest.approx(coefficient.real)
+    assert_allclose(rank_zero_gradient, np.conjugate(coefficient))
+
+
+@pytest.mark.parametrize(
+    "imaginary_part",
+    [
+        pytest.param(lambda value: value.imag, id="attribute"),
+        pytest.param(np.imag, id="numpy"),
+    ],
+)
+def test_complex_imaginary_projection_transposes_weak_and_rank_zero_scalars(
+    imaginary_part: Any,
+) -> None:
+    coefficient = 1.0 + 2.0j
+
+    weak_gradient = ad.grad(lambda value: imaginary_part(coefficient * value))(2.0)
+    rank_zero_gradient = ad.grad(lambda value: imaginary_part(coefficient * value))(
+        np.asarray(2.0 + 3.0j)
+    )
+
+    assert weak_gradient == pytest.approx(coefficient.imag)
+    assert_allclose(rank_zero_gradient, coefficient.imag + 1j * coefficient.real)
+
+
 def test_constant_python_complex_output_supports_linear_transforms() -> None:
     def function(_value: object) -> complex:
         return 1.0j

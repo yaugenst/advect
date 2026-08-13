@@ -52,6 +52,8 @@ from advect.core import (
     debug,
     primitive,
     stage,
+    transform_state,
+    transform_states,
 )
 from advect.support import support_catalog
 
@@ -151,6 +153,8 @@ __all__ = [
     "stage",
     "stop_gradient",
     "support_catalog",
+    "transform_state",
+    "transform_states",
     "value_and_grad",
     "vjp",
     "vjp_program",

@@ -8,12 +8,13 @@ import inspect
 from typing import TYPE_CHECKING, Any, cast, overload
 
 from advect.core._context import (
+    _active_trace_requires_jvp,
     _get_active_recorder,
     _get_active_trace_kind,
     _is_rematerializing,
     is_tracing,
 )
-from advect.core._errors import TracingError
+from advect.core._errors import NoJVPError, TracingError
 from advect.core._primitive_call import (
     _flatten_input_gradients,
     _flatten_primitive_output,
@@ -25,7 +26,8 @@ from advect.core._primitive_call import (
     _validate_output_treedef,
     trace_primitive_call,
 )
-from advect.core._pytree import _tree_contains_tracer
+from advect.core._protocols import _snapshot_traced
+from advect.core._pytree import _tree_contains_tracer, tree_flatten
 from advect.core._registry import get_registry
 from advect.core._registry_types import OpDef
 from advect.core._residual import _normalize_primitive_execution
@@ -106,6 +108,19 @@ def _contains_tracer(value: Any) -> bool:
     return _tree_contains_tracer(value)
 
 
+def _contains_active_tracer(value: Any) -> bool:
+    recorder = _get_active_recorder()
+    if recorder is None:
+        return False
+    leaves, _treedef = tree_flatten(value)
+    return any(
+        getattr(leaf, "recorder", None) is recorder
+        and recorder.node_is_active(_snapshot_traced(leaf)[0])
+        for leaf in leaves
+        if callable(getattr(leaf, "_advect_snapshot", None))
+    )
+
+
 class Primitive[**P, R]:
     """Callable authoring handle returned by ``advect.primitive``.
 
@@ -123,9 +138,13 @@ class Primitive[**P, R]:
         static_argnames: tuple[str, ...] = (),
         nondiff_argnames: tuple[str, ...] = (),
         residual: bool = False,
+        variable_output_arity: bool = False,
     ) -> None:
         if type(residual) is not bool:
             msg = "residual must be a boolean"
+            raise TypeError(msg)
+        if type(variable_output_arity) is not bool:
+            msg = "variable_output_arity must be a boolean"
             raise TypeError(msg)
         op_name = _normalize_name(name)
         static_names = _normalize_argnames(static_argnames, label="static_argnames")
@@ -148,9 +167,11 @@ class Primitive[**P, R]:
         registry.register(
             OpDef(
                 name=op_name,
+                output_arity_known=False,
                 static_argnames=static_names,
                 nondiff_argnames=nondiff_names,
                 has_residual=residual,
+                variable_output_arity=variable_output_arity,
                 implementation=cast("Callable[..., Any]", implementation),
                 signature=signature,
             )
@@ -321,6 +342,14 @@ class Primitive[**P, R]:
         track_output_arity: bool,
     ) -> Any:
         """Record one concrete-only call, optionally allowing per-node output arity."""
+        if _active_trace_requires_jvp() and self._jvp_rule is None:
+            differentiable = set(arguments).difference(
+                self.static_argnames,
+                self.nondiff_argnames,
+            )
+            if any(_contains_active_tracer(arguments[name]) for name in differentiable):
+                msg = f"Cannot linearize primitive '{self.op_name}': no JVP rule is installed"
+                raise NoJVPError(msg, op=self.op_name)
         static_arguments, dynamic_arguments = self._partition_arguments(arguments)
         recorder = _get_active_recorder()
         if recorder is None:
@@ -378,6 +407,12 @@ class Primitive[**P, R]:
             return cast("R", self._dispatch_impl(**arguments))
 
         if _get_active_trace_kind() == "stage_abstract":
+            if self._definition.variable_output_arity:
+                msg = (
+                    f"Primitive '{self.name}' has variable output arity and supports "
+                    "concrete dynamic transforms only"
+                )
+                raise TracingError(msg)
             from advect.core._stage import call_primitive_abstract  # noqa: PLC0415
 
             static_arguments, dynamic_arguments = self._partition_arguments(arguments)
@@ -392,7 +427,10 @@ class Primitive[**P, R]:
 
         return cast(
             "R",
-            self._trace_dynamic_call(arguments, track_output_arity=True),
+            self._trace_dynamic_call(
+                arguments,
+                track_output_arity=not self._definition.variable_output_arity,
+            ),
         )
 
     def def_abstract(self, fn: Callable[..., Any]) -> Callable[..., Any]:
@@ -620,6 +658,7 @@ def primitive[**CallP, ResultT](
     static_argnames: tuple[str, ...] = (),
     nondiff_argnames: tuple[str, ...] = (),
     residual: bool = False,
+    variable_output_arity: bool = False,
 ) -> Primitive[CallP, ResultT]: ...
 
 
@@ -632,6 +671,7 @@ def primitive[**CallP, ResultT](
     static_argnames: tuple[str, ...] = (),
     nondiff_argnames: tuple[str, ...] = (),
     residual: bool = False,
+    variable_output_arity: bool = False,
 ) -> Callable[[Callable[CallP, ResultT]], Primitive[CallP, ResultT]]: ...
 
 
@@ -643,6 +683,7 @@ def primitive[**CallP, ResultT](
     static_argnames: tuple[str, ...] = (),
     nondiff_argnames: tuple[str, ...] = (),
     residual: bool = False,
+    variable_output_arity: bool = False,
 ) -> Primitive[CallP, ResultT] | Callable[[Callable[CallP, ResultT]], Primitive[CallP, ResultT]]:
     """Define one atomic operation from its concrete implementation.
 
@@ -660,7 +701,9 @@ def primitive[**CallP, ResultT](
 
     With ``residual=True``, the implementation must return
     ``advect.PrimitiveResult``; callers still receive only its ``output``.
-    Rules are attached to the returned handle.
+    With ``variable_output_arity=True``, each concrete dynamic invocation owns
+    its output leaf count; abstract staging remains unsupported. Rules are
+    attached to the returned handle.
 
     Parameters
     ----------
@@ -677,6 +720,9 @@ def primitive[**CallP, ResultT](
     residual
         Whether the implementation returns an invocation-local
         ``PrimitiveResult`` for an exact transpose.
+    variable_output_arity
+        Whether concrete invocations may return different numbers of output
+        leaves. Such primitives cannot be staged.
 
     Returns
     -------
@@ -719,6 +765,7 @@ def primitive[**CallP, ResultT](
             static_argnames=static_argnames,
             nondiff_argnames=nondiff_argnames,
             residual=residual,
+            variable_output_arity=variable_output_arity,
         )
 
     return define if function is None else define(function)

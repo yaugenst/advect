@@ -5,7 +5,8 @@ Importing `advect.xarray` explicitly registers floating- and complex-valued
 and [`Dataset`](https://docs.xarray.dev/en/stable/generated/xarray.Dataset.html)
 objects as pytrees. Data buffers are differentiable leaves; dimensions,
 coordinates, names, attributes, and alignment metadata are static and are
-restored on derivative results. The
+restored on derivative results. `DataArray` subclasses inherit this registration
+and keep their concrete container type. The
 [Scientific Python tutorial](../tutorials/scientific-python.md#preserve-xarray-labels)
 shows a labeled gradient.
 

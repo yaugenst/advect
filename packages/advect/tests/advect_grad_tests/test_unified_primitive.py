@@ -599,7 +599,7 @@ def test_implementation_cannot_hide_a_captured_tracer_from_primitive_inputs() ->
         return primitive(value)
 
     with pytest.raises(TracingError, match=r"captured tracer.*explicit primitive argument"):
-        ad.jvp(function)(np.ones(2), tangents=np.ones(2))
+        ad.vjp(function)(np.ones(2))
 
 
 def test_static_pytree_metadata_cannot_hide_a_captured_tracer() -> None:
@@ -615,7 +615,7 @@ def test_static_pytree_metadata_cannot_hide_a_captured_tracer() -> None:
         return primitive(value)
 
     with pytest.raises(TypeError, match=r"Static pytree metadata.*dynamic pytree leaf"):
-        ad.jvp(function)(np.ones(2), tangents=np.ones(2))
+        ad.vjp(function)(np.ones(2))
 
 
 def test_python_float_primitive_outputs_normalize_for_transforms() -> None:
@@ -847,6 +847,64 @@ def test_structured_primitive_rules_receive_public_output_pytrees() -> None:
 
     staged_gradient = ad.grad(ad.stage(loss, specs=(ad.ArraySpec(x.shape, x.dtype),)))
     assert_allclose(staged_gradient(x), expected)
+
+
+@pytest.mark.parametrize("first_arity", [1, 2])
+def test_ordinary_primitive_keeps_one_fixed_output_arity(first_arity: int) -> None:
+    first_split = first_arity == 2
+
+    @ad.primitive(
+        name=f"tests.unified.fixed_output_arity_{first_split}",
+        static_argnames=("split",),
+    )
+    def primitive(value: np.ndarray, *, split: bool) -> object:
+        return (value, value + 1) if split else value
+
+    _output, pullback = ad.vjp(lambda value: primitive(value, split=first_split))(np.array(2.0))
+    pullback.close()
+
+    expected = "1 to 2" if not first_split else "2 to 1"
+    with pytest.raises(ValueError, match=rf"changed its output count from {expected}"):
+        ad.vjp(lambda value: primitive(value, split=not first_split))(np.array(2.0))
+
+
+def test_variable_output_arity_is_owned_by_each_dynamic_call() -> None:
+    @ad.primitive(
+        name="tests.unified.variable_output_arity",
+        static_argnames=("split",),
+        variable_output_arity=True,
+    )
+    def primitive(value: np.ndarray, *, split: bool) -> object:
+        return (value, value**2) if split else value**3
+
+    @primitive.def_transpose
+    def transpose_rule(
+        cotangent: object,
+        primals: tuple[np.ndarray, ...],
+        output: object,
+        *,
+        split: bool,
+    ) -> tuple[np.ndarray]:
+        del output
+        (value,) = primals
+        if split:
+            linear, quadratic = cast("tuple[np.ndarray, np.ndarray]", cotangent)
+            return (linear + 2 * value * quadratic,)
+        return (3 * value**2 * cast("np.ndarray", cotangent),)
+
+    value = np.array(2.0)
+    split_output, split_pullback = ad.vjp(lambda x: primitive(x, split=True))(value)
+    single_output, single_pullback = ad.vjp(lambda x: primitive(x, split=False))(value)
+
+    assert_allclose(split_output, (value, value**2))
+    assert_allclose(split_pullback((np.array(3.0), np.array(4.0))), 19.0)
+    assert_allclose(single_output, value**3)
+    assert_allclose(single_pullback(np.array(5.0)), 60.0)
+    with pytest.raises(ad.TracingError, match=r"variable output arity.*dynamic"):
+        ad.stage(
+            lambda x: primitive(x, split=False),
+            specs=(ad.ArraySpec((), "float64"),),
+        )
 
 
 def test_custom_primitive_traces_array_api_strict_outputs() -> None:

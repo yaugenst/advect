@@ -449,15 +449,16 @@ def _output_shape_and_dtype(value: Any) -> tuple[tuple[int, ...], Any]:
 def _record_primitive_output_count(op_name: str, count: int) -> None:
     registry = get_registry()
     op_def = registry.get(op_name)
+    if not op_def.output_arity_known:
+        registry.update(op_name, num_outputs=count, output_arity_known=True)
+        return
     if op_def.num_outputs == count:
         return
-    if op_def.num_outputs != 1:
-        msg = (
-            f"Primitive '{op_name.removeprefix('custom.')}' changed its output count "
-            f"from {op_def.num_outputs} to {count}"
-        )
-        raise ValueError(msg)
-    registry.update_num_outputs(op_name, num_outputs=count)
+    msg = (
+        f"Primitive '{op_name.removeprefix('custom.')}' changed its output count "
+        f"from {op_def.num_outputs} to {count}"
+    )
+    raise ValueError(msg)
 
 
 def _attach_residual(

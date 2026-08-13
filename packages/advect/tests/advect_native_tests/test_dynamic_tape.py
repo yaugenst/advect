@@ -114,6 +114,17 @@ def test_dynamic_tape_records_compact_shared_arena_nodes() -> None:
     tape.release_payloads()
 
 
+def test_dynamic_tape_reports_node_activity() -> None:
+    tape = native.DynamicTape()
+    active = _input(tape, 2.0)
+    passive = _input(tape, 3.0, active=False)
+
+    assert tape.node_is_active(active)
+    assert not tape.node_is_active(passive)
+
+    tape.release_payloads()
+
+
 def test_passive_inputs_remain_primal_operands_without_receiving_cotangents() -> None:
     seen_active_positions: list[tuple[int, ...]] = []
 

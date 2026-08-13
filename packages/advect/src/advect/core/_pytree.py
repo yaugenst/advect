@@ -38,6 +38,7 @@ class _UnflattenFn(Protocol):
 
 
 _REGISTRY: dict[type[Any], tuple[_FlattenFn, _UnflattenFn]] = {}
+_INHERITED_REGISTRY: set[type[Any]] = set()
 _PROTOCOL_RESULT_ARITY = 2
 
 
@@ -168,6 +169,7 @@ def register_pytree_node(
     *,
     flatten_fn: _FlattenFn,
     unflatten_fn: _UnflattenFn,
+    include_subclasses: bool = False,
 ) -> None:
     """Register a custom pytree node type.
 
@@ -179,8 +181,16 @@ def register_pytree_node(
         Function ``flatten_fn(obj) -> (children, aux_data)``.
     unflatten_fn
         Function ``unflatten_fn(aux_data, children) -> obj``.
+    include_subclasses
+        Whether subclasses without their own registration inherit this node
+        implementation. The nearest registered base in the method resolution
+        order wins.
     """
     _REGISTRY[cls] = (flatten_fn, unflatten_fn)
+    if include_subclasses:
+        _INHERITED_REGISTRY.add(cls)
+    else:
+        _INHERITED_REGISTRY.discard(cls)
 
 
 def _dict_flatten(tree: dict[Any, Any]) -> tuple[tuple[Any, ...], Any]:
@@ -270,6 +280,10 @@ def _get_node_impl(node_type: type[Any]) -> tuple[_FlattenFn, _UnflattenFn] | No
             return node_type.__advect_tree_unflatten__(aux_data, children)
 
         return flatten_protocol, unflatten_protocol
+
+    for base in node_type.__mro__[1:]:
+        if base in _INHERITED_REGISTRY:
+            return _REGISTRY[base]
 
     if issubclass(node_type, tuple) and isinstance(getattr(node_type, "_fields", None), tuple):
 

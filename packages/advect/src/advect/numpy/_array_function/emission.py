@@ -801,14 +801,15 @@ def _make_unary_shape_handler(
             if val is not None:
                 attrs[name] = attr_transform(val) if attr_transform else val
 
+        result_shape, result_dtype = _result_shape_and_dtype(result)
         node_id = _add_backend_node(
             graph=graph,
             op=_canonical_op(op_name),
             inputs=(_get_node(a, graph, traced_type),),
             value=result,
             attrs=attrs,
-            shape=result.shape,
-            dtype=result.dtype,
+            shape=result_shape,
+            dtype=result_dtype,
         )
         return result, node_id
 
