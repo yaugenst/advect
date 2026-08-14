@@ -61,13 +61,16 @@ data buffers and rebuild the labels around derivative results.</p>
   static metadata.</li>
 <li>xarray continues to own alignment, named indexing, and named reductions when
   those operations lower to supported array primitives.</li>
+<li><code>DataArray</code> subclasses inherit the same pytree behavior and preserve their
+  concrete container type.</li>
 </ul>
 <h2 id="boundaries">Boundaries<a class="headerlink" href="#boundaries" title="Permanent link">&para;</a></h2>
 <p>This integration is dynamic-only. For a reusable staged kernel, stage the raw
 array function, call it with <code>field.data</code>, and restore labels outside the
-program. Data-dependent coordinates, MultiIndex coordinates, Dask execution,
-and broad groupby, rolling, or interpolation coverage are outside the current
-contract.</p>
+program. <code>DataArray.values</code> and <code>.to_numpy()</code> materialize NumPy arrays and remain
+outside tracing. Data-dependent coordinates, MultiIndex coordinates, Dask
+execution, and broad groupby, rolling, or interpolation coverage are outside
+the current contract.</p>
 <p>See <a href="../../tutorials/scientific-python/#preserve-xarray-labels">Arrays and Scientific Python</a>
 for a complete example.</p>
       </div>

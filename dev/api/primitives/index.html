@@ -59,6 +59,10 @@ pytrees. JVP and transpose rules operate on the dynamic array/scalar leaves in
 one stable flattened order. Static arguments remain named configuration;
 nondifferentiable arguments remain dynamic values but have no derivative
 contribution.</p>
+<p>Output arity is fixed by default. Set <code>variable_output_arity=True</code> only when a
+concrete invocation determines its number of output leaves. Advect records that
+invocation's output pytree for differentiation; variable-arity primitives cannot
+be staged.</p>
 <p>The <a href="../../tutorials/primitives/">custom primitive tutorial</a> shows the common
 JVP-first workflow. Use
 <a href="../testing/#advect.testing.check_primitive"><code>check_primitive</code></a> and
@@ -84,7 +88,8 @@ the primitive and a representative composition.</p>
 </span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>    <span class="n">static_argnames</span><span class="p">:</span> <span class="n"><span title="tuple">tuple</span></span><span class="p">[</span><span class="n"><span title="str">str</span></span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">=</span> <span class="p">(),</span>
 </span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>    <span class="n">nondiff_argnames</span><span class="p">:</span> <span class="n"><span title="tuple">tuple</span></span><span class="p">[</span><span class="n"><span title="str">str</span></span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">=</span> <span class="p">(),</span>
 </span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>    <span class="n">residual</span><span class="p">:</span> <span class="n"><span title="bool">bool</span></span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
-</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="n"><span title="advect.core._primitive.Primitive">Primitive</span></span><span class="p">[</span><span class="n"><span title="advect.core._primitive.primitive[**CallP]">CallP</span></span><span class="p">,</span> <span class="n"><span title="advect.core._primitive.primitive[ResultT]">ResultT</span></span><span class="p">]</span>
+</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>    <span class="n">variable_output_arity</span><span class="p">:</span> <span class="n"><span title="bool">bool</span></span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="n"><span title="advect.core._primitive.Primitive">Primitive</span></span><span class="p">[</span><span class="n"><span title="advect.core._primitive.primitive[**CallP]">CallP</span></span><span class="p">,</span> <span class="n"><span title="advect.core._primitive.primitive[ResultT]">ResultT</span></span><span class="p">]</span>
 </span></code></pre></div><div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">primitive</span><span class="p">(</span>
 </span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    <span class="n">function</span><span class="p">:</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
 </span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>    <span class="o">/</span><span class="p">,</span>
@@ -93,9 +98,10 @@ the primitive and a representative composition.</p>
 </span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>    <span class="n">static_argnames</span><span class="p">:</span> <span class="n"><span title="tuple">tuple</span></span><span class="p">[</span><span class="n"><span title="str">str</span></span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">=</span> <span class="p">(),</span>
 </span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>    <span class="n">nondiff_argnames</span><span class="p">:</span> <span class="n"><span title="tuple">tuple</span></span><span class="p">[</span><span class="n"><span title="str">str</span></span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">=</span> <span class="p">(),</span>
 </span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>    <span class="n">residual</span><span class="p">:</span> <span class="n"><span title="bool">bool</span></span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
-</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="n"><span title="collections.abc.Callable">Callable</span></span><span class="p">[</span>
-</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>    <span class="p">[</span><span class="n"><span title="collections.abc.Callable">Callable</span></span><span class="p">[</span><span class="n"><span title="advect.core._primitive.primitive[**CallP]">CallP</span></span><span class="p">,</span> <span class="n"><span title="advect.core._primitive.primitive[ResultT]">ResultT</span></span><span class="p">]],</span> <span class="n"><span title="advect.core._primitive.Primitive">Primitive</span></span><span class="p">[</span><span class="n"><span title="advect.core._primitive.primitive[**CallP]">CallP</span></span><span class="p">,</span> <span class="n"><span title="advect.core._primitive.primitive[ResultT]">ResultT</span></span><span class="p">]</span>
-</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="p">]</span>
+</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>    <span class="n">variable_output_arity</span><span class="p">:</span> <span class="n"><span title="bool">bool</span></span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="n"><span title="collections.abc.Callable">Callable</span></span><span class="p">[</span>
+</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>    <span class="p">[</span><span class="n"><span title="collections.abc.Callable">Callable</span></span><span class="p">[</span><span class="n"><span title="advect.core._primitive.primitive[**CallP]">CallP</span></span><span class="p">,</span> <span class="n"><span title="advect.core._primitive.primitive[ResultT]">ResultT</span></span><span class="p">]],</span> <span class="n"><span title="advect.core._primitive.Primitive">Primitive</span></span><span class="p">[</span><span class="n"><span title="advect.core._primitive.primitive[**CallP]">CallP</span></span><span class="p">,</span> <span class="n"><span title="advect.core._primitive.primitive[ResultT]">ResultT</span></span><span class="p">]</span>
+</span><span id="__span-0-12"><a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="p">]</span>
 </span></code></pre></div>          </div>
 <div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">primitive</span><span class="p">(</span>
 </span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    <span class="n">function</span><span class="p">:</span> <span class="n"><span title="collections.abc.Callable">Callable</span></span><span class="p">[</span><span class="n"><span title="advect.core._primitive.primitive[**CallP]">CallP</span></span><span class="p">,</span> <span class="n"><span title="advect.core._primitive.primitive[ResultT]">ResultT</span></span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
@@ -105,13 +111,14 @@ the primitive and a representative composition.</p>
 </span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>    <span class="n">static_argnames</span><span class="p">:</span> <span class="n"><span title="tuple">tuple</span></span><span class="p">[</span><span class="n"><span title="str">str</span></span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">=</span> <span class="p">(),</span>
 </span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>    <span class="n">nondiff_argnames</span><span class="p">:</span> <span class="n"><span title="tuple">tuple</span></span><span class="p">[</span><span class="n"><span title="str">str</span></span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">=</span> <span class="p">(),</span>
 </span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>    <span class="n">residual</span><span class="p">:</span> <span class="n"><span title="bool">bool</span></span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
-</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="p">(</span>
-</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>    <span class="n"><span title="advect.core._primitive.Primitive">Primitive</span></span><span class="p">[</span><span class="n"><span title="advect.core._primitive.primitive[**CallP]">CallP</span></span><span class="p">,</span> <span class="n"><span title="advect.core._primitive.primitive[ResultT]">ResultT</span></span><span class="p">]</span>
-</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>    <span class="o">|</span> <span class="n"><span title="collections.abc.Callable">Callable</span></span><span class="p">[</span>
-</span><span id="__span-0-12"><a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>        <span class="p">[</span><span class="n"><span title="collections.abc.Callable">Callable</span></span><span class="p">[</span><span class="n"><span title="advect.core._primitive.primitive[**CallP]">CallP</span></span><span class="p">,</span> <span class="n"><span title="advect.core._primitive.primitive[ResultT]">ResultT</span></span><span class="p">]],</span>
-</span><span id="__span-0-13"><a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>        <span class="n"><span title="advect.core._primitive.Primitive">Primitive</span></span><span class="p">[</span><span class="n"><span title="advect.core._primitive.primitive[**CallP]">CallP</span></span><span class="p">,</span> <span class="n"><span title="advect.core._primitive.primitive[ResultT]">ResultT</span></span><span class="p">],</span>
-</span><span id="__span-0-14"><a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>    <span class="p">]</span>
-</span><span id="__span-0-15"><a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a><span class="p">)</span>
+</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>    <span class="n">variable_output_arity</span><span class="p">:</span> <span class="n"><span title="bool">bool</span></span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="p">(</span>
+</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>    <span class="n"><span title="advect.core._primitive.Primitive">Primitive</span></span><span class="p">[</span><span class="n"><span title="advect.core._primitive.primitive[**CallP]">CallP</span></span><span class="p">,</span> <span class="n"><span title="advect.core._primitive.primitive[ResultT]">ResultT</span></span><span class="p">]</span>
+</span><span id="__span-0-12"><a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>    <span class="o">|</span> <span class="n"><span title="collections.abc.Callable">Callable</span></span><span class="p">[</span>
+</span><span id="__span-0-13"><a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>        <span class="p">[</span><span class="n"><span title="collections.abc.Callable">Callable</span></span><span class="p">[</span><span class="n"><span title="advect.core._primitive.primitive[**CallP]">CallP</span></span><span class="p">,</span> <span class="n"><span title="advect.core._primitive.primitive[ResultT]">ResultT</span></span><span class="p">]],</span>
+</span><span id="__span-0-14"><a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>        <span class="n"><span title="advect.core._primitive.Primitive">Primitive</span></span><span class="p">[</span><span class="n"><span title="advect.core._primitive.primitive[**CallP]">CallP</span></span><span class="p">,</span> <span class="n"><span title="advect.core._primitive.primitive[ResultT]">ResultT</span></span><span class="p">],</span>
+</span><span id="__span-0-15"><a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>    <span class="p">]</span>
+</span><span id="__span-0-16"><a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a><span class="p">)</span>
 </span></code></pre></div>
 
     <div class="doc doc-contents first">
@@ -129,7 +136,9 @@ rules receive all remaining dynamic array/scalar leaves flattened in
 implementation-parameter and pytree order.</p>
 <p>With <code>residual=True</code>, the implementation must return
 <code>advect.PrimitiveResult</code>; callers still receive only its <code>output</code>.
-Rules are attached to the returned handle.</p>
+With <code>variable_output_arity=True</code>, each concrete dynamic invocation owns
+its output leaf count; abstract staging remains unsupported. Rules are
+attached to the returned handle.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -185,6 +194,17 @@ Use a stable explicit name for serialized artifacts.</p>
           <div class="doc-md-description">
             <p>Whether the implementation returns an invocation-local
 <code>PrimitiveResult</code> for an exact transpose.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>variable_output_arity</code></b>
+              (<code><span title="bool">bool</span></code>, default:
+                  <code>False</code>
+)
+          –
+          <div class="doc-md-description">
+            <p>Whether concrete invocations may return different numbers of output
+leaves. Such primitives cannot be staged.</p>
           </div>
         </li>
     </ul>

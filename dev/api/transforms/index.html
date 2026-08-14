@@ -60,6 +60,9 @@ pullback. The other transforms operate dynamically.</p>
 <a href="../../tutorials/advanced-differentiation/">higher-order</a>, and
 <a href="../../tutorials/implicit-differentiation/">implicit-differentiation</a> tutorials
 connect these transforms through complete examples.</p>
+<p>Library adapters may use <code>transform_state</code> for namespaced bookkeeping that
+lives only while one concrete transform is tracing. Differentiable primitive
+inputs and backward residuals must remain explicit.</p>
 
 
 <div class="doc doc-object doc-function">
@@ -808,8 +811,8 @@ shape does not match its selected primal.</p>
               <code><a class="autorefs autorefs-internal" title="NoJVPError (advect.core.NoJVPError)" href="../errors/#advect.NoJVPError">NoJVPError</a></code>
             –
           <div class="doc-md-description">
-            <p>If the returned map is applied forward through an operation without a
-JVP rule.</p>
+            <p>If an operation on the differentiated path has no JVP rule. Public
+primitives are rejected before their concrete implementation runs.</p>
           </div>
         </li>
         <li class="doc-section-item field-body">
@@ -1920,6 +1923,95 @@ an enclosing transform still follows that transform's documented lifetime.</p>
     </div>
 
 </div>
+
+<div class="doc doc-object doc-function">
+
+
+<h2 id="advect.transform_state" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">transform_state</span>
+
+
+<a href="#advect.transform_state" class="headerlink" title="Permanent link">&para;</a></h2>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">transform_state</span><span class="p">(</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    <span class="n">namespace</span><span class="p">:</span> <span class="n"><span title="object">object</span></span><span class="p">,</span> <span class="n">factory</span><span class="p">:</span> <span class="n"><span title="collections.abc.Callable">Callable</span></span><span class="p">[[],</span> <span class="n"><span title="advect.core._context.transform_state[T]">T</span></span><span class="p">]</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="n"><span title="advect.core._context.transform_state[T]">T</span></span> <span class="o">|</span> <span class="kc">None</span>
+</span></code></pre></div>
+
+    <div class="doc doc-contents first">
+
+        <p>Return namespaced state owned by the active dynamic transform.</p>
+<p>Libraries can use this to retain ordinary Python bookkeeping for exactly
+one define-by-run transform invocation without wrapping the transform or
+keeping process-global state. Repeated calls with the same namespace return
+the same object. Nested transforms have independent state, and Advect drops
+the state when its owning trace exits, including on exceptions.</p>
+<p>State is not a hidden differentiable input or a backward residual. Pass
+active leaves explicitly to primitives, and retain backward data with
+<code>PrimitiveResult</code>.</p>
+<p>Outside a transform this returns <code>None</code>. Abstract staging rejects the
+operation because staged programs cannot retain invocation-local Python
+state.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+            <b><code>namespace</code></b>
+              (<code><span title="object">object</span></code>)
+          –
+          <div class="doc-md-description">
+            <p>Hashable library-owned key identifying the state.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>factory</code></b>
+              (<code><span title="collections.abc.Callable">Callable</span>[[], <span title="advect.core._context.transform_state[T]">T</span>]</code>)
+          –
+          <div class="doc-md-description">
+            <p>Zero-argument callable used once to create the state.</p>
+          </div>
+        </li>
+    </ul>
+
+
+<p><span class="doc-section-title">Returns:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+              <code><span title="object">object</span> or None</code>
+          –
+          <div class="doc-md-description">
+            <p>The invocation-local state, or <code>None</code> outside dynamic tracing.</p>
+          </div>
+        </li>
+    </ul>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h2 id="advect.transform_states" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">transform_states</span>
+
+
+<a href="#advect.transform_states" class="headerlink" title="Permanent link">&para;</a></h2>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">transform_states</span><span class="p">(</span><span class="n">namespace</span><span class="p">:</span> <span class="n"><span title="object">object</span></span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n"><span title="tuple">tuple</span></span><span class="p">[</span><span class="n"><span title="advect.core._context.transform_states[T]">T</span></span><span class="p">,</span> <span class="o">...</span><span class="p">]</span>
+</span></code></pre></div>
+
+    <div class="doc doc-contents first">
+
+        <p>Return existing namespaced states from inner to outer dynamic transforms.</p>
+<p>This lets a library resolve state owned by an enclosing transform while a
+nested transform is active. It never creates state. Outside a transform it
+returns an empty tuple; abstract staging rejects the operation.</p>
+
+
+    </div>
+
+</div>
       </div>
       
 
@@ -1935,7 +2027,7 @@ an enclosing transform still follows that transform's documented lifetime.</p>
 
   <aside class="tile outlinetile" id="outlinetile" aria-label="Page outline" aria-hidden="true">
     <span class="ptitle"><span class="pn">outline</span> this-page</span>
-    <nav class="outlinelinks" id="outlinelinks"><a href="#advect.grad">grad</a><a href="#advect.value_and_grad">value_and_grad</a><a href="#advect.jvp">jvp</a><a href="#advect.vjp">vjp</a><a href="#advect.linearize">linearize</a><a href="#advect.jacobian">jacobian</a><a href="#advect.hvp">hvp</a><a href="#advect.hessian">hessian</a><a href="#advect.hessian_diag">hessian_diag</a><a href="#advect.checkpoint">checkpoint</a><a href="#advect.implicit_root">implicit_root</a><a href="#advect.Pullback">Pullback</a><a href="#advect.Pullback.__call__" class="outline-sub">Pullback.__call__</a><a href="#advect.Pullback.close" class="outline-sub">Pullback.close</a><a href="#advect.Pullback.__enter__" class="outline-sub">Pullback.__enter__</a><a href="#advect.Pullback.__exit__" class="outline-sub">Pullback.__exit__</a><a href="#advect.LinearMap">LinearMap</a><a href="#advect.LinearMap.close" class="outline-sub">LinearMap.close</a></nav>
+    <nav class="outlinelinks" id="outlinelinks"><a href="#advect.grad">grad</a><a href="#advect.value_and_grad">value_and_grad</a><a href="#advect.jvp">jvp</a><a href="#advect.vjp">vjp</a><a href="#advect.linearize">linearize</a><a href="#advect.jacobian">jacobian</a><a href="#advect.hvp">hvp</a><a href="#advect.hessian">hessian</a><a href="#advect.hessian_diag">hessian_diag</a><a href="#advect.checkpoint">checkpoint</a><a href="#advect.implicit_root">implicit_root</a><a href="#advect.Pullback">Pullback</a><a href="#advect.Pullback.__call__" class="outline-sub">Pullback.__call__</a><a href="#advect.Pullback.close" class="outline-sub">Pullback.close</a><a href="#advect.Pullback.__enter__" class="outline-sub">Pullback.__enter__</a><a href="#advect.Pullback.__exit__" class="outline-sub">Pullback.__exit__</a><a href="#advect.LinearMap">LinearMap</a><a href="#advect.LinearMap.close" class="outline-sub">LinearMap.close</a><a href="#advect.transform_state">transform_state</a><a href="#advect.transform_states">transform_states</a></nav>
   </aside>
 </div>
 

@@ -4,6 +4,8 @@
 
 Concrete and abstract calls retain the implementation's named parameters and pytrees. JVP and transpose rules operate on the dynamic array/scalar leaves in one stable flattened order. Static arguments remain named configuration; nondifferentiable arguments remain dynamic values but have no derivative contribution.
 
+Output arity is fixed by default. Set `variable_output_arity=True` only when a concrete invocation determines its number of output leaves. Advect records that invocation's output pytree for differentiation; variable-arity primitives cannot be staged.
+
 The [custom primitive tutorial](https://yaugenst.github.io/advect/dev/tutorials/primitives/index.md) shows the common JVP-first workflow. Use [`check_primitive`](https://yaugenst.github.io/advect/dev/api/testing/#advect.testing.check_primitive) and [`check_gradient`](https://yaugenst.github.io/advect/dev/api/testing/#advect.testing.check_gradient) to validate both the primitive and a representative composition.
 
 ## Define the operation
@@ -19,6 +21,7 @@ primitive(
     static_argnames: tuple[str, ...] = (),
     nondiff_argnames: tuple[str, ...] = (),
     residual: bool = False,
+    variable_output_arity: bool = False,
 ) -> Primitive[CallP, ResultT]
 ```
 
@@ -31,6 +34,7 @@ primitive(
     static_argnames: tuple[str, ...] = (),
     nondiff_argnames: tuple[str, ...] = (),
     residual: bool = False,
+    variable_output_arity: bool = False,
 ) -> Callable[
     [Callable[CallP, ResultT]], Primitive[CallP, ResultT]
 ]
@@ -45,6 +49,7 @@ primitive(
     static_argnames: tuple[str, ...] = (),
     nondiff_argnames: tuple[str, ...] = (),
     residual: bool = False,
+    variable_output_arity: bool = False,
 ) -> (
     Primitive[CallP, ResultT]
     | Callable[
@@ -60,7 +65,7 @@ The implementation must have fixed named parameters: positional-or-keyword and k
 
 `static_argnames` removes complete named arguments from tracing and stores them as operation attributes. `nondiff_argnames` keeps complete arguments as dynamic operands but supplies `None` tangents and suppresses their transpose contributions. The two sets must be disjoint. Derivative rules receive all remaining dynamic array/scalar leaves flattened in implementation-parameter and pytree order.
 
-With `residual=True`, the implementation must return `advect.PrimitiveResult`; callers still receive only its `output`. Rules are attached to the returned handle.
+With `residual=True`, the implementation must return `advect.PrimitiveResult`; callers still receive only its `output`. With `variable_output_arity=True`, each concrete dynamic invocation owns its output leaf count; abstract staging remains unsupported. Rules are attached to the returned handle.
 
 Parameters:
 
@@ -69,6 +74,7 @@ Parameters:
 - **`static_argnames`** (`tuple[str, ...]`, default: `()` ) – Complete implementation arguments treated as concrete configuration.
 - **`nondiff_argnames`** (`tuple[str, ...]`, default: `()` ) – Complete dynamic arguments excluded from differentiation.
 - **`residual`** (`bool`, default: `False` ) – Whether the implementation returns an invocation-local PrimitiveResult for an exact transpose.
+- **`variable_output_arity`** (`bool`, default: `False` ) – Whether concrete invocations may return different numbers of output leaves. Such primitives cannot be staged.
 
 Returns:
 

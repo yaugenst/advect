@@ -24,6 +24,8 @@ Prefer a traceable real-linear JVP so forward mode, structural transposition, an
 
 Use `residual=True` only when reverse mode needs exact opaque data from the forward invocation. Return `PrimitiveResult(output, residual, release=...)` and provide an explicit transpose. Advect retains the residual until the owning pullback or linear map releases it, calling `release` exactly once. This is a first-order boundary: the primal may stage, but staged derivatives, higher-order derivatives, and `checkpoint` cannot retain the residual.
 
+Use `variable_output_arity=True` only when a concrete invocation determines the number of output leaves. The ordinary primitive call records that realized pytree for dynamic differentiation. Variable-arity primitives do not stage; keep the default fixed contract whenever an abstract output rule can describe the operation.
+
 Give the primitive an explicit stable name only when saved programs need an identity independent of the Python module path. The name is a link key, not semantic versioning; loading requires the matching implementation to be registered under that name.
 
 Run `check_primitive` for every materially different shape, dtype, pytree, static-argument, and complex case. Its default abstract/JVP/transpose tuple is a first-order smoke check. Add `nested` and `stage` only when the primitive claims those paths, then run `check_gradient` on a representative composition. These author checks do not create a built-in support claim or require an internal `InvocationCase`.

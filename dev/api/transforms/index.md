@@ -4,6 +4,8 @@ Most transforms on this page run the callable and trace the path taken by its co
 
 The [gradient](https://yaugenst.github.io/advect/dev/tutorials/gradients/index.md), [linear-map](https://yaugenst.github.io/advect/dev/tutorials/linear-maps/index.md), [higher-order](https://yaugenst.github.io/advect/dev/tutorials/advanced-differentiation/index.md), and [implicit-differentiation](https://yaugenst.github.io/advect/dev/tutorials/implicit-differentiation/index.md) tutorials connect these transforms through complete examples.
 
+Library adapters may use `transform_state` for namespaced bookkeeping that lives only while one concrete transform is tracing. Differentiable primitive inputs and backward residuals must remain explicit.
+
 ## grad
 
 ```python
@@ -302,7 +304,7 @@ Raises:
 - `IndexError` – If a positional selection is out of range.
 - `TypeError` – If a selected input contains an unsupported Python complex scalar, or a tangent has an invalid structure or numeric category.
 - `ValueError` – If positional selections are duplicated, or a tangent pytree or leaf shape does not match its selected primal.
-- `NoJVPError` – If the returned map is applied forward through an operation without a JVP rule.
+- `NoJVPError` – If an operation on the differentiated path has no JVP rule. Public primitives are rejected before their concrete implementation runs.
 - `NoVJPError` – If the returned map is transposed through an operation without an explicit or structurally derivable transpose rule.
 - `RuntimeError` – If the map is applied after it has been closed.
 
@@ -684,3 +686,38 @@ close() -> None
 ```
 
 Release retained concrete values and primitive residuals.
+
+## transform_state
+
+```python
+transform_state(
+    namespace: object, factory: Callable[[], T]
+) -> T | None
+```
+
+Return namespaced state owned by the active dynamic transform.
+
+Libraries can use this to retain ordinary Python bookkeeping for exactly one define-by-run transform invocation without wrapping the transform or keeping process-global state. Repeated calls with the same namespace return the same object. Nested transforms have independent state, and Advect drops the state when its owning trace exits, including on exceptions.
+
+State is not a hidden differentiable input or a backward residual. Pass active leaves explicitly to primitives, and retain backward data with `PrimitiveResult`.
+
+Outside a transform this returns `None`. Abstract staging rejects the operation because staged programs cannot retain invocation-local Python state.
+
+Parameters:
+
+- **`namespace`** (`object`) – Hashable library-owned key identifying the state.
+- **`factory`** (`Callable[[], T]`) – Zero-argument callable used once to create the state.
+
+Returns:
+
+- `object or None` – The invocation-local state, or None outside dynamic tracing.
+
+## transform_states
+
+```python
+transform_states(namespace: object) -> tuple[T, ...]
+```
+
+Return existing namespaced states from inner to outer dynamic transforms.
+
+This lets a library resolve state owned by an enclosing transform while a nested transform is active. It never creates state. Outside a transform it returns an empty tuple; abstract staging rejects the operation.

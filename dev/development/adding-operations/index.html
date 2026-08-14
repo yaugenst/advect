@@ -129,6 +129,11 @@ and provide an explicit transpose. Advect retains the residual until the owning
 pullback or linear map releases it, calling <code>release</code> exactly once. This is a
 first-order boundary: the primal may stage, but staged derivatives,
 higher-order derivatives, and <code>checkpoint</code> cannot retain the residual.</p>
+<p>Use <code>variable_output_arity=True</code> only when a concrete invocation determines
+the number of output leaves. The ordinary primitive call records that realized
+pytree for dynamic differentiation. Variable-arity primitives do not stage;
+keep the default fixed contract whenever an abstract output rule can describe
+the operation.</p>
 <p>Give the primitive an explicit stable name only when saved programs need an
 identity independent of the Python module path. The name is a link key, not
 semantic versioning; loading requires the matching implementation to be

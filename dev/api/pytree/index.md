@@ -77,6 +77,7 @@ register_pytree_node(
     *,
     flatten_fn: _FlattenFn,
     unflatten_fn: _UnflattenFn,
+    include_subclasses: bool = False,
 ) -> None
 ```
 
@@ -87,6 +88,7 @@ Parameters:
 - **`cls`** (`type[Any]`) – Class to register as a pytree node.
 - **`flatten_fn`** (`_FlattenFn`) – Function flatten_fn(obj) -> (children, aux_data).
 - **`unflatten_fn`** (`_UnflattenFn`) – Function unflatten_fn(aux_data, children) -> obj.
+- **`include_subclasses`** (`bool`, default: `False` ) – Whether subclasses without their own registration inherit this node implementation. The nearest registered base in the method resolution order wins.
 
 ### static
 

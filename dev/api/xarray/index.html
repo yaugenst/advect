@@ -53,7 +53,8 @@ var base_url = "../..";
 and <a href="https://docs.xarray.dev/en/stable/generated/xarray.Dataset.html"><code>Dataset</code></a>
 objects as pytrees. Data buffers are differentiable leaves; dimensions,
 coordinates, names, attributes, and alignment metadata are static and are
-restored on derivative results. The
+restored on derivative results. <code>DataArray</code> subclasses inherit this registration
+and keep their concrete container type. The
 <a href="../../tutorials/scientific-python/#preserve-xarray-labels">Scientific Python tutorial</a>
 shows a labeled gradient.</p>
 <p>This is a structure integration, not an array provider. It supports dynamic
