@@ -1,0 +1,208 @@
+<!doctype html><html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Automatic differentiation for the NumPy code you already write">
+<link rel="canonical" href="https://yaugenst.github.io/advect/0.2.0/development/documentation/">
+<title>documentation(1) · advect</title>
+<link rel="icon" href="../../img/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../css/fonts.css">
+<link rel="stylesheet" href="../../css/theme.css?v=6c7554a0ba07">
+<link rel="stylesheet" href="../../assets/_mkdocstrings.css">
+<script>
+var base_url = "../..";
+/* pre-paint: apply persisted display mode and pane state to avoid a theme
+   flash and the panes animating open on every navigation */
+(function () {
+  var m = null, t = null, o = null;
+  var home = false;
+  try {
+    m = localStorage.getItem("advect-mode");
+    t = localStorage.getItem("advect-tree");
+    o = localStorage.getItem("advect-outline");
+  } catch (e) { /* private mode */ }
+  if (m === "light" || m === "dark") document.documentElement.dataset.theme = m;
+  var open = t === null ? home && window.innerWidth > 1100 : t === "1";
+  if (open) document.documentElement.classList.add("tree-open");
+  open = o === null ? !home && window.innerWidth > 1100 : o === "1";
+  if (open) document.documentElement.classList.add("outline-open");
+})();
+</script>
+
+</head>
+<body data-base="../..">
+
+<div class="desktop" id="desktop">
+  <aside class="tile treetile" id="treetile" aria-label="Documentation tree" aria-hidden="true">
+    <span class="ptitle"><span class="pn">tree</span> docs/</span>
+    <pre class="tree"><span class="trow"><a href="../.." title="Home">docs/</a></span><span class="trow" style="--ti:4ch"><span class="dim">├── </span><a href="../../tutorials/" title="Tutorials">tutorials/</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/gradients/" title="Gradients and Pytrees">gradients</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/control-flow/" title="Dynamic Control Flow and Mutation">control-flow</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/linear-maps/" title="JVPs, VJPs, and Linear Maps">linear-maps</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/advanced-differentiation/" title="Higher-Order Differentiation">advanced-differentiation</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/implicit-differentiation/" title="Implicit Differentiation">implicit-differentiation</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/staging/" title="Staging and Serialization">staging</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/scientific-python/" title="Arrays and Scientific Python">scientific-python</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/host-frameworks/" title="Host Autodiff Frameworks">host-frameworks</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/primitives/" title="Custom Primitives">primitives</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   └── </span><a href="../../tutorials/debugging/" title="Troubleshooting">debugging</a></span><span class="trow" style="--ti:4ch"><span class="dim">├── </span><a href="../../architecture/" title="Architecture">architecture</a></span><span class="trow" style="--ti:4ch"><span class="dim">├── </span><a href="../../compatibility/" title="Compatibility">compatibility/</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../compatibility/numpy/" title="NumPy">numpy</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../compatibility/array-api/" title="Array API">array-api</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../compatibility/cupy/" title="CuPy">cupy</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../compatibility/scipy/" title="SciPy">scipy</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   └── </span><a href="../../compatibility/xarray/" title="xarray">xarray</a></span><span class="trow" style="--ti:4ch"><span class="dim">├── </span><a href="../../api/" title="API Reference">api-reference/</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span>core-api/</span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="../../api/transforms/" title="Transforms">transforms</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="../../api/staging/" title="Staging">staging</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="../../api/primitives/" title="Primitives">primitives</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="../../api/arrays/" title="Arrays">arrays</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="../../api/pytree/" title="Pytrees">pytree</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="../../api/testing/" title="Testing Utilities">testing</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="../../api/support/" title="Support Catalog">support</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   └── </span><a href="../../api/errors/" title="Errors">errors</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   └── </span>public-modules/</span><span class="trow" style="--ti:12ch"><span class="dim">│       ├── </span><a href="../../api/numpy/" title="NumPy Frontend">numpy</a></span><span class="trow" style="--ti:12ch"><span class="dim">│       ├── </span><a href="../../api/scipy/" title="SciPy">scipy/</a></span><span class="trow" style="--ti:16ch"><span class="dim">│       │   ├── </span><a href="../../api/scipy/special/" title="Special Functions">special</a></span><span class="trow" style="--ti:16ch"><span class="dim">│       │   ├── </span><a href="../../api/scipy/ndimage/" title="Image Processing">ndimage</a></span><span class="trow" style="--ti:16ch"><span class="dim">│       │   └── </span><a href="../../api/scipy/solvers/" title="Solver Callbacks">solvers</a></span><span class="trow" style="--ti:12ch"><span class="dim">│       ├── </span><a href="../../api/xarray/" title="xarray">xarray</a></span><span class="trow" style="--ti:12ch"><span class="dim">│       └── </span><a href="../../api/interop/" title="Host Autodiff Interop">host-autodiff-interop/</a></span><span class="trow" style="--ti:16ch"><span class="dim">│           ├── </span><a href="../../api/interop/torch/" title="PyTorch">torch</a></span><span class="trow" style="--ti:16ch"><span class="dim">│           ├── </span><a href="../../api/interop/jax/" title="JAX">jax</a></span><span class="trow" style="--ti:16ch"><span class="dim">│           └── </span><a href="../../api/interop/autograd/" title="HIPS Autograd">autograd</a></span><span class="trow" style="--ti:4ch"><span class="dim">└── </span><a href="../" title="Developer Guide">developer-guide/</a></span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="../codebase/" title="Codebase Map">codebase</a></span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="../adding-operations/" title="Adding Operations">adding-operations</a></span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="../testing/" title="Testing">testing</a></span><span class="trow" style="--ti:8ch"><span class="dim">    └── </span><a href="./" class="cur" aria-current="page" title="Documentation">documentation</a></span></pre>
+  </aside>
+
+  <article class="tile manwin" aria-label="Manual page">
+    <span class="ptitle"><span class="pn">man</span> advect/development/documentation</span>
+    <div class="manscroll" id="manscroll"><div class="mancol">
+      <div class="manhead"><span>DOCUMENTATION(1)</span><span class="mid">User Commands</span><span>DOCUMENTATION(1)</span></div>
+      <div class="rule">────────────────────────────────────────────────────────────────────────────────────────</div>
+
+      
+      <div class="md">
+        
+        <h1 id="documentation">Documentation<a class="headerlink" href="#documentation" title="Permanent link">&para;</a></h1>
+<p>Advect documents the same architecture at different altitudes. Public pages
+teach supported behavior; developer pages explain ownership; module docstrings
+state local responsibility; scoped <code>AGENTS.md</code> files route automated work to
+those authorities.</p>
+<h2 id="published-documentation">Published documentation<a class="headerlink" href="#published-documentation" title="Permanent link">&para;</a></h2>
+<p>Put each statement at the narrowest level that owns it:</p>
+<ul>
+<li><code>docs/tutorials/</code> teaches complete user tasks with runnable examples.</li>
+<li><code>docs/architecture.md</code> explains the public execution and extension model.</li>
+<li><code>docs/api/</code> is organized by public import path and renders object docstrings
+  with mkdocstrings.</li>
+<li>The NumPy, Array API, CuPy, and SciPy pages under <code>docs/compatibility/</code> are
+  generated from live support data. The xarray page is a hand-written
+  structure contract.</li>
+<li><code>docs/development/</code> is the contributor authority for code ownership,
+  operation authoring, testing, and documentation.</li>
+<li><code>design/</code> records requirements, decisions, implementation status, and
+  evidence contracts; it is not a second public API reference.</li>
+</ul>
+<p>Keep exhaustive callable inventories in the generated compatibility report or
+mkdocstrings output. Narrative pages explain behavior and boundaries,
+then link to the owning inventory.</p>
+<h2 id="module-and-object-docstrings">Module and object docstrings<a class="headerlink" href="#module-and-object-docstrings" title="Permanent link">&para;</a></h2>
+<p>Every production Python module and package, including type stubs and package
+initializers, must start with a module docstring. A substantial module should
+state:</p>
+<ol>
+<li>what responsibility it owns;</li>
+<li>why that responsibility is separate;</li>
+<li>which neighboring layer it consumes or serves; and</li>
+<li>the important responsibility it deliberately does not own.</li>
+</ol>
+<p>One sentence is enough for a cohesive leaf whose responsibility and boundary
+are already clear from its name and types. Documentation checks enforce that
+docstrings exist; they deliberately do not turn subjective prose quality into
+a word-count gate. Review substantial modules against the four questions
+above.</p>
+<p>Do not enumerate private leaf files or repeat a directory map in every module.
+Every public function and class needs an accurate source docstring. When an
+Advect API has non-obvious selection, result structure, errors, or resource and
+lifetime behavior, use NumPy-style sections to explain those contracts and add
+a short example when it helps. A simple parity wrapper may instead rely on its
+accurate signature, a concise source docstring, and the page-level or linked
+upstream contract; do not duplicate the upstream manual parameter by
+parameter. Private helpers need a docstring when their invariant cannot be
+expressed clearly by their name and types.</p>
+<p>The public reference uses explicit mkdocstrings directives. Add a public export
+to its owning API page; do not place the same directive on several pages.</p>
+<h2 id="repository-guidance">Repository guidance<a class="headerlink" href="#repository-guidance" title="Permanent link">&para;</a></h2>
+<p><code>CONTRIBUTING.md</code> is the short human doorway. Root <code>AGENTS.md</code> routes automated
+work and holds only irreducible repository-wide rules. Add a scoped
+<code>AGENTS.md</code> only where ownership or verification materially changes. Each
+scoped file contains four sections: <code>Owns</code>, <code>Must not own</code>, <code>Read</code>, and
+<code>Verify</code>, with links back to this developer guide or a canonical design source.</p>
+<p>Use a subsystem <code>README.md</code> for a stable human explanation of a component, as
+the two Rust crates do. Do not create a README or agent file for every
+directory; redundant guidance drifts and costs readers context.</p>
+<h2 id="generated-compatibility-pages">Generated compatibility pages<a class="headerlink" href="#generated-compatibility-pages" title="Permanent link">&para;</a></h2>
+<p>Do not hand-edit the generated index, NumPy, Array API, CuPy, or SciPy pages.
+Regenerate them after a public NumPy, Array API, or SciPy support change:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>-m<span class="w"> </span>scripts.report_extension_support<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">  </span>--format<span class="w"> </span>markdown<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">  </span>--output<span class="w"> </span>docs/compatibility
+</span></code></pre></div>
+<p>Tests pin the generated pages to the live declarations.
+Update <code>docs/compatibility/xarray.md</code> directly when its labeled-container
+contract changes; it is intentionally narrative rather than generated.</p>
+<h2 id="runnable-examples-and-browser-docs">Runnable examples and browser docs<a class="headerlink" href="#runnable-examples-and-browser-docs" title="Permanent link">&para;</a></h2>
+<p>Mark a runnable Python fence with <code>```{.python .run}</code>. A page is one
+Python session: running a block first executes any unexecuted runnable blocks
+above it. Each marked block must therefore run cleanly in order with only
+NumPy, Advect, and anything defined by earlier marked blocks. Every runnable
+block must also print a meaningful result so its browser output confirms what
+the example demonstrated.</p>
+<p>Run all snippets natively:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>scripts/run_doc_snippets.py<span class="w"> </span>docs
+</span></code></pre></div>
+<p>The ordinary strict build does not require a browser wheel. For browser-facing
+changes and release builds, build the wheel and require the MkDocs hook to
+stage it with the playground adapter and examples:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>mkdir<span class="w"> </span>-p<span class="w"> </span>dist
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>uvx<span class="w"> </span>--from<span class="w"> </span>pyodide-build<span class="o">==</span><span class="m">0</span>.36.0<span class="w"> </span>pyodide<span class="w"> </span>build<span class="w"> </span>.<span class="w"> </span>--outdir<span class="w"> </span>dist/pyodide
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="nv">ADVECT_REQUIRE_BROWSER_WHEEL</span><span class="o">=</span><span class="m">1</span><span class="w"> </span>uv<span class="w"> </span>run<span class="w"> </span>mkdocs<span class="w"> </span>build<span class="w"> </span>--strict
+</span></code></pre></div>
+<p>The Pyodide CI lane also runs the snippets inside its browser-compatible
+environment.</p>
+<h2 id="build-and-llm-index">Build and LLM index<a class="headerlink" href="#build-and-llm-index" title="Permanent link">&para;</a></h2>
+<p>Run <code>uv run mkdocs build --strict</code> for every documentation change. The build
+checks navigation, internal links, mkdocstrings imports, snippets included by
+Markdown, and the generated <code>llms.txt</code>/Markdown bundle. Keep the llms sections
+focused on canonical public and developer pages so an automated reader can
+find ownership without loading the design archive first.</p>
+      </div>
+      
+
+      
+      <nav class="seealso" aria-label="Adjacent pages">
+        <span><a href="../testing/">← testing</a></span>
+        <span class="nn"></span>
+      </nav>
+      
+      <p class="prompt">$ <span class="cursor">█</span></p>
+    </div></div>
+  </article>
+
+  <aside class="tile outlinetile" id="outlinetile" aria-label="Page outline" aria-hidden="true">
+    <span class="ptitle"><span class="pn">outline</span> this-page</span>
+    <nav class="outlinelinks" id="outlinelinks"><a href="#published-documentation">Published documentation</a><a href="#module-and-object-docstrings">Module and object docstrings</a><a href="#repository-guidance">Repository guidance</a><a href="#generated-compatibility-pages">Generated compatibility pages</a><a href="#runnable-examples-and-browser-docs">Runnable examples and browser docs</a><a href="#build-and-llm-index">Build and LLM index</a></nav>
+  </aside>
+</div>
+
+<div class="overlay" id="help" role="dialog" aria-label="Keyboard shortcuts">
+  <h3>Keys</h3>
+  <table>
+    
+    <tr><td class="kk">j k d u g G</td><td>scroll the page</td></tr>
+    <tr><td class="kk">n / p</td><td>next / previous page</td></tr>
+    <tr><td class="kk">e</td><td>toggle the docs tree pane</td></tr>
+    <tr><td class="kk">o</td><td>toggle the page outline</td></tr>
+    <tr><td class="kk">2</td><td>open the playground</td></tr>
+    
+    <tr><td class="kk">/</td><td>search the manual</td></tr>
+    <tr><td class="kk">t</td><td>system → light → dark</td></tr>
+    <tr><td class="kk">?</td><td>close this help</td></tr>
+  </table>
+</div>
+
+<div class="overlay search-box" id="search" role="dialog" aria-hidden="true" aria-label="Search">
+  <div class="search-in"><span class="ps">/</span><input type="search" id="mkdocs-search-query" spellcheck="false" autocomplete="off" aria-label="Search query" placeholder="search the manual…"></div>
+  <div class="search-hits" id="mkdocs-search-results" data-no-results-text="No manual entry found" aria-live="polite"></div>
+</div>
+
+<aside class="link-preview" id="linkpreview" role="tooltip" aria-hidden="true">
+  <div class="preview-path" id="previewpath"></div>
+  <strong class="preview-title" id="previewtitle"></strong>
+  <pre class="preview-signature" id="previewsignature"><code></code></pre>
+  <p class="preview-description" id="previewdescription"></p>
+</aside>
+
+<div class="bar">
+  <a href="../.." class="b" data-short="[1]" aria-current="true">[1:docs]</a>
+  <a href="../../playground/" class="b" id="wsplay" data-short="[2]">[2:playground]</a>
+  <a href="https://github.com/yaugenst/advect" class="b" data-short="[git]">[git:source]</a>
+  <span class="path hidesm">$ man advect/development/documentation</span>
+  <span class="grow"></span>
+  <button class="tbtn" id="treebtn" data-short="[e]" aria-label="Toggle documentation tree">[e] tree</button>
+  <button class="tbtn" id="outlinebtn" data-short="[o]" aria-label="Toggle page outline" aria-controls="outlinetile" aria-expanded="false">[o] outline</button>
+  <button class="tbtn" id="searchbtn" data-short="[/]" aria-label="Search" aria-controls="search" aria-expanded="false">[/] search</button>
+  <button class="tbtn hidesm" id="helpbtn" aria-label="Keyboard help">[?] keys</button>
+  <button class="tbtn" id="themeToggle" data-short="[mode]" aria-label="Cycle system, light, and dark display modes">[ mode: … ]</button>
+</div>
+
+<script src="../../js/theme.js"></script>
+<script src="../../js/examples.js"></script>
+<script src="../../search/main.js"></script>
+
+</body>
+</html>

@@ -1,0 +1,232 @@
+# Array API
+
+Any array whose namespace implements the Array API standard reaches Advect through `value.__array_namespace__()`; provider-neutral functions are written against that namespace rather than a specific package. Advect qualifies the standard revisions `2022.12` through `2024.12`; staging can target any listed revision, and NumPy selects the newest revision implemented by its installed minor release.
+
+## Providers
+
+| Provider           | Status                                                                                                                                                          |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| NumPy              | Qualified through its first-class frontend; see [NumPy](https://yaugenst.github.io/advect/0.2.0/compatibility/numpy/index.md) for the minor-to-revision mapping |
+| `array-api-strict` | Qualified through `__array_namespace__()` for all three revisions below                                                                                         |
+| CuPy               | Built-in single-device compatibility path; see [CuPy](https://yaugenst.github.io/advect/0.2.0/compatibility/cupy/index.md)                                      |
+
+The fallback handles raw provider arrays at Advect's input boundary; it does not make an array traceable when its namespace does not implement the standard.
+
+## Qualified revisions
+
+| Revision  | Official callables | Complete Advect contracts |
+| --------- | ------------------ | ------------------------- |
+| `2022.12` | 152                | 151                       |
+| `2023.12` | 164                | 162                       |
+| `2024.12` | 170                | 168                       |
+
+The `2022.12` revision is the baseline; later revisions extend it. Its callable set appears below, followed by additions, changes, and the few official functions with a remaining boundary.
+
+Every listed function works in dynamic transforms. **Stage/save** says whether the same call can appear in a staged and serialized program. **Differentiate** reports user-visible derivative support. **No** means no derivative rule is available; **n/a** marks a structural or mathematically nondifferentiable operation.
+
+## Array API 2022.12 baseline
+
+| Function                  | Stage/save | Differentiate |
+| ------------------------- | ---------- | ------------- |
+| `abs`                     | yes        | yes           |
+| `acos`                    | yes        | yes           |
+| `acosh`                   | yes        | yes           |
+| `add`                     | yes        | yes           |
+| `all`                     | yes        | n/a           |
+| `any`                     | yes        | n/a           |
+| `arange`                  | yes        | no            |
+| `argmax`                  | yes        | n/a           |
+| `argmin`                  | yes        | n/a           |
+| `argsort`                 | yes        | n/a           |
+| `asarray`                 | yes        | yes           |
+| `asin`                    | yes        | yes           |
+| `asinh`                   | yes        | yes           |
+| `astype`                  | yes        | yes           |
+| `atan`                    | yes        | yes           |
+| `atan2`                   | yes        | yes           |
+| `atanh`                   | yes        | yes           |
+| `bitwise_and`             | yes        | n/a           |
+| `bitwise_invert`          | yes        | n/a           |
+| `bitwise_left_shift`      | yes        | no            |
+| `bitwise_or`              | yes        | n/a           |
+| `bitwise_right_shift`     | yes        | no            |
+| `bitwise_xor`             | yes        | n/a           |
+| `broadcast_arrays`        | yes        | yes           |
+| `broadcast_to`            | yes        | yes           |
+| `can_cast`                | yes        | n/a           |
+| `ceil`                    | yes        | yes           |
+| `concat`                  | yes        | yes           |
+| `conj`                    | yes        | yes           |
+| `cos`                     | yes        | yes           |
+| `cosh`                    | yes        | yes           |
+| `divide`                  | yes        | yes           |
+| `empty`                   | yes        | no            |
+| `empty_like`              | yes        | yes           |
+| `equal`                   | yes        | n/a           |
+| `exp`                     | yes        | yes           |
+| `expand_dims`             | yes        | yes           |
+| `expm1`                   | yes        | yes           |
+| `eye`                     | yes        | no            |
+| `fft.fft`                 | yes        | yes           |
+| `fft.fftfreq`             | yes        | no            |
+| `fft.fftn`                | yes        | yes           |
+| `fft.fftshift`            | yes        | yes           |
+| `fft.hfft`                | yes        | yes           |
+| `fft.ifft`                | yes        | yes           |
+| `fft.ifftn`               | yes        | yes           |
+| `fft.ifftshift`           | yes        | yes           |
+| `fft.ihfft`               | yes        | yes           |
+| `fft.irfft`               | yes        | yes           |
+| `fft.irfftn`              | yes        | yes           |
+| `fft.rfft`                | yes        | yes           |
+| `fft.rfftfreq`            | yes        | no            |
+| `fft.rfftn`               | yes        | yes           |
+| `finfo`                   | yes        | n/a           |
+| `flip`                    | yes        | yes           |
+| `floor`                   | yes        | yes           |
+| `floor_divide`            | yes        | yes           |
+| `full`                    | yes        | yes           |
+| `full_like`               | yes        | yes           |
+| `greater`                 | yes        | n/a           |
+| `greater_equal`           | yes        | n/a           |
+| `iinfo`                   | yes        | n/a           |
+| `imag`                    | yes        | yes           |
+| `isdtype`                 | yes        | n/a           |
+| `isfinite`                | yes        | n/a           |
+| `isinf`                   | yes        | n/a           |
+| `isnan`                   | yes        | n/a           |
+| `less`                    | yes        | n/a           |
+| `less_equal`              | yes        | n/a           |
+| `linalg.cholesky`         | yes        | yes           |
+| `linalg.cross`            | yes        | yes           |
+| `linalg.det`              | yes        | yes           |
+| `linalg.diagonal`         | yes        | yes           |
+| `linalg.eigh`             | yes        | yes           |
+| `linalg.eigvalsh`         | yes        | yes           |
+| `linalg.inv`              | yes        | yes           |
+| `linalg.matmul`           | yes        | yes           |
+| `linalg.matrix_norm`      | yes        | yes           |
+| `linalg.matrix_power`     | yes        | yes           |
+| `linalg.matrix_rank`      | yes        | n/a           |
+| `linalg.matrix_transpose` | yes        | yes           |
+| `linalg.outer`            | yes        | yes           |
+| `linalg.pinv`             | yes        | yes           |
+| `linalg.qr`               | yes        | yes           |
+| `linalg.slogdet`          | yes        | yes           |
+| `linalg.solve`            | yes        | yes           |
+| `linalg.svd`              | yes        | yes           |
+| `linalg.svdvals`          | yes        | yes           |
+| `linalg.tensordot`        | yes        | yes           |
+| `linalg.trace`            | yes        | yes           |
+| `linalg.vecdot`           | yes        | yes           |
+| `linalg.vector_norm`      | yes        | yes           |
+| `linspace`                | yes        | yes           |
+| `log`                     | yes        | yes           |
+| `log10`                   | yes        | yes           |
+| `log1p`                   | yes        | yes           |
+| `log2`                    | yes        | yes           |
+| `logaddexp`               | yes        | yes           |
+| `logical_and`             | yes        | n/a           |
+| `logical_not`             | yes        | n/a           |
+| `logical_or`              | yes        | n/a           |
+| `logical_xor`             | yes        | n/a           |
+| `matmul`                  | yes        | yes           |
+| `matrix_transpose`        | yes        | yes           |
+| `max`                     | yes        | yes           |
+| `mean`                    | yes        | yes           |
+| `meshgrid`                | yes        | yes           |
+| `min`                     | yes        | yes           |
+| `multiply`                | yes        | yes           |
+| `negative`                | yes        | yes           |
+| `nonzero`                 | no         | n/a           |
+| `not_equal`               | yes        | n/a           |
+| `ones`                    | yes        | no            |
+| `ones_like`               | yes        | yes           |
+| `permute_dims`            | yes        | yes           |
+| `positive`                | yes        | yes           |
+| `pow`                     | yes        | yes           |
+| `prod`                    | yes        | yes           |
+| `real`                    | yes        | yes           |
+| `remainder`               | yes        | yes           |
+| `reshape`                 | yes        | yes           |
+| `result_type`             | yes        | n/a           |
+| `roll`                    | yes        | yes           |
+| `round`                   | yes        | yes           |
+| `sign`                    | yes        | yes           |
+| `sin`                     | yes        | yes           |
+| `sinh`                    | yes        | yes           |
+| `sort`                    | yes        | yes           |
+| `sqrt`                    | yes        | yes           |
+| `square`                  | yes        | yes           |
+| `squeeze`                 | yes        | yes           |
+| `stack`                   | yes        | yes           |
+| `std`                     | yes        | yes           |
+| `subtract`                | yes        | yes           |
+| `sum`                     | yes        | yes           |
+| `take`                    | yes        | yes           |
+| `tan`                     | yes        | yes           |
+| `tanh`                    | yes        | yes           |
+| `tensordot`               | yes        | yes           |
+| `tril`                    | yes        | yes           |
+| `triu`                    | yes        | yes           |
+| `trunc`                   | yes        | yes           |
+| `unique_all`              | no         | yes           |
+| `unique_counts`           | no         | yes           |
+| `unique_inverse`          | no         | yes           |
+| `unique_values`           | no         | yes           |
+| `var`                     | yes        | yes           |
+| `vecdot`                  | yes        | yes           |
+| `where`                   | yes        | yes           |
+| `zeros`                   | yes        | no            |
+| `zeros_like`              | yes        | yes           |
+
+## Added in 2023.12
+
+| Function         | Stage/save | Differentiate |
+| ---------------- | ---------- | ------------- |
+| `clip`           | yes        | yes           |
+| `copysign`       | yes        | yes           |
+| `cumulative_sum` | yes        | yes           |
+| `hypot`          | yes        | yes           |
+| `maximum`        | yes        | yes           |
+| `minimum`        | yes        | yes           |
+| `moveaxis`       | yes        | yes           |
+| `repeat`         | yes        | yes           |
+| `searchsorted`   | yes        | n/a           |
+| `signbit`        | yes        | n/a           |
+| `tile`           | yes        | yes           |
+| `unstack`        | yes        | yes           |
+
+## Changed in 2023.12
+
+| Callable      | Change                                                                                |
+| ------------- | ------------------------------------------------------------------------------------- |
+| `astype`      | signature: `(x, dtype, /, *, copy=True)` → `(x, dtype, /, *, copy=True, device=None)` |
+| `from_dlpack` | signature: `(x, /)` → `(x, /, *, device=None, copy=None)`                             |
+
+## Added in 2024.12
+
+| Function          | Stage/save | Differentiate |
+| ----------------- | ---------- | ------------- |
+| `count_nonzero`   | yes        | n/a           |
+| `cumulative_prod` | yes        | yes           |
+| `diff`            | yes        | yes           |
+| `nextafter`       | yes        | yes           |
+| `reciprocal`      | yes        | yes           |
+| `take_along_axis` | yes        | yes           |
+
+## Changed in 2024.12
+
+| Callable       | Change                                                                                   |
+| -------------- | ---------------------------------------------------------------------------------------- |
+| `fft.fftfreq`  | signature: `(n, /, *, d=1.0, device=None)` → `(n, /, *, d=1.0, dtype=None, device=None)` |
+| `fft.rfftfreq` | signature: `(n, /, *, d=1.0, device=None)` → `(n, /, *, d=1.0, dtype=None, device=None)` |
+
+## Limits
+
+These official functions are either unsupported or supported with the boundary shown. Unlisted provider behavior is not a public claim.
+
+| Callable      | Since     | Boundary                                         |
+| ------------- | --------- | ------------------------------------------------ |
+| `from_dlpack` | `2022.12` | unsupported — no qualification case exercises it |
+| `repeat`      | `2023.12` | array-valued repeats are not traceable           |

@@ -1,0 +1,526 @@
+<!doctype html><html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Automatic differentiation for the NumPy code you already write">
+<link rel="canonical" href="https://yaugenst.github.io/advect/0.2.0/development/adding-operations/">
+<title>adding-operations(1) · advect</title>
+<link rel="icon" href="../../img/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../css/fonts.css">
+<link rel="stylesheet" href="../../css/theme.css?v=6c7554a0ba07">
+<link rel="stylesheet" href="../../assets/_mkdocstrings.css">
+<script>
+var base_url = "../..";
+/* pre-paint: apply persisted display mode and pane state to avoid a theme
+   flash and the panes animating open on every navigation */
+(function () {
+  var m = null, t = null, o = null;
+  var home = false;
+  try {
+    m = localStorage.getItem("advect-mode");
+    t = localStorage.getItem("advect-tree");
+    o = localStorage.getItem("advect-outline");
+  } catch (e) { /* private mode */ }
+  if (m === "light" || m === "dark") document.documentElement.dataset.theme = m;
+  var open = t === null ? home && window.innerWidth > 1100 : t === "1";
+  if (open) document.documentElement.classList.add("tree-open");
+  open = o === null ? !home && window.innerWidth > 1100 : o === "1";
+  if (open) document.documentElement.classList.add("outline-open");
+})();
+</script>
+
+</head>
+<body data-base="../..">
+
+<div class="desktop" id="desktop">
+  <aside class="tile treetile" id="treetile" aria-label="Documentation tree" aria-hidden="true">
+    <span class="ptitle"><span class="pn">tree</span> docs/</span>
+    <pre class="tree"><span class="trow"><a href="../.." title="Home">docs/</a></span><span class="trow" style="--ti:4ch"><span class="dim">├── </span><a href="../../tutorials/" title="Tutorials">tutorials/</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/gradients/" title="Gradients and Pytrees">gradients</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/control-flow/" title="Dynamic Control Flow and Mutation">control-flow</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/linear-maps/" title="JVPs, VJPs, and Linear Maps">linear-maps</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/advanced-differentiation/" title="Higher-Order Differentiation">advanced-differentiation</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/implicit-differentiation/" title="Implicit Differentiation">implicit-differentiation</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/staging/" title="Staging and Serialization">staging</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/scientific-python/" title="Arrays and Scientific Python">scientific-python</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/host-frameworks/" title="Host Autodiff Frameworks">host-frameworks</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/primitives/" title="Custom Primitives">primitives</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   └── </span><a href="../../tutorials/debugging/" title="Troubleshooting">debugging</a></span><span class="trow" style="--ti:4ch"><span class="dim">├── </span><a href="../../architecture/" title="Architecture">architecture</a></span><span class="trow" style="--ti:4ch"><span class="dim">├── </span><a href="../../compatibility/" title="Compatibility">compatibility/</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../compatibility/numpy/" title="NumPy">numpy</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../compatibility/array-api/" title="Array API">array-api</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../compatibility/cupy/" title="CuPy">cupy</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../compatibility/scipy/" title="SciPy">scipy</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   └── </span><a href="../../compatibility/xarray/" title="xarray">xarray</a></span><span class="trow" style="--ti:4ch"><span class="dim">├── </span><a href="../../api/" title="API Reference">api-reference/</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span>core-api/</span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="../../api/transforms/" title="Transforms">transforms</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="../../api/staging/" title="Staging">staging</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="../../api/primitives/" title="Primitives">primitives</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="../../api/arrays/" title="Arrays">arrays</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="../../api/pytree/" title="Pytrees">pytree</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="../../api/testing/" title="Testing Utilities">testing</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="../../api/support/" title="Support Catalog">support</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   └── </span><a href="../../api/errors/" title="Errors">errors</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   └── </span>public-modules/</span><span class="trow" style="--ti:12ch"><span class="dim">│       ├── </span><a href="../../api/numpy/" title="NumPy Frontend">numpy</a></span><span class="trow" style="--ti:12ch"><span class="dim">│       ├── </span><a href="../../api/scipy/" title="SciPy">scipy/</a></span><span class="trow" style="--ti:16ch"><span class="dim">│       │   ├── </span><a href="../../api/scipy/special/" title="Special Functions">special</a></span><span class="trow" style="--ti:16ch"><span class="dim">│       │   ├── </span><a href="../../api/scipy/ndimage/" title="Image Processing">ndimage</a></span><span class="trow" style="--ti:16ch"><span class="dim">│       │   └── </span><a href="../../api/scipy/solvers/" title="Solver Callbacks">solvers</a></span><span class="trow" style="--ti:12ch"><span class="dim">│       ├── </span><a href="../../api/xarray/" title="xarray">xarray</a></span><span class="trow" style="--ti:12ch"><span class="dim">│       └── </span><a href="../../api/interop/" title="Host Autodiff Interop">host-autodiff-interop/</a></span><span class="trow" style="--ti:16ch"><span class="dim">│           ├── </span><a href="../../api/interop/torch/" title="PyTorch">torch</a></span><span class="trow" style="--ti:16ch"><span class="dim">│           ├── </span><a href="../../api/interop/jax/" title="JAX">jax</a></span><span class="trow" style="--ti:16ch"><span class="dim">│           └── </span><a href="../../api/interop/autograd/" title="HIPS Autograd">autograd</a></span><span class="trow" style="--ti:4ch"><span class="dim">└── </span><a href="../" title="Developer Guide">developer-guide/</a></span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="../codebase/" title="Codebase Map">codebase</a></span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="./" class="cur" aria-current="page" title="Adding Operations">adding-operations</a></span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="../testing/" title="Testing">testing</a></span><span class="trow" style="--ti:8ch"><span class="dim">    └── </span><a href="../documentation/" title="Documentation">documentation</a></span></pre>
+  </aside>
+
+  <article class="tile manwin" aria-label="Manual page">
+    <span class="ptitle"><span class="pn">man</span> advect/development/adding-operations</span>
+    <div class="manscroll" id="manscroll"><div class="mancol">
+      <div class="manhead"><span>ADDING-OPERATIONS(1)</span><span class="mid">User Commands</span><span>ADDING-OPERATIONS(1)</span></div>
+      <div class="rule">────────────────────────────────────────────────────────────────────────────────────────</div>
+
+      
+      <div class="md">
+        
+        <h1 id="adding-operations">Adding Operations<a class="headerlink" href="#adding-operations" title="Permanent link">&para;</a></h1>
+<p>Classify the change before writing code. A public custom primitive, a built-in
+canonical operation, a composite frontend form, and a solver adapter have
+different authorities and therefore different evidence.</p>
+<table>
+<thead>
+<tr>
+<th>Change</th>
+<th>Semantic authority</th>
+<th>Owning evidence</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Public custom primitive</td>
+<td>The decorated authoring handle</td>
+<td><code>advect.testing</code> checks plus the package author's tests</td>
+</tr>
+<tr>
+<td>Built-in canonical operation</td>
+<td>The record assembled in <code>advect/_builtin_ops.py</code></td>
+<td>Primitive conformance suite</td>
+</tr>
+<tr>
+<td>Composite NumPy form</td>
+<td>NumPy dispatch and support declaration</td>
+<td>NumPy public support evidence; conformance only for any new canonical op</td>
+</tr>
+<tr>
+<td>Direct SciPy form</td>
+<td>Public wrapper plus its bundled <code>custom.scipy.*</code> primitive</td>
+<td>SciPy parity tests and primitive conformance</td>
+</tr>
+<tr>
+<td>Composite SciPy form</td>
+<td>Public SciPy composition</td>
+<td>SciPy parity, derivative, and lifetime tests</td>
+</tr>
+<tr>
+<td>SciPy solver callback</td>
+<td>Concrete dynamic adapter</td>
+<td>SciPy solver and <code>implicit_root</code> integration tests</td>
+</tr>
+<tr>
+<td>Python staged-program envelope change</td>
+<td><code>advect.core</code> staging boundary</td>
+<td>Core durability tests and Python static checks</td>
+</tr>
+<tr>
+<td>Runtime graph artifact change</td>
+<td><code>advect-runtime</code>, translated by <code>advect-native</code></td>
+<td>Runtime Rust tests plus adapter evidence when its contract changes</td>
+</tr>
+<tr>
+<td>Native translation or dynamic-tape change</td>
+<td><code>advect-native</code></td>
+<td>Native contract tests and a wheel build</td>
+</tr>
+</tbody>
+</table>
+<h2 id="public-custom-primitives">Public custom primitives<a class="headerlink" href="#public-custom-primitives" title="Permanent link">&para;</a></h2>
+<p>Use <code>@advect.primitive</code> when application or library code needs one closed
+operation that Advect cannot see through. The <a href="../../tutorials/primitives/">tutorial</a>
+and <a href="../../api/primitives/">API reference</a> own the rule signatures and common
+JVP-first workflow; this page adds the repository-facing boundaries and
+evidence.</p>
+<p>The implementation uses fixed named parameters. Positional-or-keyword and
+keyword-only parameters are valid; positional-only parameters, <code>*args</code>, and
+<code>**kwargs</code> are not. <code>static_argnames</code> turns complete named arguments into
+operation attributes; staged calls require values that the artifact can
+serialize. <code>nondiff_argnames</code> keeps arguments dynamic but removes their tangent
+and transpose contributions. One argument cannot be both.</p>
+<p>Prefer a traceable real-linear JVP so forward mode, structural transposition,
+and higher-order paths can reuse it. Add an explicit transpose only when the
+real adjoint cannot be derived or a measured hot path justifies it. A
+transpose-only primitive supports reverse mode but not forward mode.</p>
+<p>Use <code>residual=True</code> only when reverse mode needs exact opaque data from the
+forward invocation. Return <code>PrimitiveResult(output, residual, release=...)</code>
+and provide an explicit transpose. Advect retains the residual until the owning
+pullback or linear map releases it, calling <code>release</code> exactly once. This is a
+first-order boundary: the primal may stage, but staged derivatives,
+higher-order derivatives, and <code>checkpoint</code> cannot retain the residual.</p>
+<p>Use <code>variable_output_arity=True</code> only when a concrete invocation determines
+the number of output leaves. The ordinary primitive call records that realized
+pytree for dynamic differentiation. Variable-arity primitives do not stage;
+keep the default fixed contract whenever an abstract output rule can describe
+the operation.</p>
+<p>Give the primitive an explicit stable name only when saved programs need an
+identity independent of the Python module path. The name is a link key, not
+semantic versioning; loading requires the matching implementation to be
+registered under that name.</p>
+<p>Run <code>check_primitive</code> for every materially different shape, dtype, pytree,
+static-argument, and complex case. Its default abstract/JVP/transpose tuple is a
+first-order smoke check. Add <code>nested</code> and <code>stage</code> only when the primitive claims
+those paths, then run <code>check_gradient</code> on a representative composition. These
+author checks do not create a built-in support claim or require an internal
+<code>InvocationCase</code>.</p>
+<h2 id="built-in-canonical-operations">Built-in canonical operations<a class="headerlink" href="#built-in-canonical-operations" title="Permanent link">&para;</a></h2>
+<p>A built-in operation is a stable <code>array.*</code>, <code>array_ext.*</code>, or explicit
+<code>advect.*</code> semantic record, not a Python public callable. The record is
+assembled in <code>advect/_builtin_ops.py</code> from authorities that remain separate:</p>
+<ul>
+<li>abstract operand and result semantics live in
+  <code>core/_abstract_domains/&lt;family&gt;.py</code>;</li>
+<li>JVP-first formulas live under <code>autodiff/rules/array_family/jvp/</code>;</li>
+<li>the smaller set of explicit real-adjoint formulas lives under
+  <code>autodiff/rules/array_family/vjp/</code>;</li>
+<li>NumPy reachability belongs to its protocol path: ufunc admission in
+  <code>numpy/_supported_ufuncs.py</code>, array-function handlers under
+  <code>numpy/_array_function/</code>, canonical naming in <code>numpy/_op_bindings.py</code>, and
+  exceptional serialized replay in <code>numpy/_eval.py</code>;</li>
+<li>Array API binding and provider execution belong in
+  <code>core/_array_api/frontend.py</code>; NumPy and Array API reachability must be added
+  independently; and</li>
+<li>exceptional fixed output counts live in <code>_output_arities()</code> in
+  <code>advect/_builtin_ops.py</code>. Every unlisted operation has one output.</li>
+</ul>
+<p>For a multi-output op, add its fixed arity there and make each frontend agree
+with that result structure. Do not create one registry operation per result:
+<code>advect.getoutput</code> is the structural projection from the canonical parent.</p>
+<p>Complete all applicable owners as one coherent change. Define abstract
+semantics for each staged form, install the JVP, and add an explicit VJP only
+when structural transposition cannot express the correct real adjoint or a
+measured hot path justifies it. Never silently substitute a numerical
+pullback.</p>
+<p>Add an <code>InvocationCase</code> in
+<code>packages/advect/tests/advect_conformance_tests/_builtin_cases.py</code>, naming the
+canonical registry operation. Add separate cases when frontends, positional or
+keyword signatures, input roles, or static attributes are materially
+different.</p>
+<p>Choose a Hypothesis domain on which every generated example is smooth and well
+conditioned. Encode constraints in the domain rather than widening tolerances
+around kinks, singularities, ties, or unstable decompositions. If a law truly
+does not apply, narrow <code>laws</code> and give the case a <code>reason</code>.</p>
+<p>Then classify the operation and each invocation precisely:</p>
+<table>
+<thead>
+<tr>
+<th>Situation</th>
+<th>Required declaration</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>A differentiable frontend path exists</td>
+<td>An <code>InvocationCase</code> for every material frontend, signature, input-role, or static-attribute form</td>
+</tr>
+<tr>
+<td>That exact differentiable invocation cannot abstractly stage</td>
+<td>Keep its <code>InvocationCase</code>, and add its generated <code>op[frontend]#n</code> identifier to <code>DYNAMIC_ONLY_STAGING_INVOCATIONS</code></td>
+</tr>
+<tr>
+<td>A non-differentiable form has an abstract staged contract outside the derivative inventory</td>
+<td>A focused case in <code>STAGED_ONLY_INVOCATIONS</code>, with only <code>Law.STAGED</code> and a reason</td>
+</tr>
+<tr>
+<td>The operation has no differentiable user input</td>
+<td>A reason in <code>core/_primitive_classification.py:STRUCTURAL_OPS</code></td>
+</tr>
+<tr>
+<td>A derivative rule intentionally has no supported differentiable frontend path</td>
+<td>A reason in <code>test_registry_coverage.py:_UNBOUND_OPS</code> and a <code>RawRuleCase</code></td>
+</tr>
+<tr>
+<td>The operation is mathematically non-differentiable</td>
+<td>A nonempty registry <code>non_differentiable_reason</code> and no JVP or VJP</td>
+</tr>
+</tbody>
+</table>
+<p>The two invocation-lifetime collections live beside <code>InvocationCase</code>s in
+<code>_builtin_cases.py</code>. Built-in non-differentiability declarations are assembled
+from <code>autodiff/rules/array_family/vjp/registry.py:non_differentiable_items()</code>.</p>
+<p><code>InvocationCase</code> IDs are invocation-specific: the first case is
+<code>op[frontend]</code>, and later cases for that op append <code>#1</code>, <code>#2</code>, and so on.
+<code>DYNAMIC_ONLY_STAGING_INVOCATIONS</code> therefore records an abstract-lowering gap
+for one call form, not for the canonical operation as a whole. Do not put a
+differentiable dynamic-only form in <code>STAGED_ONLY_INVOCATIONS</code>.</p>
+<p>The registry coverage gate requires every product operation to belong to
+exactly one semantic bucket: frontend invocation, structural, unbound, or
+registry-declared non-differentiable. A structural or unbound operation that
+has an installed derivative rule also needs a focused <code>RawRuleCase</code> in
+<code>_raw_rule_cases.py</code>. Raw operands exercise a rule that cannot be reached from
+a public differentiable call; they are never a shortcut for an available
+frontend invocation.</p>
+<p>Run the ordinary and deep-search conformance gates:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </span>packages/advect/tests/advect_conformance_tests
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </span>packages/advect/tests/advect_conformance_tests<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">  </span>--hypothesis-profile<span class="o">=</span>thorough
+</span></code></pre></div>
+<p>A traced-operation or derivative change also requires the full Python suite:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>uv<span class="w"> </span>run<span class="w"> </span>pytest
+</span></code></pre></div>
+<h2 id="numpy-forms">NumPy forms<a class="headerlink" href="#numpy-forms" title="Permanent link">&para;</a></h2>
+<p>NumPy owns exact public spelling, signature, protocol dispatch, aliases,
+mutation behavior, and lifetime claims. A composite under
+<code>advect/numpy/_array_function/</code> should be ordinary traceable composition over
+existing canonical operations. It does not earn a duplicate registry entry or
+bespoke derivative rule.</p>
+<p>Dynamic and abstract dispatch are related but distinct implementations. For a
+new array-valued or data-dependent array-function form, put its concrete traced
+handler in the owning <code>_array_function/</code> family, expose it through that
+family's <code>register_*_handlers()</code>, and let
+<code>families.register_family_handlers()</code> and <code>registry._register_all_handlers()</code>
+aggregate it. A trace-independent metadata form instead belongs in
+<code>registry._STATIC_ARRAY_FUNCTIONS</code> and resolves from concrete or abstract
+metadata without a handler or graph node. Do not create another handler
+registry or derive a support claim from either dispatch table.</p>
+<p>A dynamic handler does not make the form stageable. The abstract path in
+<code>numpy/_abstract_calls.py</code> must either:</p>
+<ul>
+<li>spell the operation as an explicit composition of already staged canonical
+  operations, when the public form is a genuine composition; or</li>
+<li>bind one canonical operation whose schema under
+  <code>core/_abstract_domains/</code> owns the abstract result; or</li>
+<li>resolve trace-independent shape, dtype, or scalar metadata directly from the
+  abstract inputs without emitting a graph node.</li>
+</ul>
+<p>Keep those three choices honest. A dynamic composition must not record a
+frontend-only pseudo-primitive merely to make staging convenient, and a direct
+canonical operation must not acquire a second abstract formula in the NumPy
+frontend. Metadata resolution must not perform value-dependent computation or
+masquerade as an array-valued result.</p>
+<p>For every new or materially different public form:</p>
+<ol>
+<li>Declare its spelling, conservative lifetimes, and derivative availability
+   in the NumPy support contract.</li>
+<li>Add a test-only <code>NumpySupportCase</code> in
+   <code>advect_numpy_tests/_support_cases.py</code> or
+   <code>advect_numpy_tests/_support_case_families.py</code>.</li>
+<li>Set <code>derivative_argnums</code> to the exact independently active input-role groups
+   and every meaningful combined group. These integers index
+   <code>NumpySupportCase.inputs</code>, which are the arguments passed to the test's
+   internal <code>call(*inputs)</code> wrapper; they are not positions in NumPy's public
+   signature. An <code>Input(i)</code> may place the same test input inside a nested
+   positional argument or keyword value.</li>
+<li>Exercise every claimed <code>dynamic</code>, <code>staged</code>, and <code>serialized</code> lifetime.
+   Unsupported lifetimes must remain undeclared.</li>
+<li>For a non-differentiable form, still prove primal values, dtype, no input
+   mutation, and every declared staged or serialized mode.</li>
+<li>Add an <code>InvocationCase</code> as well if the form introduces or newly exposes a
+   differentiable canonical operation; primitive conformance owns its formula.</li>
+</ol>
+<p>Run the executable declaration/case coverage gate:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span>packages/advect/tests/advect_numpy_tests/test_support_evidence.py
+</span></code></pre></div>
+<p>Changes sensitive to NumPy-minor behavior also require the repository's NumPy
+2.0–2.5 compatibility matrix. That matrix is owned by the
+<code>numpy-compatibility</code> job in <code>.github/workflows/ci.yml</code>; the locked local
+environment proves only its installed NumPy minor. Do not report range-wide
+qualification until that CI matrix passes.</p>
+<h2 id="array-api-forms-and-providers">Array API forms and providers<a class="headerlink" href="#array-api-forms-and-providers" title="Permanent link">&para;</a></h2>
+<p>Array API work belongs under <code>core/_array_api/</code>, with revision profiles,
+signatures, result rules, provider negotiation, evidence, and support kept as
+separate responsibilities. Extend the binding and executable evidence for
+every live or static parameter and every claimed lifetime on each admitted
+revision.</p>
+<p>The frozen official spelling and signature belong in <code>profiles.py</code>; binding to
+a canonical op or a declared composite belongs in <code>frontend.py</code>; executable
+parameter and lifetime cases belong in <code>evidence.py</code>; and <code>support.py</code> derives
+the fail-closed claim from those sources. Do not hand-author a second support
+inventory.</p>
+<p>Run the provider-neutral gradient and core staging tests that cover the
+changed form, then execute every affected revision explicitly:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">  </span>packages/advect/tests/advect_grad_tests/test_array_api_operation_qualification.py
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>
+</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="k">for</span><span class="w"> </span>version<span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="m">2022</span>.12<span class="w"> </span><span class="m">2023</span>.12<span class="w"> </span><span class="m">2024</span>.12<span class="p">;</span><span class="w"> </span><span class="k">do</span>
+</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="w">  </span>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>-m<span class="w"> </span>scripts.qualify_array_api_operations<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-3-6"><a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="w">    </span>--array-api-version<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$version</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-3-7"><a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="w">    </span>--providers<span class="w"> </span>array-api-strict<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-3-8"><a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="w">    </span>--subset<span class="w"> </span>all
+</span><span id="__span-3-9"><a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="w">  </span>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>-m<span class="w"> </span>scripts.qualify_array_api_operations<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-3-10"><a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="w">    </span>--array-api-version<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$version</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-3-11"><a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a><span class="w">    </span>--providers<span class="w"> </span>array-api-strict,numpy<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-3-12"><a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a><span class="w">    </span>--subset<span class="w"> </span>portable
+</span><span id="__span-3-13"><a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a><span class="k">done</span>
+</span></code></pre></div>
+<p>Run only the revisions the profile change can affect while iterating; run all
+three before review for a shared canonical operation or binding. A provider
+change also requires:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </span>packages/advect/tests/advect_array_api_compat_tests
+</span></code></pre></div>
+<p>Run CuPy qualification only on a CUDA host and record that hardware gap
+explicitly when it is unavailable. Correctness evidence does not create a
+performance claim.</p>
+<h2 id="scipy-forms">SciPy forms<a class="headerlink" href="#scipy-forms" title="Permanent link">&para;</a></h2>
+<p>A SciPy-compatible function wrapper owns value, dtype, and signature parity
+with the admitted SciPy 1.18 release line. Solver factories are Advect adapters
+instead and own the callback contract described below. Additional function
+evidence depends on how the wrapper is implemented.</p>
+<p>The support catalog walks functions exported through the public SciPy modules'
+<code>__all__</code>; there is no separate SciPy support declaration. Export every new
+direct function, composite, or adapter through the intended public module. The
+catalog then discovers a matching <code>custom.scipy.*</code> primitive, an explicit
+composite marker, or a dynamic-only adapter.</p>
+<h3 id="direct-primitive">Direct primitive<a class="headerlink" href="#direct-primitive" title="Permanent link">&para;</a></h3>
+<p>A shipped direct SciPy form is a public wrapper around a private
+<code>@advect.primitive</code> handle. The decorator name <code>scipy.&lt;module&gt;.&lt;function&gt;</code>
+registers <code>custom.scipy.&lt;module&gt;.&lt;function&gt;</code>; that exact relationship lets the
+support catalog join the public wrapper to its primitive. It is not a built-in
+array-family operation: do not add it to <code>advect/_builtin_ops.py</code>, the
+array-family JVP/VJP registries, or the NumPy or Array API support inventories.</p>
+<p>Implement concrete SciPy execution, <code>def_abstract</code>, a JVP, and any necessary
+explicit real-adjoint transpose on the private primitive. Keep the public
+SciPy-compatible signature and concrete fast path on the wrapper. Because
+these primitives ship as Advect product behavior, add an <code>InvocationCase</code> to
+the SciPy group in <code>_builtin_cases.py</code> naming its <code>custom.scipy.*</code> ID, even
+though third-party custom primitives do not enter the repository inventory.
+The owning <code>advect_scipy_tests</code> test must independently prove upstream value,
+dtype, and signature parity; every differentiable input alone and in meaningful
+combinations; and each dynamic, staged, and serialized lifetime published by
+the catalog. A serialized artifact also depends on importing <code>advect.scipy</code>
+before loading so the custom operation is linked.</p>
+<h3 id="traceable-composite">Traceable composite<a class="headerlink" href="#traceable-composite" title="Permanent link">&para;</a></h3>
+<p>A composite built only from existing operations stays owned by its public
+SciPy test and is marked <code>__advect_lowering__ = "composite"</code> for support
+discovery. Check upstream parity, all independently active and combined input
+roles, and every claimed lifetime. The marker is an unconditional
+dynamic-plus-staged-plus-serialized catalog claim, so do not set it until all
+three paths are executable. Do not decorate the composition as a new primitive
+and do not add it to primitive conformance; add an <code>InvocationCase</code> only for a
+direct bundled primitive it newly introduces.</p>
+<h3 id="solver-callback">Solver callback<a class="headerlink" href="#solver-callback" title="Permanent link">&para;</a></h3>
+<p><code>root_solver</code> and <code>gmres_solver</code> are concrete, first-order dynamic callbacks
+for <code>implicit_root</code>. Test shape and scalar-category preservation, upstream
+solver behavior, convergence failures, and integration with the implicit
+derivative boundary. Do not claim staging or serialization for opaque solver
+iterations; stage explicit iterations or define a closed primitive when a
+staged program is required.</p>
+<p>Run the public SciPy suite after any of these changes:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </span>packages/advect/tests/advect_scipy_tests
+</span></code></pre></div>
+<p>A direct bundled primitive also changes the shipped derivative inventory, so
+run:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </span>packages/advect/tests/advect_conformance_tests
+</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </span>packages/advect/tests/advect_conformance_tests<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="w">  </span>--hypothesis-profile<span class="o">=</span>thorough
+</span><span id="__span-6-4"><a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>uv<span class="w"> </span>run<span class="w"> </span>pytest
+</span></code></pre></div>
+<p>After changing the exported public surface, regenerate the compatibility pages
+as described below, then run:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </span>packages/advect/tests/advect_core_tests/test_support_catalog.py
+</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>uv<span class="w"> </span>run<span class="w"> </span>mkdocs<span class="w"> </span>build<span class="w"> </span>--strict
+</span></code></pre></div>
+<h2 id="staged-program-runtime-graph-and-native-changes">Staged-program, runtime-graph, and native changes<a class="headerlink" href="#staged-program-runtime-graph-and-native-changes" title="Permanent link">&para;</a></h2>
+<p>Classify a durability change by the malformed or changing field before choosing
+the implementation boundary.</p>
+<h3 id="python-stagedprogram-envelope">Python <code>StagedProgram</code> envelope<a class="headerlink" href="#python-stagedprogram-envelope" title="Permanent link">&para;</a></h3>
+<p>Python core owns the outer format and version, call and output pytrees, leaf
+specifications, the constant manifest, the optimization report, and validation
+that those records agree with one another and with the enclosed graph. Keep
+pytree and Python-call structure out of the Rust graph format. Test envelope
+shape, version handling, cross-record mismatches, and public round trips in
+<code>advect_core_tests</code>, especially <code>test_stage_durability.py</code>.</p>
+<p>For an envelope-only change, run:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>uv<span class="w"> </span>run<span class="w"> </span>ruff<span class="w"> </span>format<span class="w"> </span>--check<span class="w"> </span>.
+</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>uv<span class="w"> </span>run<span class="w"> </span>ruff<span class="w"> </span>check<span class="w"> </span>.
+</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>uv<span class="w"> </span>run<span class="w"> </span>pyrefly<span class="w"> </span>check
+</span><span id="__span-8-4"><a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </span>packages/advect/tests/advect_core_tests/test_stage_durability.py
+</span><span id="__span-8-5"><a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </span>packages/advect/tests/advect_core_tests
+</span></code></pre></div>
+<p>Run the full Python suite as well when public invocation, staging, or transform
+behavior changes. An envelope-only codec or validation change does not require
+a native wheel build when the enclosed graph and PyO3 contract are unchanged.</p>
+<h3 id="canonical-runtime-graph-artifact">Canonical runtime graph artifact<a class="headerlink" href="#canonical-runtime-graph-artifact" title="Permanent link">&para;</a></h3>
+<p><code>advect-runtime</code> owns closed graph data, the graph format and version,
+<code>GraphStore</code> validation before ownership is accepted, canonical serialization,
+optimization, topology, execution planning, and staged value lifetimes. Test a
+graph-local invariant at this boundary, including canonical round trips and
+pure-Rust fixture execution where relevant. Do not mirror its node model or
+graph-local validators in Python.</p>
+<p>For an internal runtime change whose adapter contract is unchanged, run:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>cargo<span class="w"> </span>fmt<span class="w"> </span>--all<span class="w"> </span>--check
+</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>cargo<span class="w"> </span>clippy<span class="w"> </span>--locked<span class="w"> </span>-p<span class="w"> </span>advect-runtime<span class="w"> </span>--all-targets<span class="w"> </span>--all-features<span class="w"> </span>--<span class="w"> </span>-D<span class="w"> </span>warnings
+</span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>cargo<span class="w"> </span><span class="nb">test</span><span class="w"> </span>--locked<span class="w"> </span>-p<span class="w"> </span>advect-runtime<span class="w"> </span>--all-targets
+</span><span id="__span-9-4"><a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>cargo<span class="w"> </span>deny<span class="w"> </span>--all-features<span class="w"> </span>check<span class="w"> </span>-W<span class="w"> </span>unmaintained
+</span></code></pre></div>
+<p>If the accepted graph format, validation result, or Python-visible graph
+contract changes, also run the workspace and native boundary gates below.</p>
+<h3 id="native-translation-and-dynamic-tape">Native translation and dynamic tape<a class="headerlink" href="#native-translation-and-dynamic-tape" title="Permanent link">&para;</a></h3>
+<p><code>advect-native</code> owns PyO3 conversion, exception mapping, callbacks, thin graph
+handles, the Python host adapter, and the invocation-local dynamic tape. It
+does not own the outer envelope or graph policy. A translation change must
+exercise the corresponding Python-to-Rust round trip; a tape regression stays
+with the dynamic native tests and must not be expressed as a graph-artifact
+rule.</p>
+<p>Run the workspace and adapter gates for a native change or adapter-visible
+runtime change:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>cargo<span class="w"> </span>fmt<span class="w"> </span>--all<span class="w"> </span>--check
+</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>cargo<span class="w"> </span>clippy<span class="w"> </span>--locked<span class="w"> </span>--workspace<span class="w"> </span>--all-targets<span class="w"> </span>--all-features<span class="w"> </span>--<span class="w"> </span>-D<span class="w"> </span>warnings
+</span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>cargo<span class="w"> </span><span class="nb">test</span><span class="w"> </span>--locked<span class="w"> </span>--workspace<span class="w"> </span>--all-targets
+</span><span id="__span-10-4"><a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>cargo<span class="w"> </span>deny<span class="w"> </span>--all-features<span class="w"> </span>check<span class="w"> </span>-W<span class="w"> </span>unmaintained
+</span><span id="__span-10-5"><a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </span>packages/advect/tests/advect_native_tests
+</span><span id="__span-10-6"><a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a>uv<span class="w"> </span>build<span class="w"> </span>--package<span class="w"> </span>advect<span class="w"> </span>--wheel<span class="w"> </span>--out-dir<span class="w"> </span>dist/wheelhouse<span class="w"> </span>--clear
+</span></code></pre></div>
+<p>If Python runtime behavior changed, also run the owning core or integration
+tests and the full Python suite. Add format compatibility only for an explicit
+supported-version requirement; do not create an unowned fallback between the
+two formats.</p>
+<h2 id="publish-the-support-claim">Publish the support claim<a class="headerlink" href="#publish-the-support-claim" title="Permanent link">&para;</a></h2>
+<p>After changing a public NumPy, Array API, or SciPy surface, regenerate the
+catalog pages from the live declarations:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>-m<span class="w"> </span>scripts.report_extension_support<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="w">  </span>--format<span class="w"> </span>markdown<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-11-3"><a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="w">  </span>--output<span class="w"> </span>docs/compatibility
+</span></code></pre></div>
+<p>Never edit the generated compatibility inventories by hand. The
+<a href="../testing/">testing guide</a> lists the complete gates and suite ownership.
+Update the hand-written xarray compatibility contract when its container or
+metadata boundary changes.</p>
+      </div>
+      
+
+      
+      <nav class="seealso" aria-label="Adjacent pages">
+        <span><a href="../codebase/">← codebase map</a></span>
+        <span class="nn"><a href="../testing/">testing →</a></span>
+      </nav>
+      
+      <p class="prompt">$ <span class="cursor">█</span></p>
+    </div></div>
+  </article>
+
+  <aside class="tile outlinetile" id="outlinetile" aria-label="Page outline" aria-hidden="true">
+    <span class="ptitle"><span class="pn">outline</span> this-page</span>
+    <nav class="outlinelinks" id="outlinelinks"><a href="#public-custom-primitives">Public custom primitives</a><a href="#built-in-canonical-operations">Built-in canonical operations</a><a href="#numpy-forms">NumPy forms</a><a href="#array-api-forms-and-providers">Array API forms and providers</a><a href="#scipy-forms">SciPy forms</a><a href="#direct-primitive" class="outline-sub">Direct primitive</a><a href="#traceable-composite" class="outline-sub">Traceable composite</a><a href="#solver-callback" class="outline-sub">Solver callback</a><a href="#staged-program-runtime-graph-and-native-changes">Staged-program, runtime-graph, and native changes</a><a href="#python-stagedprogram-envelope" class="outline-sub">Python StagedProgram envelope</a><a href="#canonical-runtime-graph-artifact" class="outline-sub">Canonical runtime graph artifact</a><a href="#native-translation-and-dynamic-tape" class="outline-sub">Native translation and dynamic tape</a><a href="#publish-the-support-claim">Publish the support claim</a></nav>
+  </aside>
+</div>
+
+<div class="overlay" id="help" role="dialog" aria-label="Keyboard shortcuts">
+  <h3>Keys</h3>
+  <table>
+    
+    <tr><td class="kk">j k d u g G</td><td>scroll the page</td></tr>
+    <tr><td class="kk">n / p</td><td>next / previous page</td></tr>
+    <tr><td class="kk">e</td><td>toggle the docs tree pane</td></tr>
+    <tr><td class="kk">o</td><td>toggle the page outline</td></tr>
+    <tr><td class="kk">2</td><td>open the playground</td></tr>
+    
+    <tr><td class="kk">/</td><td>search the manual</td></tr>
+    <tr><td class="kk">t</td><td>system → light → dark</td></tr>
+    <tr><td class="kk">?</td><td>close this help</td></tr>
+  </table>
+</div>
+
+<div class="overlay search-box" id="search" role="dialog" aria-hidden="true" aria-label="Search">
+  <div class="search-in"><span class="ps">/</span><input type="search" id="mkdocs-search-query" spellcheck="false" autocomplete="off" aria-label="Search query" placeholder="search the manual…"></div>
+  <div class="search-hits" id="mkdocs-search-results" data-no-results-text="No manual entry found" aria-live="polite"></div>
+</div>
+
+<aside class="link-preview" id="linkpreview" role="tooltip" aria-hidden="true">
+  <div class="preview-path" id="previewpath"></div>
+  <strong class="preview-title" id="previewtitle"></strong>
+  <pre class="preview-signature" id="previewsignature"><code></code></pre>
+  <p class="preview-description" id="previewdescription"></p>
+</aside>
+
+<div class="bar">
+  <a href="../.." class="b" data-short="[1]" aria-current="true">[1:docs]</a>
+  <a href="../../playground/" class="b" id="wsplay" data-short="[2]">[2:playground]</a>
+  <a href="https://github.com/yaugenst/advect" class="b" data-short="[git]">[git:source]</a>
+  <span class="path hidesm">$ man advect/development/adding-operations</span>
+  <span class="grow"></span>
+  <button class="tbtn" id="treebtn" data-short="[e]" aria-label="Toggle documentation tree">[e] tree</button>
+  <button class="tbtn" id="outlinebtn" data-short="[o]" aria-label="Toggle page outline" aria-controls="outlinetile" aria-expanded="false">[o] outline</button>
+  <button class="tbtn" id="searchbtn" data-short="[/]" aria-label="Search" aria-controls="search" aria-expanded="false">[/] search</button>
+  <button class="tbtn hidesm" id="helpbtn" aria-label="Keyboard help">[?] keys</button>
+  <button class="tbtn" id="themeToggle" data-short="[mode]" aria-label="Cycle system, light, and dark display modes">[ mode: … ]</button>
+</div>
+
+<script src="../../js/theme.js"></script>
+<script src="../../js/examples.js"></script>
+<script src="../../search/main.js"></script>
+
+</body>
+</html>

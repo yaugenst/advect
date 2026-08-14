@@ -1,0 +1,2080 @@
+<!doctype html><html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Automatic differentiation for the NumPy code you already write">
+<link rel="canonical" href="https://yaugenst.github.io/advect/0.2.0/api/transforms/">
+<title>transforms(3) · advect</title>
+<link rel="icon" href="../../img/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../../css/fonts.css">
+<link rel="stylesheet" href="../../css/theme.css?v=6c7554a0ba07">
+<link rel="stylesheet" href="../../assets/_mkdocstrings.css">
+<script>
+var base_url = "../..";
+/* pre-paint: apply persisted display mode and pane state to avoid a theme
+   flash and the panes animating open on every navigation */
+(function () {
+  var m = null, t = null, o = null;
+  var home = false;
+  try {
+    m = localStorage.getItem("advect-mode");
+    t = localStorage.getItem("advect-tree");
+    o = localStorage.getItem("advect-outline");
+  } catch (e) { /* private mode */ }
+  if (m === "light" || m === "dark") document.documentElement.dataset.theme = m;
+  var open = t === null ? home && window.innerWidth > 1100 : t === "1";
+  if (open) document.documentElement.classList.add("tree-open");
+  open = o === null ? !home && window.innerWidth > 1100 : o === "1";
+  if (open) document.documentElement.classList.add("outline-open");
+})();
+</script>
+
+</head>
+<body data-base="../..">
+
+<div class="desktop" id="desktop">
+  <aside class="tile treetile" id="treetile" aria-label="Documentation tree" aria-hidden="true">
+    <span class="ptitle"><span class="pn">tree</span> docs/</span>
+    <pre class="tree"><span class="trow"><a href="../.." title="Home">docs/</a></span><span class="trow" style="--ti:4ch"><span class="dim">├── </span><a href="../../tutorials/" title="Tutorials">tutorials/</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/gradients/" title="Gradients and Pytrees">gradients</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/control-flow/" title="Dynamic Control Flow and Mutation">control-flow</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/linear-maps/" title="JVPs, VJPs, and Linear Maps">linear-maps</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/advanced-differentiation/" title="Higher-Order Differentiation">advanced-differentiation</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/implicit-differentiation/" title="Implicit Differentiation">implicit-differentiation</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/staging/" title="Staging and Serialization">staging</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/scientific-python/" title="Arrays and Scientific Python">scientific-python</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/host-frameworks/" title="Host Autodiff Frameworks">host-frameworks</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../tutorials/primitives/" title="Custom Primitives">primitives</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   └── </span><a href="../../tutorials/debugging/" title="Troubleshooting">debugging</a></span><span class="trow" style="--ti:4ch"><span class="dim">├── </span><a href="../../architecture/" title="Architecture">architecture</a></span><span class="trow" style="--ti:4ch"><span class="dim">├── </span><a href="../../compatibility/" title="Compatibility">compatibility/</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../compatibility/numpy/" title="NumPy">numpy</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../compatibility/array-api/" title="Array API">array-api</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../compatibility/cupy/" title="CuPy">cupy</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span><a href="../../compatibility/scipy/" title="SciPy">scipy</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   └── </span><a href="../../compatibility/xarray/" title="xarray">xarray</a></span><span class="trow" style="--ti:4ch"><span class="dim">├── </span><a href="../" title="API Reference">api-reference/</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   ├── </span>core-api/</span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="./" class="cur" aria-current="page" title="Transforms">transforms</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="../staging/" title="Staging">staging</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="../primitives/" title="Primitives">primitives</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="../arrays/" title="Arrays">arrays</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="../pytree/" title="Pytrees">pytree</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="../testing/" title="Testing Utilities">testing</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   ├── </span><a href="../support/" title="Support Catalog">support</a></span><span class="trow" style="--ti:12ch"><span class="dim">│   │   └── </span><a href="../errors/" title="Errors">errors</a></span><span class="trow" style="--ti:8ch"><span class="dim">│   └── </span>public-modules/</span><span class="trow" style="--ti:12ch"><span class="dim">│       ├── </span><a href="../numpy/" title="NumPy Frontend">numpy</a></span><span class="trow" style="--ti:12ch"><span class="dim">│       ├── </span><a href="../scipy/" title="SciPy">scipy/</a></span><span class="trow" style="--ti:16ch"><span class="dim">│       │   ├── </span><a href="../scipy/special/" title="Special Functions">special</a></span><span class="trow" style="--ti:16ch"><span class="dim">│       │   ├── </span><a href="../scipy/ndimage/" title="Image Processing">ndimage</a></span><span class="trow" style="--ti:16ch"><span class="dim">│       │   └── </span><a href="../scipy/solvers/" title="Solver Callbacks">solvers</a></span><span class="trow" style="--ti:12ch"><span class="dim">│       ├── </span><a href="../xarray/" title="xarray">xarray</a></span><span class="trow" style="--ti:12ch"><span class="dim">│       └── </span><a href="../interop/" title="Host Autodiff Interop">host-autodiff-interop/</a></span><span class="trow" style="--ti:16ch"><span class="dim">│           ├── </span><a href="../interop/torch/" title="PyTorch">torch</a></span><span class="trow" style="--ti:16ch"><span class="dim">│           ├── </span><a href="../interop/jax/" title="JAX">jax</a></span><span class="trow" style="--ti:16ch"><span class="dim">│           └── </span><a href="../interop/autograd/" title="HIPS Autograd">autograd</a></span><span class="trow" style="--ti:4ch"><span class="dim">└── </span><a href="../../development/" title="Developer Guide">developer-guide/</a></span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="../../development/codebase/" title="Codebase Map">codebase</a></span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="../../development/adding-operations/" title="Adding Operations">adding-operations</a></span><span class="trow" style="--ti:8ch"><span class="dim">    ├── </span><a href="../../development/testing/" title="Testing">testing</a></span><span class="trow" style="--ti:8ch"><span class="dim">    └── </span><a href="../../development/documentation/" title="Documentation">documentation</a></span></pre>
+  </aside>
+
+  <article class="tile manwin" aria-label="Manual page">
+    <span class="ptitle"><span class="pn">man</span> advect/api/transforms</span>
+    <div class="manscroll" id="manscroll"><div class="mancol">
+      <div class="manhead"><span>TRANSFORMS(3)</span><span class="mid">Library Calls</span><span>TRANSFORMS(3)</span></div>
+      <div class="rule">────────────────────────────────────────────────────────────────────────────────────────</div>
+
+      
+      <div class="md">
+        
+        <h1 id="transforms">Transforms<a class="headerlink" href="#transforms" title="Permanent link">&para;</a></h1>
+<p>Most transforms on this page run the callable and trace the path taken by its
+concrete inputs. <a href="./#advect.grad"><code>grad</code></a> and
+<a href="./#advect.value_and_grad"><code>value_and_grad</code></a> also accept a
+<a href="../staging/#advect.StagedProgram"><code>StagedProgram</code></a>; they return another staged
+program with the same input signature and Array API revision.
+<a href="../staging/#advect.vjp_program"><code>vjp_program</code></a> builds a reusable staged
+pullback. The other transforms operate dynamically.</p>
+<p>The <a href="../../tutorials/gradients/">gradient</a>,
+<a href="../../tutorials/linear-maps/">linear-map</a>,
+<a href="../../tutorials/advanced-differentiation/">higher-order</a>, and
+<a href="../../tutorials/implicit-differentiation/">implicit-differentiation</a> tutorials
+connect these transforms through complete examples.</p>
+<p>Library adapters may use <code>transform_state</code> for namespaced bookkeeping that
+lives only while one concrete transform is tracing. Differentiable primitive
+inputs and backward residuals must remain explicit.</p>
+
+
+<div class="doc doc-object doc-function">
+
+
+<h2 id="advect.grad" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">grad</span>
+
+
+<a href="#advect.grad" class="headerlink" title="Permanent link">&para;</a></h2>
+          <div class="doc-overloads">
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">grad</span><span class="p">(</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    <span class="n">f</span><span class="p">:</span> <span class="n"><a class="autorefs autorefs-internal" title="StagedProgram (advect.core._stage.StagedProgram)" href="../staging/#advect.StagedProgram">StagedProgram</a></span><span class="p">,</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>    <span class="n">argnums</span><span class="p">:</span> <span class="n"><span title="int">int</span></span> <span class="o">|</span> <span class="n"><span title="tuple">tuple</span></span><span class="p">[</span><span class="n"><span title="int">int</span></span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>    <span class="o">*</span><span class="p">,</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>    <span class="n">argnames</span><span class="p">:</span> <span class="n"><span title="tuple">tuple</span></span><span class="p">[</span><span class="n"><span title="str">str</span></span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>    <span class="n">has_aux</span><span class="p">:</span> <span class="n"><span title="bool">bool</span></span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="n"><a class="autorefs autorefs-internal" title="StagedProgram (advect.core._stage.StagedProgram)" href="../staging/#advect.StagedProgram">StagedProgram</a></span>
+</span></code></pre></div><div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">grad</span><span class="p">(</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    <span class="n">f</span><span class="p">:</span> <span class="n"><span title="collections.abc.Callable">Callable</span></span><span class="p">[</span><span class="n"><span title="advect.autodiff.api.reverse.grad[**CallP]">CallP</span></span><span class="p">,</span> <span class="n"><span title="tuple">tuple</span></span><span class="p">[</span><span class="n"><span title="object">object</span></span><span class="p">,</span> <span class="n"><span title="AuxT">AuxT</span></span><span class="p">]],</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>    <span class="n">argnums</span><span class="p">:</span> <span class="n"><span title="int">int</span></span> <span class="o">|</span> <span class="n"><span title="tuple">tuple</span></span><span class="p">[</span><span class="n"><span title="int">int</span></span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>    <span class="o">*</span><span class="p">,</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>    <span class="n">argnames</span><span class="p">:</span> <span class="n"><span title="tuple">tuple</span></span><span class="p">[</span><span class="n"><span title="str">str</span></span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>    <span class="n">has_aux</span><span class="p">:</span> <span class="n"><span title="typing.Literal">Literal</span></span><span class="p">[</span><span class="kc">True</span><span class="p">],</span>
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="n"><span title="collections.abc.Callable">Callable</span></span><span class="p">[</span><span class="n"><span title="advect.autodiff.api.reverse.grad[**CallP]">CallP</span></span><span class="p">,</span> <span class="n"><span title="tuple">tuple</span></span><span class="p">[</span><span class="n"><span title="object">object</span></span><span class="p">,</span> <span class="n"><span title="AuxT">AuxT</span></span><span class="p">]]</span>
+</span></code></pre></div><div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">grad</span><span class="p">(</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    <span class="n">f</span><span class="p">:</span> <span class="n"><span title="collections.abc.Callable">Callable</span></span><span class="p">[</span><span class="n"><span title="advect.autodiff.api.reverse.grad[**CallP]">CallP</span></span><span class="p">,</span> <span class="n"><span title="object">object</span></span><span class="p">],</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>    <span class="n">argnums</span><span class="p">:</span> <span class="n"><span title="int">int</span></span> <span class="o">|</span> <span class="n"><span title="tuple">tuple</span></span><span class="p">[</span><span class="n"><span title="int">int</span></span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>    <span class="o">*</span><span class="p">,</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>    <span class="n">argnames</span><span class="p">:</span> <span class="n"><span title="tuple">tuple</span></span><span class="p">[</span><span class="n"><span title="str">str</span></span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>    <span class="n">has_aux</span><span class="p">:</span> <span class="n"><span title="typing.Literal">Literal</span></span><span class="p">[</span><span class="kc">False</span><span class="p">]</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="n"><span title="collections.abc.Callable">Callable</span></span><span class="p">[</span><span class="n"><span title="advect.autodiff.api.reverse.grad[**CallP]">CallP</span></span><span class="p">,</span> <span class="n"><span title="object">object</span></span><span class="p">]</span>
+</span></code></pre></div><div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">grad</span><span class="p">(</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    <span class="n">f</span><span class="p">:</span> <span class="n"><span title="collections.abc.Callable">Callable</span></span><span class="p">[</span><span class="n"><span title="advect.autodiff.api.reverse.grad[**CallP]">CallP</span></span><span class="p">,</span> <span class="n"><span title="object">object</span></span><span class="p">],</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>    <span class="n">argnums</span><span class="p">:</span> <span class="n"><span title="int">int</span></span> <span class="o">|</span> <span class="n"><span title="tuple">tuple</span></span><span class="p">[</span><span class="n"><span title="int">int</span></span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>    <span class="o">*</span><span class="p">,</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>    <span class="n">argnames</span><span class="p">:</span> <span class="n"><span title="tuple">tuple</span></span><span class="p">[</span><span class="n"><span title="str">str</span></span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>    <span class="n">has_aux</span><span class="p">:</span> <span class="n"><span title="bool">bool</span></span><span class="p">,</span>
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="n"><span title="collections.abc.Callable">Callable</span></span><span class="p">[</span><span class="n"><span title="advect.autodiff.api.reverse.grad[**CallP]">CallP</span></span><span class="p">,</span> <span class="n"><span title="object">object</span></span><span class="p">]</span>
+</span></code></pre></div>          </div>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">grad</span><span class="p">(</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    <span class="n">f</span><span class="p">:</span> <span class="n"><span title="collections.abc.Callable">Callable</span></span><span class="p">[</span><span class="n"><span title="advect.autodiff.api.reverse.grad[**CallP]">CallP</span></span><span class="p">,</span> <span class="n"><span title="object">object</span></span><span class="p">],</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>    <span class="n">argnums</span><span class="p">:</span> <span class="n"><span title="int">int</span></span> <span class="o">|</span> <span class="n"><span title="tuple">tuple</span></span><span class="p">[</span><span class="n"><span title="int">int</span></span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>    <span class="o">*</span><span class="p">,</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>    <span class="n">argnames</span><span class="p">:</span> <span class="n"><span title="tuple">tuple</span></span><span class="p">[</span><span class="n"><span title="str">str</span></span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>    <span class="n">has_aux</span><span class="p">:</span> <span class="n"><span title="bool">bool</span></span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="n"><span title="collections.abc.Callable">Callable</span></span><span class="p">[</span><span class="n"><span title="advect.autodiff.api.reverse.grad[**CallP]">CallP</span></span><span class="p">,</span> <span class="n"><span title="object">object</span></span><span class="p">]</span> <span class="o">|</span> <span class="n"><a class="autorefs autorefs-internal" title="StagedProgram (advect.core._stage.StagedProgram)" href="../staging/#advect.StagedProgram">StagedProgram</a></span>
+</span></code></pre></div>
+
+    <div class="doc doc-contents first">
+
+        <p>Differentiate a scalar-valued function with reverse mode.</p>
+<p>An ordinary callable is traced from concrete inputs on every invocation;
+no trace or graph is cached between calls. Passing a <code>StagedProgram</code>
+instead compiles and returns another immutable staged program. Warm calls
+to that program execute its prebuilt graph without a dynamic tape or
+reverse sweep.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+            <b><code>f</code></b>
+              (<code><span title="collections.abc.Callable">Callable</span>[<span title="advect.autodiff.api.reverse.grad[**CallP]">CallP</span>, <span title="object">object</span>]</code>)
+          –
+          <div class="doc-md-description">
+            <p>Callable whose differentiated value is a real scalar or a one-leaf
+pytree containing a real scalar. With <code>has_aux=True</code>, it instead
+returns <code>(value, auxiliary)</code>, where only <code>value</code> is differentiated.
+A <code>StagedProgram</code> is also accepted.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>argnums</code></b>
+              (<code><span title="int">int</span> | <span title="tuple">tuple</span>[<span title="int">int</span>, ...] | None</code>, default:
+                  <code>None</code>
+)
+          –
+          <div class="doc-md-description">
+            <p>Positional arguments to differentiate. An integer returns that
+argument's gradient pytree directly, while a tuple returns a tuple in
+the given order. <code>None</code> selects argument zero unless <code>argnames</code> is
+provided, in which case it selects no positional arguments. Negative
+indices are resolved for each call.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>argnames</code></b>
+              (<code><span title="tuple">tuple</span>[<span title="str">str</span>, ...] | None</code>, default:
+                  <code>None</code>
+)
+          –
+          <div class="doc-md-description">
+            <p>Named arguments to differentiate. Their gradients are returned in a
+dictionary keyed by name. For an ordinary callable, a selected name
+may be passed positionally or by keyword; staged named inputs must be
+passed by keyword. When positional and named inputs are both selected,
+the result is <code>(positional_gradients, named_gradients)</code>, with the
+positional part following the integer-versus-tuple rule above.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>has_aux</code></b>
+              (<code><span title="bool">bool</span></code>, default:
+                  <code>False</code>
+)
+          –
+          <div class="doc-md-description">
+            <p>Whether <code>f</code> returns <code>(value, auxiliary)</code>. The auxiliary value is
+excluded from differentiation. A dynamic call materializes it as a
+concrete sidecar; a staged transform records it as an ordinary staged
+output.</p>
+          </div>
+        </li>
+    </ul>
+
+
+<p><span class="doc-section-title">Returns:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+              <code><span title="collections.abc.Callable">Callable</span> or <a class="autorefs autorefs-internal" title="StagedProgram (advect.core._stage.StagedProgram)" href="../staging/#advect.StagedProgram">StagedProgram</a></code>
+          –
+          <div class="doc-md-description">
+            <p>For an ordinary callable, a concrete-tracing gradient function. For a
+staged input, an immutable, serializable derivative program with the
+same input signature and Array API revision. Its result has the
+gradient structure selected by <code>argnums</code> and <code>argnames</code>; when
+<code>has_aux=True</code>, it returns <code>(gradient, auxiliary)</code>.</p>
+          </div>
+        </li>
+    </ul>
+
+
+<p><span class="doc-section-title">Raises:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+              <code><span title="IndexError">IndexError</span></code>
+            –
+          <div class="doc-md-description">
+            <p>If a positional selection is out of range for the transformed call.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+              <code><span title="TypeError">TypeError</span></code>
+            –
+          <div class="doc-md-description">
+            <p>If a selected input is an unsupported Python complex scalar, or a
+selected staged input leaf is static, or a selected staged weak-scalar
+signature is not real floating-point.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+              <code><span title="ValueError">ValueError</span></code>
+            –
+          <div class="doc-md-description">
+            <p>If positional selections are duplicated, an ordinary callable
+argument is selected both positionally and by name, a selected name is
+unavailable, or the differentiated output is not a real scalar.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+              <code><a class="autorefs autorefs-internal" title="NoVJPError (advect.core.NoVJPError)" href="../errors/#advect.NoVJPError">NoVJPError</a></code>
+            –
+          <div class="doc-md-description">
+            <p>If an operation on the differentiated path has no reverse-mode rule.</p>
+          </div>
+        </li>
+    </ul>
+
+
+<p><span class="doc-section-title">Examples:</span></p>
+    <div class="language-pycon highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="gp">&gt;&gt;&gt; </span><span class="kn">import</span><span class="w"> </span><span class="nn">advect</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">ad</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="gp">&gt;&gt;&gt; </span><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="gp">&gt;&gt;&gt; </span><span class="k">def</span><span class="w"> </span><span class="nf">squared_norm</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="gp">... </span>    <span class="k">return</span> <span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">x</span><span class="o">**</span><span class="mi">2</span><span class="p">)</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="gp">&gt;&gt;&gt; </span><span class="n">x</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="mf">1.0</span><span class="p">,</span> <span class="mf">2.0</span><span class="p">,</span> <span class="mf">3.0</span><span class="p">])</span>
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="gp">&gt;&gt;&gt; </span><span class="n">gradient</span> <span class="o">=</span> <span class="n">ad</span><span class="o">.</span><span class="n">grad</span><span class="p">(</span><span class="n">squared_norm</span><span class="p">)</span>
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="gp">&gt;&gt;&gt; </span><span class="n">gradient</span><span class="p">(</span><span class="n">x</span><span class="p">)</span><span class="o">.</span><span class="n">tolist</span><span class="p">()</span>
+</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="go">[2.0, 4.0, 6.0]</span>
+</span></code></pre></div>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h2 id="advect.value_and_grad" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">value_and_grad</span>
+
+
+<a href="#advect.value_and_grad" class="headerlink" title="Permanent link">&para;</a></h2>
+          <div class="doc-overloads">
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">value_and_grad</span><span class="p">(</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    <span class="n">f</span><span class="p">:</span> <span class="n"><a class="autorefs autorefs-internal" title="StagedProgram (advect.core._stage.StagedProgram)" href="../staging/#advect.StagedProgram">StagedProgram</a></span><span class="p">,</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>    <span class="n">argnums</span><span class="p">:</span> <span class="n"><span title="int">int</span></span> <span class="o">|</span> <span class="n"><span title="tuple">tuple</span></span><span class="p">[</span><span class="n"><span title="int">int</span></span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>    <span class="o">*</span><span class="p">,</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>    <span class="n">argnames</span><span class="p">:</span> <span class="n"><span title="tuple">tuple</span></span><span class="p">[</span><span class="n"><span title="str">str</span></span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>    <span class="n">has_aux</span><span class="p">:</span> <span class="n"><span title="bool">bool</span></span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="n"><a class="autorefs autorefs-internal" title="StagedProgram (advect.core._stage.StagedProgram)" href="../staging/#advect.StagedProgram">StagedProgram</a></span>
+</span></code></pre></div><div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">value_and_grad</span><span class="p">(</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    <span class="n">f</span><span class="p">:</span> <span class="n"><span title="collections.abc.Callable">Callable</span></span><span class="p">[</span><span class="n"><span title="advect.autodiff.api.reverse.value_and_grad[**CallP]">CallP</span></span><span class="p">,</span> <span class="n"><span title="ResultT">ResultT</span></span><span class="p">],</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>    <span class="n">argnums</span><span class="p">:</span> <span class="n"><span title="int">int</span></span> <span class="o">|</span> <span class="n"><span title="tuple">tuple</span></span><span class="p">[</span><span class="n"><span title="int">int</span></span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>    <span class="o">*</span><span class="p">,</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>    <span class="n">argnames</span><span class="p">:</span> <span class="n"><span title="tuple">tuple</span></span><span class="p">[</span><span class="n"><span title="str">str</span></span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>    <span class="n">has_aux</span><span class="p">:</span> <span class="n"><span title="typing.Literal">Literal</span></span><span class="p">[</span><span class="kc">False</span><span class="p">]</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="n"><span title="collections.abc.Callable">Callable</span></span><span class="p">[</span><span class="n"><span title="advect.autodiff.api.reverse.value_and_grad[**CallP]">CallP</span></span><span class="p">,</span> <span class="n"><span title="tuple">tuple</span></span><span class="p">[</span><span class="n"><span title="ResultT">ResultT</span></span><span class="p">,</span> <span class="n"><span title="object">object</span></span><span class="p">]]</span>
+</span></code></pre></div><div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">value_and_grad</span><span class="p">(</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    <span class="n">f</span><span class="p">:</span> <span class="n"><span title="collections.abc.Callable">Callable</span></span><span class="p">[</span><span class="n"><span title="advect.autodiff.api.reverse.value_and_grad[**CallP]">CallP</span></span><span class="p">,</span> <span class="n"><span title="tuple">tuple</span></span><span class="p">[</span><span class="n"><span title="ResultT">ResultT</span></span><span class="p">,</span> <span class="n"><span title="AuxT">AuxT</span></span><span class="p">]],</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>    <span class="n">argnums</span><span class="p">:</span> <span class="n"><span title="int">int</span></span> <span class="o">|</span> <span class="n"><span title="tuple">tuple</span></span><span class="p">[</span><span class="n"><span title="int">int</span></span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>    <span class="o">*</span><span class="p">,</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>    <span class="n">argnames</span><span class="p">:</span> <span class="n"><span title="tuple">tuple</span></span><span class="p">[</span><span class="n"><span title="str">str</span></span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>    <span class="n">has_aux</span><span class="p">:</span> <span class="n"><span title="typing.Literal">Literal</span></span><span class="p">[</span><span class="kc">True</span><span class="p">],</span>
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="n"><span title="collections.abc.Callable">Callable</span></span><span class="p">[</span><span class="n"><span title="advect.autodiff.api.reverse.value_and_grad[**CallP]">CallP</span></span><span class="p">,</span> <span class="n"><span title="tuple">tuple</span></span><span class="p">[</span><span class="n"><span title="ResultT">ResultT</span></span><span class="p">,</span> <span class="n"><span title="object">object</span></span><span class="p">,</span> <span class="n"><span title="AuxT">AuxT</span></span><span class="p">]]</span>
+</span></code></pre></div><div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">value_and_grad</span><span class="p">(</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    <span class="n">f</span><span class="p">:</span> <span class="n"><span title="collections.abc.Callable">Callable</span></span><span class="p">[</span><span class="n"><span title="advect.autodiff.api.reverse.value_and_grad[**CallP]">CallP</span></span><span class="p">,</span> <span class="n"><span title="object">object</span></span><span class="p">],</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>    <span class="n">argnums</span><span class="p">:</span> <span class="n"><span title="int">int</span></span> <span class="o">|</span> <span class="n"><span title="tuple">tuple</span></span><span class="p">[</span><span class="n"><span title="int">int</span></span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>    <span class="o">*</span><span class="p">,</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>    <span class="n">argnames</span><span class="p">:</span> <span class="n"><span title="tuple">tuple</span></span><span class="p">[</span><span class="n"><span title="str">str</span></span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>    <span class="n">has_aux</span><span class="p">:</span> <span class="n"><span title="bool">bool</span></span><span class="p">,</span>
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="n"><span title="collections.abc.Callable">Callable</span></span><span class="p">[</span><span class="n"><span title="advect.autodiff.api.reverse.value_and_grad[**CallP]">CallP</span></span><span class="p">,</span> <span class="n"><span title="tuple">tuple</span></span><span class="p">[</span><span class="n"><span title="object">object</span></span><span class="p">,</span> <span class="o">...</span><span class="p">]]</span>
+</span></code></pre></div>          </div>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">value_and_grad</span><span class="p">(</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    <span class="n">f</span><span class="p">:</span> <span class="n"><span title="collections.abc.Callable">Callable</span></span><span class="p">[</span><span class="n"><span title="advect.autodiff.api.reverse.value_and_grad[**CallP]">CallP</span></span><span class="p">,</span> <span class="n"><span title="object">object</span></span><span class="p">],</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>    <span class="n">argnums</span><span class="p">:</span> <span class="n"><span title="int">int</span></span> <span class="o">|</span> <span class="n"><span title="tuple">tuple</span></span><span class="p">[</span><span class="n"><span title="int">int</span></span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>    <span class="o">*</span><span class="p">,</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>    <span class="n">argnames</span><span class="p">:</span> <span class="n"><span title="tuple">tuple</span></span><span class="p">[</span><span class="n"><span title="str">str</span></span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>    <span class="n">has_aux</span><span class="p">:</span> <span class="n"><span title="bool">bool</span></span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="n"><span title="collections.abc.Callable">Callable</span></span><span class="p">[</span><span class="n"><span title="advect.autodiff.api.reverse.value_and_grad[**CallP]">CallP</span></span><span class="p">,</span> <span class="n"><span title="tuple">tuple</span></span><span class="p">[</span><span class="n"><span title="object">object</span></span><span class="p">,</span> <span class="o">...</span><span class="p">]]</span> <span class="o">|</span> <span class="n"><a class="autorefs autorefs-internal" title="StagedProgram (advect.core._stage.StagedProgram)" href="../staging/#advect.StagedProgram">StagedProgram</a></span>
+</span></code></pre></div>
+
+    <div class="doc doc-contents first">
+
+        <p>Compute a scalar value and its reverse-mode gradient together.</p>
+<p>An ordinary callable is traced from concrete inputs on every invocation;
+no trace or graph is cached between calls. Passing a <code>StagedProgram</code>
+instead compiles and returns another immutable staged program. Warm calls
+to that program execute its prebuilt graph without a dynamic tape or
+reverse sweep.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+            <b><code>f</code></b>
+              (<code><span title="collections.abc.Callable">Callable</span>[<span title="advect.autodiff.api.reverse.value_and_grad[**CallP]">CallP</span>, <span title="object">object</span>]</code>)
+          –
+          <div class="doc-md-description">
+            <p>Callable whose differentiated value is a real scalar or a one-leaf
+pytree containing a real scalar. With <code>has_aux=True</code>, it instead
+returns <code>(value, auxiliary)</code>, where only <code>value</code> is differentiated.
+A <code>StagedProgram</code> is also accepted.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>argnums</code></b>
+              (<code><span title="int">int</span> | <span title="tuple">tuple</span>[<span title="int">int</span>, ...] | None</code>, default:
+                  <code>None</code>
+)
+          –
+          <div class="doc-md-description">
+            <p>Positional arguments to differentiate. An integer returns that
+argument's gradient pytree directly, while a tuple returns a tuple in
+the given order. <code>None</code> selects argument zero unless <code>argnames</code> is
+provided, in which case it selects no positional arguments. Negative
+indices are resolved for each call.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>argnames</code></b>
+              (<code><span title="tuple">tuple</span>[<span title="str">str</span>, ...] | None</code>, default:
+                  <code>None</code>
+)
+          –
+          <div class="doc-md-description">
+            <p>Named arguments to differentiate. Their gradients are returned in a
+dictionary keyed by name. For an ordinary callable, a selected name
+may be passed positionally or by keyword; staged named inputs must be
+passed by keyword. When positional and named inputs are both selected,
+the gradient is <code>(positional_gradients, named_gradients)</code>, with the
+positional part following the integer-versus-tuple rule above.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>has_aux</code></b>
+              (<code><span title="bool">bool</span></code>, default:
+                  <code>False</code>
+)
+          –
+          <div class="doc-md-description">
+            <p>Whether <code>f</code> returns <code>(value, auxiliary)</code>. The auxiliary value is
+excluded from differentiation. A dynamic call materializes it as a
+concrete sidecar; a staged transform records it as an ordinary staged
+output.</p>
+          </div>
+        </li>
+    </ul>
+
+
+<p><span class="doc-section-title">Returns:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+              <code><span title="collections.abc.Callable">Callable</span> or <a class="autorefs autorefs-internal" title="StagedProgram (advect.core._stage.StagedProgram)" href="../staging/#advect.StagedProgram">StagedProgram</a></code>
+          –
+          <div class="doc-md-description">
+            <p>For an ordinary callable, a concrete-tracing function returning
+<code>(value, gradient)</code>. For a staged input, an immutable, serializable
+program with the same input signature and Array API revision returning
+the same structure. With <code>has_aux=True</code>, either lifetime returns
+<code>(value, gradient, auxiliary)</code>.</p>
+          </div>
+        </li>
+    </ul>
+
+
+<p><span class="doc-section-title">Raises:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+              <code><span title="IndexError">IndexError</span></code>
+            –
+          <div class="doc-md-description">
+            <p>If a positional selection is out of range for the transformed call.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+              <code><span title="TypeError">TypeError</span></code>
+            –
+          <div class="doc-md-description">
+            <p>If a selected input is an unsupported Python complex scalar, or a
+selected staged input leaf is static, or a selected staged weak-scalar
+signature is not real floating-point.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+              <code><span title="ValueError">ValueError</span></code>
+            –
+          <div class="doc-md-description">
+            <p>If positional selections are duplicated, an ordinary callable
+argument is selected both positionally and by name, a selected name is
+unavailable, or the differentiated output is not a real scalar.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+              <code><a class="autorefs autorefs-internal" title="NoVJPError (advect.core.NoVJPError)" href="../errors/#advect.NoVJPError">NoVJPError</a></code>
+            –
+          <div class="doc-md-description">
+            <p>If an operation on the differentiated path has no reverse-mode rule.</p>
+          </div>
+        </li>
+    </ul>
+
+
+<p><span class="doc-section-title">Examples:</span></p>
+    <div class="language-pycon highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="gp">&gt;&gt;&gt; </span><span class="kn">import</span><span class="w"> </span><span class="nn">advect</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">ad</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="gp">&gt;&gt;&gt; </span><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="gp">&gt;&gt;&gt; </span><span class="k">def</span><span class="w"> </span><span class="nf">squared_norm</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="gp">... </span>    <span class="k">return</span> <span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">x</span><span class="o">**</span><span class="mi">2</span><span class="p">)</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="gp">&gt;&gt;&gt; </span><span class="n">x</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="mf">1.0</span><span class="p">,</span> <span class="mf">2.0</span><span class="p">,</span> <span class="mf">3.0</span><span class="p">])</span>
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="gp">&gt;&gt;&gt; </span><span class="n">value_and_gradient</span> <span class="o">=</span> <span class="n">ad</span><span class="o">.</span><span class="n">value_and_grad</span><span class="p">(</span><span class="n">squared_norm</span><span class="p">)</span>
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="gp">&gt;&gt;&gt; </span><span class="n">value</span><span class="p">,</span> <span class="n">gradient</span> <span class="o">=</span> <span class="n">value_and_gradient</span><span class="p">(</span><span class="n">x</span><span class="p">)</span>
+</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="gp">&gt;&gt;&gt; </span><span class="nb">float</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">gradient</span><span class="o">.</span><span class="n">tolist</span><span class="p">()</span>
+</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="go">(14.0, [2.0, 4.0, 6.0])</span>
+</span></code></pre></div>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h2 id="advect.jvp" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">jvp</span>
+
+
+<a href="#advect.jvp" class="headerlink" title="Permanent link">&para;</a></h2>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">jvp</span><span class="p">(</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    <span class="n">f</span><span class="p">:</span> <span class="n"><span title="collections.abc.Callable">Callable</span></span><span class="p">[</span><span class="o">...</span><span class="p">,</span> <span class="n"><span title="advect.autodiff.api.forward.jvp[R]">R</span></span><span class="p">],</span> <span class="n">argnums</span><span class="p">:</span> <span class="n"><span title="int">int</span></span> <span class="o">|</span> <span class="n"><span title="tuple">tuple</span></span><span class="p">[</span><span class="n"><span title="int">int</span></span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">=</span> <span class="mi">0</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="n"><span title="collections.abc.Callable">Callable</span></span><span class="p">[</span><span class="o">...</span><span class="p">,</span> <span class="n"><span title="tuple">tuple</span></span><span class="p">[</span><span class="n"><span title="advect.autodiff.api.forward.jvp[R]">R</span></span><span class="p">,</span> <span class="n"><span title="object">object</span></span><span class="p">]]</span>
+</span></code></pre></div>
+
+    <div class="doc doc-contents first">
+
+        <p>Return a concrete-tracing Jacobian-vector product transform.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+            <b><code>f</code></b>
+              (<code><span title="collections.abc.Callable">Callable</span>[..., <span title="advect.autodiff.api.forward.jvp[R]">R</span>]</code>)
+          –
+          <div class="doc-md-description">
+            <p>Callable to differentiate. Its output may be any supported array or
+pytree. Passing a <code>StagedProgram</code> executes it inside a concrete
+trace; this transform does not compile a new staged program.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>argnums</code></b>
+              (<code><span title="int">int</span> | <span title="tuple">tuple</span>[<span title="int">int</span>, ...]</code>, default:
+                  <code>0</code>
+)
+          –
+          <div class="doc-md-description">
+            <p>Positional arguments to differentiate. An integer expects one tangent
+pytree directly. A tuple expects a tuple of tangent pytrees in the
+given order, including for a one-element tuple. Negative indices are
+resolved for each transformed call.</p>
+          </div>
+        </li>
+    </ul>
+
+
+<p><span class="doc-section-title">Returns:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+              <code><span title="collections.abc.Callable">Callable</span></code>
+          –
+          <div class="doc-md-description">
+            <p>A function called as <code>transformed(*args, tangents=..., **kwargs)</code>.
+<code>tangents</code> must match the selected primal pytree or pytrees. The
+result is <code>(value, output_tangent)</code>; both entries preserve <code>f</code>'s
+output pytree, and disconnected output leaves receive zero tangents.</p>
+          </div>
+        </li>
+    </ul>
+
+
+<p><span class="doc-section-title">Raises:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+              <code><span title="IndexError">IndexError</span></code>
+            –
+          <div class="doc-md-description">
+            <p>If a positional selection is out of range for the transformed call.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+              <code><span title="TypeError">TypeError</span></code>
+            –
+          <div class="doc-md-description">
+            <p>If a selected input is an unsupported Python complex scalar, multiple
+selected arguments are not given a tuple of tangents, or a tangent is
+supplied for a static or untraceable leaf.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+              <code><span title="ValueError">ValueError</span></code>
+            –
+          <div class="doc-md-description">
+            <p>If positional selections are duplicated, or the tangent arity,
+pytree, or leaf shape does not match the selected primals.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+              <code><a class="autorefs autorefs-internal" title="NoJVPError (advect.core.NoJVPError)" href="../errors/#advect.NoJVPError">NoJVPError</a></code>
+            –
+          <div class="doc-md-description">
+            <p>If an operation on the differentiated path has no JVP rule.</p>
+          </div>
+        </li>
+    </ul>
+
+
+<details class="note" open>
+  <summary>Notes</summary>
+  <p>Each invocation traces the concrete values once, applies the JVP once, and
+releases the temporary <code>LinearMap</code> and any retained primitive residuals
+before returning. No trace is cached between calls.</p>
+</details>
+
+<p><span class="doc-section-title">Examples:</span></p>
+    <div class="language-pycon highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="gp">&gt;&gt;&gt; </span><span class="kn">import</span><span class="w"> </span><span class="nn">advect</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">ad</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="gp">&gt;&gt;&gt; </span><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="gp">&gt;&gt;&gt; </span><span class="k">def</span><span class="w"> </span><span class="nf">square</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="gp">... </span>    <span class="k">return</span> <span class="n">x</span><span class="o">**</span><span class="mi">2</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="gp">&gt;&gt;&gt; </span><span class="n">x</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="mf">1.0</span><span class="p">,</span> <span class="mf">2.0</span><span class="p">])</span>
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="gp">&gt;&gt;&gt; </span><span class="n">direction</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">ones_like</span><span class="p">(</span><span class="n">x</span><span class="p">)</span>
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="gp">&gt;&gt;&gt; </span><span class="n">directional_derivative</span> <span class="o">=</span> <span class="n">ad</span><span class="o">.</span><span class="n">jvp</span><span class="p">(</span><span class="n">square</span><span class="p">)</span>
+</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="gp">&gt;&gt;&gt; </span><span class="n">value</span><span class="p">,</span> <span class="n">tangent</span> <span class="o">=</span> <span class="n">directional_derivative</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">tangents</span><span class="o">=</span><span class="n">direction</span><span class="p">)</span>
+</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="gp">&gt;&gt;&gt; </span><span class="n">value</span><span class="o">.</span><span class="n">tolist</span><span class="p">(),</span> <span class="n">tangent</span><span class="o">.</span><span class="n">tolist</span><span class="p">()</span>
+</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="go">([1.0, 4.0], [2.0, 4.0])</span>
+</span></code></pre></div>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h2 id="advect.vjp" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">vjp</span>
+
+
+<a href="#advect.vjp" class="headerlink" title="Permanent link">&para;</a></h2>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">vjp</span><span class="p">(</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    <span class="n">f</span><span class="p">:</span> <span class="n"><span title="collections.abc.Callable">Callable</span></span><span class="p">[</span><span class="n"><span title="advect.autodiff.api.reverse.vjp[**CallP]">CallP</span></span><span class="p">,</span> <span class="n"><span title="advect.autodiff.api.reverse.vjp[ResultT]">ResultT</span></span><span class="p">],</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>    <span class="n">argnums</span><span class="p">:</span> <span class="n"><span title="int">int</span></span> <span class="o">|</span> <span class="n"><span title="tuple">tuple</span></span><span class="p">[</span><span class="n"><span title="int">int</span></span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">=</span> <span class="mi">0</span><span class="p">,</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="n"><span title="collections.abc.Callable">Callable</span></span><span class="p">[</span><span class="n"><span title="advect.autodiff.api.reverse.vjp[**CallP]">CallP</span></span><span class="p">,</span> <span class="n"><span title="tuple">tuple</span></span><span class="p">[</span><span class="n"><span title="advect.autodiff.api.reverse.vjp[ResultT]">ResultT</span></span><span class="p">,</span> <span class="n"><a class="autorefs autorefs-internal" title="Pullback (advect.autodiff.api.reverse.Pullback)" href="#advect.Pullback">Pullback</a></span><span class="p">]]</span>
+</span></code></pre></div>
+
+    <div class="doc doc-contents first">
+
+        <p>Return a concrete value and a one-shot reverse pullback.</p>
+<p><code>vjp</code> is always a dynamic transform. Each call traces the selected concrete
+inputs and returns a <code>Pullback</code> that owns that invocation's tape, retained
+provider values, and primitive residuals. This remains true when <code>f</code> is a
+<code>StagedProgram</code>; use <code>vjp_program</code> to compile a reusable staged pullback.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+            <b><code>f</code></b>
+              (<code><span title="collections.abc.Callable">Callable</span>[<span title="advect.autodiff.api.reverse.vjp[**CallP]">CallP</span>, <span title="advect.autodiff.api.reverse.vjp[ResultT]">ResultT</span>]</code>)
+          –
+          <div class="doc-md-description">
+            <p>Callable to linearize. Its output may be any supported array or pytree.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>argnums</code></b>
+              (<code><span title="int">int</span> | <span title="tuple">tuple</span>[<span title="int">int</span>, ...]</code>, default:
+                  <code>0</code>
+)
+          –
+          <div class="doc-md-description">
+            <p>Positional arguments to differentiate. An integer makes the pullback
+return that argument's gradient pytree directly; a tuple makes it
+return a tuple in the given order. Negative indices are resolved for
+each call.</p>
+          </div>
+        </li>
+    </ul>
+
+
+<p><span class="doc-section-title">Returns:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+              <code><span title="collections.abc.Callable">Callable</span></code>
+          –
+          <div class="doc-md-description">
+            <p>A concrete-tracing function returning <code>(value, pullback)</code>. <code>value</code>
+preserves the callable's output pytree. Call <code>pullback(cotangent)</code> with
+a cotangent matching that pytree to obtain the selected input
+gradients.</p>
+          </div>
+        </li>
+    </ul>
+
+
+<p><span class="doc-section-title">Raises:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+              <code><span title="IndexError">IndexError</span></code>
+            –
+          <div class="doc-md-description">
+            <p>If a positional selection is out of range for the transformed call.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+              <code><span title="TypeError">TypeError</span></code>
+            –
+          <div class="doc-md-description">
+            <p>If a selected input is an unsupported Python complex scalar, or a
+cotangent leaf has an invalid numeric category.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+              <code><span title="ValueError">ValueError</span></code>
+            –
+          <div class="doc-md-description">
+            <p>If positional selections are duplicated or the cotangent pytree or
+leaf shape does not match the output.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+              <code><a class="autorefs autorefs-internal" title="NoVJPError (advect.core.NoVJPError)" href="../errors/#advect.NoVJPError">NoVJPError</a></code>
+            –
+          <div class="doc-md-description">
+            <p>If an operation on the differentiated path has no reverse-mode rule.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+              <code><span title="RuntimeError">RuntimeError</span></code>
+            –
+          <div class="doc-md-description">
+            <p>If the pullback is applied after it has already been consumed or
+closed.</p>
+          </div>
+        </li>
+    </ul>
+
+
+<details class="note" open>
+  <summary>Notes</summary>
+  <p>Applying the pullback consumes it and releases its retained trace. Call
+<code>close()</code> to release it without applying it, or use it as a context manager
+when deterministic cleanup matters.</p>
+</details>
+
+<p><span class="doc-section-title">Examples:</span></p>
+    <div class="language-pycon highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="gp">&gt;&gt;&gt; </span><span class="kn">import</span><span class="w"> </span><span class="nn">advect</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">ad</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="gp">&gt;&gt;&gt; </span><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="gp">&gt;&gt;&gt; </span><span class="n">value</span><span class="p">,</span> <span class="n">pullback</span> <span class="o">=</span> <span class="n">ad</span><span class="o">.</span><span class="n">vjp</span><span class="p">(</span><span class="k">lambda</span> <span class="n">x</span><span class="p">:</span> <span class="n">x</span><span class="o">**</span><span class="mi">2</span><span class="p">)(</span><span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="mf">1.0</span><span class="p">,</span> <span class="mf">2.0</span><span class="p">]))</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="gp">&gt;&gt;&gt; </span><span class="n">value</span><span class="o">.</span><span class="n">tolist</span><span class="p">()</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="go">[1.0, 4.0]</span>
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="gp">&gt;&gt;&gt; </span><span class="n">pullback</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">ones</span><span class="p">(</span><span class="mi">2</span><span class="p">))</span><span class="o">.</span><span class="n">tolist</span><span class="p">()</span>
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="go">[2.0, 4.0]</span>
+</span></code></pre></div>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h2 id="advect.linearize" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">linearize</span>
+
+
+<a href="#advect.linearize" class="headerlink" title="Permanent link">&para;</a></h2>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">linearize</span><span class="p">(</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    <span class="n">f</span><span class="p">:</span> <span class="n"><span title="collections.abc.Callable">Callable</span></span><span class="p">[</span><span class="o">...</span><span class="p">,</span> <span class="n"><span title="advect.autodiff.api.forward.linearize[R]">R</span></span><span class="p">],</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>    <span class="o">*</span><span class="n">primals</span><span class="p">:</span> <span class="n"><span title="object">object</span></span><span class="p">,</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>    <span class="n">argnums</span><span class="p">:</span> <span class="n"><span title="int">int</span></span> <span class="o">|</span> <span class="n"><span title="tuple">tuple</span></span><span class="p">[</span><span class="n"><span title="int">int</span></span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">=</span> <span class="mi">0</span><span class="p">,</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>    <span class="o">**</span><span class="n">kwargs</span><span class="p">:</span> <span class="n"><span title="object">object</span></span><span class="p">,</span>
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="n"><span title="tuple">tuple</span></span><span class="p">[</span><span class="n"><span title="advect.autodiff.api.forward.linearize[R]">R</span></span><span class="p">,</span> <span class="n"><a class="autorefs autorefs-internal" title="LinearMap (advect.autodiff._ephemeral.LinearMap)" href="#advect.LinearMap">LinearMap</a></span><span class="p">]</span>
+</span></code></pre></div>
+
+    <div class="doc doc-contents first">
+
+        <p>Linearize one concrete call and return its reusable real-linear map.</p>
+<p>The call is traced immediately from <code>primals</code> and <code>kwargs</code>. The
+returned <code>LinearMap</code> owns that invocation's tape, retained provider
+values, and primitive residuals; it is not a cached or durable program.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+            <b><code>f</code></b>
+              (<code><span title="collections.abc.Callable">Callable</span>[..., <span title="advect.autodiff.api.forward.linearize[R]">R</span>]</code>)
+          –
+          <div class="doc-md-description">
+            <p>Callable to linearize. Its output may be any supported array or
+pytree. A <code>StagedProgram</code> is accepted, but the surrounding
+linearization is still concrete and invocation-local.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>*primals</code></b>
+              (<code><span title="object">object</span></code>, default:
+                  <code>()</code>
+)
+          –
+          <div class="doc-md-description">
+            <p>Positional arguments for this call. Only the arguments selected by
+<code>argnums</code> are tangent inputs; the others remain primal
+coefficients.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>argnums</code></b>
+              (<code><span title="int">int</span> | <span title="tuple">tuple</span>[<span title="int">int</span>, ...]</code>, default:
+                  <code>0</code>
+)
+          –
+          <div class="doc-md-description">
+            <p>Positional arguments to differentiate. An integer makes
+<code>linear(tangents)</code> accept that argument's tangent pytree directly; a
+tuple makes it accept a tuple of tangent pytrees in the given order.
+Negative indices are resolved against <code>primals</code>.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>**kwargs</code></b>
+              (<code><span title="object">object</span></code>, default:
+                  <code>{}</code>
+)
+          –
+          <div class="doc-md-description">
+            <p>Keyword arguments forwarded to <code>f</code>. <code>linearize</code> does not select
+keyword arguments for differentiation.</p>
+          </div>
+        </li>
+    </ul>
+
+
+<p><span class="doc-section-title">Returns:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+              <code><span title="value">value</span></code>
+          –
+          <div class="doc-md-description">
+            <p>The concrete output of <code>f</code>, with its pytree structure preserved.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+              <code><span title="linear">linear</span></code>
+          –
+          <div class="doc-md-description">
+            <p>A reusable <code>LinearMap</code>. Calling <code>linear(tangents)</code> applies the JVP
+and returns a tangent with the output pytree. Calling
+<code>linear.pullback(cotangent)</code> or <code>linear.transpose()(cotangent)</code>
+applies the real adjoint and returns the selected input structure.</p>
+          </div>
+        </li>
+    </ul>
+
+
+<p><span class="doc-section-title">Raises:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+              <code><span title="IndexError">IndexError</span></code>
+            –
+          <div class="doc-md-description">
+            <p>If a positional selection is out of range.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+              <code><span title="TypeError">TypeError</span></code>
+            –
+          <div class="doc-md-description">
+            <p>If a selected input contains an unsupported Python complex scalar, or
+a tangent has an invalid structure or numeric category.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+              <code><span title="ValueError">ValueError</span></code>
+            –
+          <div class="doc-md-description">
+            <p>If positional selections are duplicated, or a tangent pytree or leaf
+shape does not match its selected primal.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+              <code><a class="autorefs autorefs-internal" title="NoJVPError (advect.core.NoJVPError)" href="../errors/#advect.NoJVPError">NoJVPError</a></code>
+            –
+          <div class="doc-md-description">
+            <p>If an operation on the differentiated path has no JVP rule. Public
+primitives are rejected before their concrete implementation runs.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+              <code><a class="autorefs autorefs-internal" title="NoVJPError (advect.core.NoVJPError)" href="../errors/#advect.NoVJPError">NoVJPError</a></code>
+            –
+          <div class="doc-md-description">
+            <p>If the returned map is transposed through an operation without an
+explicit or structurally derivable transpose rule.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+              <code><span title="RuntimeError">RuntimeError</span></code>
+            –
+          <div class="doc-md-description">
+            <p>If the map is applied after it has been closed.</p>
+          </div>
+        </li>
+    </ul>
+
+
+<details class="note" open>
+  <summary>Notes</summary>
+  <p>The map remains reusable until <code>close()</code>. Close it explicitly, or use it
+as a context manager, to release retained concrete values and residuals
+deterministically.</p>
+</details>
+
+<p><span class="doc-section-title">Examples:</span></p>
+    <div class="language-pycon highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="gp">&gt;&gt;&gt; </span><span class="kn">import</span><span class="w"> </span><span class="nn">advect</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">ad</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="gp">&gt;&gt;&gt; </span><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="gp">&gt;&gt;&gt; </span><span class="n">value</span><span class="p">,</span> <span class="n">linear</span> <span class="o">=</span> <span class="n">ad</span><span class="o">.</span><span class="n">linearize</span><span class="p">(</span><span class="k">lambda</span> <span class="n">x</span><span class="p">:</span> <span class="n">x</span><span class="o">**</span><span class="mi">2</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="mf">1.0</span><span class="p">,</span> <span class="mf">2.0</span><span class="p">]))</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="gp">&gt;&gt;&gt; </span><span class="n">value</span><span class="o">.</span><span class="n">tolist</span><span class="p">()</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="go">[1.0, 4.0]</span>
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="gp">&gt;&gt;&gt; </span><span class="k">with</span> <span class="n">linear</span><span class="p">:</span>
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="gp">... </span>    <span class="n">linear</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">ones</span><span class="p">(</span><span class="mi">2</span><span class="p">))</span><span class="o">.</span><span class="n">tolist</span><span class="p">()</span>
+</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="go">[2.0, 4.0]</span>
+</span></code></pre></div>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h2 id="advect.jacobian" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">jacobian</span>
+
+
+<a href="#advect.jacobian" class="headerlink" title="Permanent link">&para;</a></h2>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">jacobian</span><span class="p">(</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    <span class="n">f</span><span class="p">:</span> <span class="n"><span title="collections.abc.Callable">Callable</span></span><span class="p">[</span><span class="n"><span title="advect.autodiff.api.forward.jacobian[**P]">P</span></span><span class="p">,</span> <span class="n"><span title="object">object</span></span><span class="p">],</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>    <span class="n">argnums</span><span class="p">:</span> <span class="n"><span title="int">int</span></span> <span class="o">|</span> <span class="n"><span title="tuple">tuple</span></span><span class="p">[</span><span class="n"><span title="int">int</span></span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>    <span class="o">*</span><span class="p">,</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>    <span class="n">argnames</span><span class="p">:</span> <span class="n"><span title="tuple">tuple</span></span><span class="p">[</span><span class="n"><span title="str">str</span></span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="n"><span title="collections.abc.Callable">Callable</span></span><span class="p">[</span><span class="n"><span title="advect.autodiff.api.forward.jacobian[**P]">P</span></span><span class="p">,</span> <span class="n"><span title="object">object</span></span><span class="p">]</span>
+</span></code></pre></div>
+
+    <div class="doc doc-contents first">
+
+        <p>Return a shape-preserving dense Jacobian for real pytree inputs and outputs.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+            <b><code>f</code></b>
+              (<code><span title="collections.abc.Callable">Callable</span>[<span title="advect.autodiff.api.forward.jacobian[**P]">P</span>, <span title="object">object</span>]</code>)
+          –
+          <div class="doc-md-description">
+            <p>Callable to differentiate. Its selected inputs and output may be
+pytrees of real arrays or real Python scalars. A <code>StagedProgram</code> is
+accepted, but each call still uses a concrete, invocation-local
+linearization.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>argnums</code></b>
+              (<code><span title="int">int</span> | <span title="tuple">tuple</span>[<span title="int">int</span>, ...] | None</code>, default:
+                  <code>None</code>
+)
+          –
+          <div class="doc-md-description">
+            <p>Positional arguments to differentiate. An integer represents that
+input directly in every output block; a tuple represents the selected
+inputs as a tuple in the given order. <code>None</code> selects argument zero
+unless <code>argnames</code> is provided, in which case it selects no
+positional arguments. Negative indices are resolved for each call.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>argnames</code></b>
+              (<code><span title="tuple">tuple</span>[<span title="str">str</span>, ...] | None</code>, default:
+                  <code>None</code>
+)
+          –
+          <div class="doc-md-description">
+            <p>Named arguments to differentiate. Each output leaf contains their
+derivative blocks in a dictionary keyed by name. For an ordinary
+callable, a selected name may be passed positionally or by keyword;
+staged named inputs must be passed by keyword. With both positional
+and named selections, each output leaf contains
+<code>(positional_blocks, named_blocks)</code>.</p>
+          </div>
+        </li>
+    </ul>
+
+
+<p><span class="doc-section-title">Returns:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+              <code><span title="collections.abc.Callable">Callable</span></code>
+          –
+          <div class="doc-md-description">
+            <p>A concrete-tracing function returning an output-shaped pytree of
+input-shaped derivative blocks. For each output leaf and selected
+input leaf, the dense block shape is
+<code>output_leaf.shape + input_leaf.shape</code>; neither side is flattened.
+Static or untraceable selected input leaves have <code>None</code> blocks.</p>
+          </div>
+        </li>
+    </ul>
+
+
+<p><span class="doc-section-title">Raises:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+              <code><span title="IndexError">IndexError</span></code>
+            –
+          <div class="doc-md-description">
+            <p>If a positional selection is out of range for the transformed call.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+              <code><span title="TypeError">TypeError</span></code>
+            –
+          <div class="doc-md-description">
+            <p>If a selected input contains an unsupported Python complex scalar.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+              <code><span title="ValueError">ValueError</span></code>
+            –
+          <div class="doc-md-description">
+            <p>If positional selections are duplicated, an argument is selected both
+positionally and by name, a selected name is unavailable, or an input
+or output leaf is complex.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+              <code><a class="autorefs autorefs-internal" title="NoJVPError (advect.core.NoJVPError)" href="../errors/#advect.NoJVPError">NoJVPError</a></code>
+            –
+          <div class="doc-md-description">
+            <p>If forward assembly is required through an operation without a JVP
+rule.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+              <code><a class="autorefs autorefs-internal" title="NoVJPError (advect.core.NoVJPError)" href="../errors/#advect.NoVJPError">NoVJPError</a></code>
+            –
+          <div class="doc-md-description">
+            <p>If reverse assembly is required through an operation without an
+explicit or structurally derivable transpose rule.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+              <code><span title="RuntimeError">RuntimeError</span></code>
+            –
+          <div class="doc-md-description">
+            <p>If the provider cannot assemble a dense block or a derivative rule
+changes the expected pytree structure between basis seeds.</p>
+          </div>
+        </li>
+    </ul>
+
+
+<details class="note" open>
+  <summary>Notes</summary>
+  <p>Advect chooses forward or reverse assembly from the traced coordinate
+counts and available rule direction. The temporary <code>LinearMap</code> is always
+closed before the call returns or raises, releasing retained values and
+primitive residuals.</p>
+<p>A general real-linear complex map needs two complex blocks, or one real
+<code>2m x 2n</code> block, so a single complex matrix would be ambiguous. Complex
+callers should use <code>linearize</code> instead.</p>
+</details>
+
+<p><span class="doc-section-title">Examples:</span></p>
+    <div class="language-pycon highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="gp">&gt;&gt;&gt; </span><span class="kn">import</span><span class="w"> </span><span class="nn">advect</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">ad</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="gp">&gt;&gt;&gt; </span><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="gp">&gt;&gt;&gt; </span><span class="n">jacobian</span> <span class="o">=</span> <span class="n">ad</span><span class="o">.</span><span class="n">jacobian</span><span class="p">(</span><span class="k">lambda</span> <span class="n">x</span><span class="p">:</span> <span class="n">x</span><span class="o">**</span><span class="mi">2</span><span class="p">)(</span><span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="mf">1.0</span><span class="p">,</span> <span class="mf">2.0</span><span class="p">]))</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="gp">&gt;&gt;&gt; </span><span class="n">jacobian</span><span class="o">.</span><span class="n">tolist</span><span class="p">()</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="go">[[2.0, 0.0], [0.0, 4.0]]</span>
+</span></code></pre></div>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h2 id="advect.hvp" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">hvp</span>
+
+
+<a href="#advect.hvp" class="headerlink" title="Permanent link">&para;</a></h2>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">hvp</span><span class="p">(</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    <span class="n">f</span><span class="p">:</span> <span class="n"><span title="collections.abc.Callable">Callable</span></span><span class="p">[</span><span class="o">...</span><span class="p">,</span> <span class="n"><span title="advect.autodiff.api.higher_order.hvp[R]">R</span></span><span class="p">],</span> <span class="n">argnums</span><span class="p">:</span> <span class="n"><span title="int">int</span></span> <span class="o">|</span> <span class="n"><span title="tuple">tuple</span></span><span class="p">[</span><span class="n"><span title="int">int</span></span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">=</span> <span class="mi">0</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="n"><span title="advect.autodiff.api.higher_order._HvpTransform">_HvpTransform</span></span><span class="p">[</span><span class="n"><span title="advect.autodiff.api.higher_order.hvp[R]">R</span></span><span class="p">]</span>
+</span></code></pre></div>
+
+    <div class="doc doc-contents first">
+
+        <p>Return a dynamic value-and-Hessian-vector-product transform.</p>
+<p>The returned function evaluates <code>f</code> and applies its Hessian to one
+selected input-space vector without materializing the dense Hessian. It
+traces the concrete arguments on every call, evaluates <code>f</code> once, and
+releases the invocation-local linearization before returning.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+            <b><code>f</code></b>
+              (<code><span title="collections.abc.Callable">Callable</span>[..., <span title="advect.autodiff.api.higher_order.hvp[R]">R</span>]</code>)
+          –
+          <div class="doc-md-description">
+            <p>Callable producing a real scalar or a one-leaf pytree containing a
+real scalar. A <code>StagedProgram</code> is accepted, but the returned transform
+is still an ordinary dynamic callable.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>argnums</code></b>
+              (<code><span title="int">int</span> | <span title="tuple">tuple</span>[<span title="int">int</span>, ...]</code>, default:
+                  <code>0</code>
+)
+          –
+          <div class="doc-md-description">
+            <p>One or more positional arguments to differentiate. An integer selects
+one input and uses its pytree directly. A tuple preserves a tuple of
+selected input pytrees in the given order, including for a one-element
+tuple. Negative indices are resolved for each call.</p>
+          </div>
+        </li>
+    </ul>
+
+
+<p><span class="doc-section-title">Returns:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+              <code><span title="collections.abc.Callable">Callable</span></code>
+          –
+          <div class="doc-md-description">
+            <p>A function called as <code>transformed(*args, vectors=vectors, **kwargs)</code>
+that returns <code>(value, product)</code>. The keyword-only <code>vectors</code> value
+must match the pytree structure and leaf shapes selected by <code>argnums</code>;
+use <code>None</code> for a static or otherwise untraceable leaf. <code>value</code>
+preserves the output structure of <code>f</code>, and <code>product</code> preserves the
+integer-versus-tuple selection structure described above.</p>
+          </div>
+        </li>
+    </ul>
+
+
+<p><span class="doc-section-title">Raises:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+              <code><span title="IndexError">IndexError</span></code>
+            –
+          <div class="doc-md-description">
+            <p>If a selected positional index is out of range for the transformed
+call.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+              <code><span title="TypeError">TypeError</span></code>
+            –
+          <div class="doc-md-description">
+            <p>If <code>vectors</code> is omitted, is not a tuple for a tuple selection, gives
+a non-<code>None</code> tangent for a static leaf, or a selected input contains
+an unsupported Python complex scalar.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+              <code><span title="ValueError">ValueError</span></code>
+            –
+          <div class="doc-md-description">
+            <p>If no argument is selected, positional selections are duplicated, the
+vector arity, pytree, or leaf shape does not match the selected input,
+or <code>f</code> does not produce a real scalar value.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+              <code><a class="autorefs autorefs-internal" title="NoJVPError (advect.core.NoJVPError)" href="../errors/#advect.NoJVPError">NoJVPError</a></code>
+            –
+          <div class="doc-md-description">
+            <p>If an operation needed by the nested derivative has no forward-mode
+rule.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+              <code><a class="autorefs autorefs-internal" title="NoVJPError (advect.core.NoVJPError)" href="../errors/#advect.NoVJPError">NoVJPError</a></code>
+            –
+          <div class="doc-md-description">
+            <p>If an operation on the differentiated path has no reverse-mode rule.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+              <code><a class="autorefs autorefs-internal" title="TracingError (advect.core.TracingError)" href="../errors/#advect.TracingError">TracingError</a></code>
+            –
+          <div class="doc-md-description">
+            <p>If nested differentiation crosses a first-order-only primitive or
+another unsupported tracing boundary.</p>
+          </div>
+        </li>
+    </ul>
+
+
+<details class="note" open>
+  <summary>Notes</summary>
+  <p>Complex provider arrays are supported under Advect's real-linear
+convention when <code>f</code> returns a real scalar. Python complex scalars must be
+wrapped in provider zero-dimensional arrays. Use <code>hessian</code> only for an
+explicit dense Hessian over real inputs.</p>
+</details>
+
+<p><span class="doc-section-title">Examples:</span></p>
+    <div class="language-pycon highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="gp">&gt;&gt;&gt; </span><span class="kn">import</span><span class="w"> </span><span class="nn">advect</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">ad</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="gp">&gt;&gt;&gt; </span><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="gp">&gt;&gt;&gt; </span><span class="n">value</span><span class="p">,</span> <span class="n">product</span> <span class="o">=</span> <span class="n">ad</span><span class="o">.</span><span class="n">hvp</span><span class="p">(</span><span class="k">lambda</span> <span class="n">x</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">x</span><span class="o">**</span><span class="mi">2</span><span class="p">))(</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="gp">... </span>    <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="mf">1.0</span><span class="p">,</span> <span class="mf">2.0</span><span class="p">]),</span> <span class="n">vectors</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="mf">3.0</span><span class="p">,</span> <span class="mf">4.0</span><span class="p">])</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="gp">... </span><span class="p">)</span>
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="gp">&gt;&gt;&gt; </span><span class="nb">float</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">product</span><span class="o">.</span><span class="n">tolist</span><span class="p">()</span>
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="go">(5.0, [6.0, 8.0])</span>
+</span></code></pre></div>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h2 id="advect.hessian" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">hessian</span>
+
+
+<a href="#advect.hessian" class="headerlink" title="Permanent link">&para;</a></h2>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">hessian</span><span class="p">(</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    <span class="n">f</span><span class="p">:</span> <span class="n"><span title="collections.abc.Callable">Callable</span></span><span class="p">[</span><span class="n"><span title="advect.autodiff.api.higher_order.hessian[**P]">P</span></span><span class="p">,</span> <span class="n"><span title="object">object</span></span><span class="p">],</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>    <span class="n">argnums</span><span class="p">:</span> <span class="n"><span title="int">int</span></span> <span class="o">|</span> <span class="n"><span title="tuple">tuple</span></span><span class="p">[</span><span class="n"><span title="int">int</span></span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">=</span> <span class="mi">0</span><span class="p">,</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="n"><span title="collections.abc.Callable">Callable</span></span><span class="p">[</span><span class="n"><span title="advect.autodiff.api.higher_order.hessian[**P]">P</span></span><span class="p">,</span> <span class="n"><span title="object">object</span></span><span class="p">]</span>
+</span></code></pre></div>
+
+    <div class="doc doc-contents first">
+
+        <p>Return a dynamic transform that assembles an exact dense Hessian.</p>
+<p>Each selected positional argument is one dense real input block. For
+selected shapes <code>S_i</code>, block <code>[i][j]</code> has shape <code>S_i + S_j</code>: its rows
+index coordinates of the gradient with respect to argument <code>i</code> and its
+columns index coordinates of argument <code>j</code>.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+            <b><code>f</code></b>
+              (<code><span title="collections.abc.Callable">Callable</span>[<span title="advect.autodiff.api.higher_order.hessian[**P]">P</span>, <span title="object">object</span>]</code>)
+          –
+          <div class="doc-md-description">
+            <p>Callable producing a real scalar or a one-leaf pytree containing a
+real scalar. A <code>StagedProgram</code> is accepted, but the returned transform
+is still an ordinary dynamic callable.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>argnums</code></b>
+              (<code><span title="int">int</span> | <span title="tuple">tuple</span>[<span title="int">int</span>, ...]</code>, default:
+                  <code>0</code>
+)
+          –
+          <div class="doc-md-description">
+            <p>One or more positional arguments to differentiate. An integer selects
+one input and returns its dense block directly. A tuple preserves both
+selected-argument axes in the given order and returns a tuple of tuple
+blocks, including a one-by-one structure for a one-element tuple.
+Negative indices are resolved for each call.</p>
+          </div>
+        </li>
+    </ul>
+
+
+<p><span class="doc-section-title">Returns:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+              <code><span title="collections.abc.Callable">Callable</span></code>
+          –
+          <div class="doc-md-description">
+            <p>A function accepting the arguments of <code>f</code> and returning dense
+provider arrays. An integer selection returns one array with shape
+<code>S + S</code>. A tuple selection returns blocks <code>result[i][j]</code> with shape
+<code>S_i + S_j</code>.</p>
+          </div>
+        </li>
+    </ul>
+
+
+<p><span class="doc-section-title">Raises:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+              <code><span title="IndexError">IndexError</span></code>
+            –
+          <div class="doc-md-description">
+            <p>If a selected positional index is out of range for the transformed
+call.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+              <code><span title="ValueError">ValueError</span></code>
+            –
+          <div class="doc-md-description">
+            <p>If no argument is selected, positional selections are duplicated, a
+selected input is complex, or <code>f</code> does not produce a real scalar
+value.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+              <code><a class="autorefs autorefs-internal" title="AdvectError (advect.core.AdvectError)" href="../errors/#advect.AdvectError">AdvectError</a></code>
+            –
+          <div class="doc-md-description">
+            <p>If dense assembly cannot resolve a compatible runtime array namespace
+or represent the selected gradient as dense blocks.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+              <code><a class="autorefs autorefs-internal" title="NoJVPError (advect.core.NoJVPError)" href="../errors/#advect.NoJVPError">NoJVPError</a></code>
+            –
+          <div class="doc-md-description">
+            <p>If an operation needed by the nested derivative has no forward-mode
+rule.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+              <code><a class="autorefs autorefs-internal" title="NoVJPError (advect.core.NoVJPError)" href="../errors/#advect.NoVJPError">NoVJPError</a></code>
+            –
+          <div class="doc-md-description">
+            <p>If an operation on the differentiated path has no reverse-mode rule.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+              <code><a class="autorefs autorefs-internal" title="TracingError (advect.core.TracingError)" href="../errors/#advect.TracingError">TracingError</a></code>
+            –
+          <div class="doc-md-description">
+            <p>If nested differentiation crosses a first-order-only primitive or
+another unsupported tracing boundary.</p>
+          </div>
+        </li>
+    </ul>
+
+
+<details class="note" open>
+  <summary>Notes</summary>
+  <p>Each selected argument must be a real Python scalar or one array-like value
+with a coherent <code>shape</code> and <code>dtype</code>. Generic tuple and dictionary
+pytrees are supported by <code>hvp</code>, but not by dense Hessian assembly.</p>
+<p>Each invocation traces <code>f</code> at the current values once, reuses that trace
+for the coordinate sweeps, and releases it before returning. No derivative
+graph is cached, and this transform never returns a <code>StagedProgram</code>.
+Storage dtypes are promoted with the provider's <code>float64</code> dtype. A
+derivative column for a selected Python <code>int</code> or <code>float</code> is restored
+to a Python scalar. Dense complex Hessians are not represented; use <code>hvp</code>
+or <code>linearize</code> for complex real-linear derivatives.</p>
+</details>
+
+<p><span class="doc-section-title">Examples:</span></p>
+    <div class="language-pycon highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="gp">&gt;&gt;&gt; </span><span class="kn">import</span><span class="w"> </span><span class="nn">advect</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">ad</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="gp">&gt;&gt;&gt; </span><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="gp">&gt;&gt;&gt; </span><span class="n">ad</span><span class="o">.</span><span class="n">hessian</span><span class="p">(</span><span class="k">lambda</span> <span class="n">x</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">x</span><span class="o">**</span><span class="mi">3</span><span class="p">))(</span><span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="mf">1.0</span><span class="p">,</span> <span class="mf">2.0</span><span class="p">]))</span><span class="o">.</span><span class="n">tolist</span><span class="p">()</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="go">[[6.0, 0.0], [0.0, 12.0]]</span>
+</span></code></pre></div>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h2 id="advect.hessian_diag" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">hessian_diag</span>
+
+
+<a href="#advect.hessian_diag" class="headerlink" title="Permanent link">&para;</a></h2>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">hessian_diag</span><span class="p">(</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    <span class="n">f</span><span class="p">:</span> <span class="n"><span title="collections.abc.Callable">Callable</span></span><span class="p">[</span><span class="n"><span title="advect.autodiff.api.higher_order.hessian_diag[**P]">P</span></span><span class="p">,</span> <span class="n"><span title="object">object</span></span><span class="p">],</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>    <span class="n">argnums</span><span class="p">:</span> <span class="n"><span title="int">int</span></span> <span class="o">|</span> <span class="n"><span title="tuple">tuple</span></span><span class="p">[</span><span class="n"><span title="int">int</span></span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">=</span> <span class="mi">0</span><span class="p">,</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="n"><span title="collections.abc.Callable">Callable</span></span><span class="p">[</span><span class="n"><span title="advect.autodiff.api.higher_order.hessian_diag[**P]">P</span></span><span class="p">,</span> <span class="n"><span title="object">object</span></span><span class="p">]</span>
+</span></code></pre></div>
+
+    <div class="doc doc-contents first">
+
+        <p>Return a dynamic transform that assembles exact Hessian diagonals.</p>
+<p>For each selected positional argument, the result contains the diagonal of
+that argument's self-Hessian block with the argument's original shape.
+Mixed-argument blocks are omitted.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+            <b><code>f</code></b>
+              (<code><span title="collections.abc.Callable">Callable</span>[<span title="advect.autodiff.api.higher_order.hessian_diag[**P]">P</span>, <span title="object">object</span>]</code>)
+          –
+          <div class="doc-md-description">
+            <p>Callable producing a real scalar or a one-leaf pytree containing a
+real scalar. A <code>StagedProgram</code> is accepted, but the returned transform
+is still an ordinary dynamic callable.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>argnums</code></b>
+              (<code><span title="int">int</span> | <span title="tuple">tuple</span>[<span title="int">int</span>, ...]</code>, default:
+                  <code>0</code>
+)
+          –
+          <div class="doc-md-description">
+            <p>One or more positional arguments to differentiate. An integer selects
+one input and returns its diagonal directly. A tuple returns one
+diagonal per selected input in the given order, including a one-tuple
+for a one-element tuple. Negative indices are resolved for each call.</p>
+          </div>
+        </li>
+    </ul>
+
+
+<p><span class="doc-section-title">Returns:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+              <code><span title="collections.abc.Callable">Callable</span></code>
+          –
+          <div class="doc-md-description">
+            <p>A function accepting the arguments of <code>f</code>. For an integer selection
+with input shape <code>S</code>, it returns one provider array with shape <code>S</code>.
+A tuple selection returns a tuple whose entry <code>i</code> has shape <code>S_i</code>.</p>
+          </div>
+        </li>
+    </ul>
+
+
+<p><span class="doc-section-title">Raises:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+              <code><span title="IndexError">IndexError</span></code>
+            –
+          <div class="doc-md-description">
+            <p>If a selected positional index is out of range for the transformed
+call.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+              <code><span title="ValueError">ValueError</span></code>
+            –
+          <div class="doc-md-description">
+            <p>If no argument is selected, positional selections are duplicated, a
+selected input is complex, or <code>f</code> does not produce a real scalar
+value.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+              <code><a class="autorefs autorefs-internal" title="AdvectError (advect.core.AdvectError)" href="../errors/#advect.AdvectError">AdvectError</a></code>
+            –
+          <div class="doc-md-description">
+            <p>If dense assembly cannot resolve a compatible runtime array namespace
+or represent the selected gradient as a dense block.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+              <code><a class="autorefs autorefs-internal" title="NoJVPError (advect.core.NoJVPError)" href="../errors/#advect.NoJVPError">NoJVPError</a></code>
+            –
+          <div class="doc-md-description">
+            <p>If an operation needed by the nested derivative has no forward-mode
+rule.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+              <code><a class="autorefs autorefs-internal" title="NoVJPError (advect.core.NoVJPError)" href="../errors/#advect.NoVJPError">NoVJPError</a></code>
+            –
+          <div class="doc-md-description">
+            <p>If an operation on the differentiated path has no reverse-mode rule.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+              <code><a class="autorefs autorefs-internal" title="TracingError (advect.core.TracingError)" href="../errors/#advect.TracingError">TracingError</a></code>
+            –
+          <div class="doc-md-description">
+            <p>If nested differentiation crosses a first-order-only primitive or
+another unsupported tracing boundary.</p>
+          </div>
+        </li>
+    </ul>
+
+
+<details class="note" open>
+  <summary>Notes</summary>
+  <p>Each selected argument must be a real Python scalar or one array-like value
+with a coherent <code>shape</code> and <code>dtype</code>. Generic tuple and dictionary
+pytrees are supported by <code>hvp</code>, but not by dense diagonal assembly.</p>
+<p>This is an exact automatic-differentiation result, not a stochastic
+estimator; computing it may still require one coordinate sweep per
+selected scalar coordinate. Each call traces <code>f</code> once, releases its
+temporary linearization before returning, and never produces a
+<code>StagedProgram</code>. Storage dtypes are promoted with the provider's
+<code>float64</code> dtype. Selected Python <code>int</code> and <code>float</code> inputs have Python
+scalar diagonal entries. Dense complex diagonals are not represented; use
+<code>hvp</code> or <code>linearize</code> for complex real-linear derivatives.</p>
+</details>
+
+<p><span class="doc-section-title">Examples:</span></p>
+    <div class="language-pycon highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="gp">&gt;&gt;&gt; </span><span class="kn">import</span><span class="w"> </span><span class="nn">advect</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">ad</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="gp">&gt;&gt;&gt; </span><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="gp">&gt;&gt;&gt; </span><span class="n">ad</span><span class="o">.</span><span class="n">hessian_diag</span><span class="p">(</span><span class="k">lambda</span> <span class="n">x</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">x</span><span class="o">**</span><span class="mi">3</span><span class="p">))(</span><span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="mf">1.0</span><span class="p">,</span> <span class="mf">2.0</span><span class="p">]))</span><span class="o">.</span><span class="n">tolist</span><span class="p">()</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="go">[6.0, 12.0]</span>
+</span></code></pre></div>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h2 id="advect.checkpoint" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">checkpoint</span>
+
+
+<a href="#advect.checkpoint" class="headerlink" title="Permanent link">&para;</a></h2>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">checkpoint</span><span class="p">(</span><span class="n">function</span><span class="p">:</span> <span class="n"><span title="collections.abc.Callable">Callable</span></span><span class="p">[</span><span class="n"><span title="advect.autodiff.api.checkpoint.checkpoint[**P]">P</span></span><span class="p">,</span> <span class="n"><span title="advect.autodiff.api.checkpoint.checkpoint[R]">R</span></span><span class="p">])</span> <span class="o">-&gt;</span> <span class="n"><span title="collections.abc.Callable">Callable</span></span><span class="p">[</span><span class="n"><span title="advect.autodiff.api.checkpoint.checkpoint[**P]">P</span></span><span class="p">,</span> <span class="n"><span title="advect.autodiff.api.checkpoint.checkpoint[R]">R</span></span><span class="p">]</span>
+</span></code></pre></div>
+
+    <div class="doc doc-contents first">
+
+        <p>Return a dynamic rematerialization wrapper for <code>function</code>.</p>
+<p>An ordinary call invokes <code>function</code> directly. During concrete autodiff,
+Advect records the whole call as one operation on the outer tape and
+recomputes its body when applying a JVP or transpose instead of retaining
+the body's interior trace.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+            <b><code>function</code></b>
+              (<code><span title="collections.abc.Callable">Callable</span>[<span title="advect.autodiff.api.checkpoint.checkpoint[**P]">P</span>, <span title="advect.autodiff.api.checkpoint.checkpoint[R]">R</span>]</code>)
+          –
+          <div class="doc-md-description">
+            <p>Pure callable to rematerialize. Its positional arguments, keyword
+arguments, and result may be pytrees. Replaying the same explicit
+inputs must produce the same result; observed mutable state and side
+effects are therefore outside the contract.</p>
+          </div>
+        </li>
+    </ul>
+
+
+<p><span class="doc-section-title">Returns:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+              <code><span title="collections.abc.Callable">Callable</span></code>
+          –
+          <div class="doc-md-description">
+            <p>A wrapper with the apparent signature and metadata of <code>function</code>.
+Calling it as <code>wrapped(*args, **kwargs)</code> returns the same output
+pytree as <code>function(*args, **kwargs)</code>.</p>
+          </div>
+        </li>
+    </ul>
+
+
+<p><span class="doc-section-title">Raises:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+              <code><span title="TypeError">TypeError</span></code>
+            –
+          <div class="doc-md-description">
+            <p>If <code>function</code> is not callable, or if a traced invocation changes its
+input pytree structure while the rematerialized region is executing.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+              <code><a class="autorefs autorefs-internal" title="TracingError (advect.core._errors.TracingError)" href="../errors/#advect.TracingError">TracingError</a></code>
+            –
+          <div class="doc-md-description">
+            <p>If abstract staging reaches the wrapper, or if recomputation reaches a
+residual-bearing primitive whose opaque residual cannot cross the
+checkpoint boundary.</p>
+          </div>
+        </li>
+    </ul>
+
+
+<details class="note" open>
+  <summary>Notes</summary>
+  <p>Checkpointing is a concrete dynamic transform; it does not create a
+durable staged region, and <code>stage</code> rejects a checkpointed call. Nested
+dynamic derivatives are supported when the recomputed callable and all
+derivative rules on its path remain traceable at the nested level.</p>
+<p>The returned wrapper retains <code>function</code> and its closure for the
+wrapper's lifetime. Each JVP or transpose application owns and releases
+its temporary inner trace before returning; checkpointing exposes no
+additional resource handle to close.</p>
+</details>
+
+<p><span class="doc-section-title">Examples:</span></p>
+    <div class="language-pycon highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="gp">&gt;&gt;&gt; </span><span class="kn">import</span><span class="w"> </span><span class="nn">advect</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">ad</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="gp">&gt;&gt;&gt; </span><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="gp">&gt;&gt;&gt; </span><span class="nd">@ad</span><span class="o">.</span><span class="n">checkpoint</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="gp">... </span><span class="k">def</span><span class="w"> </span><span class="nf">square</span><span class="p">(</span><span class="n">value</span><span class="p">):</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="gp">... </span>    <span class="k">return</span> <span class="n">value</span><span class="o">**</span><span class="mi">2</span>
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="gp">&gt;&gt;&gt; </span><span class="n">ad</span><span class="o">.</span><span class="n">grad</span><span class="p">(</span><span class="k">lambda</span> <span class="n">value</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">square</span><span class="p">(</span><span class="n">value</span><span class="p">)))(</span><span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="mf">1.0</span><span class="p">,</span> <span class="mf">2.0</span><span class="p">,</span> <span class="mf">3.0</span><span class="p">]))</span><span class="o">.</span><span class="n">tolist</span><span class="p">()</span>
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="go">[2.0, 4.0, 6.0]</span>
+</span></code></pre></div>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h2 id="advect.implicit_root" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">implicit_root</span>
+
+
+<a href="#advect.implicit_root" class="headerlink" title="Permanent link">&para;</a></h2>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">implicit_root</span><span class="p">(</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    <span class="n">residual</span><span class="p">:</span> <span class="n"><span title="advect.autodiff.api.implicit._ResidualFunction">_ResidualFunction</span></span><span class="p">[</span><span class="n"><span title="advect.autodiff.api.implicit.implicit_root[SolutionT]">SolutionT</span></span><span class="p">,</span> <span class="n"><span title="advect.autodiff.api.implicit.implicit_root[ParamsT]">ParamsT</span></span><span class="p">],</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>    <span class="o">*</span><span class="p">,</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>    <span class="n">solve</span><span class="p">:</span> <span class="n"><span title="advect.autodiff.api.implicit._RootSolver">_RootSolver</span></span><span class="p">[</span><span class="n"><span title="advect.autodiff.api.implicit.implicit_root[SolutionT]">SolutionT</span></span><span class="p">],</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>    <span class="n">linear_solve</span><span class="p">:</span> <span class="n"><span title="advect.autodiff.api.implicit._LinearSolver">_LinearSolver</span></span><span class="p">[</span><span class="n"><span title="advect.autodiff.api.implicit.implicit_root[SolutionT]">SolutionT</span></span><span class="p">],</span>
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>    <span class="n">transpose_solve</span><span class="p">:</span> <span class="n"><span title="advect.autodiff.api.implicit._LinearSolver">_LinearSolver</span></span><span class="p">[</span><span class="n"><span title="advect.autodiff.api.implicit.implicit_root[SolutionT]">SolutionT</span></span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="n"><span title="advect.autodiff.api.implicit._ImplicitRootCallable">_ImplicitRootCallable</span></span><span class="p">[</span><span class="n"><span title="advect.autodiff.api.implicit.implicit_root[ParamsT]">ParamsT</span></span><span class="p">,</span> <span class="n"><span title="advect.autodiff.api.implicit.implicit_root[SolutionT]">SolutionT</span></span><span class="p">]</span>
+</span></code></pre></div>
+
+    <div class="doc doc-contents first">
+
+        <p>Build a dynamic transform for a converged implicit solution.</p>
+<p>The returned callable solves <code>residual(solution, params) == 0</code> and
+differentiates the defining equation without recording the nonlinear
+solver's iterations on the surrounding tape.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+            <b><code>residual</code></b>
+              (<code><span title="advect.autodiff.api.implicit._ResidualFunction">_ResidualFunction</span>[<span title="advect.autodiff.api.implicit.implicit_root[SolutionT]">SolutionT</span>, <span title="advect.autodiff.api.implicit.implicit_root[ParamsT]">ParamsT</span>]</code>)
+          –
+          <div class="doc-md-description">
+            <p>Trace-compatible callable with signature <code>residual(solution, params)</code>.
+Its result must have the same pytree structure and leaf shape, dtype,
+array provider, and device as <code>solution</code>.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>solve</code></b>
+              (<code><span title="advect.autodiff.api.implicit._RootSolver">_RootSolver</span>[<span title="advect.autodiff.api.implicit.implicit_root[SolutionT]">SolutionT</span>]</code>)
+          –
+          <div class="doc-md-description">
+            <p>Nonlinear callback with signature
+<code>solve(residual_at_params, initial) -&gt; solution</code>. Advect supplies
+<code>residual_at_params(candidate)</code> with <code>params</code> fixed. Returning
+certifies convergence. The solution must match <code>initial</code> in pytree
+structure, leaf shape, provider, and device; its dtype may be promoted.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>linear_solve</code></b>
+              (<code><span title="advect.autodiff.api.implicit._LinearSolver">_LinearSolver</span>[<span title="advect.autodiff.api.implicit.implicit_root[SolutionT]">SolutionT</span>]</code>)
+          –
+          <div class="doc-md-description">
+            <p>Matrix-free callback with signature
+<code>linear_solve(operator, rhs) -&gt; solution_tangent</code>. For a JVP,
+<code>operator(direction)</code> applies the residual's state Jacobian and
+<code>rhs</code> is the negative parameter-forcing tangent. The returned value
+must match the solved solution's pytree and leaf specifications.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>transpose_solve</code></b>
+              (<code><span title="advect.autodiff.api.implicit._LinearSolver">_LinearSolver</span>[<span title="advect.autodiff.api.implicit.implicit_root[SolutionT]">SolutionT</span>] | None</code>, default:
+                  <code>None</code>
+)
+          –
+          <div class="doc-md-description">
+            <p>Matrix-free callback with signature
+<code>transpose_solve(operator, rhs) -&gt; residual_cotangent</code>. In reverse
+mode, <code>operator</code> applies the real adjoint of the residual's state
+Jacobian and <code>rhs</code> is the solution cotangent. The result must match
+the residual value's pytree and leaf specifications. <code>None</code> reuses
+<code>linear_solve</code> with this adjoint operator.</p>
+          </div>
+        </li>
+    </ul>
+
+
+<p><span class="doc-section-title">Returns:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+              <code><span title="collections.abc.Callable">Callable</span></code>
+          –
+          <div class="doc-md-description">
+            <p>A callable with signature <code>root(params, *, initial) -&gt; solution</code>.
+<code>params</code> and <code>initial</code> may be pytrees. <code>initial</code> selects a root
+but is excluded from the implicit derivative, so an enclosing
+derivative with respect to it is zero. A Python scalar solution is
+moved to the parameter array provider when one is available.</p>
+          </div>
+        </li>
+    </ul>
+
+
+<p><span class="doc-section-title">Raises:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+              <code><span title="TypeError">TypeError</span></code>
+            –
+          <div class="doc-md-description">
+            <p>If a callback is not callable, or if a nonlinear solution, residual,
+tangent solve, or transpose solve violates its required pytree or leaf
+specification.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+              <code><a class="autorefs autorefs-internal" title="TracingError (advect.core._errors.TracingError)" href="../errors/#advect.TracingError">TracingError</a></code>
+            –
+          <div class="doc-md-description">
+            <p>If abstract staging reaches the returned root. Opaque Python solver
+callbacks have no durable staged representation.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+              <code><a class="autorefs autorefs-internal" title="ImplicitSolveError (advect.autodiff.api.implicit.ImplicitSolveError)" href="../errors/#advect.ImplicitSolveError">ImplicitSolveError</a></code>
+            –
+          <div class="doc-md-description">
+            <p>Propagated when a nonlinear or linear callback uses this exception to
+report failure. A callback return is otherwise treated as a successful
+solve; Advect does not independently test convergence.</p>
+          </div>
+        </li>
+    </ul>
+
+
+<details class="note" open>
+  <summary>Notes</summary>
+  <p>This is a concrete dynamic boundary. <code>stage</code> rejects the root before
+calling <code>solve</code>; stage explicit solver iterations or define a custom
+primitive with a closed abstract rule when a durable program is required.
+Higher-order dynamic derivatives require <code>residual</code> and every solver
+callback reached by the nested transform to accept nested traced values.
+Concrete adapters such as the bundled SciPy callbacks intentionally form a
+first-order boundary.</p>
+<p>A derivative application creates one joint linearization of <code>residual</code>
+at the solved value and closes it before returning, including on callback
+failure. The root wrapper retains the four callbacks for its lifetime but
+creates no user-managed resource. A <code>Pullback</code> or <code>LinearMap</code> returned by
+an enclosing transform still follows that transform's documented lifetime.</p>
+</details>
+
+<p><span class="doc-section-title">Examples:</span></p>
+    <div class="language-pycon highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="gp">&gt;&gt;&gt; </span><span class="kn">import</span><span class="w"> </span><span class="nn">advect</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">ad</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="gp">&gt;&gt;&gt; </span><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="gp">&gt;&gt;&gt; </span><span class="k">def</span><span class="w"> </span><span class="nf">solve</span><span class="p">(</span><span class="n">residual_at_params</span><span class="p">,</span> <span class="n">initial</span><span class="p">):</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="gp">... </span>    <span class="k">return</span> <span class="n">initial</span> <span class="o">-</span> <span class="n">residual_at_params</span><span class="p">(</span><span class="n">initial</span><span class="p">)</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="gp">&gt;&gt;&gt; </span><span class="k">def</span><span class="w"> </span><span class="nf">linear_solve</span><span class="p">(</span><span class="n">operator</span><span class="p">,</span> <span class="n">rhs</span><span class="p">):</span>
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="gp">... </span>    <span class="k">return</span> <span class="n">rhs</span> <span class="o">/</span> <span class="n">operator</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">ones_like</span><span class="p">(</span><span class="n">rhs</span><span class="p">))</span>
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="gp">&gt;&gt;&gt; </span><span class="n">root</span> <span class="o">=</span> <span class="n">ad</span><span class="o">.</span><span class="n">implicit_root</span><span class="p">(</span>
+</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="gp">... </span>    <span class="k">lambda</span> <span class="n">solution</span><span class="p">,</span> <span class="n">params</span><span class="p">:</span> <span class="n">solution</span> <span class="o">-</span> <span class="n">params</span><span class="p">,</span>
+</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="gp">... </span>    <span class="n">solve</span><span class="o">=</span><span class="n">solve</span><span class="p">,</span>
+</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="gp">... </span>    <span class="n">linear_solve</span><span class="o">=</span><span class="n">linear_solve</span><span class="p">,</span>
+</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="gp">... </span><span class="p">)</span>
+</span><span id="__span-0-12"><a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="gp">&gt;&gt;&gt; </span><span class="n">gradient</span> <span class="o">=</span> <span class="n">ad</span><span class="o">.</span><span class="n">grad</span><span class="p">(</span><span class="k">lambda</span> <span class="n">params</span><span class="p">:</span> <span class="n">root</span><span class="p">(</span><span class="n">params</span><span class="p">,</span> <span class="n">initial</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="mf">0.0</span><span class="p">)))(</span><span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="mf">3.0</span><span class="p">))</span>
+</span><span id="__span-0-13"><a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="gp">&gt;&gt;&gt; </span><span class="nb">float</span><span class="p">(</span><span class="n">gradient</span><span class="p">)</span>
+</span><span id="__span-0-14"><a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a><span class="go">1.0</span>
+</span></code></pre></div>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="advect.Pullback" class="doc doc-heading">
+            <span class="doc doc-object-name doc-class-name">Pullback</span>
+
+
+<a href="#advect.Pullback" class="headerlink" title="Permanent link">&para;</a></h2>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">Pullback</span><span class="p">(</span><span class="n">linear</span><span class="p">:</span> <span class="n"><a class="autorefs autorefs-internal" title="LinearMap (advect.autodiff._ephemeral.LinearMap)" href="#advect.LinearMap">LinearMap</a></span><span class="p">)</span>
+</span></code></pre></div>
+
+    <div class="doc doc-contents first">
+
+
+
+        <p>One-shot reverse linearization returned by <code>vjp</code>.</p>
+
+
+<p><span class="doc-section-title">Examples:</span></p>
+    <div class="language-pycon highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="gp">&gt;&gt;&gt; </span><span class="kn">import</span><span class="w"> </span><span class="nn">advect</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">ad</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="gp">&gt;&gt;&gt; </span><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="gp">&gt;&gt;&gt; </span><span class="n">_</span><span class="p">,</span> <span class="n">pullback</span> <span class="o">=</span> <span class="n">ad</span><span class="o">.</span><span class="n">vjp</span><span class="p">(</span><span class="k">lambda</span> <span class="n">x</span><span class="p">:</span> <span class="n">x</span><span class="o">**</span><span class="mi">2</span><span class="p">)(</span><span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="mf">1.0</span><span class="p">,</span> <span class="mf">2.0</span><span class="p">]))</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="gp">&gt;&gt;&gt; </span><span class="n">pullback</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">ones</span><span class="p">(</span><span class="mi">2</span><span class="p">))</span><span class="o">.</span><span class="n">tolist</span><span class="p">()</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="go">[2.0, 4.0]</span>
+</span></code></pre></div>
+
+
+
+
+
+
+
+
+
+
+
+  <div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="advect.Pullback.__call__" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">__call__</span>
+
+
+<a href="#advect.Pullback.__call__" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">__call__</span><span class="p">(</span><span class="n">cotangent</span><span class="p">:</span> <span class="n"><span title="object">object</span></span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n"><span title="object">object</span></span>
+</span></code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Apply the pullback once and release its retained trace.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="advect.Pullback.close" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">close</span>
+
+
+<a href="#advect.Pullback.close" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">close</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span>
+</span></code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Release the retained trace without applying the pullback.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="advect.Pullback.__enter__" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">__enter__</span>
+
+
+<a href="#advect.Pullback.__enter__" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">__enter__</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n"><span title="typing.Self">Self</span></span>
+</span></code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Enter an ownership scope for the pending pullback.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="advect.Pullback.__exit__" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">__exit__</span>
+
+
+<a href="#advect.Pullback.__exit__" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">__exit__</span><span class="p">(</span><span class="o">*</span><span class="n">_exc_info</span><span class="p">:</span> <span class="n"><span title="object">object</span></span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span>
+</span></code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Release the pullback when leaving its ownership scope.</p>
+
+
+    </div>
+
+</div>
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="advect.LinearMap" class="doc doc-heading">
+            <span class="doc doc-object-name doc-class-name">LinearMap</span>
+
+
+<a href="#advect.LinearMap" class="headerlink" title="Permanent link">&para;</a></h2>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">LinearMap</span><span class="p">(</span><span class="n">trace</span><span class="p">:</span> <span class="n"><span title="advect.autodiff._ephemeral.TraceResult">TraceResult</span></span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">single_argnum</span><span class="p">:</span> <span class="n"><span title="bool">bool</span></span><span class="p">)</span>
+</span></code></pre></div>
+
+    <div class="doc doc-contents first">
+
+
+
+        <p>Reusable real-linear map captured by one concrete trace.</p>
+
+
+<p><span class="doc-section-title">Examples:</span></p>
+    <div class="language-pycon highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="gp">&gt;&gt;&gt; </span><span class="kn">import</span><span class="w"> </span><span class="nn">advect</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">ad</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="gp">&gt;&gt;&gt; </span><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="gp">&gt;&gt;&gt; </span><span class="n">_</span><span class="p">,</span> <span class="n">linear</span> <span class="o">=</span> <span class="n">ad</span><span class="o">.</span><span class="n">linearize</span><span class="p">(</span><span class="k">lambda</span> <span class="n">x</span><span class="p">:</span> <span class="n">x</span><span class="o">**</span><span class="mi">2</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="mf">1.0</span><span class="p">,</span> <span class="mf">2.0</span><span class="p">]))</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="gp">&gt;&gt;&gt; </span><span class="k">with</span> <span class="n">linear</span><span class="p">:</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="gp">... </span>    <span class="n">linear</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">ones</span><span class="p">(</span><span class="mi">2</span><span class="p">))</span><span class="o">.</span><span class="n">tolist</span><span class="p">()</span>
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="go">[2.0, 4.0]</span>
+</span></code></pre></div>
+
+
+
+
+
+
+
+
+
+
+
+  <div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="advect.LinearMap.close" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">close</span>
+
+
+<a href="#advect.LinearMap.close" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">close</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span>
+</span></code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Release retained concrete values and primitive residuals.</p>
+
+
+    </div>
+
+</div>
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h2 id="advect.transform_state" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">transform_state</span>
+
+
+<a href="#advect.transform_state" class="headerlink" title="Permanent link">&para;</a></h2>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">transform_state</span><span class="p">(</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    <span class="n">namespace</span><span class="p">:</span> <span class="n"><span title="object">object</span></span><span class="p">,</span> <span class="n">factory</span><span class="p">:</span> <span class="n"><span title="collections.abc.Callable">Callable</span></span><span class="p">[[],</span> <span class="n"><span title="advect.core._context.transform_state[T]">T</span></span><span class="p">]</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="n"><span title="advect.core._context.transform_state[T]">T</span></span> <span class="o">|</span> <span class="kc">None</span>
+</span></code></pre></div>
+
+    <div class="doc doc-contents first">
+
+        <p>Return namespaced state owned by the active dynamic transform.</p>
+<p>Libraries can use this to retain ordinary Python bookkeeping for exactly
+one define-by-run transform invocation without wrapping the transform or
+keeping process-global state. Repeated calls with the same namespace return
+the same object. Nested transforms have independent state, and Advect drops
+the state when its owning trace exits, including on exceptions.</p>
+<p>State is not a hidden differentiable input or a backward residual. Pass
+active leaves explicitly to primitives, and retain backward data with
+<code>PrimitiveResult</code>.</p>
+<p>Outside a transform this returns <code>None</code>. Abstract staging rejects the
+operation because staged programs cannot retain invocation-local Python
+state.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+            <b><code>namespace</code></b>
+              (<code><span title="object">object</span></code>)
+          –
+          <div class="doc-md-description">
+            <p>Hashable library-owned key identifying the state.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>factory</code></b>
+              (<code><span title="collections.abc.Callable">Callable</span>[[], <span title="advect.core._context.transform_state[T]">T</span>]</code>)
+          –
+          <div class="doc-md-description">
+            <p>Zero-argument callable used once to create the state.</p>
+          </div>
+        </li>
+    </ul>
+
+
+<p><span class="doc-section-title">Returns:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+              <code><span title="object">object</span> or None</code>
+          –
+          <div class="doc-md-description">
+            <p>The invocation-local state, or <code>None</code> outside dynamic tracing.</p>
+          </div>
+        </li>
+    </ul>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h2 id="advect.transform_states" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">transform_states</span>
+
+
+<a href="#advect.transform_states" class="headerlink" title="Permanent link">&para;</a></h2>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">transform_states</span><span class="p">(</span><span class="n">namespace</span><span class="p">:</span> <span class="n"><span title="object">object</span></span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n"><span title="tuple">tuple</span></span><span class="p">[</span><span class="n"><span title="advect.core._context.transform_states[T]">T</span></span><span class="p">,</span> <span class="o">...</span><span class="p">]</span>
+</span></code></pre></div>
+
+    <div class="doc doc-contents first">
+
+        <p>Return existing namespaced states from inner to outer dynamic transforms.</p>
+<p>This lets a library resolve state owned by an enclosing transform while a
+nested transform is active. It never creates state. Outside a transform it
+returns an empty tuple; abstract staging rejects the operation.</p>
+
+
+    </div>
+
+</div>
+      </div>
+      
+
+      
+      <nav class="seealso" aria-label="Adjacent pages">
+        <span><a href="../">← overview</a></span>
+        <span class="nn"><a href="../staging/">staging →</a></span>
+      </nav>
+      
+      <p class="prompt">$ <span class="cursor">█</span></p>
+    </div></div>
+  </article>
+
+  <aside class="tile outlinetile" id="outlinetile" aria-label="Page outline" aria-hidden="true">
+    <span class="ptitle"><span class="pn">outline</span> this-page</span>
+    <nav class="outlinelinks" id="outlinelinks"><a href="#advect.grad">grad</a><a href="#advect.value_and_grad">value_and_grad</a><a href="#advect.jvp">jvp</a><a href="#advect.vjp">vjp</a><a href="#advect.linearize">linearize</a><a href="#advect.jacobian">jacobian</a><a href="#advect.hvp">hvp</a><a href="#advect.hessian">hessian</a><a href="#advect.hessian_diag">hessian_diag</a><a href="#advect.checkpoint">checkpoint</a><a href="#advect.implicit_root">implicit_root</a><a href="#advect.Pullback">Pullback</a><a href="#advect.Pullback.__call__" class="outline-sub">Pullback.__call__</a><a href="#advect.Pullback.close" class="outline-sub">Pullback.close</a><a href="#advect.Pullback.__enter__" class="outline-sub">Pullback.__enter__</a><a href="#advect.Pullback.__exit__" class="outline-sub">Pullback.__exit__</a><a href="#advect.LinearMap">LinearMap</a><a href="#advect.LinearMap.close" class="outline-sub">LinearMap.close</a><a href="#advect.transform_state">transform_state</a><a href="#advect.transform_states">transform_states</a></nav>
+  </aside>
+</div>
+
+<div class="overlay" id="help" role="dialog" aria-label="Keyboard shortcuts">
+  <h3>Keys</h3>
+  <table>
+    
+    <tr><td class="kk">j k d u g G</td><td>scroll the page</td></tr>
+    <tr><td class="kk">n / p</td><td>next / previous page</td></tr>
+    <tr><td class="kk">e</td><td>toggle the docs tree pane</td></tr>
+    <tr><td class="kk">o</td><td>toggle the page outline</td></tr>
+    <tr><td class="kk">2</td><td>open the playground</td></tr>
+    
+    <tr><td class="kk">/</td><td>search the manual</td></tr>
+    <tr><td class="kk">t</td><td>system → light → dark</td></tr>
+    <tr><td class="kk">?</td><td>close this help</td></tr>
+  </table>
+</div>
+
+<div class="overlay search-box" id="search" role="dialog" aria-hidden="true" aria-label="Search">
+  <div class="search-in"><span class="ps">/</span><input type="search" id="mkdocs-search-query" spellcheck="false" autocomplete="off" aria-label="Search query" placeholder="search the manual…"></div>
+  <div class="search-hits" id="mkdocs-search-results" data-no-results-text="No manual entry found" aria-live="polite"></div>
+</div>
+
+<aside class="link-preview" id="linkpreview" role="tooltip" aria-hidden="true">
+  <div class="preview-path" id="previewpath"></div>
+  <strong class="preview-title" id="previewtitle"></strong>
+  <pre class="preview-signature" id="previewsignature"><code></code></pre>
+  <p class="preview-description" id="previewdescription"></p>
+</aside>
+
+<div class="bar">
+  <a href="../.." class="b" data-short="[1]" aria-current="true">[1:docs]</a>
+  <a href="../../playground/" class="b" id="wsplay" data-short="[2]">[2:playground]</a>
+  <a href="https://github.com/yaugenst/advect" class="b" data-short="[git]">[git:source]</a>
+  <span class="path hidesm">$ man advect/api/transforms</span>
+  <span class="grow"></span>
+  <button class="tbtn" id="treebtn" data-short="[e]" aria-label="Toggle documentation tree">[e] tree</button>
+  <button class="tbtn" id="outlinebtn" data-short="[o]" aria-label="Toggle page outline" aria-controls="outlinetile" aria-expanded="false">[o] outline</button>
+  <button class="tbtn" id="searchbtn" data-short="[/]" aria-label="Search" aria-controls="search" aria-expanded="false">[/] search</button>
+  <button class="tbtn hidesm" id="helpbtn" aria-label="Keyboard help">[?] keys</button>
+  <button class="tbtn" id="themeToggle" data-short="[mode]" aria-label="Cycle system, light, and dark display modes">[ mode: … ]</button>
+</div>
+
+<script src="../../js/theme.js"></script>
+<script src="../../js/examples.js"></script>
+<script src="../../search/main.js"></script>
+
+</body>
+</html>
