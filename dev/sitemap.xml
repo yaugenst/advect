@@ -2,178 +2,178 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
     <url>
          <loc>https://yaugenst.github.io/advect/dev/</loc>
-         <lastmod>2026-08-14</lastmod>
+         <lastmod>2026-08-20</lastmod>
     </url>
     <url>
          <loc>https://yaugenst.github.io/advect/dev/architecture/</loc>
-         <lastmod>2026-08-14</lastmod>
+         <lastmod>2026-08-20</lastmod>
     </url>
     <url>
          <loc>https://yaugenst.github.io/advect/dev/playground/</loc>
-         <lastmod>2026-08-14</lastmod>
+         <lastmod>2026-08-20</lastmod>
     </url>
     <url>
          <loc>https://yaugenst.github.io/advect/dev/api/</loc>
-         <lastmod>2026-08-14</lastmod>
+         <lastmod>2026-08-20</lastmod>
     </url>
     <url>
          <loc>https://yaugenst.github.io/advect/dev/api/arrays/</loc>
-         <lastmod>2026-08-14</lastmod>
+         <lastmod>2026-08-20</lastmod>
     </url>
     <url>
          <loc>https://yaugenst.github.io/advect/dev/api/errors/</loc>
-         <lastmod>2026-08-14</lastmod>
+         <lastmod>2026-08-20</lastmod>
     </url>
     <url>
          <loc>https://yaugenst.github.io/advect/dev/api/numpy/</loc>
-         <lastmod>2026-08-14</lastmod>
+         <lastmod>2026-08-20</lastmod>
     </url>
     <url>
          <loc>https://yaugenst.github.io/advect/dev/api/primitives/</loc>
-         <lastmod>2026-08-14</lastmod>
+         <lastmod>2026-08-20</lastmod>
     </url>
     <url>
          <loc>https://yaugenst.github.io/advect/dev/api/pytree/</loc>
-         <lastmod>2026-08-14</lastmod>
+         <lastmod>2026-08-20</lastmod>
     </url>
     <url>
          <loc>https://yaugenst.github.io/advect/dev/api/staging/</loc>
-         <lastmod>2026-08-14</lastmod>
+         <lastmod>2026-08-20</lastmod>
     </url>
     <url>
          <loc>https://yaugenst.github.io/advect/dev/api/support/</loc>
-         <lastmod>2026-08-14</lastmod>
+         <lastmod>2026-08-20</lastmod>
     </url>
     <url>
          <loc>https://yaugenst.github.io/advect/dev/api/testing/</loc>
-         <lastmod>2026-08-14</lastmod>
+         <lastmod>2026-08-20</lastmod>
     </url>
     <url>
          <loc>https://yaugenst.github.io/advect/dev/api/transforms/</loc>
-         <lastmod>2026-08-14</lastmod>
+         <lastmod>2026-08-20</lastmod>
     </url>
     <url>
          <loc>https://yaugenst.github.io/advect/dev/api/xarray/</loc>
-         <lastmod>2026-08-14</lastmod>
+         <lastmod>2026-08-20</lastmod>
     </url>
     <url>
          <loc>https://yaugenst.github.io/advect/dev/api/interop/</loc>
-         <lastmod>2026-08-14</lastmod>
+         <lastmod>2026-08-20</lastmod>
     </url>
     <url>
          <loc>https://yaugenst.github.io/advect/dev/api/interop/autograd/</loc>
-         <lastmod>2026-08-14</lastmod>
+         <lastmod>2026-08-20</lastmod>
     </url>
     <url>
          <loc>https://yaugenst.github.io/advect/dev/api/interop/jax/</loc>
-         <lastmod>2026-08-14</lastmod>
+         <lastmod>2026-08-20</lastmod>
     </url>
     <url>
          <loc>https://yaugenst.github.io/advect/dev/api/interop/torch/</loc>
-         <lastmod>2026-08-14</lastmod>
+         <lastmod>2026-08-20</lastmod>
     </url>
     <url>
          <loc>https://yaugenst.github.io/advect/dev/api/scipy/</loc>
-         <lastmod>2026-08-14</lastmod>
+         <lastmod>2026-08-20</lastmod>
     </url>
     <url>
          <loc>https://yaugenst.github.io/advect/dev/api/scipy/ndimage/</loc>
-         <lastmod>2026-08-14</lastmod>
+         <lastmod>2026-08-20</lastmod>
     </url>
     <url>
          <loc>https://yaugenst.github.io/advect/dev/api/scipy/solvers/</loc>
-         <lastmod>2026-08-14</lastmod>
+         <lastmod>2026-08-20</lastmod>
     </url>
     <url>
          <loc>https://yaugenst.github.io/advect/dev/api/scipy/special/</loc>
-         <lastmod>2026-08-14</lastmod>
+         <lastmod>2026-08-20</lastmod>
     </url>
     <url>
          <loc>https://yaugenst.github.io/advect/dev/compatibility/</loc>
-         <lastmod>2026-08-14</lastmod>
+         <lastmod>2026-08-20</lastmod>
     </url>
     <url>
          <loc>https://yaugenst.github.io/advect/dev/compatibility/array-api/</loc>
-         <lastmod>2026-08-14</lastmod>
+         <lastmod>2026-08-20</lastmod>
     </url>
     <url>
          <loc>https://yaugenst.github.io/advect/dev/compatibility/cupy/</loc>
-         <lastmod>2026-08-14</lastmod>
+         <lastmod>2026-08-20</lastmod>
     </url>
     <url>
          <loc>https://yaugenst.github.io/advect/dev/compatibility/numpy/</loc>
-         <lastmod>2026-08-14</lastmod>
+         <lastmod>2026-08-20</lastmod>
     </url>
     <url>
          <loc>https://yaugenst.github.io/advect/dev/compatibility/scipy/</loc>
-         <lastmod>2026-08-14</lastmod>
+         <lastmod>2026-08-20</lastmod>
     </url>
     <url>
          <loc>https://yaugenst.github.io/advect/dev/compatibility/xarray/</loc>
-         <lastmod>2026-08-14</lastmod>
+         <lastmod>2026-08-20</lastmod>
     </url>
     <url>
          <loc>https://yaugenst.github.io/advect/dev/development/</loc>
-         <lastmod>2026-08-14</lastmod>
+         <lastmod>2026-08-20</lastmod>
     </url>
     <url>
          <loc>https://yaugenst.github.io/advect/dev/development/adding-operations/</loc>
-         <lastmod>2026-08-14</lastmod>
+         <lastmod>2026-08-20</lastmod>
     </url>
     <url>
          <loc>https://yaugenst.github.io/advect/dev/development/codebase/</loc>
-         <lastmod>2026-08-14</lastmod>
+         <lastmod>2026-08-20</lastmod>
     </url>
     <url>
          <loc>https://yaugenst.github.io/advect/dev/development/documentation/</loc>
-         <lastmod>2026-08-14</lastmod>
+         <lastmod>2026-08-20</lastmod>
     </url>
     <url>
          <loc>https://yaugenst.github.io/advect/dev/development/testing/</loc>
-         <lastmod>2026-08-14</lastmod>
+         <lastmod>2026-08-20</lastmod>
     </url>
     <url>
          <loc>https://yaugenst.github.io/advect/dev/tutorials/</loc>
-         <lastmod>2026-08-14</lastmod>
+         <lastmod>2026-08-20</lastmod>
     </url>
     <url>
          <loc>https://yaugenst.github.io/advect/dev/tutorials/advanced-differentiation/</loc>
-         <lastmod>2026-08-14</lastmod>
+         <lastmod>2026-08-20</lastmod>
     </url>
     <url>
          <loc>https://yaugenst.github.io/advect/dev/tutorials/control-flow/</loc>
-         <lastmod>2026-08-14</lastmod>
+         <lastmod>2026-08-20</lastmod>
     </url>
     <url>
          <loc>https://yaugenst.github.io/advect/dev/tutorials/debugging/</loc>
-         <lastmod>2026-08-14</lastmod>
+         <lastmod>2026-08-20</lastmod>
     </url>
     <url>
          <loc>https://yaugenst.github.io/advect/dev/tutorials/gradients/</loc>
-         <lastmod>2026-08-14</lastmod>
+         <lastmod>2026-08-20</lastmod>
     </url>
     <url>
          <loc>https://yaugenst.github.io/advect/dev/tutorials/host-frameworks/</loc>
-         <lastmod>2026-08-14</lastmod>
+         <lastmod>2026-08-20</lastmod>
     </url>
     <url>
          <loc>https://yaugenst.github.io/advect/dev/tutorials/implicit-differentiation/</loc>
-         <lastmod>2026-08-14</lastmod>
+         <lastmod>2026-08-20</lastmod>
     </url>
     <url>
          <loc>https://yaugenst.github.io/advect/dev/tutorials/linear-maps/</loc>
-         <lastmod>2026-08-14</lastmod>
+         <lastmod>2026-08-20</lastmod>
     </url>
     <url>
          <loc>https://yaugenst.github.io/advect/dev/tutorials/primitives/</loc>
-         <lastmod>2026-08-14</lastmod>
+         <lastmod>2026-08-20</lastmod>
     </url>
     <url>
          <loc>https://yaugenst.github.io/advect/dev/tutorials/scientific-python/</loc>
-         <lastmod>2026-08-14</lastmod>
+         <lastmod>2026-08-20</lastmod>
     </url>
     <url>
          <loc>https://yaugenst.github.io/advect/dev/tutorials/staging/</loc>
-         <lastmod>2026-08-14</lastmod>
+         <lastmod>2026-08-20</lastmod>
     </url>
 </urlset>
