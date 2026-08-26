@@ -41,7 +41,7 @@ dependencies = [
 ]
 
 [project.urls]
-Documentation = "https://yaugenst.github.io/advect/"
+Documentation = "https://yaugenst.github.io/advect/latest/"
 Issues = "https://github.com/yaugenst/advect/issues"
 Repository = "https://github.com/yaugenst/advect"
 
