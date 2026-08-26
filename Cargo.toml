@@ -10,9 +10,9 @@ license = "MIT"
 authors = [ "Yannick Augenstein" ]
 description = "Required native compute-graph core for Advect"
 readme = "README.md"
-homepage = "https://yaugenst.github.io/advect/"
+homepage = "https://yaugenst.github.io/advect/latest/"
 repository = "https://github.com/yaugenst/advect"
-documentation = "https://yaugenst.github.io/advect/"
+documentation = "https://yaugenst.github.io/advect/latest/"
 keywords = [ "graph", "autodiff", "tracing", "python" ]
 categories = [ "algorithms", "science" ]
 

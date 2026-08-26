@@ -57,7 +57,7 @@ index
 {% endif -%}
 {% if page and page.is_homepage %}<link rel="alternate" type="text/plain" title="Advect documentation for AI agents" href="{{ 'llms.txt'|url }}">
 {% endif -%}
-<title>{% if page and page.title %}{{ manname }}({{ mansec }}) · {{ config.site_name|lower }}{% else %}{{ config.site_name|lower }}{% endif %}</title>
+<title>{% if page and page.is_homepage %}{{ config.site_name }} — {{ config.site_description }}{% elif page and page.title %}{{ page.title }} — {{ config.site_name }}{% else %}{{ config.site_name }}{% endif %}</title>
 <link rel="icon" href="{{ 'img/favicon.svg'|url }}" type="image/svg+xml">
 <link rel="stylesheet" href="{{ 'css/fonts.css'|url }}">
 <link rel="stylesheet" href="{{ 'css/theme.css'|url }}?v={{ config.extra.theme_css_version }}">
