@@ -51,13 +51,10 @@ impl Host for VectorHost {
         }
         constant
             .data()
-            .chunks_exact(4)
-            .map(|bytes| {
-                bytes
-                    .try_into()
-                    .map(f32::from_le_bytes)
-                    .map_err(|_| "fixture constant contains an incomplete float32".to_owned())
-            })
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|&bytes| Ok(f32::from_le_bytes(bytes)))
             .collect()
     }
 

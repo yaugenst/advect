@@ -372,7 +372,7 @@ fn digest_body(
     digest.update(br#"{"byte_order":"little","data":""#);
     let mut hex_buffer = [0_u8; 8192];
     for chunk in data.chunks(hex_buffer.len() / 2) {
-        for (encoded, &byte) in hex_buffer.chunks_exact_mut(2).zip(chunk) {
+        for (encoded, &byte) in hex_buffer.as_chunks_mut::<2>().0.iter_mut().zip(chunk) {
             encoded
                 .copy_from_slice(&[crate::hex::digit(byte >> 4), crate::hex::digit(byte & 0x0f)]);
         }

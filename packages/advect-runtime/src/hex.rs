@@ -15,16 +15,10 @@ pub(crate) fn decode(encoded: &str) -> Result<Vec<u8>, &'static str> {
     }
     encoded
         .as_bytes()
-        .chunks_exact(2)
-        .map(|pair| {
-            let Some(&high) = pair.first() else {
-                return Err("is missing a high digit");
-            };
-            let Some(&low) = pair.get(1) else {
-                return Err("is missing a low digit");
-            };
-            Ok((decode_digit(high)? << 4) | decode_digit(low)?)
-        })
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|&[high, low]| Ok((decode_digit(high)? << 4) | decode_digit(low)?))
         .collect()
 }
 
