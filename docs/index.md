@@ -14,6 +14,8 @@ optimized program that can itself be differentiated, saved, and loaded.
 
 ```bash
 python -m pip install advect
+# or
+conda install -c conda-forge advect
 ```
 
 Add optional integrations with extras such as `advect[scipy]`,
