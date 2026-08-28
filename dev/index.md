@@ -10,6 +10,8 @@ Open the [playground](https://yaugenst.github.io/advect/dev/playground/index.md)
 
 ```bash
 python -m pip install advect
+# or
+conda install -c conda-forge advect
 ```
 
 Add optional integrations with extras such as `advect[scipy]`, `advect[xarray]`, `advect[jax]`, `advect[torch]`, or `advect[autograd]`.
