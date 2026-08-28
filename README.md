@@ -6,6 +6,7 @@
   <a href="https://github.com/yaugenst/advect/actions/workflows/ci.yml"><img src="https://github.com/yaugenst/advect/actions/workflows/ci.yml/badge.svg?branch=main&amp;event=push" alt="CI"></a>
   <a href="https://app.codecov.io/gh/yaugenst/advect"><img src="https://codecov.io/gh/yaugenst/advect/branch/main/graph/badge.svg" alt="Coverage"></a>
   <a href="https://pypi.org/project/advect/"><img src="https://img.shields.io/pypi/v/advect.svg" alt="PyPI"></a>
+  <a href="https://anaconda.org/conda-forge/advect"><img src="https://img.shields.io/conda/vn/conda-forge/advect.svg" alt="conda-forge"></a>
   <a href="https://pypi.org/project/advect/"><img src="https://img.shields.io/pypi/pyversions/advect.svg" alt="Python versions"></a>
 </p>
 <!-- markdownlint-enable MD033 -->
@@ -19,6 +20,8 @@ optimized program that can itself be differentiated, saved, and loaded.
 
 ```bash
 python -m pip install advect
+# or
+conda install -c conda-forge advect
 ```
 
 ```python
