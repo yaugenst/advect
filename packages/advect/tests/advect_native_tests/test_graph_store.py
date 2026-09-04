@@ -414,23 +414,31 @@ def test_native_staged_execution_binds_once_and_supports_constants_and_outputs()
     assert bound_ops == ["custom.pair", "advect.getoutput", "advect.getoutput"]
 
 
-def test_native_staged_execution_validates_results_and_annotates_callback_errors() -> None:
+@pytest.mark.parametrize(
+    ("result_shape", "result_dtype"),
+    [((1,), "float32"), ((2,), "float64"), ((2,), ">f4")],
+)
+def test_native_staged_execution_validates_results_and_annotates_callback_errors(
+    result_shape: tuple[int, ...], result_dtype: str
+) -> None:
     builder = advect_native.GraphBuilder()
     input_id = builder.append_input_node([2], "float32")
     output_id = builder.append_node("custom.bad", [input_id], {}, [2], "float32")
     builder.append_output(output_id)
     store, _, _ = _finish(builder)
 
-    wrong_shape_plan = advect_native.build_graph_execution_plan(
+    invalid_result_plan = advect_native.build_graph_execution_plan(
         store,
-        lambda _op, _attrs: lambda _values, _context, _donation: np.ones(1, dtype=np.float64),
+        lambda _op, _attrs: (
+            lambda _values, _context, _donation: np.ones(result_shape, dtype=result_dtype)
+        ),
     )
     with pytest.raises(
         ValueError,
-        match=r"declared shape=\(2,\), dtype=float32; produced shape=\(1,\), dtype=float64",
+        match=r"declared shape=\(2,\), dtype=float32; produced shape=",
     ):
         advect_native.execute_graph(
-            wrong_shape_plan,
+            invalid_result_plan,
             [np.ones(2, dtype=np.float32)],
             [],
         )

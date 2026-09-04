@@ -11,7 +11,7 @@ use std::collections::BTreeMap;
 
 use crate::staged::GraphStore;
 use crate::staged::conversion::attr::attr_map_to_python;
-use crate::staged::conversion::dtype::dtype_from_python;
+use crate::staged::conversion::dtype::DTypeCache;
 
 #[derive(Debug)]
 struct LinkedEvaluator {
@@ -30,6 +30,7 @@ struct PythonHost<'py> {
     binder: Option<Py<PyAny>>,
     constants: BTreeMap<NodeId, Py<PyAny>>,
     context: Py<PyAny>,
+    dtype_cache: DTypeCache,
 }
 
 impl<'py> PythonHost<'py> {
@@ -39,6 +40,7 @@ impl<'py> PythonHost<'py> {
             binder: Some(binder),
             constants: BTreeMap::new(),
             context: py.None(),
+            dtype_cache: DTypeCache::default(),
         }
     }
 
@@ -53,6 +55,7 @@ impl<'py> PythonHost<'py> {
             binder: None,
             constants: constant_ids.into_iter().zip(constants).collect(),
             context: context.unwrap_or_else(|| py.None()),
+            dtype_cache: DTypeCache::default(),
         }
     }
 }
@@ -152,16 +155,20 @@ impl Host for PythonHost<'_> {
         value: &Self::Value,
         outputs: &[ValueSpec],
     ) -> Result<(), Self::Error> {
-        validate_python_outputs(value.bind(self.py), outputs)
+        validate_python_outputs(value.bind(self.py), outputs, &mut self.dtype_cache)
     }
 }
 
-fn validate_python_outputs(value: &Bound<'_, PyAny>, outputs: &[ValueSpec]) -> PyResult<()> {
+fn validate_python_outputs(
+    value: &Bound<'_, PyAny>,
+    outputs: &[ValueSpec],
+    dtype_cache: &mut DTypeCache,
+) -> PyResult<()> {
     match outputs {
         [] => Err(PyRuntimeError::new_err(
             "staged node has no declared output specifications",
         )),
-        [output] => validate_python_value(value, output),
+        [output] => validate_python_value(value, output, dtype_cache),
         _ => {
             let tuple = value.cast::<PyTuple>().map_err(|_| {
                 let type_name = value
@@ -181,14 +188,18 @@ fn validate_python_outputs(value: &Bound<'_, PyAny>, outputs: &[ValueSpec]) -> P
                 )));
             }
             for (value, output) in tuple.iter().zip(outputs) {
-                validate_python_value(&value, output)?;
+                validate_python_value(&value, output, dtype_cache)?;
             }
             Ok(())
         }
     }
 }
 
-fn validate_python_value(value: &Bound<'_, PyAny>, result: &ValueSpec) -> PyResult<()> {
+fn validate_python_value(
+    value: &Bound<'_, PyAny>,
+    result: &ValueSpec,
+    dtype_cache: &mut DTypeCache,
+) -> PyResult<()> {
     if let Some(kind) = python_scalar_kind(value) {
         let dtype = result.dtype().name();
         if result.shape().is_empty() && scalar_kind_matches_dtype(kind, dtype) {
@@ -215,7 +226,8 @@ fn validate_python_value(value: &Bound<'_, PyAny>, result: &ValueSpec) -> PyResu
     let actual_shape = shape
         .extract::<Vec<usize>>()
         .map_err(|_| PyRuntimeError::new_err("staged operation returned an invalid array shape"))?;
-    let actual_dtype = dtype_from_python(&dtype)
+    let actual_dtype = dtype_cache
+        .resolve(value.py(), &dtype)
         .map_err(|_| PyRuntimeError::new_err("staged operation returned an invalid array dtype"))?;
     if actual_shape != result.shape() || &actual_dtype != result.dtype() {
         return Err(PyValueError::new_err(format!(
