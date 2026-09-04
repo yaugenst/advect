@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from advect.core._abstract_helpers import accumulation_dtype, dtype_name, normalize_axis
 from advect.core._array_api.providers import (
+    ResolvedArrayNamespace,
     _array_namespace_can_donate,
     _get_array_namespace,
     _get_backend_key_from_namespace,
@@ -535,6 +536,8 @@ def _evaluate_array_op(  # noqa: PLR0912, PLR0915 - one explicit portable execut
     if namespace is None:
         raise RuntimeError(f"Cannot execute {op!r} without an array namespace")
     array_api_version = _selected_array_api_version(namespace, attrs)
+    if isinstance(namespace, ResolvedArrayNamespace):
+        namespace = namespace.raw_namespace
     if getattr(namespace, "__name__", "") != "numpy":
         inputs = cast(
             "tuple[Any, ...]",
