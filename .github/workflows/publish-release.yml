@@ -63,7 +63,7 @@ jobs:
         env:
           RELEASE_VERSION: ${{ needs.candidate.outputs.version }}
         run: |
-          uv venv .testpypi-smoke --python 3.14
+          uv venv .testpypi-smoke --python 3.15
           uv pip install \
             --python .testpypi-smoke/bin/python \
             --no-cache \
@@ -221,7 +221,7 @@ jobs:
         env:
           RELEASE_VERSION: ${{ needs.candidate.outputs.version }}
         run: |
-          uv venv .pypi-smoke --python 3.14
+          uv venv .pypi-smoke --python 3.15
           uv pip install \
             --python .pypi-smoke/bin/python \
             --no-cache \
