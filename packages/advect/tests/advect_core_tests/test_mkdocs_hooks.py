@@ -72,7 +72,9 @@ def test_browser_wheel_is_required_only_when_requested(
 
 
 def test_playground_uses_a_scalar_float_staged_signature() -> None:
-    runtime = runpy.run_path(str(mkdocs_hooks._ROOT / "docs-theme" / "playground_runtime.py"))
+    runtime = runpy.run_path(
+        str(mkdocs_hooks._ROOT / "docs-theme" / "playground_runtime.py"), run_name="__main__"
+    )
 
     runtime["playground_trace_json"]("x")
 

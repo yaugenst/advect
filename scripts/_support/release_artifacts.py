@@ -16,7 +16,7 @@ from pathlib import Path
 _EXPECTED_WHEELS = frozenset(
     (python_tag, python_tag, platform)
     for python_tag, platform in product(
-        ("cp312", "cp313", "cp314"),
+        ("cp312", "cp313", "cp314", "cp315"),
         ("linux-x86_64", "linux-aarch64", "macos-x86_64", "macos-arm64", "windows-x86_64"),
     )
 )
