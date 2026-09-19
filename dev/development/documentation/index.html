@@ -129,8 +129,9 @@ the example demonstrated.</p>
 changes and release builds, build the wheel and require the MkDocs hook to
 stage it with the playground adapter and examples:</p>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>mkdir<span class="w"> </span>-p<span class="w"> </span>dist
-</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>uvx<span class="w"> </span>--from<span class="w"> </span>pyodide-build<span class="o">==</span><span class="m">0</span>.36.0<span class="w"> </span>pyodide<span class="w"> </span>build<span class="w"> </span>.<span class="w"> </span>--outdir<span class="w"> </span>dist/pyodide
-</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="nv">ADVECT_REQUIRE_BROWSER_WHEEL</span><span class="o">=</span><span class="m">1</span><span class="w"> </span>uv<span class="w"> </span>run<span class="w"> </span>mkdocs<span class="w"> </span>build<span class="w"> </span>--strict
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>uvx<span class="w"> </span>--from<span class="w"> </span>pyodide-build<span class="o">==</span><span class="m">0</span>.36.0<span class="w"> </span>pyodide<span class="w"> </span>xbuildenv<span class="w"> </span>install<span class="w"> </span><span class="m">314</span>.0.0
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>uvx<span class="w"> </span>--from<span class="w"> </span>pyodide-build<span class="o">==</span><span class="m">0</span>.36.0<span class="w"> </span>pyodide<span class="w"> </span>build<span class="w"> </span>.<span class="w"> </span>--outdir<span class="w"> </span>dist/pyodide
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="nv">ADVECT_REQUIRE_BROWSER_WHEEL</span><span class="o">=</span><span class="m">1</span><span class="w"> </span>uv<span class="w"> </span>run<span class="w"> </span>mkdocs<span class="w"> </span>build<span class="w"> </span>--strict
 </span></code></pre></div>
 <p>The Pyodide CI lane also runs the snippets inside its browser-compatible
 environment.</p>

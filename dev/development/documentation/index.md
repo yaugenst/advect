@@ -62,6 +62,7 @@ The ordinary strict build does not require a browser wheel. For browser-facing c
 
 ```bash
 mkdir -p dist
+uvx --from pyodide-build==0.36.0 pyodide xbuildenv install 314.0.0
 uvx --from pyodide-build==0.36.0 pyodide build . --outdir dist/pyodide
 ADVECT_REQUIRE_BROWSER_WHEEL=1 uv run mkdocs build --strict
 ```
