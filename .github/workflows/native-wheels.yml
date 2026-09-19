@@ -39,6 +39,8 @@ jobs:
             artifact: py313
           - version: "3.14"
             artifact: py314
+          - version: "3.15"
+            artifact: py315
         platform:
           - name: Linux x86-64
             artifact: linux-x86_64
@@ -80,6 +82,7 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ matrix.python.version }}
+          allow-prereleases: true
 
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:

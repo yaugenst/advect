@@ -28,7 +28,7 @@ _PACKAGE_FILES = ("advect/_native_core.pyi", "advect/py.typed")
 _WHEELS = tuple(
     (python_tag, python_tag, platform_tag)
     for python_tag, platform_tag in product(
-        ("cp312", "cp313", "cp314"),
+        ("cp312", "cp313", "cp314", "cp315"),
         (
             "manylinux_2_17_x86_64.manylinux2014_x86_64",
             "manylinux_2_17_aarch64.manylinux2014_aarch64",
@@ -103,7 +103,7 @@ def test_assemble_release_artifacts_validates_and_hashes_complete_set(tmp_path: 
         checksums_path=checksums_path,
     )
 
-    assert len(records) == 16
+    assert len(records) == 21
     manifest = json.loads(manifest_path.read_text())
     assert manifest["source_revision"] == _REVISION
     assert manifest["package_version"] == _VERSION
@@ -118,7 +118,7 @@ def test_assemble_release_artifacts_validates_and_hashes_complete_set(tmp_path: 
 def test_assemble_release_artifacts_rejects_an_incomplete_wheel_family(tmp_path: Path) -> None:
     dist_dir = tmp_path / "dist"
     _write_release_set(dist_dir)
-    next(dist_dir.glob("*win_amd64.whl")).unlink()
+    next(dist_dir.glob("*cp315-cp315-win_amd64.whl")).unlink()
 
     with pytest.raises(ReleaseArtifactError, match="release wheel family mismatch"):
         assemble_release_artifacts(

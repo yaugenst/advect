@@ -24,7 +24,7 @@ lifetime evidence required for a new public form.
 
 ## Python gates
 
-Set up the locked development environment with Python 3.12 through 3.14:
+Set up the locked development environment with Python 3.12 through 3.15:
 
 ```bash
 uv sync --all-groups --locked

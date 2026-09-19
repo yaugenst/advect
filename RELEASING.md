@@ -4,7 +4,7 @@
 metadata and both Rust crates derive their version from it;
 [`Cargo.lock`](Cargo.lock) is the generated mirror.
 
-The binary release family targets CPython 3.12 through 3.14 on manylinux
+The binary release family targets CPython 3.12 through 3.15 on manylinux
 x86-64 and arm64, macOS Intel and Apple silicon, and Windows x86-64. Release
 one does not target musllinux, Windows ARM64, free-threaded CPython, PyPy, or
 abi3 wheels.
