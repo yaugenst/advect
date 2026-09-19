@@ -69,6 +69,7 @@ jobs:
       - name: Build the WebAssembly wheel
         run: |
           mkdir -p dist
+          pyodide xbuildenv install 314.0.0
           pyodide build . --outdir dist/pyodide
 
       - name: Create the Pyodide runtime
