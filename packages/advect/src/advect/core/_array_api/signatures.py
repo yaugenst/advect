@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+from dataclasses import dataclass
 from functools import cache
 from typing import TYPE_CHECKING, cast
 
@@ -27,6 +28,17 @@ def official_signatures(
 OFFICIAL_SIGNATURES = official_signatures()
 
 
+@dataclass(frozen=True, slots=True)
+class OfficialParameter:
+    """One parameter of a frozen official signature, in signature order."""
+
+    name: str
+    positional: bool
+    has_default: bool
+    default: object = None
+    variadic: bool = False
+
+
 @cache
 def _signature_arguments(path: str, version: str) -> ast.arguments:
     signature = official_signatures(version)[path]
@@ -37,33 +49,68 @@ def _signature_arguments(path: str, version: str) -> ast.arguments:
     return function.args
 
 
+def _parameter(name: str, *, positional: bool, default: ast.expr | None) -> OfficialParameter:
+    return OfficialParameter(
+        name=name,
+        positional=positional,
+        has_default=default is not None,
+        default=None if default is None else ast.literal_eval(default),
+    )
+
+
+@cache
+def official_parameters(
+    path: str,
+    version: str = LATEST_ARRAY_API_VERSION,
+) -> tuple[OfficialParameter, ...]:
+    """Return one revision's parameters with their frozen literal defaults."""
+    arguments = _signature_arguments(path, version)
+    positional = (*arguments.posonlyargs, *arguments.args)
+    defaults = (None,) * (len(positional) - len(arguments.defaults)) + tuple(arguments.defaults)
+    parameters = [
+        _parameter(node.arg, positional=True, default=default)
+        for node, default in zip(positional, defaults, strict=True)
+    ]
+    if arguments.vararg is not None:
+        parameters.append(
+            OfficialParameter(
+                arguments.vararg.arg, positional=True, has_default=False, variadic=True
+            )
+        )
+    parameters.extend(
+        _parameter(node.arg, positional=False, default=default)
+        for node, default in zip(arguments.kwonlyargs, arguments.kw_defaults, strict=True)
+    )
+    return tuple(parameters)
+
+
+@cache
 def official_parameter_names(
     path: str,
     version: str = LATEST_ARRAY_API_VERSION,
 ) -> tuple[str, ...]:
     """Derive parameter names from one revision's normalized signature."""
-    arguments = _signature_arguments(path, version)
-    names = [argument.arg for argument in (*arguments.posonlyargs, *arguments.args)]
-    if arguments.vararg is not None:
-        names.append(arguments.vararg.arg)
-    names.extend(argument.arg for argument in arguments.kwonlyargs)
-    if arguments.kwarg is not None:
-        names.append(arguments.kwarg.arg)
-    return tuple(names)
+    return tuple(parameter.name for parameter in official_parameters(path, version))
 
 
+@cache
 def official_positional_parameter_names(
     path: str,
     version: str = LATEST_ARRAY_API_VERSION,
 ) -> tuple[str, ...]:
     """Return parameters accepted positionally by one revision."""
-    arguments = _signature_arguments(path, version)
-    return tuple(argument.arg for argument in (*arguments.posonlyargs, *arguments.args))
+    return tuple(
+        parameter.name
+        for parameter in official_parameters(path, version)
+        if parameter.positional and not parameter.variadic
+    )
 
 
 __all__ = [
     "OFFICIAL_SIGNATURES",
+    "OfficialParameter",
     "official_parameter_names",
+    "official_parameters",
     "official_positional_parameter_names",
     "official_signatures",
 ]

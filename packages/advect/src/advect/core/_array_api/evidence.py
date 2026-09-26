@@ -8,7 +8,6 @@ an abstractly staged program, and after staged-program serialization.
 
 from __future__ import annotations
 
-import ast
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
@@ -16,7 +15,7 @@ from advect.core._array_api.profiles import (
     LATEST_ARRAY_API_VERSION,
     materialize_array_api_profile,
 )
-from advect.core._array_api.signatures import official_parameter_names, official_signatures
+from advect.core._array_api.signatures import official_parameter_names, official_parameters
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -105,65 +104,12 @@ class MetadataCase:
         return self.path
 
 
-@dataclass(frozen=True, slots=True)
-class _SignatureParameter:
-    name: str
-    positional: bool
-    has_default: bool
-    default: object = None
-    variadic: bool = False
-
-
-def _signature_parameters(
-    path: str,
-    version: str = LATEST_ARRAY_API_VERSION,
-) -> tuple[_SignatureParameter, ...]:
-    parsed = ast.parse(f"def operation{official_signatures(version)[path]}:\n    pass\n")
-    function = parsed.body[0]
-    if not isinstance(function, ast.FunctionDef):
-        message = f"Could not parse official Array API signature for {path!r}"
-        raise TypeError(message)
-    arguments = function.args
-    positional_nodes = (*arguments.posonlyargs, *arguments.args)
-    positional_defaults = (None,) * (len(positional_nodes) - len(arguments.defaults)) + tuple(
-        arguments.defaults
-    )
-    parameters = [
-        _SignatureParameter(
-            name=node.arg,
-            positional=True,
-            has_default=default is not None,
-            default=ast.literal_eval(default) if default is not None else None,
-        )
-        for node, default in zip(positional_nodes, positional_defaults, strict=True)
-    ]
-    if arguments.vararg is not None:
-        parameters.append(
-            _SignatureParameter(
-                name=arguments.vararg.arg,
-                positional=True,
-                has_default=False,
-                variadic=True,
-            )
-        )
-    parameters.extend(
-        _SignatureParameter(
-            name=node.arg,
-            positional=False,
-            has_default=default is not None,
-            default=ast.literal_eval(default) if default is not None else None,
-        )
-        for node, default in zip(arguments.kwonlyargs, arguments.kw_defaults, strict=True)
-    )
-    return tuple(parameters)
-
-
 def case_parameter_values(
     case: OperationCase,
     version: str = LATEST_ARRAY_API_VERSION,
 ) -> Mapping[str, object]:
     """Bind one evidence case to its frozen official signature."""
-    parameters = _signature_parameters(case.path, version)
+    parameters = official_parameters(case.path, version)
     positional = [
         parameter for parameter in parameters if parameter.positional and not parameter.variadic
     ]
@@ -212,7 +158,7 @@ def static_variant_requirements(
 ) -> frozenset[str]:
     """Return the semantic variants required for one static parameter."""
     parameter = next(
-        parameter for parameter in _signature_parameters(path, version) if parameter.name == name
+        parameter for parameter in official_parameters(path, version) if parameter.name == name
     )
     return frozenset({"default", "explicit"} if parameter.has_default else {"explicit"})
 
@@ -224,9 +170,7 @@ def static_variant(
 ) -> str:
     """Classify one bound static value as the default or explicit variant."""
     parameter = next(
-        parameter
-        for parameter in _signature_parameters(case.path, version)
-        if parameter.name == name
+        parameter for parameter in official_parameters(case.path, version) if parameter.name == name
     )
     value = case_parameter_values(case, version)[name]
     if parameter.has_default and value == parameter.default:
@@ -321,7 +265,7 @@ def _replace_parameter(
     values[name] = value
     if name == "axes" and value is None and case.path in {"fft.irfftn", "fft.rfftn"}:
         values["s"] = None
-    parameters = _signature_parameters(case.path, version)
+    parameters = official_parameters(case.path, version)
     inputs = case.inputs
     if name == "axis" and semantic_variant == "default":
         if case.path == "cumulative_prod":
@@ -1131,7 +1075,7 @@ def operation_evidence_cases(
             )
         parameter_values = case_parameter_values(case, version)
         signature_parameters = {
-            parameter.name: parameter for parameter in _signature_parameters(case.path, version)
+            parameter.name: parameter for parameter in official_parameters(case.path, version)
         }
         for name in static_parameters.get(case.path, ()):
             parameter = signature_parameters[name]
