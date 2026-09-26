@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import operator
 from collections.abc import Callable, Iterable
+from functools import cache
 from typing import TYPE_CHECKING, Any, cast
 
 from advect.core._abstract_helpers import accumulation_dtype, dtype_name, normalize_axis
@@ -15,7 +16,6 @@ from advect.core._array_api.providers import (
     _get_backend_key_from_namespace,
 )
 from advect.core._array_protocol_helpers import materialize_weak_scalar_operands
-from advect.core._backend_hooks import resolve_backend_hooks
 from advect.core._backends import get_hook
 from advect.core._basic_index import decode_basic_index
 from advect.core._graph_attrs import decode_graph_attrs_from_native
@@ -26,15 +26,10 @@ if TYPE_CHECKING:
 
 type BoundEvaluator = Callable[[tuple[Any, ...], Any | None, int | None], Any]
 
-_CORE_EVALUATOR_OPS = frozenset(
-    {"advect.copy", "advect.getitem", "advect.getoutput", "advect.index_update"}
-)
-
 _ALIASING_ARRAY_LEAVES = frozenset(
     {
         "broadcast_to",
         "expand_dims",
-        "permute_dims",
         "reshape",
         "squeeze",
         "transpose",
@@ -43,7 +38,6 @@ _ALIASING_ARRAY_LEAVES = frozenset(
 
 _OWNED_ARRAY_LEAVES = frozenset(
     {
-        "abs",
         "absolute",
         "add",
         "arccos",
@@ -54,13 +48,9 @@ _OWNED_ARRAY_LEAVES = frozenset(
         "arctan2",
         "arctanh",
         "bitwise_and",
-        "bitwise_invert",
-        "bitwise_left_shift",
         "bitwise_or",
-        "bitwise_right_shift",
         "bitwise_xor",
         "ceil",
-        "conj",
         "conjugate",
         "cos",
         "cosh",
@@ -162,16 +152,66 @@ _SCALAR_UNARY_OPERATORS: dict[str, Callable[[Any], Any]] = {
     "real": lambda value: value.real,
 }
 
+_PYTHON_SCALARS = frozenset({bool, complex, float, int})
+_NUMPY_ALIASES = {"absolute": "abs"}
+_PORTABLE_ALIASES = {
+    "absolute": "abs",
+    "arccos": "acos",
+    "arccosh": "acosh",
+    "arcsin": "asin",
+    "arcsinh": "asinh",
+    "arctan": "atan",
+    "arctan2": "atan2",
+    "arctanh": "atanh",
+    "concatenate": "concat",
+    "conjugate": "conj",
+    "cumprod": "cumulative_prod",
+    "cumsum": "cumulative_sum",
+    "invert": "bitwise_invert",
+    "left_shift": "bitwise_left_shift",
+    "power": "pow",
+    "rint": "round",
+    "right_shift": "bitwise_right_shift",
+    "transpose": "permute_dims",
+}
+_LINALG_MEMBERS = frozenset({"cross", "diagonal", "outer", "trace", "vecdot"})
+_ASARRAY = (("asarray",), ("asarray",))
+_PERMUTE_DIMS = (("permute_dims",), ("permute_dims",))
 
-def _selected_array_api_version(
-    namespace: Any,
-    attrs: Mapping[str, Any],
-) -> str | None:
-    version = attrs.get("_advect_array_api_version")
-    if isinstance(version, str):
-        return version
-    requested = getattr(namespace, "_advect_requested_array_api_version", None)
-    return requested if isinstance(requested, str) else None
+# How a leaf passes operands and static attrs to its namespace member; plain
+# ``function(*operands, **attrs)`` needs no entry.
+_ARRAY_CALL_KINDS = {
+    **dict.fromkeys(
+        ("broadcast_to", "moveaxis", "repeat", "reshape", "tile", "transpose"), "operand"
+    ),
+    **dict.fromkeys(("arange", "empty", "eye", "linspace", "ones", "zeros"), "creation"),
+    **dict.fromkeys(("fftfreq", "rfftfreq"), "frequency"),
+    **dict.fromkeys(("argsort", "sort"), "sort"),
+    **dict.fromkeys(("concatenate", "stack"), "sequence"),
+    **dict.fromkeys(("diagonal", "trace"), "diagonal"),
+    "astype": "astype",
+    "clip": "clip",
+    "full": "full",
+    "pinv": "pinv",
+}
+_REQUIRED = object()
+# Static attrs passed positionally, as (name, default) pairs.
+_POSITIONAL_ATTRS: dict[str, tuple[tuple[str, object], ...]] = {
+    "arange": (("start", _REQUIRED), ("stop", None), ("step", 1)),
+    "broadcast_to": (("shape", _REQUIRED),),
+    "empty": (("shape", _REQUIRED),),
+    "eye": (("n_rows", _REQUIRED), ("n_cols", None)),
+    "fftfreq": (("n", _REQUIRED),),
+    "full": (("shape", _REQUIRED),),
+    "linspace": (("start", _REQUIRED), ("stop", _REQUIRED), ("num", _REQUIRED)),
+    "moveaxis": (("source", _REQUIRED), ("destination", _REQUIRED)),
+    "ones": (("shape", _REQUIRED),),
+    "repeat": (("repeats", _REQUIRED),),
+    "reshape": (("shape", _REQUIRED),),
+    "rfftfreq": (("n", _REQUIRED),),
+    "tile": (("reps", _REQUIRED),),
+    "zeros": (("shape", _REQUIRED),),
+}
 
 
 def _validate_backend_namespace(op: str, backend_name: str, namespace: Any | None) -> None:
@@ -206,19 +246,14 @@ def bind_native_node_evaluator(op: str, attrs: Mapping[str, Any]) -> BoundEvalua
 
 def has_core_evaluator(op: str) -> bool:
     """Return whether a structural operation has a built-in evaluator."""
-    return op in _CORE_EVALUATOR_OPS
+    return op in _CORE_BINDERS
 
 
 def bind_node_evaluator(op: str, attrs: Mapping[str, Any]) -> BoundEvaluator:
     """Resolve stable evaluator dispatch and attribute decoding once per graph."""
-    if op == "advect.getoutput":
-        return _bind_getoutput_evaluator(attrs)
-    if op == "advect.getitem":
-        return _bind_getitem_evaluator(attrs)
-    if op == "advect.copy" and "_advect_backend" not in attrs:
-        return _bind_copy_evaluator(attrs)
-    if op == "advect.index_update":
-        return _bind_index_update_evaluator(attrs)
+    bind_core = _CORE_BINDERS.get(op)
+    if bind_core is not None and not (op == "advect.copy" and "_advect_backend" in attrs):
+        return bind_core(attrs)
 
     if op.startswith("custom."):
 
@@ -235,100 +270,57 @@ def bind_node_evaluator(op: str, attrs: Mapping[str, Any]) -> BoundEvaluator:
     if isinstance(backend_name, str) and backend_name:
         backend_evaluate_op = get_hook(f"{backend_name}.evaluate_op")
         if backend_evaluate_op is not None:
-            decoder = get_hook(f"{backend_name}.decode_attrs")
-            decoded_attrs = decoder(op, attrs) if decoder is not None else attrs
-            bind_evaluator = get_hook(f"{backend_name}.bind_evaluator")
-            if bind_evaluator is not None:
-                bound = bind_evaluator(op, decoded_attrs)
-                if bound is not None:
-
-                    def evaluate_bound(
-                        input_vals: tuple[Any, ...],
-                        context: Any | None = None,
-                        _donation_position: int | None = None,
-                    ) -> Any:
-                        _validate_backend_namespace(op, backend_name, context)
-                        if op.startswith(("array.", "array_ext.")):
-                            runtime_namespace = _instance_specific_namespace(input_vals)
-                            if runtime_namespace is not None:
-                                path = op.removeprefix("array_ext.").removeprefix("array.")
-                                try:
-                                    _namespace_function(runtime_namespace, path)
-                                except AttributeError:
-                                    pass
-                                else:
-                                    return _evaluate_array_op(
-                                        op,
-                                        input_vals,
-                                        attrs,
-                                        runtime_namespace,
-                                    )
-                        return bound(input_vals)
-
-                    return evaluate_bound
-
-            def evaluate_backend(
-                input_vals: tuple[Any, ...],
-                context: Any | None = None,
-                _donation_position: int | None = None,
-            ) -> Any:
-                _validate_backend_namespace(op, backend_name, context)
-                return backend_evaluate_op(op, input_vals, decoded_attrs)
-
-            return evaluate_backend
-
+            return _bind_backend_op(op, attrs, backend_name, backend_evaluate_op)
     if op.startswith(("array.", "array_ext.")):
+        return _bind_array_op(op, attrs)
+    raise ValueError(f"No evaluator for staged operation {op!r}")
 
-        def evaluate_array(
+
+def _bind_backend_op(
+    op: str,
+    attrs: Mapping[str, Any],
+    backend_name: str,
+    backend_evaluate_op: Callable[..., Any],
+) -> BoundEvaluator:
+    decoder = get_hook(f"{backend_name}.decode_attrs")
+    decoded_attrs = decoder(op, attrs) if decoder is not None else attrs
+    bind_evaluator = get_hook(f"{backend_name}.bind_evaluator")
+    bound = None if bind_evaluator is None else bind_evaluator(op, decoded_attrs)
+    if bound is None:
+
+        def evaluate_backend(
             input_vals: tuple[Any, ...],
             context: Any | None = None,
             _donation_position: int | None = None,
         ) -> Any:
-            namespace = context if context is not None else _namespace_from_inputs(input_vals)
-            return _evaluate_array_op(op, input_vals, attrs, namespace)
+            _validate_backend_namespace(op, backend_name, context)
+            return backend_evaluate_op(op, input_vals, decoded_attrs)
 
-        return evaluate_array
+        return evaluate_backend
 
-    # Some custom backend namespaces intentionally resolve from runtime input
-    # types. Preserve that dynamic path rather than guessing at compile time.
-    def evaluate_dynamic(
+    members = _array_members(op) if op.startswith(("array.", "array_ext.")) else None
+    # An instance-specific namespace (a nested trace) replays through the
+    # portable array evaluator, which only such calls bind.
+    portable = cache(lambda: _bind_array_op(op, attrs))
+
+    def evaluate_bound(
         input_vals: tuple[Any, ...],
         context: Any | None = None,
         _donation_position: int | None = None,
     ) -> Any:
-        return evaluate_node_value(op, input_vals, attrs, namespace=context)
+        _validate_backend_namespace(op, backend_name, context)
+        if members is not None:
+            runtime_namespace = _instance_specific_namespace(input_vals)
+            if runtime_namespace is not None:
+                try:
+                    _namespace_member(runtime_namespace, members)
+                except AttributeError:
+                    pass
+                else:
+                    return portable()(input_vals, runtime_namespace, None)
+        return bound(input_vals)
 
-    return evaluate_dynamic
-
-
-def evaluate_node_value(
-    op: str,
-    input_vals: tuple[Any, ...],
-    attrs: Mapping[str, Any],
-    *,
-    namespace: Any | None = None,
-) -> Any:
-    """Evaluate a single op given concrete inputs."""
-    if op in _CORE_EVALUATOR_OPS and not (op == "advect.copy" and "_advect_backend" in attrs):
-        return bind_node_evaluator(op, attrs)(input_vals, namespace, None)
-    if op.startswith("custom."):
-        return evaluate_primitive(op, input_vals, attrs, namespace=namespace)
-    backend_name = attrs.get("_advect_backend")
-    if isinstance(backend_name, str) and backend_name:
-        backend_evaluate_op = get_hook(f"{backend_name}.evaluate_op")
-        if backend_evaluate_op is not None:
-            _validate_backend_namespace(op, backend_name, namespace)
-            decoder = get_hook(f"{backend_name}.decode_attrs")
-            decoded_attrs = decoder(op, attrs) if decoder is not None else attrs
-            return backend_evaluate_op(op, input_vals, decoded_attrs)
-    if op.startswith(("array.", "array_ext.")):
-        runtime_namespace = (
-            namespace if namespace is not None else _namespace_from_inputs(input_vals)
-        )
-        return _evaluate_array_op(op, input_vals, attrs, runtime_namespace)
-    backend_evaluate_op, decode_attrs = resolve_backend_hooks(op, input_vals)
-    decoded_attrs = decode_attrs(op, attrs) if decode_attrs is not None else attrs
-    return backend_evaluate_op(op, input_vals, decoded_attrs)
+    return evaluate_bound
 
 
 def _bind_getoutput_evaluator(attrs: Mapping[str, Any]) -> BoundEvaluator:
@@ -467,228 +459,190 @@ def _instance_specific_namespace(values: object) -> Any | None:
     return None
 
 
-def _namespace_function(namespace: Any, path: str) -> Callable[..., Any]:
+@cache
+def _array_members(op: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Return an array operation's NumPy and portable Array API member paths."""
+    path = op.removeprefix("array_ext.").removeprefix("array.")
+    *prefix, leaf = path.split(".")
+    numpy = (*prefix, _NUMPY_ALIASES.get(leaf, leaf))
+    if path in _LINALG_MEMBERS:
+        prefix = ["linalg"]
+    return numpy, (*prefix, _PORTABLE_ALIASES.get(leaf, leaf))
+
+
+def _namespace_member(
+    namespace: Any,
+    members: tuple[tuple[str, ...], tuple[str, ...]],
+) -> Callable[..., Any]:
+    parts = members[getattr(namespace, "__name__", "") != "numpy"]
     target = namespace
-    if getattr(namespace, "__name__", "") == "numpy":
-        aliases = {"absolute": "abs"}
-    else:
-        aliases = {
-            "absolute": "abs",
-            "arccos": "acos",
-            "arccosh": "acosh",
-            "arcsin": "asin",
-            "arcsinh": "asinh",
-            "arctan": "atan",
-            "arctan2": "atan2",
-            "arctanh": "atanh",
-            "concatenate": "concat",
-            "conjugate": "conj",
-            "cumprod": "cumulative_prod",
-            "cumsum": "cumulative_sum",
-            "invert": "bitwise_invert",
-            "left_shift": "bitwise_left_shift",
-            "power": "pow",
-            "rint": "round",
-            "right_shift": "bitwise_right_shift",
-            "transpose": "permute_dims",
-        }
-        if path in {"cross", "diagonal", "outer", "trace", "vecdot"}:
-            path = f"linalg.{path}"
-    parts = path.split(".")
-    parts[-1] = aliases.get(parts[-1], parts[-1])
     for part in parts:
         target = getattr(target, part)
     if not callable(target):
-        raise TypeError(f"Array namespace member {path!r} is not callable")
+        raise TypeError(f"Array namespace member {'.'.join(parts)!r} is not callable")
     return cast("Callable[..., Any]", target)
 
 
-def _evaluate_array_op(  # noqa: PLR0912, PLR0915 - one explicit portable execution schema
-    op: str,
-    inputs: tuple[Any, ...],
-    attrs: Mapping[str, Any],
-    namespace: Any | None,
-) -> Any:
-    path = op.removeprefix("array_ext.").removeprefix("array.")
-    leaf_name = path.rsplit(".", 1)[-1]
-    if (
-        leaf_name in _BINARY_OPERATORS
-        and len(inputs) == 2
-        and (
-            all(type(value) in {bool, complex, float, int} for value in inputs)
-            or any(callable(getattr(value, "_advect_snapshot", None)) for value in inputs)
-        )
-    ):
-        return _BINARY_OPERATORS[leaf_name](*inputs)
-    scalar_unary = _SCALAR_UNARY_OPERATORS.get(leaf_name)
-    if (
-        scalar_unary is not None
-        and len(inputs) == 1
-        and type(inputs[0])
-        in {
-            bool,
-            complex,
-            float,
-            int,
-        }
-    ):
-        return scalar_unary(inputs[0])
-    if namespace is None:
-        raise RuntimeError(f"Cannot execute {op!r} without an array namespace")
-    array_api_version = _selected_array_api_version(namespace, attrs)
-    if isinstance(namespace, ResolvedArrayNamespace):
-        namespace = namespace.raw_namespace
-    if getattr(namespace, "__name__", "") != "numpy":
-        inputs = cast(
-            "tuple[Any, ...]",
-            materialize_weak_scalar_operands(
-                op,
-                inputs,
-                namespace=namespace,
-            ),
-        )
-    kwargs = {key: value for key, value in attrs.items() if not key.startswith("_advect_")}
-    if (
-        leaf_name in {"cumprod", "cumsum", "prod", "sum"}
-        and inputs
-        and kwargs.get("dtype") is None
-        and array_api_version is not None
-    ):
-        target_dtype = accumulation_dtype(
-            inputs[0].dtype,
-            array_api_version=array_api_version,
-        )
-        if target_dtype != dtype_name(inputs[0].dtype):
-            kwargs["dtype"] = target_dtype
+def _execution_device(device_key: str, inputs: tuple[Any, ...], namespace: Any) -> Any:
+    candidates = [
+        getattr(value, "device", None)
+        for value in inputs
+        if getattr(value, "device", None) is not None
+    ]
+    namespace_info = getattr(namespace, "__array_namespace_info__", None)
+    if callable(namespace_info):
+        devices = getattr(namespace_info(), "devices", None)
+        if callable(devices):
+            available_devices = devices()
+            if not isinstance(available_devices, Iterable):
+                raise TypeError("Array namespace devices() must return an iterable")
+            candidates.extend(available_devices)
+    device = next((candidate for candidate in candidates if str(candidate) == device_key), None)
+    if device is None:
+        raise ValueError(f"Array API device {device_key!r} is unavailable at execution")
+    return device
+
+
+def _bind_array_op(op: str, attrs: Mapping[str, Any]) -> BoundEvaluator:  # noqa: PLR0915
+    """Resolve one portable array operation's calling convention once per node."""
+    members = _array_members(op)
+    leaf = op.rsplit(".", 1)[-1]
+    kind = _ARRAY_CALL_KINDS.get(leaf)
+    binary = _BINARY_OPERATORS.get(leaf)
+    unary = _SCALAR_UNARY_OPERATORS.get(leaf)
+    accumulates = leaf in {"cumprod", "cumsum", "prod", "sum"}
+    attr_version = attrs.get("_advect_array_api_version")
     device_key = attrs.get("_advect_device")
-    if isinstance(device_key, str):
-        candidates = [
-            getattr(value, "device", None)
-            for value in inputs
-            if getattr(value, "device", None) is not None
-        ]
-        namespace_info = getattr(namespace, "__array_namespace_info__", None)
-        if callable(namespace_info):
-            devices = getattr(namespace_info(), "devices", None)
-            if callable(devices):
-                available_devices = devices()
-                if not isinstance(available_devices, Iterable):
-                    raise TypeError("Array namespace devices() must return an iterable")
-                candidates.extend(available_devices)
-        device = next(
-            (candidate for candidate in candidates if str(candidate) == device_key),
-            None,
+    clip_bounds = (
+        (
+            bool(attrs.get("_advect_clip_min_is_input", False)),
+            bool(attrs.get("_advect_clip_max_is_input", False)),
         )
-        if device is None:
-            raise ValueError(f"Array API device {device_key!r} is unavailable at execution")
-        kwargs["device"] = device
-    if kwargs.get("dtype") is not None:
-        dtype = kwargs["dtype"]
-        kwargs["dtype"] = getattr(namespace, str(dtype), dtype)
-    if leaf_name in {"reshape", "broadcast_to"}:
-        return _namespace_function(namespace, path)(inputs[0], kwargs.pop("shape"), **kwargs)
-    if leaf_name == "clip":
-        values = iter(inputs[1:])
-        lower = next(values) if bool(attrs.get("_advect_clip_min_is_input", False)) else None
-        upper = next(values) if bool(attrs.get("_advect_clip_max_is_input", False)) else None
-        return _namespace_function(namespace, path)(inputs[0], min=lower, max=upper, **kwargs)
-    if leaf_name == "pinv":
-        tolerance = attrs.get("_advect_pinv_tolerance")
-        if tolerance is not None:
-            if tolerance not in {"rcond", "rtol"} or len(inputs) != 2:
-                raise ValueError("pinv tolerance metadata does not match its operands")
-            kwargs[str(tolerance)] = inputs[1]
-        return _namespace_function(namespace, path)(inputs[0], **kwargs)
-    if leaf_name in {"diagonal", "trace"} and getattr(namespace, "__name__", "") != "numpy":
-        rank = len(inputs[0].shape)
-        first_axis = normalize_axis(kwargs.pop("axis1", 0), rank)
-        second_axis = normalize_axis(kwargs.pop("axis2", 1), rank)
-        axes = (
-            *(axis for axis in range(rank) if axis not in {first_axis, second_axis}),
-            first_axis,
-            second_axis,
+        if kind == "clip"
+        else (False, False)
+    )
+    tolerance = attrs.get("_advect_pinv_tolerance") if kind == "pinv" else None
+    as_array = kind == "astype" and bool(attrs.get("_advect_array_api_asarray", False))
+    static_kwargs = {key: value for key, value in attrs.items() if not key.startswith("_advect_")}
+    positional: tuple[Any, ...] = ()
+    if leaf in _POSITIONAL_ATTRS:
+        positional = tuple(
+            static_kwargs.pop(name) if default is _REQUIRED else static_kwargs.pop(name, default)
+            for name, default in _POSITIONAL_ATTRS[leaf]
         )
-        if axes != tuple(range(rank)):
-            inputs = (_namespace_function(namespace, "permute_dims")(inputs[0], axes),)
-    if leaf_name in {"empty", "ones", "zeros"}:
-        return _namespace_function(namespace, path)(kwargs.pop("shape"), **kwargs)
-    if leaf_name == "eye":
-        n_rows = kwargs.pop("n_rows")
-        n_cols = kwargs.pop("n_cols", None)
-        return _namespace_function(namespace, path)(n_rows, n_cols, **kwargs)
-    if leaf_name == "arange":
-        start = kwargs.pop("start")
-        stop = kwargs.pop("stop", None)
-        step = kwargs.pop("step", 1)
-        return _namespace_function(namespace, path)(start, stop, step, **kwargs)
-    if leaf_name == "linspace":
-        start = kwargs.pop("start")
-        stop = kwargs.pop("stop")
-        num = kwargs.pop("num")
-        return _namespace_function(namespace, path)(start, stop, num, **kwargs)
-    if leaf_name in {"fftfreq", "rfftfreq"}:
-        n = kwargs.pop("n")
-        if getattr(namespace, "__name__", "") == "numpy":
-            dtype = kwargs.pop("dtype")
-            result = _namespace_function(namespace, path)(n, **kwargs)
-            return result.astype(dtype, copy=False)
-        return _namespace_function(namespace, path)(n, **kwargs)
-    if leaf_name in {"argsort", "sort"} and getattr(namespace, "__name__", "") == "numpy":
-        descending = bool(kwargs.pop("descending", False))
-        if descending:
+    elif leaf == "transpose":
+        axes = static_kwargs.pop("axes", None)
+        positional = () if axes is None else (axes,)
+
+    def evaluate(  # noqa: PLR0912 - one explicit portable execution schema
+        inputs: tuple[Any, ...],
+        context: Any | None = None,
+        _donation_position: int | None = None,
+    ) -> Any:
+        if binary is not None and len(inputs) == 2:
+            left, right = inputs
+            if (
+                (type(left) in _PYTHON_SCALARS and type(right) in _PYTHON_SCALARS)
+                or callable(getattr(left, "_advect_snapshot", None))
+                or callable(getattr(right, "_advect_snapshot", None))
+            ):
+                return binary(left, right)
+        if unary is not None and len(inputs) == 1 and type(inputs[0]) in _PYTHON_SCALARS:
+            return unary(inputs[0])
+        resolved = context if context is not None else _namespace_from_inputs(inputs)
+        if resolved is None:
+            raise RuntimeError(f"Cannot execute {op!r} without an array namespace")
+        namespace = (
+            resolved.raw_namespace if isinstance(resolved, ResolvedArrayNamespace) else resolved
+        )
+        is_numpy = getattr(namespace, "__name__", "") == "numpy"
+        if not is_numpy:
+            inputs = cast(
+                "tuple[Any, ...]",
+                materialize_weak_scalar_operands(op, inputs, namespace=namespace),
+            )
+        kwargs = dict(static_kwargs)
+        if accumulates and inputs and kwargs.get("dtype") is None:
+            requested = (
+                attr_version
+                if isinstance(attr_version, str)
+                else getattr(resolved, "_advect_requested_array_api_version", None)
+            )
+            if isinstance(requested, str):
+                target_dtype = accumulation_dtype(inputs[0].dtype, array_api_version=requested)
+                if target_dtype != dtype_name(inputs[0].dtype):
+                    kwargs["dtype"] = target_dtype
+        if isinstance(device_key, str):
+            kwargs["device"] = _execution_device(device_key, inputs, namespace)
+        if kwargs.get("dtype") is not None:
+            kwargs["dtype"] = getattr(namespace, str(kwargs["dtype"]), kwargs["dtype"])
+
+        if kind == "astype":
+            dtype = kwargs.pop("dtype", None)
+            if as_array:
+                if dtype is not None:
+                    kwargs["dtype"] = dtype
+                return _namespace_member(namespace, _ASARRAY)(inputs[0], **kwargs)
+            if dtype is None:
+                raise TypeError("astype requires a dtype")
+            scalar_type = getattr(namespace, "generic", None)
+            if type(inputs[0]) in _PYTHON_SCALARS or (
+                isinstance(scalar_type, type) and isinstance(inputs[0], scalar_type)
+            ):
+                return _namespace_member(namespace, _ASARRAY)(inputs[0], dtype=dtype)
+            return _namespace_member(namespace, members)(inputs[0], dtype, **kwargs)
+        if kind == "diagonal" and not is_numpy:
+            rank = len(inputs[0].shape)
+            first_axis = normalize_axis(kwargs.pop("axis1", 0), rank)
+            second_axis = normalize_axis(kwargs.pop("axis2", 1), rank)
+            axes = (
+                *(axis for axis in range(rank) if axis not in {first_axis, second_axis}),
+                first_axis,
+                second_axis,
+            )
+            if axes != tuple(range(rank)):
+                inputs = (_namespace_member(namespace, _PERMUTE_DIMS)(inputs[0], axes),)
+        elif kind == "sort" and is_numpy and bool(kwargs.pop("descending", False)):
             raise NotImplementedError(
                 "Portable staged descending sort is not supported on NumPy; "
                 "use an Array API provider or sort ascending."
             )
-        return _namespace_function(namespace, path)(*inputs, **kwargs)
-    if leaf_name == "moveaxis":
-        return _namespace_function(namespace, path)(
-            inputs[0],
-            kwargs.pop("source"),
-            kwargs.pop("destination"),
-            **kwargs,
-        )
-    if leaf_name == "repeat":
-        return _namespace_function(namespace, path)(
-            inputs[0],
-            kwargs.pop("repeats"),
-            **kwargs,
-        )
-    if leaf_name == "tile":
-        return _namespace_function(namespace, path)(
-            inputs[0],
-            kwargs.pop("reps"),
-            **kwargs,
-        )
-    if leaf_name == "full":
-        return _namespace_function(namespace, path)(
-            kwargs.pop("shape"),
-            inputs[0],
-            **kwargs,
-        )
-    if leaf_name in {"permute_dims", "transpose"}:
-        axes = kwargs.pop("axes", None)
-        function = _namespace_function(namespace, path)
-        return (
-            function(inputs[0], **kwargs) if axes is None else function(inputs[0], axes, **kwargs)
-        )
-    if leaf_name == "astype":
-        dtype = kwargs.pop("dtype", None)
-        if bool(attrs.get("_advect_array_api_asarray", False)):
-            if dtype is not None:
-                kwargs["dtype"] = dtype
-            return _namespace_function(namespace, "asarray")(inputs[0], **kwargs)
-        if dtype is None:
-            raise TypeError("astype requires a dtype")
-        scalar_type = getattr(namespace, "generic", None)
-        if type(inputs[0]) in {bool, complex, float, int} or (
-            isinstance(scalar_type, type) and isinstance(inputs[0], scalar_type)
-        ):
-            return _namespace_function(namespace, "asarray")(inputs[0], dtype=dtype)
-        return _namespace_function(namespace, path)(inputs[0], dtype, **kwargs)
-    if leaf_name in {"concat", "concatenate", "stack"}:
-        return _namespace_function(namespace, path)(inputs, **kwargs)
-    return _namespace_function(namespace, path)(*inputs, **kwargs)
+        function = _namespace_member(namespace, members)
+        if kind == "operand":
+            return function(inputs[0], *positional, **kwargs)
+        if kind == "creation":
+            return function(*positional, **kwargs)
+        if kind == "frequency" and is_numpy:
+            dtype = kwargs.pop("dtype")
+            return function(*positional, **kwargs).astype(dtype, copy=False)
+        if kind == "frequency":
+            return function(*positional, **kwargs)
+        if kind == "full":
+            return function(*positional, inputs[0], **kwargs)
+        if kind == "sequence":
+            return function(inputs, **kwargs)
+        if kind == "clip":
+            values = iter(inputs[1:])
+            lower = next(values) if clip_bounds[0] else None
+            upper = next(values) if clip_bounds[1] else None
+            return function(inputs[0], min=lower, max=upper, **kwargs)
+        if kind == "pinv":
+            if tolerance is not None:
+                if tolerance not in {"rcond", "rtol"} or len(inputs) != 2:
+                    raise ValueError("pinv tolerance metadata does not match its operands")
+                kwargs[str(tolerance)] = inputs[1]
+            return function(inputs[0], **kwargs)
+        return function(*inputs, **kwargs)
+
+    return evaluate
+
+
+_CORE_BINDERS: dict[str, Callable[[Mapping[str, Any]], BoundEvaluator]] = {
+    "advect.copy": _bind_copy_evaluator,
+    "advect.getitem": _bind_getitem_evaluator,
+    "advect.getoutput": _bind_getoutput_evaluator,
+    "advect.index_update": _bind_index_update_evaluator,
+}
 
 
 def _decode_attrs_for_vjp(op: str, attrs: Mapping[str, Any]) -> dict[str, Any]:
@@ -719,6 +673,5 @@ __all__ = [
     "_decode_attrs_for_vjp",
     "bind_native_node_evaluator",
     "bind_node_evaluator",
-    "evaluate_node_value",
     "has_core_evaluator",
 ]

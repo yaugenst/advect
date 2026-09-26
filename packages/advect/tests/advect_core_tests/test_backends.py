@@ -11,7 +11,6 @@ import numpy as np
 import pytest
 
 from advect.core._array_api.frontend import ArrayAPITracer, _accepts_array_api
-from advect.core._backend_hooks import resolve_backend_hooks
 from advect.core._backends import (
     dispatch_input,
     get_hook,
@@ -19,6 +18,7 @@ from advect.core._backends import (
     register_input_handler,
 )
 from advect.core._context import _set_active_recorder
+from advect.core._eval_dispatch import bind_node_evaluator
 from advect.core._native import DynamicTape
 from advect_core_tests._backend_state import isolated_backend_state
 
@@ -122,13 +122,10 @@ def test_hook_registration_is_idempotent_for_the_identical_callable() -> None:
         return op, inputs, attrs
 
     register_hook("idempotent.evaluate_op", evaluate)
-    resolved, _decode = resolve_backend_hooks("idempotent.add", ())
-    assert resolved is evaluate
+    assert get_hook("idempotent.evaluate_op") is evaluate
 
     register_hook("idempotent.evaluate_op", evaluate)
 
-    resolved_again, _decode = resolve_backend_hooks("idempotent.add", ())
-    assert resolved_again is evaluate
     assert get_hook("idempotent.evaluate_op") is evaluate
 
 
@@ -144,9 +141,20 @@ def test_hook_registration_rejects_rebinding() -> None:
     with pytest.raises(ValueError, match="already registered"):
         register_hook("single_assignment.evaluate_op", second)
 
-    resolved, _decode = resolve_backend_hooks("single_assignment.add", ())
-    assert resolved is first
     assert get_hook("single_assignment.evaluate_op") is first
+
+
+@pytest.mark.parametrize(
+    ("op", "attrs"),
+    [("advect.const", {}), ("advect.copy", {"_advect_backend": "unregistered"})],
+    ids=["no-evaluator", "unregistered-backend"],
+)
+def test_staged_binder_rejects_operations_without_an_evaluator(
+    op: str,
+    attrs: dict[str, object],
+) -> None:
+    with pytest.raises(ValueError, match="No evaluator for staged operation"):
+        bind_node_evaluator(op, attrs)
 
 
 def test_generic_array_api_version_guard_never_claims_numpy(

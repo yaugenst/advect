@@ -18,7 +18,7 @@ from advect.autodiff.api.common import (
 from advect.autodiff.rules.array_family.providers import resolve_array_family_backend_provider
 from advect.core._array_api.providers import ResolvedArrayNamespace
 from advect.core._errors import HigherOrderNotSupportedError
-from advect.core._eval_dispatch import bind_node_evaluator, evaluate_node_value
+from advect.core._eval_dispatch import bind_node_evaluator
 
 
 def _numpy_sin(value: object) -> object:
@@ -170,13 +170,6 @@ def test_unbound_numpy_evaluator_checks_provider_before_fallback_dispatch() -> N
 
     with pytest.raises(TypeError, match="NumPy-authored node"):
         evaluator((value,), context, None)
-    with pytest.raises(TypeError, match="NumPy-authored node"):
-        evaluate_node_value(
-            "unbound.operation",
-            (value,),
-            attrs,
-            namespace=context,
-        )
 
 
 def test_nested_staged_differentiation_retains_numpy_frontend() -> None:

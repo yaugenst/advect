@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 
 import advect as ad
-from advect.core._eval_dispatch import _evaluate_array_op, evaluate_node_value
+from advect.core._eval_dispatch import _bind_array_op, bind_node_evaluator
 from advect.core._pytree import tree_flatten, tree_map
 from advect.core._registry import get_registry
 from advect.testing import _real_inner_product, _real_inner_product_magnitude
@@ -164,7 +164,7 @@ def _evaluate_rule_op(
                 dict(attrs),
             )
         else:
-            result = _evaluate_array_op(op, operands, attrs, namespace)
+            result = _bind_array_op(op, attrs)(operands, namespace, None)
     elif op == "advect.getitem":
         result = operands[0][attrs["index"]]
     elif op == "advect.index_update":
@@ -178,7 +178,7 @@ def _evaluate_rule_op(
     elif op == "advect.getoutput":
         result = operands[0][int(attrs["index"])]
     else:
-        result = evaluate_node_value(op, operands, attrs)
+        result = bind_node_evaluator(op, attrs)(operands, None, None)
     # NumPy 2 returns namedtuple subclasses for decompositions while Advect's
     # atomic multi-output node deliberately owns a plain tuple.
     if isinstance(result, tuple) and type(result) is not tuple:
