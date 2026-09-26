@@ -204,7 +204,13 @@ def _trace_passive_outer_value(
 ) -> object:
     """Lift outer tracers into this tape without differentiating their positions."""
     if callable(getattr(value, "_advect_snapshot", None)):
-        traced, _node_id = _wrap_input(value, graph, name=prefix, active=False)
+        traced, _node_id = _wrap_input(
+            value,
+            graph,
+            name=prefix,
+            active=False,
+            weak=bool(getattr(value, "_advect_weak", False)),
+        )
         return traced
 
     paths, leaves, treedef = tree_flatten_with_paths(value)
@@ -215,7 +221,13 @@ def _trace_passive_outer_value(
         if traced_leaves is None:
             traced_leaves = list(leaves)
         leaf_name = _format_leaf_name(prefix, path)
-        traced, _node_id = _wrap_input(leaf, graph, name=leaf_name, active=False)
+        traced, _node_id = _wrap_input(
+            leaf,
+            graph,
+            name=leaf_name,
+            active=False,
+            weak=bool(getattr(leaf, "_advect_weak", False)),
+        )
         traced_leaves[index] = traced
 
     return value if traced_leaves is None else tree_unflatten(treedef, traced_leaves)

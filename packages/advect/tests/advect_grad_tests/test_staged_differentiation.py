@@ -147,6 +147,37 @@ def test_staged_grad_preserves_unselected_outer_trace_operands() -> None:
     assert_allclose(restored(value, weight, scale=scale), expected)
 
 
+@pytest.mark.parametrize("declared", [False, True], ids=["example", "spec"])
+def test_staged_transforms_preserve_unselected_weak_scalar_operands(declared: bool) -> None:
+    def loss(value: object, scale: object) -> object:
+        return np.sum(scale * value * value)
+
+    value = np.array([1.0, 2.0, 3.0])
+    scale = 2.5
+    primal = (
+        ad.stage(
+            loss,
+            specs=(ad.ArraySpec(value.shape, value.dtype), ad.ArraySpec((), "float64", weak=True)),
+        )
+        if declared
+        else ad.stage(loss, value, scale)
+    )
+    expected = 2 * scale * value
+
+    gradient = ad.grad(primal)
+    assert_allclose(gradient(value, scale), expected)
+    result, actual = ad.value_and_grad(primal)(value, scale)
+    assert_allclose(result, loss(value, scale))
+    assert_allclose(actual, expected)
+    cotangent = np.array(1.5)
+    assert_allclose(
+        ad.vjp_program(primal)(value, scale, cotangent=cotangent),
+        cotangent * expected,
+    )
+    restored = ad.StagedProgram.from_dict(gradient.to_dict())
+    assert_allclose(restored(value, scale), expected)
+
+
 def test_vjp_program_is_a_serializable_staged_pullback() -> None:
     def transform(value: object, weight: object) -> dict[str, object]:
         return {
