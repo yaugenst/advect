@@ -17,7 +17,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 from functools import partial
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 from advect.core._abstract_domains import operation_semantics
 from advect.core._abstract_helpers import (
@@ -1288,7 +1288,7 @@ class ArrayAPITracer:
     __array_priority__ = 100_000
     __advect_namespace_is_instance_specific__ = True
     # Elementwise `__eq__` is installed below; keep tracers unhashable.
-    __hash__ = None  # type: ignore[assignment]
+    __hash__: ClassVar[None] = None
 
     def __init__(
         self,
