@@ -1,4 +1,4 @@
-# ruff: noqa: ANN401, PLR2004, SLF001
+# ruff: noqa: ANN401, SLF001
 """Orchestrate Python staging across abstract tracing and the durable runtime.
 
 This module owns call-signature validation, snapshots static inputs, drives an
@@ -264,6 +264,7 @@ class _ExecutionState:
 _STAGED_PROGRAM_FORMAT = "advect.ssa-program"
 _STAGED_PROGRAM_FORMAT_VERSION = 2
 _OPTIMIZATION_PASS_NAMES = ("dce", "simplify", "cse")
+_SHA256_HEX = re.compile(r"[0-9a-f]{64}")
 
 
 def _encode_optimization(report: OptimizationReport) -> dict[str, object]:
@@ -427,11 +428,7 @@ def _decode_constant(payload: object) -> ConstantRecord:
         raise TypeError("Staged constant dtype must be a non-empty string")
     if type(byte_count) is not int or byte_count < 0:
         raise TypeError("Staged constant bytes must be a non-negative integer")
-    if (
-        not isinstance(digest, str)
-        or len(digest) != 64
-        or any(character not in "0123456789abcdef" for character in digest)
-    ):
+    if not isinstance(digest, str) or _SHA256_HEX.fullmatch(digest) is None:
         raise TypeError("Staged constant digest must be a lowercase SHA-256 hex string")
     if name is not None and not isinstance(name, str):
         raise TypeError("Staged constant name must be a string or None")
@@ -445,49 +442,6 @@ def _decode_constant(payload: object) -> ConstantRecord:
         digest=digest,
         name=name,
     )
-
-
-def _link_custom_output_counts(graph_payload: object) -> None:
-    """Install serialized custom-node arities before native graph loading."""
-    if not isinstance(graph_payload, dict):
-        return
-    nodes = graph_payload.get("nodes")
-    if not isinstance(nodes, list):
-        return
-    for node in nodes:
-        if not isinstance(node, dict):
-            continue
-        op = node.get("op")
-        count = node.get("num_outputs")
-        if isinstance(op, str) and op.startswith("custom.") and type(count) is int:
-            try:
-                _record_primitive_output_count(op, count)
-            except KeyError as error:
-                name = op.removeprefix("custom.")
-                raise ValueError(f"Staged program requires unlinked primitive '{name}'") from error
-
-
-def _validate_custom_calls(graph: GraphStore) -> None:
-    """Validate the call metadata needed to link custom nodes safely."""
-    for node_id in graph.node_ids():
-        node = graph.get_node(node_id)
-        if not node.op.startswith("custom."):
-            continue
-        attrs = decode_graph_attrs_from_native(node.attrs)
-        try:
-            call_meta, _node_attrs = _split_primitive_attrs(attrs)
-        except (TypeError, ValueError) as error:
-            raise ValueError(
-                f"Staged custom node {node.op!r} has an invalid call contract"
-            ) from error
-        if call_meta.output_treedef.num_leaves != node.num_outputs:
-            raise ValueError(
-                f"Staged custom node {node.op!r} output structure does not match its arity"
-            )
-        if len(node.inputs) != sum(call_meta.input_leaf_mask):
-            raise ValueError(
-                f"Staged custom node {node.op!r} input count does not match its call structure"
-            )
 
 
 def _value_spec(value: Any) -> ArraySpec:
@@ -943,22 +897,34 @@ def _validate_constant_manifest(
 
 
 def _deserialize_staged_graph(payload: object) -> GraphStore:
-    """Load one already-optimized graph without rerunning the compiler."""
+    """Link one already-optimized graph to the registry and load it without recompiling."""
     if not isinstance(payload, dict):
         raise TypeError("Staged graph payload must be a mapping")
     raw_nodes = payload.get("nodes")
     if not isinstance(raw_nodes, list):
         raise TypeError("Staged graph nodes must be a list")
     registry = get_registry()
-    for raw_node in raw_nodes:
+    # advect-runtime requires dense node ids, so a list position is its node id.
+    custom_ids: list[int] = []
+    for node_id, raw_node in enumerate(raw_nodes):
         if not isinstance(raw_node, dict):
             raise TypeError("Staged graph node must be a mapping")
         op = raw_node.get("op")
         schema_version = raw_node.get("schema_version")
+        num_outputs = raw_node.get("num_outputs")
         if not isinstance(op, str):
             raise TypeError("Staged graph node op must be a string")
         if type(schema_version) is not int or schema_version < 1:
             raise TypeError("Staged graph node schema_version must be a positive integer")
+        if type(num_outputs) is not int or num_outputs < 1:
+            raise TypeError("Staged graph node num_outputs must be a positive integer")
+        if op.startswith("custom."):
+            try:
+                _record_primitive_output_count(op, num_outputs)
+            except KeyError as error:
+                name = op.removeprefix("custom.")
+                raise ValueError(f"Staged program requires unlinked primitive '{name}'") from error
+            custom_ids.append(node_id)
         op_def = registry.get_optional(op)
         if op_def is None:
             raise ValueError(
@@ -971,22 +937,36 @@ def _deserialize_staged_graph(payload: object) -> GraphStore:
                 f"Staged graph op '{op}' requires schema {schema_version}; "
                 f"linked schema is {expected_schema}"
             )
-
-        num_outputs = raw_node.get("num_outputs")
-        if type(num_outputs) is not int or num_outputs < 1:
-            raise TypeError("Staged graph node num_outputs must be a positive integer")
         if op_def.num_outputs != num_outputs:
             raise ValueError(
                 f"Op '{op}' expects num_outputs={op_def.num_outputs}, got num_outputs={num_outputs}"
             )
 
-    encoded = json.dumps(
-        payload,
-        ensure_ascii=True,
-        sort_keys=True,
-        separators=(",", ":"),
-    )
-    return deserialize_graph_json(encoded)
+    graph = deserialize_graph_json(json.dumps(payload, separators=(",", ":")))
+    _validate_custom_calls(graph, custom_ids)
+    return graph
+
+
+def _validate_custom_calls(graph: GraphStore, node_ids: Sequence[int]) -> None:
+    """Validate the call metadata needed to link custom nodes safely."""
+    for node_id in node_ids:
+        node = graph.get_node(node_id)
+        try:
+            call_meta, _node_attrs = _split_primitive_attrs(
+                decode_graph_attrs_from_native(node.attrs)
+            )
+        except (TypeError, ValueError) as error:
+            raise ValueError(
+                f"Staged custom node {node.op!r} has an invalid call contract"
+            ) from error
+        if call_meta.output_treedef.num_leaves != node.num_outputs:
+            raise ValueError(
+                f"Staged custom node {node.op!r} output structure does not match its arity"
+            )
+        if len(node.inputs) != sum(call_meta.input_leaf_mask):
+            raise ValueError(
+                f"Staged custom node {node.op!r} input count does not match its call structure"
+            )
 
 
 def _encode_artifact(artifact: _CompiledStage) -> dict[str, object]:
@@ -1017,7 +997,6 @@ def _decode_artifact(payload: object) -> _CompiledStage:
         raise ValueError("Staged artifact has invalid fields")
     registry = get_registry()
     with registry.transaction():
-        _link_custom_output_counts(payload["graph"])
         call_specs_payload = payload["call_specs"]
         output_specs_payload = payload["output_specs"]
         constants_payload = payload["constants"]
@@ -1041,7 +1020,6 @@ def _decode_artifact(payload: object) -> _CompiledStage:
         if len(output_specs) != output_treedef.num_leaves:
             raise ValueError("Staged output specs do not match their pytree")
         graph = _deserialize_staged_graph(payload["graph"])
-        _validate_custom_calls(graph)
         input_specs = tuple(spec for spec in call_specs if isinstance(spec, ArraySpec))
         input_nodes = tuple(graph.get_node(node_id) for node_id in graph.inputs)
         if len(input_nodes) != len(input_specs) or any(
@@ -1461,8 +1439,7 @@ class StagedProgram:
             raise TypeError("Staged program format version must be an integer")
         if format_version != _STAGED_PROGRAM_FORMAT_VERSION:
             raise ValueError(f"Unsupported staged program format version {format_version}")
-        with get_registry().transaction():
-            artifact = _decode_artifact(payload["program"])
+        artifact = _decode_artifact(payload["program"])
         loaded = cls.__new__(cls)
         loaded._artifact = artifact
         loaded._compile_seconds = 0.0
