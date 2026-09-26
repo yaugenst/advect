@@ -22,6 +22,8 @@ from advect.core._abstract_helpers import (
 )
 from advect.core._abstract_model import AbstractValue, ArraySpec
 from advect.core._array_api.frontend import (
+    _ARITHMETIC_OPERATORS,
+    _COMPARISON_OPERATORS,
     _FUNCTION_SPECS,
     _INTERNAL_FUNCTION_SPECS,
     _STAGED_ARRAY_API_COMPOSITES,
@@ -752,27 +754,11 @@ def _binary_method(
     return method
 
 
-for _dunder, _operation in {
-    "add": "add",
-    "sub": "subtract",
-    "mul": "multiply",
-    "truediv": "divide",
-    "floordiv": "floor_divide",
-    "mod": "remainder",
-    "pow": "pow",
-    "matmul": "matmul",
-    "and": "bitwise_and",
-    "or": "bitwise_or",
-    "xor": "bitwise_xor",
-    "lt": "less",
-    "le": "less_equal",
-    "gt": "greater",
-    "ge": "greater_equal",
-    "eq": "equal",
-    "ne": "not_equal",
-}.items():
+for _dunder, _operation in _ARITHMETIC_OPERATORS.items():
     setattr(AbstractArray, f"__{_dunder}__", _binary_method(_operation))
     setattr(AbstractArray, f"__r{_dunder}__", _binary_method(_operation, reverse=True))
+for _dunder, _operation in _COMPARISON_OPERATORS.items():
+    setattr(AbstractArray, f"__{_dunder}__", _binary_method(_operation))
 
 
 def _unary_method(name: str) -> Callable[[AbstractArray], AbstractArray]:
@@ -855,20 +841,8 @@ def _inplace_method(name: str) -> Callable[[AbstractArray, object], object]:
 AbstractArray.__neg__ = _unary_method("negative")
 AbstractArray.__pos__ = _unary_method("positive")
 AbstractArray.__abs__ = _unary_method("absolute")
-for _dunder in (
-    ("iadd", "add"),
-    ("isub", "subtract"),
-    ("imul", "multiply"),
-    ("itruediv", "divide"),
-    ("ifloordiv", "floor_divide"),
-    ("imod", "remainder"),
-    ("ipow", "pow"),
-    ("imatmul", "matmul"),
-    ("iand", "bitwise_and"),
-    ("ior", "bitwise_or"),
-    ("ixor", "bitwise_xor"),
-):
-    setattr(AbstractArray, f"__{_dunder[0]}__", _inplace_method(_dunder[1]))
+for _dunder, _operation in _ARITHMETIC_OPERATORS.items():
+    setattr(AbstractArray, f"__i{_dunder}__", _inplace_method(_operation))
 
 
 def _lift(trace: AbstractTrace, value: object) -> AbstractArray:

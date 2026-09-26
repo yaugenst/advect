@@ -1,7 +1,6 @@
-# ruff: noqa: ANN401, FBT001, PLW1641
+# ruff: noqa: ANN401, FBT001
 # ANN401: the Array API protocol is intentionally backend-agnostic.
 # FBT001: __array__ follows NumPy's positional copy protocol.
-# PLW1641: elementwise equality intentionally makes tracers unhashable.
 """Backend-neutral tracing for Python Array API implementations.
 
 This frontend is deliberately small and provider-agnostic.  It recognizes an
@@ -211,6 +210,30 @@ _ARRAY_API_META_FUNCTIONS = _metadata_functions()
 # Frontend-private ``_advect_*`` attributes bypass abstract attribute schemas.
 _RENAMED_PARAMETERS = {"device": "_advect_device", "repetitions": "reps"}
 _ACCUMULATION_FUNCTIONS = frozenset({"prod", "sum"})
+# Python operator stems and the standard functions both tracer classes call.
+# Arithmetic and bitwise operators also install reflected methods; Python
+# reflects a comparison through the other operand's mirrored method.
+_ARITHMETIC_OPERATORS = {
+    "add": "add",
+    "sub": "subtract",
+    "mul": "multiply",
+    "truediv": "divide",
+    "floordiv": "floor_divide",
+    "mod": "remainder",
+    "pow": "pow",
+    "matmul": "matmul",
+    "and": "bitwise_and",
+    "or": "bitwise_or",
+    "xor": "bitwise_xor",
+}
+_COMPARISON_OPERATORS = {
+    "lt": "less",
+    "le": "less_equal",
+    "gt": "greater",
+    "ge": "greater_equal",
+    "eq": "equal",
+    "ne": "not_equal",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -1308,6 +1331,8 @@ class ArrayAPITracer:
 
     __array_priority__ = 100_000
     __advect_namespace_is_instance_specific__ = True
+    # Elementwise `__eq__` is installed below; keep tracers unhashable.
+    __hash__ = None  # type: ignore[assignment]
 
     def __init__(
         self,
@@ -1613,90 +1638,6 @@ class ArrayAPITracer:
         function = getattr(namespace, name)
         return function(other, self) if reverse else function(self, other)
 
-    def __add__(self, other: Any) -> Any:
-        return self._binary("add", other)
-
-    def __radd__(self, other: Any) -> Any:
-        return self._binary("add", other, reverse=True)
-
-    def __sub__(self, other: Any) -> Any:
-        return self._binary("subtract", other)
-
-    def __rsub__(self, other: Any) -> Any:
-        return self._binary("subtract", other, reverse=True)
-
-    def __mul__(self, other: Any) -> Any:
-        return self._binary("multiply", other)
-
-    def __rmul__(self, other: Any) -> Any:
-        return self._binary("multiply", other, reverse=True)
-
-    def __truediv__(self, other: Any) -> Any:
-        return self._binary("divide", other)
-
-    def __rtruediv__(self, other: Any) -> Any:
-        return self._binary("divide", other, reverse=True)
-
-    def __floordiv__(self, other: Any) -> Any:
-        return self._binary("floor_divide", other)
-
-    def __rfloordiv__(self, other: Any) -> Any:
-        return self._binary("floor_divide", other, reverse=True)
-
-    def __mod__(self, other: Any) -> Any:
-        return self._binary("remainder", other)
-
-    def __rmod__(self, other: Any) -> Any:
-        return self._binary("remainder", other, reverse=True)
-
-    def __pow__(self, other: Any) -> Any:
-        return self._binary("pow", other)
-
-    def __rpow__(self, other: Any) -> Any:
-        return self._binary("pow", other, reverse=True)
-
-    def __matmul__(self, other: Any) -> Any:
-        return self._binary("matmul", other)
-
-    def __rmatmul__(self, other: Any) -> Any:
-        return self._binary("matmul", other, reverse=True)
-
-    def __and__(self, other: Any) -> Any:
-        return self._binary("bitwise_and", other)
-
-    def __rand__(self, other: Any) -> Any:
-        return self._binary("bitwise_and", other, reverse=True)
-
-    def __or__(self, other: Any) -> Any:
-        return self._binary("bitwise_or", other)
-
-    def __ror__(self, other: Any) -> Any:
-        return self._binary("bitwise_or", other, reverse=True)
-
-    def __xor__(self, other: Any) -> Any:
-        return self._binary("bitwise_xor", other)
-
-    def __rxor__(self, other: Any) -> Any:
-        return self._binary("bitwise_xor", other, reverse=True)
-
-    def __lt__(self, other: Any) -> Any:
-        return self._binary("less", other)
-
-    def __le__(self, other: Any) -> Any:
-        return self._binary("less_equal", other)
-
-    def __eq__(self, other: object) -> Any:
-        return self._binary("equal", other)
-
-    def __ne__(self, other: object) -> Any:
-        return self._binary("not_equal", other)
-
-    def __gt__(self, other: Any) -> Any:
-        return self._binary("greater", other)
-
-    def __ge__(self, other: Any) -> Any:
-        return self._binary("greater_equal", other)
-
     def __neg__(self) -> Any:
         return self.__array_namespace__().negative(self)
 
@@ -1708,3 +1649,19 @@ class ArrayAPITracer:
 
     def __invert__(self) -> Any:
         return self.__array_namespace__().bitwise_invert(self)
+
+
+def _tracer_operator(
+    function: str, *, reverse: bool = False
+) -> Callable[[ArrayAPITracer, Any], Any]:
+    def operator(self: ArrayAPITracer, other: Any) -> Any:
+        return self._binary(function, other, reverse=reverse)
+
+    return operator
+
+
+for _stem, _function in _ARITHMETIC_OPERATORS.items():
+    setattr(ArrayAPITracer, f"__{_stem}__", _tracer_operator(_function))
+    setattr(ArrayAPITracer, f"__r{_stem}__", _tracer_operator(_function, reverse=True))
+for _stem, _function in _COMPARISON_OPERATORS.items():
+    setattr(ArrayAPITracer, f"__{_stem}__", _tracer_operator(_function))

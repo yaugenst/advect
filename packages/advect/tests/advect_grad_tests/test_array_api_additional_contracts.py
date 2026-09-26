@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import operator
 from types import SimpleNamespace
 from typing import Any
 
@@ -14,6 +15,8 @@ import advect as ad
 from advect.autodiff._ephemeral import trace_call
 from advect.core._array_api import providers, signatures
 from advect.core._array_api.frontend import (
+    _ARITHMETIC_OPERATORS,
+    _COMPARISON_OPERATORS,
     _FUNCTION_SPECS,
     ArrayAPINamespace,
     _accepts_array_api,
@@ -523,37 +526,48 @@ def test_tracer_array_methods_preserve_standard_array_results() -> None:
     assert float(np.asarray(singleton_item)) == 1.0
 
 
-def test_tracer_operator_surface_routes_to_standard_operations() -> None:
-    real = _strict([1.0, 2.0], dtype=strict.float64)
+def _operator_operands(stem: str) -> tuple[Any, Any]:
+    if stem in {"and", "or", "xor"}:
+        return _strict([1, 2, 3], dtype=strict.int64), 6
+    if stem == "matmul":
+        return (
+            _strict([[2.0, 1.0], [0.5, 3.0]], dtype=strict.float64),
+            _strict([[1.0, -1.0], [2.0, 0.25]], dtype=strict.float64),
+        )
+    return _strict([0.5, 1.5, 2.5], dtype=strict.float64), 1.5
+
+
+@pytest.mark.parametrize("stem", sorted({**_ARITHMETIC_OPERATORS, **_COMPARISON_OPERATORS}))
+def test_tracer_operators_match_the_provider_operators(stem: str) -> None:
+    # Regression guard: a reflected operator that dropped its reflection
+    # (`3.0 - x` computing `x - 3.0`) survived the whole suite.
+    value, other = _operator_operands(stem)
+    python_operator = getattr(operator, stem, None) or getattr(operator, f"{stem}_")
+    spellings = [(f"__{stem}__", python_operator(value, other))]
+    if stem in _ARITHMETIC_OPERATORS:
+        spellings.append((f"__r{stem}__", python_operator(other, value)))
+
+    for method, expected in spellings:
+        actual = _trace(lambda argument, method=method: getattr(argument, method)(other), value)
+        assert actual.dtype == expected.dtype, method
+        np.testing.assert_array_equal(np.asarray(actual), np.asarray(expected), err_msg=method)
+
+
+def test_tracer_unary_operators_and_complex_views_match_the_provider() -> None:
+    real = _strict([-1.5, 2.0], dtype=strict.float64)
     integer = _strict([1, 2], dtype=strict.int64)
     complex_value = _strict([1.0 + 2.0j, -3.0 + 0.5j], dtype=strict.complex128)
-    matrix = _strict([[2.0, 0.0], [0.0, 3.0]], dtype=strict.float64)
 
-    real_outputs = _trace(
-        lambda value: (
-            2.0 + value,
-            3.0 - value,
-            4.0 / value,
-            5.0 // value,
-            5.0 % value,
-            2.0**value,
-            value.__rmatmul__(matrix),
-            value > 0.0,
-            value < 3.0,
-            +value,
-            -value,
-            abs(value),
-        ),
-        real,
-    )
-    integer_outputs = _trace(
-        lambda value: (1 & value, 1 | value, 1 ^ value, value & 1, value | 1, value ^ 1, ~value),
-        integer,
-    )
+    for function, value in (
+        (operator.pos, real),
+        (operator.neg, real),
+        (operator.abs, real),
+        (operator.invert, integer),
+    ):
+        np.testing.assert_array_equal(
+            np.asarray(_trace(function, value)), np.asarray(function(value))
+        )
     complex_outputs = _trace(lambda value: (value.conj(), value.real, value.imag), complex_value)
-
-    assert len(real_outputs) == 12
-    assert len(integer_outputs) == 7
     np.testing.assert_array_equal(np.asarray(complex_outputs[0]), np.conj(complex_value))
     np.testing.assert_array_equal(np.asarray(complex_outputs[1]), np.real(complex_value))
     np.testing.assert_array_equal(np.asarray(complex_outputs[2]), np.imag(complex_value))
