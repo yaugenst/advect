@@ -739,29 +739,6 @@ def test_namespace_discovery_validates_requests_and_empty_wrappers() -> None:
     assert providers._get_array_namespace(_WrappedArray(None), api_version="2024.12") is None
 
 
-@pytest.mark.parametrize(
-    "namespace",
-    [
-        pytest.param(_provider_namespace(name=None), id="missing-backend-name"),
-        pytest.param(_provider_namespace(asarray=False), id="missing-asarray"),
-        pytest.param(_provider_namespace(namespace_info=False), id="missing-namespace-info"),
-        pytest.param(_provider_namespace(version="future"), id="malformed-version"),
-        # Regression: negotiation accepted a missing version that input
-        # acceptance then rejected with a generic "No backend" error.
-        pytest.param(_provider_namespace(version=None), id="missing-version"),
-    ],
-)
-def test_negotiation_rejects_incomplete_provider_reports(namespace: Any) -> None:
-    value = _ProtocolArray(namespace)
-
-    with pytest.raises(TypeError, match=r"cannot serve required Array API 2024\.12"):
-        providers._negotiate_array_namespace_for_call(
-            args=(value,),
-            kwargs={},
-            required_version="2024.12",
-        )
-
-
 def test_acceptance_reports_provider_revision_and_noninvasive_failures() -> None:
     old = _ProtocolArray(_provider_namespace(version="2022.12"))
     with pytest.raises(TypeError, match=r"selected Array API 2024\.12"):

@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import re
+from dataclasses import dataclass
 from types import SimpleNamespace
 
 import numpy as np
 import pytest
+from hypothesis import example, given, settings, strategies as st
 
 import advect as ad
 from advect.autodiff._ephemeral import trace_call
@@ -15,7 +18,10 @@ from advect.core._array_api.profiles import (
     materialize_array_api_profile,
     minimum_array_api_version,
 )
-from advect.core._array_api.providers import _negotiate_array_namespace_for_call
+from advect.core._array_api.providers import (
+    ResolvedArrayNamespace,
+    _negotiate_array_namespace_for_call,
+)
 from advect.core._context import _get_active_array_api_version
 
 
@@ -43,92 +49,114 @@ def test_unknown_profile_is_rejected_clearly() -> None:
         materialize_array_api_profile("2025.12")
 
 
-class _VersionedArray:
+# Reported revisions one step below and above the supported range.
+_REPORTED_VERSIONS = ("2021.12", *SUPPORTED_ARRAY_API_VERSIONS, "2025.12")
+
+
+@dataclass(frozen=True, slots=True)
+class _Leaf:
+    """One provider leaf and the protocol report it gives per request."""
+
+    served: frozenset[str]
+    reported: int | str | None  # offset from the request, a malformed string, or none
+    info_from: int  # first supported-revision index exposing namespace info
+    backend: str | None
+    asarray: bool
+
+    def serves(self, version: str) -> bool:
+        return (
+            version in self.served
+            and isinstance(self.reported, int)
+            and self.reported >= 0
+            and (
+                version == "2022.12"
+                or SUPPORTED_ARRAY_API_VERSIONS.index(version) >= self.info_from
+            )
+            and self.backend is not None
+            and self.asarray
+        )
+
+
+class _NegotiatedArray:
     __advect_namespace_is_instance_specific__ = True
     shape = (1,)
     dtype = np.dtype("float64")
 
-    def __init__(
-        self,
-        *supported: str,
-        backend: str = "versioned_array",
-        reported: str | None = None,
-        namespace_info: bool = True,
-    ) -> None:
-        self.supported = frozenset(supported)
-        self.backend = backend
-        self.reported = reported
-        self.namespace_info = namespace_info
+    def __init__(self, leaf: _Leaf) -> None:
+        self.leaf = leaf
         self.requests: list[str | None] = []
 
     def __array_namespace__(self, *, api_version: str | None = None) -> object:
         self.requests.append(api_version)
-        if api_version not in self.supported:
+        leaf = self.leaf
+        if api_version not in leaf.served:
             message = f"unsupported revision {api_version}"
             raise ValueError(message)
-        namespace = SimpleNamespace(
-            __name__=self.backend,
-            __array_api_version__=self.reported or api_version,
-            asarray=lambda value: value,
+        index = SUPPORTED_ARRAY_API_VERSIONS.index(api_version)
+        attributes: dict[str, object] = {}
+        if leaf.backend is not None:
+            attributes["__name__"] = leaf.backend
+        if isinstance(leaf.reported, int):
+            attributes["__array_api_version__"] = _REPORTED_VERSIONS[index + 1 + leaf.reported]
+        elif leaf.reported is not None:
+            attributes["__array_api_version__"] = leaf.reported
+        if index >= leaf.info_from:
+            attributes["__array_namespace_info__"] = object
+        if leaf.asarray:
+            attributes["asarray"] = lambda value: value
+        return SimpleNamespace(**attributes)
+
+
+_LEAVES = st.builds(
+    _Leaf,
+    served=st.frozensets(st.sampled_from(SUPPORTED_ARRAY_API_VERSIONS)),
+    reported=st.sampled_from((None, "future", -1, 0, 1)),
+    info_from=st.integers(0, len(SUPPORTED_ARRAY_API_VERSIONS)),
+    backend=st.sampled_from(("a", "b", None)),
+    asarray=st.booleans(),
+)
+_COMPLETE = frozenset(SUPPORTED_ARRAY_API_VERSIONS)
+
+
+@settings(derandomize=True, deadline=None)
+@given(
+    leaves=st.lists(_LEAVES, min_size=1, max_size=4),
+    required=st.none() | st.sampled_from(SUPPORTED_ARRAY_API_VERSIONS),
+)
+# Regression: a leaf reporting no revision used to negotiate successfully.
+@example(leaves=[_Leaf(_COMPLETE, None, 0, "a", asarray=True)], required=None)
+@example(leaves=[_Leaf(_COMPLETE, 1, 0, "a", asarray=True)], required=None)
+@example(leaves=[_Leaf(frozenset({"2022.12"}), 0, 3, "a", asarray=True)], required=None)
+def test_negotiation_selects_the_newest_revision_every_leaf_serves(
+    leaves: list[_Leaf],
+    required: str | None,
+) -> None:
+    arrays = [_NegotiatedArray(leaf) for leaf in leaves]
+    attempted = tuple(reversed(SUPPORTED_ARRAY_API_VERSIONS)) if required is None else (required,)
+    common = [version for version in attempted if all(leaf.serves(version) for leaf in leaves)]
+
+    def negotiate() -> object:
+        return _negotiate_array_namespace_for_call(
+            args=({"leaves": arrays},),
+            kwargs={},
+            required_version=required,
         )
-        if self.namespace_info:
-            namespace.__array_namespace_info__ = object
-        return namespace
 
-
-def test_negotiation_selects_newest_revision_served_by_every_leaf() -> None:
-    first = _VersionedArray(*SUPPORTED_ARRAY_API_VERSIONS)
-    second = _VersionedArray("2022.12", "2023.12")
-
-    resolution = _negotiate_array_namespace_for_call(
-        args=({"first": first, "nested": [second]},),
-        kwargs={},
-    )
-
-    assert resolution is not None
-    assert resolution.requested_version == "2023.12"
-    assert first.requests == ["2024.12", "2023.12"]
-    assert second.requests == ["2024.12", "2023.12"]
-
-
-def test_negotiation_accepts_a_newer_provider_revision() -> None:
-    value = _VersionedArray(*SUPPORTED_ARRAY_API_VERSIONS, reported="2025.12")
-
-    resolution = _negotiate_array_namespace_for_call(args=(value,), kwargs={})
-
-    assert resolution is not None
-    assert resolution.requested_version == "2024.12"
-    assert resolution.raw_namespace.__array_api_version__ == "2025.12"
-
-
-def test_2022_negotiation_does_not_require_later_namespace_info_protocol() -> None:
-    value = _VersionedArray("2022.12", namespace_info=False)
-
-    resolution = _negotiate_array_namespace_for_call(args=(value,), kwargs={})
-
-    assert resolution is not None
-    assert resolution.requested_version == "2022.12"
-    assert not hasattr(resolution.raw_namespace, "__array_namespace_info__")
-
-
-def test_negotiation_rejects_mixed_providers_before_tracing() -> None:
-    left = _VersionedArray(*SUPPORTED_ARRAY_API_VERSIONS, backend="left_array")
-    right = _VersionedArray(*SUPPORTED_ARRAY_API_VERSIONS, backend="right_array")
-
-    with pytest.raises(TypeError, match="different array providers"):
-        _negotiate_array_namespace_for_call(args=(left, right), kwargs={})
-
-
-def test_negotiation_reports_every_attempted_revision() -> None:
-    value = _VersionedArray()
-
-    with pytest.raises(
-        TypeError,
-        match=r"attempted 2024\.12, 2023\.12, 2022\.12",
-    ):
-        _negotiate_array_namespace_for_call(args=(value,), kwargs={})
-
-    assert value.requests == ["2024.12", "2023.12", "2022.12"]
+    if not common:
+        with pytest.raises(TypeError, match=f"attempted {re.escape(', '.join(attempted))}$"):
+            negotiate()
+        assert arrays[0].requests == list(attempted)
+        return
+    selected = common[0]
+    if len({leaf.backend for leaf in leaves}) > 1:
+        with pytest.raises(TypeError, match="different array providers"):
+            negotiate()
+    else:
+        resolution = negotiate()
+        assert isinstance(resolution, ResolvedArrayNamespace)
+        assert resolution.requested_version == selected
+    # Requests descend and stop at the first revision every leaf serves.
+    assert arrays[0].requests == list(attempted[: attempted.index(selected) + 1])
 
 
 def test_dynamic_numpy_negotiation_uses_provider_declared_revision() -> None:
