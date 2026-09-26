@@ -517,7 +517,7 @@ def _copy_array_value(value: Any, namespace: Any) -> Any:
 
 def _unwrap(value: Any) -> Any:
     if isinstance(value, ArrayAPITracer):
-        payload = _unwrap(_snapshot_traced(value)[1])
+        payload = _unwrap(value._advect_snapshot()[1])  # noqa: SLF001 - same frontend
         return weak_scalar_runtime_value(value, payload)
     if isinstance(value, tuple):
         return tuple(_unwrap(item) for item in value)
@@ -545,18 +545,14 @@ def _operand_for_recorder(
 ) -> tuple[int | None, Any]:
     original = operand
     current = operand
-    original_level: int | None = None
     while isinstance(current, ArrayAPITracer):
-        owner = current.recorder
-        level, _frame_id = owner.runtime_trace_identity()
-        if original_level is None:
-            original_level = level
-        node_id, value = _snapshot_traced(current)
-        if owner is recorder:
-            return node_id, weak_scalar_runtime_value(current, value)
-        current = value
+        if current.recorder is recorder:
+            # Callers pass an active recorder, so this SSA value is live.
+            return current._node_id, weak_scalar_runtime_value(current, current._value)  # noqa: SLF001
+        current = current._advect_snapshot()[1]  # noqa: SLF001 - same frontend
 
     if isinstance(original, ArrayAPITracer):
+        original_level, _frame_id = original.recorder.runtime_trace_identity()
         recorder_level, _frame_id = recorder.runtime_trace_identity()
         if (
             original_level is not None
@@ -719,6 +715,39 @@ def _recorder_trace_level(recorder: DynamicTape) -> int:
         msg = "Array API operation recorder is not bound to an active trace level"
         raise TracingError(msg)
     return level
+
+
+def _recording_targets(tracers: list[ArrayAPITracer]) -> tuple[DynamicTape, ...]:
+    """Return every recorder one operation records into, outermost first.
+
+    Callers validate each tracer's own recorder. Operands owned by one
+    recorder with concrete payloads, the common case, need no trace-level
+    ordering; nested tracers also record into each enclosing recorder.
+    """
+    recorder = tracers[0].recorder
+    if all(
+        tracer.recorder is recorder and not isinstance(tracer._value, ArrayAPITracer)  # noqa: SLF001
+        for tracer in tracers
+    ):
+        return (recorder,)
+    recorder = cast(
+        "DynamicTape",
+        _select_deepest_active_recorder(tracer.recorder for tracer in tracers),
+    )
+    recorder_chain = {
+        nested_recorder for tracer in tracers for nested_recorder in _tracer_recorders(tracer)
+    }
+    target_level = _recorder_trace_level(recorder)
+    enclosing_recorders = sorted(
+        (
+            nested_recorder
+            for nested_recorder in recorder_chain
+            if nested_recorder is not recorder
+            and _recorder_trace_level(nested_recorder) < target_level
+        ),
+        key=_recorder_trace_level,
+    )
+    return (*enclosing_recorders, recorder)
 
 
 def _array_api_tracers(value: Any) -> tuple[ArrayAPITracer, ...]:
@@ -1211,15 +1240,13 @@ class ArrayAPINamespace:
         if not tracers:
             return function(*args, **kwargs)
 
+        root_namespace = self.raw_namespace
         for tracer in tracers:
             tracer._require_active_recorder()  # noqa: SLF001 - same frontend invariant
-            if not _same_namespace(tracer.raw_namespace, self.raw_namespace):
+            if not _same_namespace(tracer._namespace, root_namespace):  # noqa: SLF001
                 msg = f"Cannot combine different Array API namespaces in {path}()"
                 raise TypeError(msg)
-        recorder = cast(
-            "DynamicTape",
-            _select_deepest_active_recorder(tracer.recorder for tracer in tracers),
-        )
+        targets = _recording_targets(tracers)
 
         concrete_args = cast("tuple[Any, ...]", _unwrap(args))
         concrete_kwargs = cast("dict[str, Any]", _unwrap(kwargs))
@@ -1228,7 +1255,7 @@ class ArrayAPINamespace:
             materialize_weak_scalar_operands(
                 binding.op,
                 concrete_args,
-                namespace=self.raw_namespace,
+                namespace=root_namespace,
             ),
         )
         result = function(*concrete_args, **concrete_kwargs)
@@ -1239,29 +1266,13 @@ class ArrayAPINamespace:
         )
 
         attrs = dict(binding.attrs)
-        root_namespace = self.raw_namespace
         backend = _get_backend_key_from_namespace(root_namespace)
         if backend is not None:
             attrs["_advect_backend"] = backend
-        attrs["_advect_array_api_version"] = self.__array_api_version__
+        attrs["_advect_array_api_version"] = self._array_api_version
 
         result_value: Any = outputs
-        recorder_chain = {
-            nested_recorder
-            for operand in binding.operands
-            for nested_recorder in _tracer_recorders(operand)
-        }
-        target_level = _recorder_trace_level(recorder)
-        enclosing_recorders = sorted(
-            (
-                nested_recorder
-                for nested_recorder in recorder_chain
-                if nested_recorder is not recorder
-                and _recorder_trace_level(nested_recorder) < target_level
-            ),
-            key=_recorder_trace_level,
-        )
-        for target_recorder in (*enclosing_recorders, recorder):
+        for target_recorder in targets:
             result_value = _record_array_api_result(
                 recorder=target_recorder,
                 op=binding.op,
@@ -1313,10 +1324,7 @@ class ArrayAPITracer:
         self._recorder = recorder
         self._namespace = namespace
         self._array_api_version = array_api_version
-        self._namespace_proxy = ArrayAPINamespace(
-            namespace,
-            array_api_version=array_api_version,
-        )
+        self._namespace_proxy: ArrayAPINamespace | None = None
         self._owned = owned
 
     @property
@@ -1403,6 +1411,8 @@ class ArrayAPITracer:
         if api_version is not None and api_version != current:
             msg = f"Array API version {api_version!r} requested, but provider exposes {current!r}"
             raise ValueError(msg)
+        if self._namespace_proxy is None:
+            self._namespace_proxy = ArrayAPINamespace(self._namespace, array_api_version=current)
         return self._namespace_proxy
 
     def __array_ufunc__(
