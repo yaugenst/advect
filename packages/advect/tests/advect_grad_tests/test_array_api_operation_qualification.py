@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import zlib
-from dataclasses import replace
 from typing import Any
 
 import array_api_strict
@@ -13,7 +12,6 @@ from scripts import qualify_array_api_operations as qualifier
 
 import advect as ad
 from advect.autodiff._ephemeral import trace_call
-from advect.core._array_api import support
 from advect.core._array_api.evidence import (
     case_parameter_values,
     input_indices,
@@ -102,66 +100,6 @@ def test_complete_claims_have_no_evidence_gaps() -> None:
         for path, row in _ROWS.items()
         if row["complete"] is False
     )
-
-
-def test_complete_claim_fails_closed_when_callable_evidence_is_absent(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    remaining = tuple(case for case in _ALL_CASES if case.path != "abs")
-    monkeypatch.setattr(
-        support,
-        "operation_evidence_cases",
-        lambda _static_parameters, _version: remaining,
-    )
-
-    row = next(row for row in support.build_support_profile()["callables"] if row["path"] == "abs")
-
-    assert row["complete"] is False
-    assert row["modes"] == []
-    assert row["note"] == "no executable callable evidence"
-
-
-def test_complete_claim_fails_closed_when_static_variant_is_absent(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    remaining = tuple(
-        case
-        for case in _ALL_CASES
-        if not (case.path == "sum" and case.variant == "keepdims=default")
-    )
-    monkeypatch.setattr(
-        support,
-        "operation_evidence_cases",
-        lambda _static_parameters, _version: remaining,
-    )
-
-    row = next(row for row in support.build_support_profile()["callables"] if row["path"] == "sum")
-
-    assert row["complete"] is False
-    assert row["modes"] == []
-    assert "keepdims lacks default static-variant evidence" in row["note"]
-
-
-def test_complete_claim_fails_closed_when_one_variant_lacks_a_lifetime(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    weakened = tuple(
-        replace(case, modes=("dynamic",))
-        if case.path == "sum" and case.variant == "keepdims=default"
-        else case
-        for case in _ALL_CASES
-    )
-    monkeypatch.setattr(
-        support,
-        "operation_evidence_cases",
-        lambda _static_parameters, _version: weakened,
-    )
-
-    row = next(row for row in support.build_support_profile()["callables"] if row["path"] == "sum")
-
-    assert row["complete"] is False
-    assert row["modes"] == []
-    assert "claimed lifetimes lack executable evidence" in row["note"]
 
 
 def _metadata_can_cast(x: Any) -> object:

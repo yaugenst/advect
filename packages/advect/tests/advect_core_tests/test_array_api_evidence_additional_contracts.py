@@ -4,14 +4,11 @@ from __future__ import annotations
 
 from dataclasses import replace
 from types import SimpleNamespace
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-import array_api_strict as strict
-import numpy as np
 import pytest
 
 import advect as ad
-from advect.autodiff._ephemeral import trace_call
 from advect.core._array_api import support
 from advect.core._array_api.evidence import (
     MetadataCase,
@@ -19,19 +16,8 @@ from advect.core._array_api.evidence import (
 )
 from advect.core._array_api.profiles import LATEST_ARRAY_API_VERSION
 
-
-def _trace(function: Any, value: Any) -> Any:
-    traced = trace_call(
-        function,
-        args=(value,),
-        kwargs={},
-        argnums=(0,),
-        argnames=None,
-    )
-    try:
-        return traced.output
-    finally:
-        traced.tape.release_payloads()
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 def test_array_api_catalog_modes_are_the_evidenced_support_profile() -> None:
@@ -58,116 +44,129 @@ def test_array_api_catalog_modes_are_the_evidenced_support_profile() -> None:
             assert set(str(declared["note"]).split("; ")) <= partial_notes, path
 
 
-def test_support_profile_fails_closed_for_missing_metadata_evidence(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    cases = support.metadata_cases()
-    monkeypatch.setattr(
-        support,
-        "metadata_cases",
-        lambda: tuple(case for case in cases if case.path != "finfo"),
+def _evidence(transform: Callable[[Any], Any]) -> Callable[[pytest.MonkeyPatch], None]:
+    """Patch callable evidence; ``transform`` returns ``None`` to drop a case."""
+
+    def patch(monkeypatch: pytest.MonkeyPatch) -> None:
+        cases = operation_evidence_cases(
+            support._static_parameters(version=LATEST_ARRAY_API_VERSION),
+            LATEST_ARRAY_API_VERSION,
+        )
+        kept = tuple(case for case in map(transform, cases) if case is not None)
+        monkeypatch.setattr(support, "operation_evidence_cases", lambda _static, _version: kept)
+
+    return patch
+
+
+def _metadata(transform: Callable[[Any], Any]) -> Callable[[pytest.MonkeyPatch], None]:
+    """Patch metadata evidence; ``transform`` returns ``None`` to drop a case."""
+
+    def patch(monkeypatch: pytest.MonkeyPatch) -> None:
+        kept = tuple(case for case in map(transform, support.metadata_cases()) if case is not None)
+        monkeypatch.setattr(support, "metadata_cases", lambda: kept)
+
+    return patch
+
+
+def _abstract_schema(schema: object) -> Callable[[pytest.MonkeyPatch], None]:
+    """Give every canonical operation the same abstract lowering schema."""
+
+    def patch(monkeypatch: pytest.MonkeyPatch) -> None:
+        registry = SimpleNamespace(
+            get_optional=lambda _name: SimpleNamespace(abstract_schema=schema)
+        )
+        monkeypatch.setattr(support, "get_registry", lambda: registry)
+
+    return patch
+
+
+def _replaced(path_or_identifier: str, replacement: Callable[[Any], Any]) -> Callable[[Any], Any]:
+    return lambda case: (
+        replacement(case) if path_or_identifier in {case.path, case.identifier} else case
     )
 
-    row = next(
-        row for row in support.build_support_profile()["callables"] if row["path"] == "finfo"
-    )
 
-    assert row["complete"] is False
-    assert row["modes"] == []
-    assert row["note"] == "no executable metadata evidence"
-
-
-def test_support_profile_fails_closed_for_incomplete_metadata_evidence(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    cases = support.metadata_cases()
-    monkeypatch.setattr(
-        support,
-        "metadata_cases",
-        lambda: tuple(
-            MetadataCase(case.path, case.data, case.dtype, (), ("dynamic",))
-            if case.path == "finfo"
-            else case
-            for case in cases
-        ),
-    )
-
-    row = next(
-        row for row in support.build_support_profile()["callables"] if row["path"] == "finfo"
-    )
-
-    assert row["complete"] is False
-    assert "metadata parameters lack executable evidence" in row["note"]
-    assert "metadata lifetime evidence is incomplete" in row["note"]
-
-
-def test_support_profile_requires_baseline_and_live_parameter_evidence(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    cases = operation_evidence_cases(
-        support._static_parameters(version=LATEST_ARRAY_API_VERSION),
-        LATEST_ARRAY_API_VERSION,
-    )
-    weakened = tuple(
-        replace(case, args=(object(),), variant="constant-input") if case.path == "abs" else case
-        for case in cases
-    )
-    monkeypatch.setattr(
-        support,
-        "operation_evidence_cases",
-        lambda _static_parameters, _version: weakened,
-    )
-
-    row = next(row for row in support.build_support_profile()["callables"] if row["path"] == "abs")
-
-    assert row["complete"] is False
-    assert "no baseline callable evidence" in row["note"]
-    assert "x lacks live-parameter evidence" in row["note"]
+_KEEPDIMS_DEFAULT = "sum[keepdims=default]"
 
 
 @pytest.mark.parametrize(
-    ("schema", "path"),
+    ("patch", "path", "notes"),
     [
-        (None, "abs"),
-        (SimpleNamespace(allowed_attrs=frozenset(), positional_attrs=frozenset()), "sum"),
+        pytest.param(
+            _metadata(_replaced("finfo", lambda _case: None)),
+            "finfo",
+            {"no executable metadata evidence"},
+            id="metadata-evidence-absent",
+        ),
+        pytest.param(
+            _metadata(
+                _replaced(
+                    "finfo",
+                    lambda case: MetadataCase(case.path, case.data, case.dtype, (), ("dynamic",)),
+                )
+            ),
+            "finfo",
+            {
+                "metadata lifetime evidence is incomplete",
+                "metadata parameters lack executable evidence",
+            },
+            id="metadata-evidence-incomplete",
+        ),
+        pytest.param(
+            _evidence(_replaced("abs", lambda _case: None)),
+            "abs",
+            {"no executable callable evidence"},
+            id="callable-evidence-absent",
+        ),
+        pytest.param(
+            _evidence(
+                _replaced(
+                    "abs",
+                    lambda case: replace(case, args=(object(),), variant="constant-input"),
+                )
+            ),
+            "abs",
+            {"no baseline callable evidence", "x lacks live-parameter evidence"},
+            id="baseline-and-live-parameter-absent",
+        ),
+        pytest.param(
+            _evidence(_replaced(_KEEPDIMS_DEFAULT, lambda _case: None)),
+            "sum",
+            {"keepdims lacks default static-variant evidence"},
+            id="static-variant-absent",
+        ),
+        pytest.param(
+            _evidence(_replaced(_KEEPDIMS_DEFAULT, lambda case: replace(case, modes=("dynamic",)))),
+            "sum",
+            {"claimed lifetimes lack executable evidence"},
+            id="variant-lifetime-absent",
+        ),
+        pytest.param(
+            _abstract_schema(None),
+            "abs",
+            {"claimed lifetimes lack executable evidence"},
+            id="abstract-schema-absent",
+        ),
+        pytest.param(
+            _abstract_schema(
+                SimpleNamespace(allowed_attrs=frozenset(), positional_attrs=frozenset())
+            ),
+            "sum",
+            {"claimed lifetimes lack executable evidence"},
+            id="static-attribute-unlowered",
+        ),
     ],
-    ids=("missing-abstract-schema", "missing-static-attribute"),
 )
-def test_support_profile_requires_complete_abstract_lowering(
+def test_support_profile_fails_closed_without_complete_evidence(
     monkeypatch: pytest.MonkeyPatch,
-    schema: object,
+    patch: Callable[[pytest.MonkeyPatch], None],
     path: str,
+    notes: set[str],
 ) -> None:
-    registry = SimpleNamespace(
-        get_optional=lambda _name: SimpleNamespace(abstract_schema=schema),
-    )
-    monkeypatch.setattr(support, "get_registry", lambda: registry)
+    patch(monkeypatch)
 
     row = next(row for row in support.build_support_profile()["callables"] if row["path"] == path)
 
     assert row["complete"] is False
     assert row["modes"] == []
-    assert "claimed lifetimes lack executable evidence" in row["note"]
-
-
-def test_cumulative_initial_uses_the_vector_default_axis() -> None:
-    value = strict.asarray([1.0, 2.0, 3.0], dtype=strict.float64)
-
-    actual = _trace(
-        lambda x: x.__array_namespace__().cumulative_sum(x, include_initial=True),
-        value,
-    )
-
-    np.testing.assert_array_equal(np.asarray(actual), [0.0, 1.0, 3.0, 6.0])
-
-
-def test_live_sequence_accepts_an_empty_array_child() -> None:
-    value = strict.asarray([], dtype=strict.float64)
-
-    actual = _trace(
-        lambda x: x.__array_namespace__().asarray([x, []], dtype=x.dtype),
-        value,
-    )
-
-    assert actual.shape == (2, 0)
-    assert actual.dtype == strict.float64
+    assert set(str(row["note"]).split("; ")) == notes

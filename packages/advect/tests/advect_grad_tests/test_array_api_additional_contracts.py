@@ -475,6 +475,29 @@ def test_diff_rank_zero_boundaries_agree_across_lifetimes() -> None:
             np.testing.assert_allclose(np.asarray(actual), expected)
 
 
+def test_cumulative_initial_uses_the_vector_default_axis() -> None:
+    value = _strict([1.0, 2.0, 3.0], dtype=strict.float64)
+
+    actual = _trace(
+        lambda x: x.__array_namespace__().cumulative_sum(x, include_initial=True),
+        value,
+    )
+
+    np.testing.assert_array_equal(np.asarray(actual), [0.0, 1.0, 3.0, 6.0])
+
+
+def test_live_sequence_accepts_an_empty_array_child() -> None:
+    value = _strict([], dtype=strict.float64)
+
+    actual = _trace(
+        lambda x: x.__array_namespace__().asarray([x, []], dtype=x.dtype),
+        value,
+    )
+
+    assert actual.shape == (2, 0)
+    assert actual.dtype == strict.float64
+
+
 def test_debug_representation_uses_the_provider_value() -> None:
     representations: list[str] = []
     _trace(
