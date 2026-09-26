@@ -56,7 +56,6 @@ from advect.core._portable_constant import (
     iter_constant_values,
     normalize_constant_dtype,
     portable_constant_from_native,
-    portable_constant_from_payload,
     snapshot_constant_parts,
 )
 from advect.core._primitive_call import (
@@ -677,20 +676,11 @@ class _StageBuilder:
             return existing
 
         dtype = normalize_constant_dtype(_dtype_name(spec.dtype))
-        if isinstance(value, _PortableConstant):
-            stored_value = value
-        elif isinstance(value, dict) and value.get("format") == "advect.numeric-constant":
-            stored_value = portable_constant_from_payload(
-                value,
-                shape=spec.shape,
-                dtype=dtype,
-            )
-        else:
-            stored_value = snapshot_constant_parts(
-                value,
-                shape=spec.shape,
-                dtype=dtype,
-            )
+        stored_value = (
+            value
+            if isinstance(value, _PortableConstant)
+            else snapshot_constant_parts(value, shape=spec.shape, dtype=dtype)
+        )
         if stored_value.shape != spec.shape or stored_value.dtype != dtype:
             raise ValueError("Staged constant parts do not match their abstract specification")
         node_id, native_digest = self._builder.append_constant(
@@ -699,8 +689,6 @@ class _StageBuilder:
             dtype,
             kind=stored_value.kind,
         )
-        if native_digest != stored_value.digest:
-            raise RuntimeError("Python and native staged constant digests disagree")
 
         byte_count = len(stored_value.data)
         if value_identity in self._closure_names:
@@ -921,22 +909,14 @@ def _compile_stage(
     )
 
 
-def _constant_records_by_id(
-    constants: Sequence[ConstantRecord],
-) -> dict[int, ConstantRecord]:
-    records: dict[int, ConstantRecord] = {}
-    for record in constants:
-        if record.value_id in records:
-            raise ValueError(f"Staged constant manifest repeats value %{record.value_id}")
-        records[record.value_id] = record
-    return records
-
-
 def _validate_constant_manifest(
     graph: GraphStore,
     constants: Sequence[ConstantRecord],
 ) -> None:
-    records = _constant_records_by_id(constants)
+    records: dict[int, ConstantRecord] = {}
+    for record in constants:
+        if records.setdefault(record.value_id, record) is not record:
+            raise ValueError(f"Staged constant manifest repeats value %{record.value_id}")
     graph_ids = set(graph.constant_ids())
     if set(records) != graph_ids:
         missing = sorted(graph_ids - set(records))
@@ -947,18 +927,15 @@ def _validate_constant_manifest(
         )
     for value_id, record in records.items():
         node = graph.get_node(value_id)
+        # advect-runtime has already checked each payload against its node.
         if tuple(node.shape) != record.shape or _dtype_name(node.dtype) != _dtype_name(
             record.dtype
         ):
             raise ValueError(
                 f"Staged constant %{value_id} manifest shape/dtype does not match its graph node"
             )
-        _kind, dtype, shape, data, digest = graph._constant_parts(value_id)
-        if (
-            tuple(shape) != record.shape
-            or _dtype_name(dtype) != _dtype_name(record.dtype)
-            or len(data) != record.bytes
-        ):
+        _kind, _dtype, _shape, data, digest = graph._constant_parts(value_id)
+        if len(data) != record.bytes:
             raise ValueError(
                 f"Staged constant %{value_id} manifest metadata does not match its payload"
             )
@@ -966,17 +943,6 @@ def _validate_constant_manifest(
             raise ValueError(
                 f"Staged constant %{value_id} manifest digest does not match its payload"
             )
-
-
-def _encode_graph_payload(
-    graph: GraphStore,
-    constants: Sequence[ConstantRecord],
-) -> dict[str, object]:
-    _validate_constant_manifest(graph, constants)
-    payload = json.loads(graph._to_json())
-    if not isinstance(payload, dict):
-        raise TypeError("Native graph artifact must encode a mapping")
-    return payload
 
 
 def _deserialize_staged_graph(payload: object) -> GraphStore:
@@ -1028,7 +994,7 @@ def _deserialize_staged_graph(payload: object) -> GraphStore:
 
 def _encode_artifact(artifact: _CompiledStage) -> dict[str, object]:
     return {
-        "graph": _encode_graph_payload(artifact.graph, artifact.constants),
+        "graph": json.loads(artifact.graph._to_json()),
         "call_treedef": _encode_treedef(artifact.call_treedef),
         "call_specs": [_encode_spec(spec) for spec in artifact.call_specs],
         "output_treedef": _encode_treedef(artifact.output_treedef),
@@ -1291,7 +1257,7 @@ def _materialize_constants(
     def provider_values() -> tuple[object, ...]:
         return tuple(
             _coerce_constant(
-                portable_constant_from_native(*compiled.graph._constant_parts(node_id)),
+                portable_constant_from_native(compiled.graph._constant_parts(node_id)),
                 provider,
                 device=device,
             )

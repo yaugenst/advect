@@ -1,11 +1,8 @@
-# ruff: noqa: ANN401, C901, PLR0912
+# ruff: noqa: ANN401
 """Portable numeric constants at the Python/native graph boundary."""
 
 from __future__ import annotations
 
-import binascii
-import hashlib
-import json
 import math
 import struct
 import sys
@@ -15,22 +12,6 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
-
-_FORMAT = "advect.numeric-constant"
-_VERSION = 2
-_LAYOUT = "C"
-_BYTE_ORDER = "little"
-_PAYLOAD_KEYS = {
-    "byte_order",
-    "data",
-    "digest",
-    "dtype",
-    "format",
-    "kind",
-    "layout",
-    "shape",
-    "version",
-}
 
 _DTYPE_ALIASES = {
     "bool_": "bool",
@@ -74,11 +55,12 @@ _COMPLEX_FORMATS = {
 
 @dataclass(frozen=True, slots=True)
 class _PortableConstant:
+    """Canonical constant bytes; advect-runtime owns the wire format and digest."""
+
     kind: Literal["scalar", "array"]
     dtype: str
     shape: tuple[int, ...]
     data: bytes
-    digest: str
 
 
 def normalize_constant_dtype(dtype: str) -> str:
@@ -103,7 +85,7 @@ def snapshot_constant_parts(
     kind = "scalar" if isinstance(value, (bool, int, float, complex)) else "array"
     if kind == "scalar" and shape:
         raise ValueError("A staged scalar constant must have rank zero")
-    expected_bytes = _element_count(shape) * _item_size(normalized_dtype)
+    expected_bytes = math.prod(shape) * _item_size(normalized_dtype)
     raw = _snapshot_constant_bytes(
         value,
         shape=shape,
@@ -111,19 +93,7 @@ def snapshot_constant_parts(
         kind=kind,
         expected_bytes=expected_bytes,
     )
-    data = bytes(raw)
-    return _PortableConstant(
-        kind=kind,
-        dtype=normalized_dtype,
-        shape=shape,
-        data=data,
-        digest=_constant_digest_bytes(
-            kind=kind,
-            dtype=normalized_dtype,
-            shape=shape,
-            data=data,
-        ),
-    )
+    return _PortableConstant(kind=kind, dtype=normalized_dtype, shape=shape, data=bytes(raw))
 
 
 def _snapshot_constant_bytes(
@@ -169,140 +139,12 @@ def _snapshot_constant_bytes(
     return raw
 
 
-def validate_constant(
-    payload: object,
-    *,
-    shape: tuple[int, ...] | None = None,
-    dtype: str | None = None,
-    byte_count: int | None = None,
-) -> dict[str, object]:
-    """Validate and detach one portable constant mapping."""
-    if not isinstance(payload, dict):
-        raise TypeError("Staged constant payload must be a mapping")
-    if set(payload) != _PAYLOAD_KEYS:
-        raise ValueError("Staged constant payload has invalid fields")
-    if payload["format"] != _FORMAT:
-        raise ValueError(f"Unknown staged constant format {payload['format']!r}")
-    if payload["version"] != _VERSION:
-        raise ValueError(f"Unsupported staged constant version {payload['version']!r}")
-    if payload["layout"] != _LAYOUT:
-        raise ValueError(f"Unsupported staged constant layout {payload['layout']!r}")
-    if payload["byte_order"] != _BYTE_ORDER:
-        raise ValueError(f"Unsupported staged constant byte order {payload['byte_order']!r}")
-
-    kind = payload["kind"]
-    payload_dtype = payload["dtype"]
-    payload_shape = payload["shape"]
-    encoded_data = payload["data"]
-    digest = payload["digest"]
-    if kind not in {"scalar", "array"}:
-        raise ValueError(f"Unknown staged constant kind {kind!r}")
-    if not isinstance(payload_dtype, str):
-        raise TypeError("Staged constant dtype must be a string")
-    normalized_dtype = normalize_constant_dtype(payload_dtype)
-    if payload_dtype != normalized_dtype:
-        raise ValueError("Staged constant dtype must use its canonical portable name")
-    if not isinstance(payload_shape, list) or any(
-        type(size) is not int or size < 0 for size in payload_shape
-    ):
-        raise TypeError("Staged constant shape must contain non-negative integers")
-    normalized_shape = tuple(payload_shape)
-    if kind == "scalar" and normalized_shape:
-        raise ValueError("A staged scalar constant must have rank zero")
-    if not isinstance(encoded_data, str):
-        raise TypeError("Staged constant data must be a hexadecimal string")
-    if encoded_data != encoded_data.lower() or any(
-        character not in "0123456789abcdef" for character in encoded_data
-    ):
-        raise ValueError("Staged constant data must be lowercase hexadecimal")
-    if len(encoded_data) % 2:
-        raise ValueError("Staged constant data must contain complete bytes")
-    raw = bytes.fromhex(encoded_data)
-    expected_bytes = _element_count(normalized_shape) * _item_size(normalized_dtype)
-    if len(raw) != expected_bytes:
-        raise ValueError(
-            f"Staged constant shape {normalized_shape} and dtype {normalized_dtype!r} "
-            f"require {expected_bytes} bytes; payload has {len(raw)}"
-        )
-    if normalized_dtype == "bool" and any(item not in {0, 1} for item in raw):
-        raise ValueError("Staged bool constant bytes must be zero or one")
-    expected_digest = _constant_digest_bytes(
-        kind=kind,
-        dtype=normalized_dtype,
-        shape=normalized_shape,
-        data=raw,
-    )
-    if not isinstance(digest, str) or digest != expected_digest:
-        raise ValueError("Staged constant payload digest does not match its contents")
-    if shape is not None and normalized_shape != shape:
-        raise ValueError("Staged constant payload shape does not match its graph metadata")
-    if dtype is not None and normalized_dtype != normalize_constant_dtype(dtype):
-        raise ValueError("Staged constant payload dtype does not match its graph metadata")
-    if byte_count is not None and len(raw) != byte_count:
-        raise ValueError("Staged constant payload byte count does not match its manifest")
-    return _constant_payload(
-        _PortableConstant(
-            kind=kind,
-            dtype=normalized_dtype,
-            shape=normalized_shape,
-            data=raw,
-            digest=digest,
-        )
-    )
-
-
-def portable_constant_from_payload(
-    payload: object,
-    *,
-    shape: tuple[int, ...] | None = None,
-    dtype: str | None = None,
-    byte_count: int | None = None,
-) -> _PortableConstant:
-    """Decode one validated textual payload into its normal runtime form."""
-    validated = validate_constant(
-        payload,
-        shape=shape,
-        dtype=dtype,
-        byte_count=byte_count,
-    )
-    return _PortableConstant(
-        kind=cast("Literal['scalar', 'array']", validated["kind"]),
-        dtype=str(validated["dtype"]),
-        shape=tuple(cast("list[int]", validated["shape"])),
-        data=bytes.fromhex(str(validated["data"])),
-        digest=str(validated["digest"]),
-    )
-
-
 def portable_constant_from_native(
-    kind: str,
-    dtype: str,
-    shape: list[int],
-    data: bytes,
-    digest: str,
+    parts: tuple[str, str, list[int], bytes, str],
 ) -> _PortableConstant:
-    """Validate raw parts returned by the native portable graph store."""
-    normalized_dtype = normalize_constant_dtype(dtype)
-    normalized_shape = tuple(shape)
-    if kind not in {"scalar", "array"}:
-        raise ValueError(f"Unknown staged constant kind {kind!r}")
-    if kind == "scalar" and normalized_shape:
-        raise ValueError("A staged scalar constant must have rank zero")
-    expected_bytes = _element_count(normalized_shape) * _item_size(normalized_dtype)
-    if len(data) != expected_bytes:
-        raise ValueError(
-            f"Staged constant shape {normalized_shape} and dtype {normalized_dtype!r} "
-            f"require {expected_bytes} bytes; native store has {len(data)}"
-        )
-    expected_digest = _constant_digest_bytes(
-        kind=kind,
-        dtype=normalized_dtype,
-        shape=normalized_shape,
-        data=data,
-    )
-    if digest != expected_digest:
-        raise ValueError("Native staged constant digest does not match its contents")
-    return _PortableConstant(kind, normalized_dtype, normalized_shape, data, digest)
+    """Wrap one payload the native graph store has already validated."""
+    kind, dtype, shape, data, _digest = parts
+    return _PortableConstant(cast("Literal['scalar', 'array']", kind), dtype, tuple(shape), data)
 
 
 def iter_constant_values(
@@ -310,59 +152,6 @@ def iter_constant_values(
 ) -> Iterator[bool | int | float | complex]:
     """Iterate decoded values only for providers without a byte materializer."""
     return _unpack_elements(constant.data, constant.dtype)
-
-
-def _constant_payload(constant: _PortableConstant) -> dict[str, object]:
-    body = _constant_body(
-        kind=constant.kind,
-        dtype=constant.dtype,
-        shape=constant.shape,
-        data=constant.data.hex(),
-    )
-    return {**body, "digest": constant.digest}
-
-
-def _constant_body(
-    *,
-    kind: str,
-    dtype: str,
-    shape: tuple[int, ...],
-    data: str,
-) -> dict[str, object]:
-    return {
-        "format": _FORMAT,
-        "version": _VERSION,
-        "kind": kind,
-        "dtype": dtype,
-        "shape": list(shape),
-        "layout": _LAYOUT,
-        "byte_order": _BYTE_ORDER,
-        "data": data,
-    }
-
-
-def _constant_digest_bytes(
-    *,
-    kind: str,
-    dtype: str,
-    shape: tuple[int, ...],
-    data: bytes,
-) -> str:
-    digest = hashlib.sha256()
-    digest.update(b'{"byte_order":"little","data":"')
-    view = memoryview(data)
-    chunk_size = 1024 * 1024
-    for offset in range(0, len(view), chunk_size):
-        digest.update(binascii.hexlify(view[offset : offset + chunk_size]))
-    suffix = (
-        f'","dtype":{json.dumps(dtype, ensure_ascii=True)},'
-        f'"format":"{_FORMAT}","kind":{json.dumps(kind, ensure_ascii=True)},'
-        f'"layout":"{_LAYOUT}","shape":'
-        f"{json.dumps(list(shape), ensure_ascii=True, separators=(',', ':'))},"
-        f'"version":{_VERSION}}}'
-    )
-    digest.update(suffix.encode("ascii"))
-    return digest.hexdigest()
 
 
 def _constant_elements(
@@ -433,11 +222,4 @@ def _unpack_elements(
 
 
 def _item_size(dtype: str) -> int:
-    format_code = _COMPLEX_FORMATS.get(dtype, _SCALAR_FORMATS.get(dtype))
-    if format_code is None:
-        raise TypeError(f"Unsupported staged constant dtype {dtype!r}")
-    return struct.calcsize(f"<{format_code}")
-
-
-def _element_count(shape: tuple[int, ...]) -> int:
-    return math.prod(shape)
+    return struct.calcsize(f"<{_COMPLEX_FORMATS.get(dtype) or _SCALAR_FORMATS[dtype]}")
