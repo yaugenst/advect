@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from typing import TYPE_CHECKING
 
 import array_api_strict as strict
 import numpy as np
@@ -10,6 +11,9 @@ import pytest
 
 import advect as ad
 from advect.core._registry import get_registry
+
+if TYPE_CHECKING:
+    from types import FunctionType
 
 
 def test_stage_traces_abstract_array_api_and_executes_without_retracing() -> None:
@@ -142,6 +146,24 @@ def test_stage_reports_captured_constants() -> None:
     assert records[0].shape == (3,)
     assert records[0].bytes == kernel.nbytes
     assert len(records[0].digest) == 64
+
+
+@pytest.mark.parametrize(
+    "capture",
+    [
+        lambda x, kernel: x * kernel,
+        lambda x, kernel: np.multiply(x, kernel),  # noqa: PLW0108 - explicit call site
+        lambda x, kernel: np.convolve(x, kernel, mode="same"),
+    ],
+    ids=["operator", "ufunc", "array-function"],
+)
+def test_captured_constant_location_names_the_user_call_site(capture: FunctionType) -> None:
+    kernel = np.array([1.0, 2.0, 1.0])
+    program = ad.stage(lambda x: capture(x, kernel), specs=(ad.ArraySpec((3,), "float64"),))
+
+    code = capture.__code__
+    (record,) = program.constants
+    assert record.location == f"{code.co_filename}:{code.co_firstlineno} in {code.co_name}()"
 
 
 def test_stage_snapshots_bound_method_state() -> None:

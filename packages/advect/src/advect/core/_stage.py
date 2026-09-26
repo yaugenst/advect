@@ -13,8 +13,8 @@ from __future__ import annotations
 
 import json
 import re
+import sys
 import time
-import traceback
 from dataclasses import dataclass, field, replace
 from itertools import pairwise
 from threading import Lock
@@ -82,6 +82,7 @@ from advect.core._stage_serialization import (
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator, Sequence
+    from types import FrameType
 
     from advect.core._native import GraphBuilder, GraphExecutionPlan, GraphStore
     from advect.core._pytree import TreeDef
@@ -609,10 +610,14 @@ def _flatten_runtime_to_treedef(value: Any, treedef: TreeDef) -> list[Any]:
 
 
 def _capture_location() -> str | None:
-    for frame in reversed(traceback.extract_stack()[:-2]):
-        normalized = frame.filename.replace("\\", "/")
-        if "/advect/core/" not in normalized:
-            return f"{frame.filename}:{frame.lineno} in {frame.name}()"
+    """Return the innermost caller frame outside the Advect package."""
+    frame: FrameType | None = sys._getframe(1)
+    while frame is not None:
+        module = frame.f_globals.get("__name__")
+        if not isinstance(module, str) or (module != "advect" and not module.startswith("advect.")):
+            code = frame.f_code
+            return f"{code.co_filename}:{frame.f_lineno} in {code.co_name}()"
+        frame = frame.f_back
     return None
 
 
