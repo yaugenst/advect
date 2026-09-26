@@ -1,4 +1,4 @@
-# ruff: noqa: PLR2004, SLF001
+# ruff: noqa: SLF001
 """Payload-free arrays for explicit, conservative abstract staging.
 
 Only operations declared in :mod:`advect.core._abstract_domains` are stageable.
@@ -17,7 +17,6 @@ from advect.core._abstract_helpers import (
     broadcast_shape as _broadcast_shape,
     dtype_kind_bits as _dtype_kind_bits,
     dtype_name as _dtype_name,
-    normalize_axis as _normalize_axis,
     promote_dtype as _promote_dtype,
     shape_tuple as _shape_tuple,
 )
@@ -28,6 +27,7 @@ from advect.core._array_api.frontend import (
     _STAGED_ARRAY_API_COMPOSITES,
     _staged_array_api_composite,
     bind_array_api_call,
+    lower_array_api_call,
 )
 from advect.core._array_api.profiles import materialize_array_api_profile
 from advect.core._array_api.results import restore_array_api_result
@@ -1238,114 +1238,6 @@ def _array_api_asarray(  # noqa: C901 - one constructor contract
     return _alias_result(value, result) if copy is not True and unchanged else result
 
 
-def _array_api_cumulative_with_initial(
-    trace: AbstractTrace,
-    path: str,
-    raw_args: tuple[Any, ...],
-    raw_kwargs: dict[str, Any],
-) -> AbstractArray:
-    if not raw_args or len(raw_args) > 2:
-        raise TypeError(f"{path}() expects an array and optional axis")
-    if len(raw_args) == 2 and "axis" in raw_kwargs:
-        raise TypeError(f"{path}() received 'axis' twice")
-    source = _lift(trace, raw_args[0])
-    axis_value = raw_args[1] if len(raw_args) == 2 else raw_kwargs.get("axis")
-    if axis_value is None:
-        if source.ndim != 1:
-            raise ValueError(
-                "cumulative operations require axis= for inputs with more than one dimension"
-            )
-        axis = 0
-    else:
-        axis = _normalize_axis(axis_value, source.ndim)
-    options = dict(raw_kwargs)
-    options["axis"] = axis
-    options.pop("include_initial", None)
-    base = cast("AbstractArray", _apply_array_api(trace, path, (source,), options))
-    seed_shape = list(base.shape)
-    seed_shape[axis] = 1
-    fill_value = 1 if path == "cumulative_prod" else 0
-    seed = cast(
-        "AbstractArray",
-        _apply_array_api(
-            trace,
-            "full",
-            (tuple(seed_shape), fill_value),
-            {"dtype": base.dtype},
-        ),
-    )
-    return cast(
-        "AbstractArray",
-        _apply_array_api(trace, "concat", ((seed, base),), {"axis": axis}),
-    )
-
-
-def _array_api_diff(
-    trace: AbstractTrace,
-    raw_args: tuple[Any, ...],
-    raw_kwargs: dict[str, Any],
-) -> AbstractArray:
-    if not raw_args or len(raw_args) > 5:
-        raise TypeError("diff() expects (a, n, axis, prepend, append)")
-    values = dict(raw_kwargs)
-    unexpected = set(values) - {"append", "axis", "n", "prepend"}
-    if unexpected:
-        raise TypeError(
-            f"Abstract staging of diff() does not support {tuple(sorted(unexpected))!r}"
-        )
-    source_raw = raw_args[0]
-    for name, value in zip(("n", "axis", "prepend", "append"), raw_args[1:], strict=False):
-        if name in values:
-            raise TypeError(f"diff() received {name!r} twice")
-        values[name] = value
-    n = values.get("n", 1)
-    if isinstance(n, bool) or not isinstance(n, int) or n < 0:
-        raise ValueError("diff n must be a non-negative integer")
-    source = _lift(trace, source_raw)
-    axis = _normalize_axis(values.get("axis", -1), source.ndim)
-
-    def emit_diff(value: AbstractArray) -> AbstractArray:
-        return cast(
-            "AbstractArray",
-            _record_abstract_op(
-                trace,
-                "array.diff",
-                (value,),
-                {"axis": axis, "n": n},
-                abstract_attrs={"_advect_array_api_version": trace.array_api_version},
-            ),
-        )
-
-    if n == 0 or (values.get("prepend") is None and values.get("append") is None):
-        return emit_diff(source)
-    boundary_shape = list(source.shape)
-    boundary_shape[axis] = 1
-
-    def lift_boundary(raw_value: object) -> AbstractArray:
-        boundary = _lift(trace, raw_value)
-        if boundary.shape == ():
-            return cast(
-                "AbstractArray",
-                _apply_array_api(
-                    trace,
-                    "full",
-                    (tuple(boundary_shape), boundary),
-                    {},
-                ),
-            )
-        return boundary
-
-    parts = [lift_boundary(values["prepend"])] if values.get("prepend") is not None else []
-    parts.append(source)
-    if values.get("append") is not None:
-        parts.append(lift_boundary(values["append"]))
-    joined = cast(
-        "AbstractArray",
-        _apply_array_api(trace, "concat", (tuple(parts),), {"axis": axis}),
-    )
-    return emit_diff(joined)
-
-
 def _apply_array_api(
     trace: AbstractTrace,
     path: str,
@@ -1356,17 +1248,9 @@ def _apply_array_api(
     trace.require_open()
     if path == "asarray":
         return _array_api_asarray(trace, args, kwargs)
-    if path in {"cumulative_prod", "cumulative_sum"} and bool(kwargs.get("include_initial", False)):
-        return _array_api_cumulative_with_initial(trace, path, args, kwargs)
-    if path == "diff":
-        return _array_api_diff(trace, args, kwargs)
-    if path == "searchsorted" and kwargs.get("sorter") is not None:
-        if len(args) != 2:
-            raise TypeError("searchsorted() expects two positional array arguments")
-        options = dict(kwargs)
-        sorter = options.pop("sorter")
-        sorted_source = _apply_array_api(trace, "take", (args[0], sorter), {"axis": 0})
-        return _apply_array_api(trace, path, (sorted_source, args[1]), options)
+    lowered = lower_array_api_call(path, AbstractNamespace(trace), args, kwargs)
+    if lowered is not NotImplemented:
+        return lowered
 
     binding = bind_array_api_call(path, args, kwargs)
     result = _record_abstract_op(

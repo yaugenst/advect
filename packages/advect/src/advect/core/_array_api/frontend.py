@@ -78,6 +78,7 @@ __all__ = [
     "ArrayAPINamespace",
     "ArrayAPITracer",
     "bind_array_api_call",
+    "lower_array_api_call",
 ]
 
 _MIN_MATRIX_RANK = 2
@@ -856,6 +857,100 @@ def _staged_array_api_composite(  # noqa: C901, PLR0912 - explicit bounded surfa
     raise AssertionError(message)
 
 
+_CUMULATIVE_IDENTITIES = {"cumulative_prod": 1, "cumulative_sum": 0}
+
+
+def _cumulative_with_initial(
+    path: str,
+    namespace: Any,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+) -> Any:
+    if len(args) != 1:
+        message = f"{path}() expects one positional array argument"
+        raise TypeError(message)
+    source = args[0]
+    options = dict(kwargs)
+    del options["include_initial"]
+    rank = len(source.shape)
+    axis_value = options.get("axis")
+    if axis_value is None and rank != 1:
+        message = "cumulative operations require axis= for inputs with more than one dimension"
+        raise ValueError(message)
+    axis = 0 if axis_value is None else _normalize_axis(axis_value, rank)
+    base = getattr(namespace, path)(source, **{**options, "axis": axis})
+    seed_shape = list(base.shape)
+    seed_shape[axis] = 1
+    seed = namespace.full(tuple(seed_shape), _CUMULATIVE_IDENTITIES[path], dtype=base.dtype)
+    return namespace.concat((seed, base), axis=axis)
+
+
+def _diff_with_boundaries(
+    namespace: Any,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+) -> Any:
+    if len(args) != 1:
+        message = "diff() expects one positional array argument"
+        raise TypeError(message)
+    source = args[0]
+    options = dict(kwargs)
+    prepend = options.pop("prepend", None)
+    append = options.pop("append", None)
+    if (prepend is None and append is None) or options.get("n", 1) == 0:
+        return namespace.diff(source, **options)
+    axis = _normalize_axis(options.get("axis", -1), len(source.shape))
+    boundary_shape = list(source.shape)
+    boundary_shape[axis] = 1
+
+    def boundary(value: Any) -> Any:
+        # Scalars and rank-zero arrays broadcast across the boundary slice.
+        if getattr(value, "shape", ()) != ():
+            return value
+        return namespace.full(tuple(boundary_shape), value)
+
+    parts = (
+        *(() if prepend is None else (boundary(prepend),)),
+        source,
+        *(() if append is None else (boundary(append),)),
+    )
+    return namespace.diff(namespace.concat(parts, axis=axis), **options)
+
+
+def _searchsorted_with_sorter(
+    namespace: Any,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+) -> Any:
+    if len(args) != _BINARY_ARITY:
+        message = "searchsorted() expects two positional array arguments"
+        raise TypeError(message)
+    options = dict(kwargs)
+    sorted_source = namespace.take(args[0], options.pop("sorter"), axis=0)
+    return namespace.searchsorted(sorted_source, args[1], **options)
+
+
+def lower_array_api_call(
+    path: str,
+    namespace: Any,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+) -> Any:
+    """Lower a standard form that has no single canonical operation.
+
+    The dynamic proxy and the abstract namespace both pass themselves, so each
+    lowered step records through that frontend's ordinary namespace calls.
+    Return ``NotImplemented`` when the call binds to one canonical operation.
+    """
+    if path in _CUMULATIVE_IDENTITIES and kwargs.get("include_initial"):
+        return _cumulative_with_initial(path, namespace, args, kwargs)
+    if path == "diff" and ("prepend" in kwargs or "append" in kwargs):
+        return _diff_with_boundaries(namespace, args, kwargs)
+    if path == "searchsorted" and kwargs.get("sorter") is not None:
+        return _searchsorted_with_sorter(namespace, args, kwargs)
+    return NotImplemented
+
+
 class ArrayAPINamespace:
     """Trace-aware proxy for one concrete Python Array API namespace."""
 
@@ -988,81 +1083,6 @@ class ArrayAPINamespace:
             }
         return sorted(names)
 
-    def _cumulative_with_initial(
-        self,
-        path: str,
-        function: Callable[..., Any],
-        args: tuple[Any, ...],
-        kwargs: dict[str, Any],
-    ) -> Any:
-        if not args:
-            msg = f"{path}() requires an array"
-            raise TypeError(msg)
-        source = args[0]
-        axis_value = kwargs.get("axis")
-        source_shape = tuple(int(size) for size in source.shape)
-        if axis_value is None:
-            if len(source_shape) != 1:
-                msg = "cumulative operations require axis= for inputs with more than one dimension"
-                raise ValueError(msg)
-            axis = 0
-        else:
-            axis = int(axis_value)
-            if axis < 0:
-                axis += len(source_shape)
-            if axis < 0 or axis >= len(source_shape):
-                msg = f"axis {axis_value} is out of bounds"
-                raise ValueError(msg)
-        base_kwargs = dict(kwargs)
-        base_kwargs["axis"] = axis
-        base_kwargs["include_initial"] = False
-        base = self._call(path, function, *args, **base_kwargs)
-        seed_shape = list(base.shape)
-        seed_shape[axis] = 1
-        fill_value = 1 if path == "cumulative_prod" else 0
-        seed = self.raw_namespace.full(
-            tuple(seed_shape),
-            fill_value,
-            dtype=base.dtype,
-        )
-        concat = cast("Callable[..., Any]", self.raw_namespace.concat)
-        return self._call("concat", concat, (seed, base), axis=axis)
-
-    def _diff_with_boundaries(
-        self,
-        function: Callable[..., Any],
-        args: tuple[Any, ...],
-        kwargs: dict[str, Any],
-    ) -> Any:
-        if len(args) != 1:
-            message = "diff() expects one positional array argument"
-            raise TypeError(message)
-        options = dict(kwargs)
-        prepend = options.pop("prepend", None)
-        append = options.pop("append", None)
-        if options.get("n", 1) == 0:
-            return self._call("diff", function, args[0], **options)
-        axis = options.get("axis", -1)
-        parts = tuple(part for part in (prepend, args[0], append) if part is not None)
-        concat = cast("Callable[..., Any]", self.raw_namespace.concat)
-        joined = self._call("concat", concat, parts, axis=axis)
-        return self._call("diff", function, joined, **options)
-
-    def _searchsorted_with_sorter(
-        self,
-        function: Callable[..., Any],
-        args: tuple[Any, ...],
-        kwargs: dict[str, Any],
-    ) -> Any:
-        if len(args) != _BINARY_ARITY:
-            message = "searchsorted() expects two positional array arguments"
-            raise TypeError(message)
-        options = dict(kwargs)
-        sorter = options.pop("sorter")
-        take = cast("Callable[..., Any]", self.raw_namespace.take)
-        sorted_source = self._call("take", take, args[0], sorter, axis=0)
-        return self._call("searchsorted", function, sorted_source, args[1], **options)
-
     def _asarray_live_sequence(
         self,
         function: Callable[..., Any],
@@ -1151,7 +1171,7 @@ class ArrayAPINamespace:
             *(self._lift_discrete_composite(namespace, value) for value in metadata),
         )
 
-    def _call(  # noqa: C901, PLR0911 - one closed frontend dispatch
+    def _call(  # noqa: PLR0911 - one closed frontend dispatch
         self,
         path: str,
         function: Callable[..., Any],
@@ -1181,14 +1201,9 @@ class ArrayAPINamespace:
             return self._dynamic_array_api_composite(path, namespace, args, kwargs)
         if path == "asarray" and isinstance(args[0] if args else None, (tuple, list)):
             return self._asarray_live_sequence(function, args, kwargs)
-        if path == "diff" and any(kwargs.get(name) is not None for name in ("prepend", "append")):
-            return self._diff_with_boundaries(function, args, kwargs)
-        if path == "searchsorted" and kwargs.get("sorter") is not None:
-            return self._searchsorted_with_sorter(function, args, kwargs)
-        if path in {"cumulative_prod", "cumulative_sum"} and bool(
-            kwargs.get("include_initial", False)
-        ):
-            return self._cumulative_with_initial(path, function, args, kwargs)
+        lowered = lower_array_api_call(path, self, args, kwargs)
+        if lowered is not NotImplemented:
+            return lowered
         binding = bind_array_api_call(path, args, kwargs)
         tracers = [operand for operand in binding.operands if isinstance(operand, ArrayAPITracer)]
         if not tracers:

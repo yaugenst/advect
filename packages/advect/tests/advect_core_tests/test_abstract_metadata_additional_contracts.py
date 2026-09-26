@@ -192,10 +192,10 @@ def test_cumulative_include_initial_stages_the_identity_slice(
                 include_initial=True,
             ),
             TypeError,
-            "received 'axis' twice",
+            "expects one positional array argument",
         ),
     ],
-    ids=["missing-matrix-axis", "duplicate-axis"],
+    ids=["missing-matrix-axis", "positional-axis"],
 )
 def test_cumulative_include_initial_validates_axis_contract(
     operation: Callable[[Any, Any], object],
@@ -235,7 +235,7 @@ def test_diff_stages_boundaries_and_the_zero_order_identity() -> None:
         (
             lambda namespace, value: namespace.diff(value, 1, n=2),
             TypeError,
-            "received 'n' twice",
+            "takes 1 positional arguments but 2 were given",
         ),
         (
             lambda namespace, value: namespace.diff(value, period=2),
@@ -253,7 +253,7 @@ def test_diff_stages_boundaries_and_the_zero_order_identity() -> None:
             "out of bounds",
         ),
     ],
-    ids=["duplicate-n", "unknown-option", "boolean-n", "invalid-axis"],
+    ids=["positional-n", "unknown-option", "boolean-n", "invalid-axis"],
 )
 def test_diff_validates_static_controls(
     operation: Callable[[Any, Any], object],

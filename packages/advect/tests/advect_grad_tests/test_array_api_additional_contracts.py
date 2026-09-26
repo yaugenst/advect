@@ -392,7 +392,7 @@ def test_composite_boundaries_fail_before_provider_execution(
                 include_initial=True,
             ),
             _strict([1.0, 2.0], dtype=strict.float64),
-            "axis 2 is out of bounds",
+            "Axis 2 is out of bounds",
             id="cumulative-axis",
         ),
         pytest.param(
@@ -445,6 +445,31 @@ def test_extended_provider_edge_paths() -> None:
         _trace(lambda x: x.__array_namespace__().searchsorted(x, sorter=x), value)
     with pytest.raises(ValueError, match="cannot construct an array from a sequence"):
         _trace(lambda x: x.__array_namespace__().asarray([x[0]], copy=False), value)
+
+
+def test_diff_rank_zero_boundaries_agree_across_lifetimes() -> None:
+    # Regression: the dynamic lowering concatenated rank-zero boundaries as-is
+    # and failed, while the provider and staging broadcast them along the axis.
+    value = _strict([1.0, 4.0, 9.0], dtype=strict.float64)
+    boundary = _strict(0.5, dtype=strict.float64)
+
+    def objective(source: Any, edge: Any) -> Any:
+        namespace = source.__array_namespace__()
+        return namespace.sum(namespace.diff(source, prepend=edge, append=edge) ** 2)
+
+    # diff([b, x0, x1, x2, b]) = [0.5, 3, 5, -8.5] for the values above.
+    expected_value = 0.25 + 9.0 + 25.0 + 72.25
+    expected_gradients = ([-5.0, -4.0, 27.0], -18.0)
+    program = ad.stage(
+        objective,
+        specs=(ad.ArraySpec(value.shape, value.dtype), ad.ArraySpec((), value.dtype)),
+    )
+    restored = ad.StagedProgram.from_dict(program.to_dict())
+    for function in (objective, program, restored):
+        np.testing.assert_allclose(float(function(value, boundary)), expected_value)
+        gradients = ad.grad(function, argnums=(0, 1))(value, boundary)
+        for actual, expected in zip(gradients, expected_gradients, strict=True):
+            np.testing.assert_allclose(np.asarray(actual), expected)
 
 
 def test_debug_representation_uses_the_provider_value() -> None:

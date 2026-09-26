@@ -370,11 +370,14 @@ _INVALID_STAGING_CASES = {
     "cumulative-missing-input": _case(
         lambda x: x.__array_namespace__().cumulative_sum(include_initial=True),
         ((2,),),
-        "expects an array and optional axis",
+        "expects one positional array argument",
         TypeError,
     ),
     "diff-missing-input": _case(
-        lambda x: x.__array_namespace__().diff(), ((2,),), "diff.*expects", TypeError
+        lambda x: x.__array_namespace__().diff(),
+        ((2,),),
+        "diff.*missing required argument 'x'",
+        TypeError,
     ),
     "searchsorted-missing-query": _case(
         lambda x: x.__array_namespace__().searchsorted(x, sorter=x),
