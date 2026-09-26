@@ -33,6 +33,7 @@ from advect.core._array_api.profiles import (
 from advect.core._array_api.providers import (
     _get_array_namespace,
     _get_backend_key_from_namespace,
+    _namespace_serves,
 )
 from advect.core._array_api.results import restore_array_api_result
 from advect.core._array_api.signatures import (
@@ -415,31 +416,11 @@ def _raw_namespace(value: Any, *, api_version: str | None = None) -> Any | None:
     if not callable(namespace_function):
         return None
     try:
-        return namespace_function(api_version=selected)
+        # A default namespace still lets the acceptance predicate emit a
+        # precise version error for providers that cannot serve the pin.
+        return namespace_function()
     except Exception:  # noqa: BLE001 - backend discovery must be non-invasive
-        try:
-            # A default namespace still lets the acceptance predicate emit a
-            # precise version error for providers that cannot serve the pin.
-            return namespace_function()
-        except Exception:  # noqa: BLE001 - backend discovery must be non-invasive
-            return None
-
-
-def _is_standard_array_api_namespace(namespace: Any, *, api_version: str) -> bool:
-    version = getattr(namespace, "__array_api_version__", None)
-    namespace_info = getattr(namespace, "__array_namespace_info__", None)
-    selected = tuple(int(part) for part in api_version.split("."))
-    reported = (
-        tuple(int(part) for part in version.split("."))
-        if isinstance(version, str) and all(part.isdigit() for part in version.split("."))
-        else None
-    )
-    return (
-        reported is not None
-        and reported >= selected
-        and (api_version == "2022.12" or callable(namespace_info))
-        and callable(getattr(namespace, "asarray", None))
-    )
+        return None
 
 
 def _accepts_array_api(value: Any) -> bool:
@@ -465,10 +446,10 @@ def _accepts_array_api(value: Any) -> bool:
     namespace_info = getattr(namespace, "__array_namespace_info__", None)
     asarray = getattr(namespace, "asarray", None)
     if isinstance(version, str) and callable(namespace_info) and callable(asarray):
-        if not _is_standard_array_api_namespace(namespace, api_version=selected):
+        if not _namespace_serves(namespace, selected):
             msg = f"Advect selected Array API {selected}; the input provider exposes {version}"
             raise TypeError(msg)
-    elif not _is_standard_array_api_namespace(namespace, api_version=selected):
+    elif not _namespace_serves(namespace, selected):
         return False
     return backend is not None
 
@@ -488,8 +469,8 @@ def _handle_array_api_input(
     if namespace is None:
         msg = f"{type(value).__name__} no longer exposes an Array API namespace"
         raise TypeError(msg)
-    if not callable(getattr(value, "_advect_snapshot", None)) and not (
-        _is_standard_array_api_namespace(namespace, api_version=selected)
+    if not callable(getattr(value, "_advect_snapshot", None)) and not _namespace_serves(
+        namespace, selected
     ):
         version = getattr(namespace, "__array_api_version__", None)
         msg = f"Advect selected Array API {selected}; the input provider exposes {version!r}"

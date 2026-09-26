@@ -746,6 +746,9 @@ def test_namespace_discovery_validates_requests_and_empty_wrappers() -> None:
         pytest.param(_provider_namespace(asarray=False), id="missing-asarray"),
         pytest.param(_provider_namespace(namespace_info=False), id="missing-namespace-info"),
         pytest.param(_provider_namespace(version="future"), id="malformed-version"),
+        # Regression: negotiation accepted a missing version that input
+        # acceptance then rejected with a generic "No backend" error.
+        pytest.param(_provider_namespace(version=None), id="missing-version"),
     ],
 )
 def test_negotiation_rejects_incomplete_provider_reports(namespace: Any) -> None:

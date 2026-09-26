@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 from advect.core._array_api.profiles import (
     LATEST_ARRAY_API_VERSION,
@@ -196,27 +196,30 @@ def _get_provider_array_api_version(namespace: Any) -> str | None:
     return version if isinstance(version, str) else None
 
 
+def _namespace_serves(namespace: Any, version: str) -> bool:
+    """Return whether a namespace reports the standard protocol for one revision.
+
+    Negotiation and frontend input acceptance share this one predicate, so a
+    revision negotiated for a call is one the frontend then accepts.
+    """
+    reported = _get_provider_array_api_version(namespace)
+    reported_key = None if reported is None else _version_key(reported)
+    requested_key = cast("tuple[int, int]", _version_key(version))
+    return (
+        reported_key is not None
+        and reported_key >= requested_key
+        and (version == "2022.12" or callable(getattr(namespace, "__array_namespace_info__", None)))
+        and callable(getattr(namespace, "asarray", None))
+    )
+
+
 def _provider_can_report(
     namespace: Any,
     *,
     requested_version: str,
 ) -> str | None:
     backend = _get_backend_key_from_namespace(namespace)
-    if backend is None:
-        return None
-    if not callable(getattr(namespace, "asarray", None)):
-        return None
-
-    provider_version = _get_provider_array_api_version(namespace)
-    if provider_version is not None:
-        reported_key = _version_key(provider_version)
-        requested_key = _version_key(requested_version)
-        if reported_key is None or requested_key is None or reported_key < requested_key:
-            return None
-
-    if requested_version != "2022.12" and not callable(
-        getattr(namespace, "__array_namespace_info__", None)
-    ):
+    if backend is None or not _namespace_serves(namespace, requested_version):
         return None
     return backend
 
