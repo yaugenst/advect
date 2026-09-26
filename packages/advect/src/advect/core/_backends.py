@@ -165,15 +165,12 @@ def _ensure_core_input_handlers() -> None:
 
     from advect.core._array_api import frontend as _array_api  # noqa: PLC0415
 
-    register_input_handler(_array_api._accepts_array_api, _array_api._handle_array_api_input)
+    core_handler = (_array_api._accepts_array_api, _array_api._handle_array_api_input)
+    register_input_handler(*core_handler)
     register_hook("advect.array_api.wrap_traced", _array_api._wrap_traced)
 
     # Core semantics take precedence even when another provider frontend was
     # imported eagerly before the first dynamic dispatch.
-    core_handlers = ((_array_api._accepts_array_api, _array_api._handle_array_api_input),)
-    for core_handler in reversed(core_handlers):
-        for index, registered in enumerate(_input_handlers):
-            if registered[0] is core_handler[0] and registered[1] is core_handler[1]:
-                _input_handlers.insert(0, _input_handlers.pop(index))
-                break
+    _input_handlers.remove(core_handler)
+    _input_handlers.insert(0, core_handler)
     _state.core_handlers_loaded = True

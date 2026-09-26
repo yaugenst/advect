@@ -101,11 +101,6 @@ class _PrimitiveExecution:
         self.output = output
         self._residual = residual
 
-    @property
-    def residual(self) -> Any | None:  # noqa: ANN401 - residuals are intentionally opaque
-        slot = self._residual
-        return None if slot is None else slot.payload
-
     def take_residual(self) -> _ResidualSlot | None:
         """Transfer residual ownership out of this execution."""
         residual = self._residual
