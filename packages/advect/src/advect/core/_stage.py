@@ -556,19 +556,31 @@ def _normalize_weak_runtime_scalar(value: object, spec: ArraySpec) -> object:
     raise ValueError(f"Unsupported weak staged scalar dtype {spec.dtype!r}")
 
 
-def _spec_key(spec: ArraySpec | StaticSpec) -> tuple[Any, ...]:
-    if isinstance(spec, ArraySpec):
-        return (
-            "array",
-            spec.shape,
-            _dtype_name(spec.dtype),
-            spec.device,
-            spec.weak,
-        )
-    value = spec.value
-    encoded = _encode_value(value)
-    identity = json.dumps(encoded, sort_keys=True, separators=(",", ":"))
-    return ("static", type(value).__module__, type(value).__qualname__, identity)
+# Equality between two values of one of these exact codec types implies one encoding.
+_EQUALITY_IS_IDENTITY = (type(None), bool, int, str, bytes)
+
+
+def _same_static_value(runtime: object, compiled: object) -> bool:
+    """Compare static call metadata by its serialized identity.
+
+    Python equality conflates ``1``, ``1.0``, and ``True`` (and ``0.0`` with
+    ``-0.0``), each of which can trace a different graph.
+    """
+    kind = type(compiled)
+    if type(runtime) is kind:
+        if kind in _EQUALITY_IS_IDENTITY:
+            return runtime == compiled
+        if kind is float:
+            return repr(runtime) == repr(compiled)
+    try:
+        return _static_identity(runtime) == _static_identity(compiled)
+    except TypeError:
+        # Compiled metadata is encodable, so an unencodable runtime value differs.
+        return False
+
+
+def _static_identity(value: object) -> str:
+    return json.dumps(_encode_value(value), sort_keys=True, separators=(",", ":"))
 
 
 def _snapshot_static_value(value: object) -> object:
@@ -594,12 +606,13 @@ def _flatten_runtime_to_treedef(value: Any, treedef: TreeDef) -> list[Any]:
     children, aux_data = flatten_fn(value)
     if treedef.node_type is dict:
         expected_keys = tuple(treedef.aux_data)
-        actual_keys = tuple(aux_data)
-        if set(actual_keys) != set(expected_keys):
+        entries = {key: (key, child) for key, child in zip(aux_data, children, strict=True)}
+        if entries.keys() != set(expected_keys) or not all(
+            _same_static_value(entries[key][0], key) for key in expected_keys
+        ):
             raise TypeError("Staged call pytree differs from the declared specs")
-        child_by_key = dict(zip(actual_keys, children, strict=True))
-        children = tuple(child_by_key[key] for key in expected_keys)
-    elif aux_data != treedef.aux_data:
+        children = tuple(entries[key][1] for key in expected_keys)
+    elif not _same_static_value(aux_data, treedef.aux_data):
         raise TypeError("Staged call pytree differs from the declared specs")
     if len(children) != len(treedef.children):
         raise TypeError("Staged call pytree differs from the declared specs")
@@ -1623,7 +1636,7 @@ class StagedProgram:
             zip(artifact.call_specs, concrete_leaves, strict=True)
         ):
             if isinstance(spec, StaticSpec):
-                if _spec_key(spec) != _spec_key(StaticSpec(value)):
+                if not _same_static_value(value, spec.value):
                     raise TypeError(f"Static staged argument leaf {index} changed value")
                 continue
             is_python_scalar = type(value) in {bool, complex, float, int}

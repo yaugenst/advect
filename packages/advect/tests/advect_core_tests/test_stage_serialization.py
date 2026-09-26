@@ -5,8 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import pytest
+from hypothesis import example, given, strategies as st
 
 from advect.core._pytree import TreeDef, static, tree_flatten
+from advect.core._stage import _same_static_value, _static_identity
 from advect.core._stage_serialization import (
     _decode_scalar,
     _decode_treedef,
@@ -45,6 +47,35 @@ def test_static_value_codec_round_trips_supported_values(value: object) -> None:
 
 def test_static_value_codec_canonicalizes_dict_order() -> None:
     assert _encode_value({"left": 1, "right": 2}) == _encode_value({"right": 2, "left": 1})
+
+
+_STATIC_SCALARS = st.one_of(
+    st.sampled_from([None, False, True, 0, 1, 0.0, -0.0, 1.0, "1", b"1"]),
+    st.integers(),
+    st.floats(allow_nan=False, allow_infinity=False),
+    st.text(max_size=3),
+    st.binary(max_size=3),
+)
+_STATIC_VALUES = st.recursive(
+    _STATIC_SCALARS,
+    lambda children: st.one_of(
+        st.lists(children, max_size=3),
+        st.lists(children, max_size=3).map(tuple),
+        st.dictionaries(_STATIC_SCALARS, children, max_size=3),
+    ),
+    max_leaves=8,
+)
+
+
+@given(_STATIC_VALUES, _STATIC_VALUES)
+@example(1, 1.0)
+@example(left=1, right=True)
+@example(0.0, -0.0)
+@example((1,), [1])
+@example({1: "one"}, {1.0: "one"})
+def test_static_value_comparison_matches_codec_identity(left: object, right: object) -> None:
+    assert _same_static_value(left, right) == (_static_identity(left) == _static_identity(right))
+    assert _same_static_value(_decode_value(_encode_value(left)), left)
 
 
 @pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])

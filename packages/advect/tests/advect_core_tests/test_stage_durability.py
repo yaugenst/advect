@@ -340,6 +340,42 @@ def test_static_specs_use_serialized_value_identity() -> None:
         restored(value, {"scale": 3, "mode": "forward"})
 
 
+@pytest.mark.parametrize(
+    ("compiled", "called"),
+    [(1, 1.0), (1, True), (1.0, 1), (0.0, -0.0)],
+    ids=["int-float", "int-bool", "float-int", "signed-zero"],
+)
+def test_static_pytree_values_and_keys_use_serialized_identity(
+    compiled: object,
+    called: object,
+) -> None:
+    value = np.arange(3.0)
+    by_spec = cast(
+        "ad.StagedProgram",
+        ad.stage(
+            lambda x, _factor: x, specs=(ad.ArraySpec((3,), "float64"), ad.StaticSpec(compiled))
+        ),
+    )
+    by_node = cast(
+        "ad.StagedProgram",
+        ad.stage(lambda x, factor: x * factor.value, value, ad.pytree.static(compiled)),
+    )
+    by_key = cast(
+        "ad.StagedProgram",
+        ad.stage(lambda table: table[compiled] - table["other"], {compiled: value, "other": value}),
+    )
+
+    np.testing.assert_array_equal(by_spec(value, compiled), value)
+    np.testing.assert_array_equal(by_node(value, ad.pytree.static(compiled)), value * compiled)
+    np.testing.assert_array_equal(by_key({"other": value, compiled: value}), np.zeros(3))
+    with pytest.raises(TypeError, match="changed value"):
+        by_spec(value, called)
+    with pytest.raises(TypeError, match="differs from the declared specs"):
+        by_node(value, ad.pytree.static(called))
+    with pytest.raises(TypeError, match="differs from the declared specs"):
+        by_key({called: value, "other": value})
+
+
 def test_static_specs_reject_repr_only_identity() -> None:
     class SameRepr:
         __hash__ = None
