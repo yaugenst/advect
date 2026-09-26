@@ -39,6 +39,7 @@ from advect.core._array_api.results import restore_array_api_result
 from advect.core._array_api.signatures import (
     OFFICIAL_SIGNATURES,
     official_parameter_names,
+    official_parameters,
     official_positional_parameter_names,
 )
 from advect.core._array_family_ops import _canonical_array_family_op_name
@@ -119,6 +120,7 @@ class _FunctionSpec:
     operands: tuple[str, ...]
     positional: tuple[str, ...]
     sequence_operands: frozenset[str] = frozenset()
+    optional_operands: frozenset[str] = frozenset()
 
 
 def _metadata_functions() -> frozenset[str]:
@@ -180,6 +182,11 @@ def _function_specs() -> dict[str, _FunctionSpec]:
             operands=operands,
             positional=official_positional_parameter_names(path),
             sequence_operands=(frozenset(operands[:1]) if schema.sequence_operand else frozenset()),
+            optional_operands=frozenset(
+                parameter.name
+                for parameter in official_parameters(path)
+                if parameter.has_default and parameter.name in operands
+            ),
         )
     return specs
 
@@ -242,6 +249,9 @@ def _collect_array_api_operands(
     operands: list[Any] = []
     for name in spec.operands:
         if name not in attrs:
+            if name not in spec.optional_operands:
+                msg = f"Array API {path}() missing required argument {name!r}"
+                raise TypeError(msg)
             continue
         value = attrs.pop(name)
         if path == "clip" and name in {"min", "max"}:

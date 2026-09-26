@@ -85,6 +85,14 @@ def test_call_binding_normalizes_optional_live_parameters() -> None:
             id="excess-positional-argument",
         ),
         pytest.param(
+            "sin",
+            (),
+            {},
+            TypeError,
+            "missing required argument 'x'",
+            id="missing-required-operand",
+        ),
+        pytest.param(
             "concat",
             (object(),),
             {},
@@ -214,6 +222,11 @@ def test_array_api_binding_is_independent_of_the_argument_spelling(
     if len(args) == len(spec.positional):
         with pytest.raises(TypeError, match="positional arguments"):
             bind_array_api_call(path, (*args, object()), kwargs)
+    required = [name for name in spec.operands if name not in spec.optional_operands]
+    if required:
+        without = {name: value for name, value in values.items() if name != required[0]}
+        with pytest.raises(TypeError, match="missing required argument"):
+            bind_array_api_call(path, (), without)
 
 
 def test_accumulation_reports_a_missing_provider_dtype() -> None:
