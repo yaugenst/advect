@@ -270,6 +270,19 @@ def test_generated_report_records_common_provenance(
     assert report["environment"]["machine"]["platform"]
 
 
+def test_revision_restriction_restores_the_reference_provider_flags() -> None:
+    # Regression: selecting a revision left array-api-strict at that revision,
+    # breaking later tests that call functions added after it.
+    before = array_api_strict.get_array_api_strict_flags()
+    provider = qualifier._provider("array-api-strict", "2022.12")
+
+    assert provider.reported_array_api_version == "2022.12"
+    assert array_api_strict.get_array_api_strict_flags() == before
+    with qualifier._restrict_provider_revision(provider, "2022.12"):
+        assert array_api_strict.__array_api_version__ == "2022.12"
+    assert array_api_strict.get_array_api_strict_flags() == before
+
+
 @pytest.mark.parametrize("array_api_version", ["2022.12", "2023.12", "2024.12"])
 def test_every_supported_revision_qualifies_its_declared_lifetimes(
     array_api_version: str,

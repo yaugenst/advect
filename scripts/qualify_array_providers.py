@@ -5,8 +5,10 @@ from __future__ import annotations
 import argparse
 import importlib
 import json
+from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from functools import partial
 from importlib import metadata
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -26,6 +28,7 @@ from scripts._support.evidence import evidence_environment
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from contextlib import AbstractContextManager
 
 
 _PROVIDER_NAMES = ("numpy", "array-api-strict", "cupy")
@@ -38,6 +41,7 @@ class _Provider:
     version: str
     to_numpy: Callable[[object], np.ndarray]
     synchronize: Callable[[], None]
+    revision: Callable[[], AbstractContextManager[object]] = nullcontext
 
 
 @dataclass(frozen=True, slots=True)
@@ -187,13 +191,14 @@ def _numpy_provider() -> _Provider:
 
 
 def _strict_provider(array_api_version: str = LATEST_ARRAY_API_VERSION) -> _Provider:
-    strict.set_array_api_strict_flags(api_version=array_api_version)
     return _Provider(
         name="array-api-strict",
         module=strict,
         version=strict.__version__,
         to_numpy=np.asarray,
         synchronize=lambda: None,
+        # Select the revision only while qualifying, restoring the global flags.
+        revision=partial(strict.ArrayAPIStrictFlags, api_version=array_api_version),
     )
 
 
@@ -271,6 +276,20 @@ def _numeric_summary(value: np.ndarray) -> dict[str, object]:
 
 
 def _qualify_provider(
+    provider: _Provider,
+    programs: _Programs,
+    *,
+    array_api_version: str,
+) -> _ProviderResult:
+    with provider.revision():
+        return _qualify_selected_revision(
+            provider,
+            programs,
+            array_api_version=array_api_version,
+        )
+
+
+def _qualify_selected_revision(
     provider: _Provider,
     programs: _Programs,
     *,

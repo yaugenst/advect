@@ -52,6 +52,7 @@ class _Provider:
     name: str
     namespace: object
     version: str
+    reported_array_api_version: str | None
 
 
 def _arguments() -> argparse.Namespace:
@@ -90,8 +91,9 @@ def _parse_providers(value: str) -> tuple[str, ...]:
 
 def _provider(name: str, array_api_version: str = LATEST_ARRAY_API_VERSION) -> _Provider:
     if name == "array-api-strict":
-        array_api_strict.set_array_api_strict_flags(api_version=array_api_version)
-        api_version = getattr(array_api_strict, "__array_api_version__", None)
+        # Probe the revision without leaking the reference provider's global flags.
+        with array_api_strict.ArrayAPIStrictFlags(api_version=array_api_version):
+            api_version = getattr(array_api_strict, "__array_api_version__", None)
         if api_version != array_api_version:
             msg = f"Expected array-api-strict Array API {array_api_version}, found {api_version!r}"
             raise RuntimeError(msg)
@@ -99,9 +101,15 @@ def _provider(name: str, array_api_version: str = LATEST_ARRAY_API_VERSION) -> _
             name=name,
             namespace=array_api_strict,
             version=str(getattr(array_api_strict, "__version__", "unknown")),
+            reported_array_api_version=api_version,
         )
     if name == "numpy":
-        return _Provider(name=name, namespace=np, version=np.__version__)
+        return _Provider(
+            name=name,
+            namespace=np,
+            version=np.__version__,
+            reported_array_api_version=getattr(np, "__array_api_version__", None),
+        )
     msg = f"Unknown provider {name!r}"
     raise ValueError(msg)
 
@@ -123,11 +131,7 @@ def _restrict_provider_revision(
         yield
         return
 
-    configured_version = str(array_api_strict.__array_api_version__)
-    _clear_array_namespace_caches()
-    array_api_strict.set_array_api_strict_flags(api_version=array_api_version)
-    sample = array_api_strict.asarray(0.0)
-    array_type = type(sample)
+    array_type = type(array_api_strict.asarray(0.0))
     original = array_type.__array_namespace__
 
     def restricted_namespace(
@@ -144,12 +148,16 @@ def _restrict_provider_revision(
             raise ValueError(message)
         return original(value, api_version=array_api_version)
 
-    array_type.__array_namespace__ = restricted_namespace
+    # The flags context restores the caller's provider revision on exit.
+    _clear_array_namespace_caches()
     try:
-        yield
+        with array_api_strict.ArrayAPIStrictFlags(api_version=array_api_version):
+            array_type.__array_namespace__ = restricted_namespace
+            try:
+                yield
+            finally:
+                array_type.__array_namespace__ = original
     finally:
-        array_type.__array_namespace__ = original
-        array_api_strict.set_array_api_strict_flags(api_version=configured_version)
         _clear_array_namespace_caches()
 
 
@@ -383,11 +391,7 @@ def build_report(
                 "name": provider.name,
                 "passed": not failures,
                 "qualified": len(qualified),
-                "reported_array_api_version": getattr(
-                    provider.namespace,
-                    "__array_api_version__",
-                    None,
-                ),
+                "reported_array_api_version": provider.reported_array_api_version,
                 "selected_array_api_version": array_api_version,
                 "version": provider.version,
             }

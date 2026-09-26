@@ -18,6 +18,7 @@ def test_scientific_provider_qualification(
     provider_name: str,
     array_api_version: str,
 ) -> None:
+    flags = strict.get_array_api_strict_flags()
     provider = qualify_array_providers._providers(
         (provider_name,),
         array_api_version,
@@ -27,6 +28,8 @@ def test_scientific_provider_qualification(
         qualify_array_providers._build_programs(array_api_version),
         array_api_version=array_api_version,
     )
+
+    assert strict.get_array_api_strict_flags() == flags
 
     assert result.report["name"] == provider_name
     assert result.report["selected_array_api_version"] == array_api_version
