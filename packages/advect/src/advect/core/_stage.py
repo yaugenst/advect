@@ -484,6 +484,10 @@ def _validate_custom_calls(graph: GraphStore) -> None:
             raise ValueError(
                 f"Staged custom node {node.op!r} output structure does not match its arity"
             )
+        if len(node.inputs) != sum(call_meta.input_leaf_mask):
+            raise ValueError(
+                f"Staged custom node {node.op!r} input count does not match its call structure"
+            )
 
 
 def _value_spec(value: Any) -> ArraySpec:

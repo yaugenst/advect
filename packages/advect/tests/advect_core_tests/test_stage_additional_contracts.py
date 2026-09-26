@@ -451,8 +451,19 @@ def test_loaded_program_rejects_malformed_graph_linkage(
         ad.StagedProgram.from_dict(payload)
 
 
-def test_loaded_custom_primitive_rejects_output_structure_arity_mismatch() -> None:
-    @ad.primitive(name="tests.additional_stage_pair")
+@pytest.mark.parametrize(
+    ("corruption", "match"),
+    [
+        pytest.param("output-structure", "output structure does not match its arity", id="output"),
+        pytest.param("missing-input", "input count does not match", id="missing-input"),
+        pytest.param("extra-input", "input count does not match", id="extra-input"),
+    ],
+)
+def test_loaded_custom_primitive_rejects_call_structure_arity_mismatch(
+    corruption: str,
+    match: str,
+) -> None:
+    @ad.primitive(name=f"tests.additional_stage_pair_{corruption.replace('-', '_')}")
     def pair(value: object) -> tuple[object, object]:
         return value, value
 
@@ -466,10 +477,15 @@ def test_loaded_custom_primitive_rejects_output_structure_arity_mismatch() -> No
     )
     payload = cast("dict[str, Any]", deepcopy(program.to_dict()))
     node = next(item for item in payload["program"]["graph"]["nodes"] if item["op"] == pair.op_name)
-    call_meta = node["attrs"]["__advect_primitive_call__"]["value"]
-    call_meta["output_treedef"] = deepcopy(call_meta["call_treedef"])
+    if corruption == "output-structure":
+        call_meta = node["attrs"]["__advect_primitive_call__"]["value"]
+        call_meta["output_treedef"] = deepcopy(call_meta["call_treedef"])
+    elif corruption == "missing-input":
+        node["inputs"] = []
+    else:
+        node["inputs"] = [*node["inputs"], node["inputs"][0]]
 
-    with pytest.raises(ValueError, match="output structure does not match its arity"):
+    with pytest.raises(ValueError, match=match):
         ad.StagedProgram.from_dict(payload)
 
 
