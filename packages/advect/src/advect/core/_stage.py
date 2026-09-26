@@ -15,10 +15,10 @@ import json
 import re
 import sys
 import time
-from dataclasses import dataclass, field, replace
+from dataclasses import asdict, dataclass, field, fields, replace
 from itertools import pairwise
 from threading import Lock
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Self, cast
 
 from advect.core._abstract import (
     AbstractArray,
@@ -265,76 +265,52 @@ _STAGED_PROGRAM_FORMAT = "advect.ssa-program"
 _STAGED_PROGRAM_FORMAT_VERSION = 2
 _OPTIMIZATION_PASS_NAMES = ("dce", "simplify", "cse")
 _SHA256_HEX = re.compile(r"[0-9a-f]{64}")
+_REPORT_COUNTS = ("nodes_before", "nodes_after", "rewritten_nodes")
+_PASS_COUNTS = ("nodes_before", "nodes_after", "removed_nodes", "rewritten_nodes")
+_CONSTANT_FIELDS = tuple(item.name for item in fields(ConstantRecord))
+
+
+def _closed_mapping(payload: object, label: str, names: Sequence[str]) -> dict[str, Any]:
+    """Return one artifact record whose fields are exactly ``names``."""
+    if not isinstance(payload, dict):
+        raise TypeError(f"Staged {label} must be a mapping")
+    if payload.keys() != set(names):
+        raise ValueError(f"Staged {label} has invalid fields")
+    return payload
+
+
+def _count(value: object, label: str) -> int:
+    if type(value) is not int or value < 0:
+        raise TypeError(f"Staged {label} must be a non-negative integer")
+    return value
 
 
 def _encode_optimization(report: OptimizationReport) -> dict[str, object]:
-    return {
-        "nodes_before": report.nodes_before,
-        "nodes_after": report.nodes_after,
-        "rewritten_nodes": report.rewritten_nodes,
-        "passes": [
-            {
-                "name": item.name,
-                "nodes_before": item.nodes_before,
-                "nodes_after": item.nodes_after,
-                "removed_nodes": item.removed_nodes,
-                "rewritten_nodes": item.rewritten_nodes,
-            }
-            for item in report.passes
-        ],
-    }
+    return {**asdict(report), "passes": [asdict(item) for item in report.passes]}
 
 
 def _decode_optimization(payload: object) -> OptimizationReport:
-    if not isinstance(payload, dict):
-        raise TypeError("Staged optimization report must be a mapping")
-    if set(payload) != {"nodes_before", "nodes_after", "rewritten_nodes", "passes"}:
-        raise ValueError("Staged optimization report has invalid fields")
-    for key in ("nodes_before", "nodes_after", "rewritten_nodes"):
-        value = payload[key]
-        if type(value) is not int or value < 0:
-            raise TypeError(f"Staged optimization {key} must be a non-negative integer")
-    raw_passes = payload["passes"]
+    report = _closed_mapping(payload, "optimization report", (*_REPORT_COUNTS, "passes"))
+    nodes_before, nodes_after, rewritten_nodes = (
+        _count(report[key], f"optimization {key}") for key in _REPORT_COUNTS
+    )
+    raw_passes = report["passes"]
     if not isinstance(raw_passes, list):
         raise TypeError("Staged optimization passes must be a list")
     passes: list[OptimizationPass] = []
     for raw_pass in raw_passes:
-        if not isinstance(raw_pass, dict):
-            raise TypeError("Staged optimization pass must be a mapping")
-        required = {
-            "name",
-            "nodes_before",
-            "nodes_after",
-            "removed_nodes",
-            "rewritten_nodes",
-        }
-        if set(raw_pass) != required:
-            raise ValueError("Staged optimization pass has invalid fields")
-        name = raw_pass["name"]
-        if not isinstance(name, str):
+        record = _closed_mapping(raw_pass, "optimization pass", ("name", *_PASS_COUNTS))
+        if not isinstance(record["name"], str):
             raise TypeError("Staged optimization pass name must be a string")
-        counts: dict[str, int] = {}
-        for key in required - {"name"}:
-            value = raw_pass[key]
-            if type(value) is not int or value < 0:
-                raise TypeError(f"Staged optimization pass {key} must be a non-negative integer")
-            counts[key] = value
-        if counts["removed_nodes"] != counts["nodes_before"] - counts["nodes_after"]:
-            raise ValueError("Staged optimization removed-node count is inconsistent")
-        passes.append(
-            OptimizationPass(
-                name=name,
-                nodes_before=counts["nodes_before"],
-                nodes_after=counts["nodes_after"],
-                removed_nodes=counts["removed_nodes"],
-                rewritten_nodes=counts["rewritten_nodes"],
-            )
+        item = OptimizationPass(
+            record["name"],
+            *(_count(record[key], f"optimization pass {key}") for key in _PASS_COUNTS),
         )
+        if item.removed_nodes != item.nodes_before - item.nodes_after:
+            raise ValueError("Staged optimization removed-node count is inconsistent")
+        passes.append(item)
     if tuple(item.name for item in passes) != _OPTIMIZATION_PASS_NAMES:
         raise ValueError("Staged optimization pass sequence is invalid")
-    nodes_before = cast("int", payload["nodes_before"])
-    nodes_after = cast("int", payload["nodes_after"])
-    rewritten_nodes = cast("int", payload["rewritten_nodes"])
     if (
         passes[0].nodes_before != nodes_before
         or passes[-1].nodes_after != nodes_after
@@ -342,23 +318,12 @@ def _decode_optimization(payload: object) -> OptimizationReport:
         or sum(item.rewritten_nodes for item in passes) != rewritten_nodes
     ):
         raise ValueError("Staged optimization aggregate counts are inconsistent")
-    return OptimizationReport(
-        nodes_before=nodes_before,
-        nodes_after=nodes_after,
-        rewritten_nodes=rewritten_nodes,
-        passes=tuple(passes),
-    )
+    return OptimizationReport(nodes_before, nodes_after, rewritten_nodes, tuple(passes))
 
 
 def _encode_spec(spec: ArraySpec | StaticSpec) -> dict[str, object]:
     if isinstance(spec, ArraySpec):
-        return {
-            "kind": "array",
-            "shape": list(spec.shape),
-            "dtype": spec.dtype,
-            "device": spec.device,
-            "weak": spec.weak,
-        }
+        return {"kind": "array", **asdict(spec), "shape": list(spec.shape)}
     return {"kind": "static", "value": _encode_value(spec.value)}
 
 
@@ -367,8 +332,7 @@ def _decode_spec(payload: object) -> ArraySpec | StaticSpec:
         raise TypeError("Staged call spec must be a mapping")
     kind = payload.get("kind")
     if kind == "array":
-        if set(payload) != {"kind", "shape", "dtype", "device", "weak"}:
-            raise ValueError("Staged array spec has invalid fields")
+        _closed_mapping(payload, "array spec", ("kind", "shape", "dtype", "device", "weak"))
         shape = payload["shape"]
         dtype = payload["dtype"]
         device = payload["device"]
@@ -383,65 +347,35 @@ def _decode_spec(payload: object) -> ArraySpec | StaticSpec:
             raise TypeError("Staged array weak flag must be a bool")
         return ArraySpec(tuple(shape), _dtype_name(dtype), device=device, weak=weak)
     if kind == "static":
-        if set(payload) != {"kind", "value"}:
-            raise ValueError("Staged static spec has invalid fields")
+        _closed_mapping(payload, "static spec", ("kind", "value"))
         return StaticSpec(_decode_value(payload["value"]))
     raise ValueError(f"Unknown staged call spec kind {kind!r}")
 
 
 def _encode_constant(record: ConstantRecord) -> dict[str, object]:
-    return {
-        "value_id": record.value_id,
-        "origin": record.origin,
-        "location": record.location,
-        "shape": list(record.shape),
-        "dtype": record.dtype,
-        "bytes": record.bytes,
-        "digest": record.digest,
-        "name": record.name,
-    }
+    return {**asdict(record), "shape": list(record.shape)}
 
 
 def _decode_constant(payload: object) -> ConstantRecord:
-    if not isinstance(payload, dict):
-        raise TypeError("Staged constant record must be a mapping")
-    required = {"value_id", "origin", "location", "shape", "dtype", "bytes", "digest", "name"}
-    if set(payload) != required:
-        raise ValueError("Staged constant record has invalid fields")
-    value_id = payload["value_id"]
-    origin = payload["origin"]
-    location = payload["location"]
-    shape = payload["shape"]
-    dtype = payload["dtype"]
-    byte_count = payload["bytes"]
-    digest = payload["digest"]
-    name = payload["name"]
-    if type(value_id) is not int or value_id < 0:
-        raise TypeError("Staged constant value_id must be a non-negative integer")
-    if origin not in {"closure", "global", "created"}:
+    record = _closed_mapping(payload, "constant record", _CONSTANT_FIELDS)
+    _count(record["value_id"], "constant value_id")
+    if record["origin"] not in {"closure", "global", "created"}:
         raise ValueError("Staged constant origin must be closure, global, or created")
-    if location is not None and not isinstance(location, str):
+    if record["location"] is not None and not isinstance(record["location"], str):
         raise TypeError("Staged constant location must be a string or None")
+    shape = record["shape"]
     if not isinstance(shape, list) or any(type(size) is not int or size < 0 for size in shape):
         raise TypeError("Staged constant shape must be a list of non-negative integers")
-    if not isinstance(dtype, str) or not dtype:
+    if not isinstance(record["dtype"], str) or not record["dtype"]:
         raise TypeError("Staged constant dtype must be a non-empty string")
-    if type(byte_count) is not int or byte_count < 0:
-        raise TypeError("Staged constant bytes must be a non-negative integer")
+    _count(record["bytes"], "constant bytes")
+    digest = record["digest"]
     if not isinstance(digest, str) or _SHA256_HEX.fullmatch(digest) is None:
         raise TypeError("Staged constant digest must be a lowercase SHA-256 hex string")
-    if name is not None and not isinstance(name, str):
+    if record["name"] is not None and not isinstance(record["name"], str):
         raise TypeError("Staged constant name must be a string or None")
-    return ConstantRecord(
-        value_id=value_id,
-        origin=origin,
-        location=location,
-        shape=tuple(shape),
-        dtype=dtype,
-        bytes=byte_count,
-        digest=digest,
-        name=name,
-    )
+    decoded: dict[str, Any] = {**record, "shape": tuple(shape)}
+    return ConstantRecord(**decoded)
 
 
 def _value_spec(value: Any) -> ArraySpec:
@@ -595,22 +529,16 @@ class _StageBuilder:
         "weak_constant_ids",
     )
 
-    def __init__(self, function: Callable[..., Any], builder: GraphBuilder) -> None:
+    def __init__(self, captures: Sequence[tuple[str, str, object]], builder: GraphBuilder) -> None:
         self._builder = builder
-        closure = getattr(function, "__closure__", None) or ()
-        freevars = getattr(getattr(function, "__code__", None), "co_freevars", ())
+        # The first closure name and the last referenced global name identify a value.
         self._closure_names: dict[int, str] = {}
-        for name, cell in zip(freevars, closure, strict=False):
-            try:
-                value = cell.cell_contents
-            except ValueError:
-                continue
-            self._closure_names.setdefault(id(value), name)
-        globals_map = getattr(function, "__globals__", {})
-        referenced_names = getattr(getattr(function, "__code__", None), "co_names", ())
-        self._global_names = {
-            id(globals_map[name]): name for name in referenced_names if name in globals_map
-        }
+        self._global_names: dict[int, str] = {}
+        for origin, name, value in captures:
+            if origin == "closure":
+                self._closure_names.setdefault(id(value), name)
+            elif origin == "global":
+                self._global_names[id(value)] = name
         self._constant_ids: dict[int, int] = {}
         # Retaining the objects makes identity deduplication sound: temporary
         # providers cannot recycle an id while this builder is alive.
@@ -670,25 +598,27 @@ class _StageBuilder:
         return node_id
 
 
-def _function_captures(function: Callable[..., Any]) -> Iterator[tuple[str, object]]:
+def _function_captures(function: Callable[..., Any]) -> Iterator[tuple[str, str, object]]:
+    """Yield ``(origin, name, value)`` for each value a callable can read."""
     owner = getattr(function, "__self__", None)
     if owner is not None:
-        yield "bound callable", owner
+        yield "bound", "bound callable", owner
     closure = getattr(function, "__closure__", None) or ()
     code = getattr(function, "__code__", None)
     for name, cell in zip(getattr(code, "co_freevars", ()), closure, strict=False):
         try:
-            yield name, cell.cell_contents
+            value = cell.cell_contents
         except ValueError:
             continue
+        yield "closure", name, value
     globals_map = getattr(function, "__globals__", {})
     for name in getattr(code, "co_names", ()):
         if name in globals_map:
-            yield name, globals_map[name]
+            yield "global", name, globals_map[name]
     for index, value in enumerate(getattr(function, "__defaults__", None) or ()):
-        yield f"default argument {index}", value
+        yield "default", f"default argument {index}", value
     for name, value in (getattr(function, "__kwdefaults__", None) or {}).items():
-        yield f"default argument {name}", value
+        yield "default", f"default argument {name}", value
 
 
 def _scalar_output_mask(
@@ -745,7 +675,8 @@ def _compile_stage(
     array_api_version: str,
 ) -> _CompiledStage:
     graph_builder = create_graph_builder(required_array_api_version=array_api_version)
-    stage_builder = _StageBuilder(function, graph_builder)
+    captures = tuple(_function_captures(function))
+    stage_builder = _StageBuilder(captures, graph_builder)
     array_factory = cast(
         "type[AbstractArray]",
         get_hook("advect.abstract_array_factory") or AbstractArray,
@@ -758,7 +689,9 @@ def _compile_stage(
         array_factory=array_factory,
     )
     spec_leaves, call_treedef = tree_flatten(call_tree)
-    stage_scope = array_factory._advect_stage_context(tuple(_function_captures(function)))
+    stage_scope = array_factory._advect_stage_context(
+        tuple((name, value) for _origin, name, value in captures)
+    )
     call_specs: list[ArraySpec | StaticSpec] = []
     traced_leaves: list[Any] = []
     weak_input_ids: set[int] = set()
@@ -812,35 +745,18 @@ def _compile_stage(
         old_to_new=tuple(old_to_new),
         constants=tuple(stage_builder.constants),
     )
-    constants: list[ConstantRecord] = []
-    for record in stage_builder.constants:
-        try:
-            remapped_id = old_to_new[record.value_id]
-        except IndexError as error:
-            raise RuntimeError("Staged optimizer returned an incomplete ID remap") from error
-        if remapped_id is None:
-            continue
-        constants.append(
-            ConstantRecord(
-                value_id=remapped_id,
-                origin=record.origin,
-                location=record.location,
-                shape=record.shape,
-                dtype=record.dtype,
-                bytes=record.bytes,
-                digest=record.digest,
-                name=record.name,
-            )
-        )
+    # The native remap covers every traced id; None marks a removed node.
+    constants = tuple(
+        replace(record, value_id=remapped_id)
+        for record in stage_builder.constants
+        if (remapped_id := old_to_new[record.value_id]) is not None
+    )
     optimization = _decode_optimization(raw_optimization)
-    weak_source_ids: set[int] = set()
-    for raw_id in weak_input_ids | stage_builder.weak_constant_ids:
-        try:
-            remapped_id = old_to_new[raw_id]
-        except IndexError as error:
-            raise RuntimeError("Staged optimizer returned an incomplete ID remap") from error
-        if remapped_id is not None:
-            weak_source_ids.add(remapped_id)
+    weak_source_ids = {
+        remapped_id
+        for raw_id in weak_input_ids | stage_builder.weak_constant_ids
+        if (remapped_id := old_to_new[raw_id]) is not None
+    }
     scalar_output_mask = _scalar_output_mask(graph, weak_source_ids)
     output_specs = tuple(
         replace(spec, dtype=_dtype_name(spec.dtype), weak=restore and spec.shape == ())
@@ -854,7 +770,7 @@ def _compile_stage(
         call_specs=tuple(call_specs),
         output_treedef=output_treedef,
         output_specs=output_specs,
-        constants=tuple(constants),
+        constants=constants,
         optimization=optimization,
         trace=trace,
     )
@@ -969,6 +885,17 @@ def _validate_custom_calls(graph: GraphStore, node_ids: Sequence[int]) -> None:
             )
 
 
+_ARTIFACT_FIELDS = (
+    "graph",
+    "call_treedef",
+    "call_specs",
+    "output_treedef",
+    "output_specs",
+    "constants",
+    "optimization",
+)
+
+
 def _encode_artifact(artifact: _CompiledStage) -> dict[str, object]:
     return {
         "graph": json.loads(artifact.graph._to_json()),
@@ -982,21 +909,8 @@ def _encode_artifact(artifact: _CompiledStage) -> dict[str, object]:
 
 
 def _decode_artifact(payload: object) -> _CompiledStage:
-    if not isinstance(payload, dict):
-        raise TypeError("Staged artifact must be a mapping")
-    required = {
-        "graph",
-        "call_treedef",
-        "call_specs",
-        "output_treedef",
-        "output_specs",
-        "constants",
-        "optimization",
-    }
-    if set(payload) != required:
-        raise ValueError("Staged artifact has invalid fields")
-    registry = get_registry()
-    with registry.transaction():
+    payload = _closed_mapping(payload, "artifact", _ARTIFACT_FIELDS)
+    with get_registry().transaction():
         call_specs_payload = payload["call_specs"]
         output_specs_payload = payload["output_specs"]
         constants_payload = payload["constants"]
@@ -1335,6 +1249,14 @@ class StagedProgram:
         )
         self._execution_state = _ExecutionState()
 
+    @classmethod
+    def _from_artifact(cls, artifact: _CompiledStage, compile_seconds: float) -> Self:
+        program = cls.__new__(cls)
+        program._artifact = artifact
+        program._compile_seconds = compile_seconds
+        program._execution_state = _ExecutionState()
+        return program
+
     def __repr__(self) -> str:
         """Return a compact program summary for notebooks and debuggers."""
         return f"StagedProgram({self._artifact.graph!r})"
@@ -1428,10 +1350,7 @@ class StagedProgram:
     @classmethod
     def from_dict(cls, payload: object) -> StagedProgram:
         """Load a versioned staged artifact after linking custom primitives."""
-        if not isinstance(payload, dict):
-            raise TypeError("Staged program payload must be a mapping")
-        if set(payload) != {"format", "version", "program"}:
-            raise ValueError("Staged program payload has invalid fields")
+        payload = _closed_mapping(payload, "program payload", ("format", "version", "program"))
         if payload["format"] != _STAGED_PROGRAM_FORMAT:
             raise ValueError(f"Unknown staged program format {payload['format']!r}")
         format_version = payload["version"]
@@ -1439,12 +1358,7 @@ class StagedProgram:
             raise TypeError("Staged program format version must be an integer")
         if format_version != _STAGED_PROGRAM_FORMAT_VERSION:
             raise ValueError(f"Unsupported staged program format version {format_version}")
-        artifact = _decode_artifact(payload["program"])
-        loaded = cls.__new__(cls)
-        loaded._artifact = artifact
-        loaded._compile_seconds = 0.0
-        loaded._execution_state = _ExecutionState()
-        return loaded
+        return cls._from_artifact(_decode_artifact(payload["program"]), 0.0)
 
     def _staged_transform(
         self,
@@ -1468,21 +1382,15 @@ class StagedProgram:
                 list(artifact.output_specs),
             )
             call_tree = (args, {**kwargs, output_argname: output_tree})
-        transformed = self.__class__.__new__(self.__class__)
-        transformed._artifact, transformed._compile_seconds = self._compile(
+        transformed, compile_seconds = self._compile(
             function,
             call_tree,
             array_api_version=artifact.graph.required_array_api_version,
         )
         if scalar_output_override is not None:
             offset, mask = scalar_output_override
-            transformed._artifact = _with_scalar_output_mask(
-                transformed._artifact,
-                offset=offset,
-                mask=mask,
-            )
-        transformed._execution_state = _ExecutionState()
-        return transformed
+            transformed = _with_scalar_output_mask(transformed, offset=offset, mask=mask)
+        return self._from_artifact(transformed, compile_seconds)
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         artifact = self._artifact
