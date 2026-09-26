@@ -33,40 +33,42 @@ from advect.core._array_api.support import (
     build_support_profile,
 )
 
-_ALL_CASES = operation_evidence_cases(
-    _static_parameters(version=LATEST_ARRAY_API_VERSION),
-    LATEST_ARRAY_API_VERSION,
-)
+_EVIDENCE = {
+    version: operation_evidence_cases(_static_parameters(version=version), version)
+    for version in SUPPORTED_ARRAY_API_VERSIONS
+}
+_ALL_CASES = _EVIDENCE[LATEST_ARRAY_API_VERSION]
 _PORTABLE_CASES = tuple(case for case in _ALL_CASES if case.portable)
 _BASELINE_CASES = {case.path: case for case in _ALL_CASES if case.variant == "baseline"}
 _ROWS = {str(row["path"]): row for row in build_support_profile()["callables"]}
+_REVISION_CASES = tuple(
+    pytest.param(version, case, id=f"{version}-{case.identifier}")
+    for version, cases in _EVIDENCE.items()
+    for case in cases
+)
 
 
-def _derivative_cases() -> tuple[tuple[str, str, str, tuple[int, ...]], ...]:
-    cases: list[tuple[str, str, str, tuple[int, ...]]] = []
-    for version in SUPPORTED_ARRAY_API_VERSIONS:
+def _derivative_cases() -> tuple[Any, ...]:
+    """Pair each complete baseline with each differentiable parameter per revision."""
+    cases = []
+    for version, evidence in _EVIDENCE.items():
         rows = {str(row["path"]): row for row in build_support_profile(version)["callables"]}
-        baselines = {
-            case.path: case
-            for case in operation_evidence_cases(
-                _static_parameters(version=version),
-                version,
+        for case in evidence:
+            if case.variant != "baseline" or rows[case.path]["complete"] is not True:
+                continue
+            values = case_parameter_values(case, version)
+            cases.extend(
+                pytest.param(
+                    version,
+                    case,
+                    name,
+                    tuple(sorted(input_indices(values[name]))),
+                    id=f"{version}-{case.path}-{name}",
+                )
+                for parameter in rows[case.path]["parameters"]
+                if parameter["role"] == "differentiable"
+                for name in (str(parameter["name"]),)
             )
-            if case.variant == "baseline"
-        }
-        cases.extend(
-            (
-                version,
-                path,
-                str(parameter["name"]),
-                tuple(sorted(input_indices(values[str(parameter["name"])]))),
-            )
-            for path, case in baselines.items()
-            if rows[path]["complete"] is True
-            for values in (case_parameter_values(case),)
-            for parameter in rows[path]["parameters"]
-            if parameter["role"] == "differentiable"
-        )
     return tuple(cases)
 
 
@@ -242,29 +244,25 @@ def test_compile_time_metadata_controls_dynamic_trace_and_serialized_stage(
 def test_generated_report_records_common_provenance(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    case = _ALL_CASES[0]
+    case = _EVIDENCE["2022.12"][0]
     monkeypatch.setattr(
         qualifier,
         "operation_evidence_cases",
         lambda _static_parameters, _version: (case,),
     )
-    monkeypatch.setattr(
-        qualifier,
-        "_run_case",
-        lambda _case, _provider, *, array_api_version: {
-            "path": case.path,
-            "status": "qualified",
-            "array_api_version": array_api_version,
-        },
-    )
 
     report = qualifier.build_report(
         provider_names=("array-api-strict",),
         subset="all",
+        array_api_version="2022.12",
     )
 
     assert report["schema_version"] == 1
     assert report["report_kind"] == "advect.array-api-operation-qualification"
+    assert report["api_version"] == "2022.12"
+    assert report["passed"] is True
+    assert report["providers"][0]["reported_array_api_version"] == "2022.12"
+    assert report["providers"][0]["cases"][0]["lifetimes"] == list(case.modes)
     assert report["environment"]["source_revision"]
     assert report["environment"]["python"]
     assert report["environment"]["machine"]["platform"]
@@ -283,25 +281,17 @@ def test_revision_restriction_restores_the_reference_provider_flags() -> None:
     assert array_api_strict.get_array_api_strict_flags() == before
 
 
-@pytest.mark.parametrize("array_api_version", ["2022.12", "2023.12", "2024.12"])
-def test_every_supported_revision_qualifies_its_declared_lifetimes(
+@pytest.mark.parametrize(("array_api_version", "case"), _REVISION_CASES)
+def test_declared_case_round_trips_on_array_api_strict(
     array_api_version: str,
+    case: Any,
 ) -> None:
-    report = qualifier.build_report(
-        provider_names=("array-api-strict",),
-        subset="all",
+    provider = qualifier._provider("array-api-strict", array_api_version)
+    expected, outputs = qualifier.execute_lifetimes(
+        case,
+        provider,
         array_api_version=array_api_version,
     )
-
-    assert report["api_version"] == array_api_version
-    assert report["passed"] is True
-    assert report["providers"][0]["failed"] == 0
-
-
-@pytest.mark.parametrize("case", _ALL_CASES, ids=lambda case: case.path)
-def test_declared_case_round_trips_on_array_api_strict(case: object) -> None:
-    provider = qualifier._provider("array-api-strict")
-    expected, outputs = qualifier.execute_lifetimes(case, provider)
 
     assert set(outputs) == set(case.modes)
     for output in outputs.values():
@@ -375,27 +365,18 @@ def _real_pairing(left: object, right: object) -> float:
 
 
 @pytest.mark.parametrize(
-    ("array_api_version", "path", "parameter", "argnums"),
+    ("array_api_version", "case", "parameter", "argnums"),
     _DERIVATIVE_CASES,
-    ids=str,
 )
 @pytest.mark.parametrize("scale", [-0.75, 0.5, 1.5])
 def test_each_differentiable_parameter_executes_jvp_and_vjp(
     array_api_version: str,
-    path: str,
+    case: Any,
     parameter: str,
     argnums: tuple[int, ...],
     scale: float,
 ) -> None:
-    baselines = {
-        case.path: case
-        for case in operation_evidence_cases(
-            _static_parameters(version=array_api_version),
-            array_api_version,
-        )
-        if case.variant == "baseline"
-    }
-    case = baselines[path]
+    path = case.path
     provider = qualifier._provider("array-api-strict", array_api_version)
     with qualifier._restrict_provider_revision(provider, array_api_version):
         inputs = qualifier._materialize_inputs(case, provider.namespace)
