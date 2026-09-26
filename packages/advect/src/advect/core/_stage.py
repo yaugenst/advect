@@ -36,10 +36,10 @@ from advect.core._array_api.profiles import (
 )
 from advect.core._array_api.providers import (
     ResolvedArrayNamespace,
-    _get_array_namespace,
     _get_backend_key_from_namespace,
     _get_provider_array_api_version,
     _negotiate_array_namespace_for_call,
+    _version_key,
 )
 from advect.core._backends import get_hook
 from advect.core._context import _set_active_recorder
@@ -525,8 +525,6 @@ def _specs_from_examples(examples: tuple[Any, ...]) -> tuple[Any, ...]:
 
 def _normalize_weak_runtime_scalar(value: object, spec: ArraySpec) -> object:
     """Normalize one Python scalar to the exact declared weak dtype category."""
-    if type(value) not in {bool, complex, float, int}:
-        return value
     dtype = spec.dtype
     if dtype == "bool":
         if type(value) is not bool:
@@ -555,31 +553,30 @@ def _normalize_weak_runtime_scalar(value: object, spec: ArraySpec) -> object:
     raise ValueError(f"Unsupported weak staged scalar dtype {spec.dtype!r}")
 
 
-# Equality between two values of one of these exact codec types implies one encoding.
-_EQUALITY_IS_IDENTITY = (type(None), bool, int, str, bytes)
-
-
-def _same_static_value(runtime: object, compiled: object) -> bool:
-    """Compare static call metadata by its serialized identity.
+def _same_static_value(runtime: object, compiled: Any) -> bool:
+    """Compare a runtime value with compiled static metadata by serialized identity.
 
     Python equality conflates ``1``, ``1.0``, and ``True`` (and ``0.0`` with
-    ``-0.0``), each of which can trace a different graph.
+    ``-0.0``), each of which can trace a different graph. The codec encodes
+    only exact builtin types, so values of different types never match.
     """
     kind = type(compiled)
-    if type(runtime) is kind:
-        if kind in _EQUALITY_IS_IDENTITY:
-            return runtime == compiled
-        if kind is float:
-            return repr(runtime) == repr(compiled)
-    try:
-        return _static_identity(runtime) == _static_identity(compiled)
-    except TypeError:
-        # Compiled metadata is encodable, so an unencodable runtime value differs.
+    if type(runtime) is not kind:
         return False
-
-
-def _static_identity(value: object) -> str:
-    return json.dumps(_encode_value(value), sort_keys=True, separators=(",", ":"))
+    if kind is float:
+        return repr(runtime) == repr(compiled)
+    if kind is list or kind is tuple:
+        return len(runtime) == len(compiled) and all(map(_same_static_value, runtime, compiled))
+    if kind is dict:
+        # Map each compiled key to the runtime's own equal key object.
+        keys = {key: key for key in runtime}
+        return len(keys) == len(compiled) and all(
+            key in keys
+            and _same_static_value(keys[key], key)
+            and _same_static_value(runtime[key], item)
+            for key, item in compiled.items()
+        )
+    return runtime == compiled
 
 
 def _snapshot_static_value(value: object) -> object:
@@ -1073,107 +1070,42 @@ def _decode_artifact(payload: object) -> _CompiledStage:
         )
 
 
-def _runtime_namespace(
-    values: Sequence[Any],
-    *,
-    array_api_version: str,
-) -> Any | None:
+def _runtime_namespace(values: Sequence[Any], *, array_api_version: str) -> Any:
+    """Select the provider for one call and require the program's Array API revision."""
     resolution = _negotiate_array_namespace_for_call(
         args=tuple(values),
         kwargs={},
         required_version=array_api_version,
     )
-    if resolution is None:
-        return None
-    _validate_runtime_namespace_profile(
-        resolution.raw_namespace,
-        array_api_version=array_api_version,
-    )
-    return resolution.raw_namespace
-
-
-def _default_array_namespace(*, array_api_version: str) -> Any:
-    resolve = get_hook("advect.default_array_namespace")
-    if resolve is None:
-        raise RuntimeError(
-            "A staged call without provider-backed inputs requires a registered "
-            "default array namespace"
-        )
-    namespace = resolve()
-    _validate_runtime_namespace_profile(
-        namespace,
-        array_api_version=array_api_version,
-    )
-    return namespace
-
-
-def _restore_staged_output_tree(
-    value: Any,
-    *,
-    output_specs: Sequence[ArraySpec],
-    restore_scalars: bool,
-) -> Any:
-    leaves, treedef = tree_flatten(value)
-    if len(leaves) != len(output_specs):
-        msg = (
-            "Staged output specifications do not match the runtime output pytree: "
-            f"expected {len(output_specs)} leaves, got {len(leaves)}"
-        )
-        raise RuntimeError(msg)
-    restored: list[Any] = []
-    for leaf, spec in zip(leaves, output_specs, strict=True):
-        if spec.weak:
-            mark_weak = getattr(leaf, "_advect_mark_weak", None)
-            if callable(mark_weak):
-                mark_weak()
-        item = getattr(leaf, "item", None)
-        should_unlift = (
-            restore_scalars and spec.weak and getattr(leaf, "shape", None) == () and callable(item)
-        )
-        restored.append(item() if should_unlift else leaf)
-    return tree_unflatten(treedef, restored)
-
-
-def _validate_runtime_namespace_profile(
-    namespace: Any | None,
-    *,
-    array_api_version: str,
-) -> None:
-    if namespace is None:
-        return
-    backend = _get_backend_key_from_namespace(namespace)
-    if backend is None:
+    if resolution is not None:
+        namespace = resolution.raw_namespace
+    else:
+        resolve = get_hook("advect.default_array_namespace")
+        if resolve is None:
+            raise RuntimeError(
+                "A staged call without provider-backed inputs requires a registered "
+                "default array namespace"
+            )
+        namespace = resolve()
+    if _get_backend_key_from_namespace(namespace) is None:
         raise TypeError("Staged array providers must expose a stable namespace name")
     version = _get_provider_array_api_version(namespace)
-    requested_key = tuple(int(part) for part in array_api_version.split("."))
-    reported_key = (
-        tuple(int(part) for part in version.split("."))
-        if isinstance(version, str) and all(part.isdigit() for part in version.split("."))
-        else None
-    )
-    if reported_key is None or reported_key < requested_key:
+    reported_key = None if version is None else _version_key(version)
+    requested_key = _version_key(array_api_version)
+    if reported_key is None or requested_key is None or reported_key < requested_key:
         raise TypeError(
             f"Staged profile {_ADVECT_ARRAY_SEMANTIC_PROFILE!r} requires Array API "
             f"{array_api_version}; "
             f"the runtime provider exposes {version!r}"
         )
+    return namespace
 
 
-def _runtime_device(
-    values: Sequence[Any],
-    namespace: Any | None,
-    *,
-    array_api_version: str,
-) -> tuple[object | None, str | None]:
-    if namespace is None:
-        return None, None
-    backend = _get_backend_key_from_namespace(namespace)
+def _runtime_device(values: Sequence[Any]) -> tuple[object | None, str | None]:
+    """Return the one device of the negotiated provider's inputs, if any."""
     selected: object | None = None
     selected_key: str | None = None
     for value in values:
-        value_namespace = _get_array_namespace(value, api_version=array_api_version)
-        if value_namespace is None or _get_backend_key_from_namespace(value_namespace) != backend:
-            continue
         device = getattr(value, "device", None)
         if device is None:
             continue
@@ -1369,20 +1301,10 @@ def _execute_staged(
     compiled: _CompiledStage,
     state: _ExecutionState,
     inputs: Sequence[Any],
-) -> Any:
+) -> list[Any]:
     array_api_version = compiled.graph.required_array_api_version
     namespace = _runtime_namespace(inputs, array_api_version=array_api_version)
-    if namespace is None:
-        namespace = _default_array_namespace(array_api_version=array_api_version)
-    device, device_key = (
-        _runtime_device(
-            inputs,
-            namespace,
-            array_api_version=array_api_version,
-        )
-        if compiled.constants
-        else (None, None)
-    )
+    device, device_key = _runtime_device(inputs) if compiled.constants else (None, None)
     constants = _materialize_constants(
         compiled,
         state,
@@ -1391,7 +1313,7 @@ def _execute_staged(
         device_key=device_key,
     )
     try:
-        output_leaves = execute_graph(
+        return execute_graph(
             compiled.execution_plan,
             inputs,
             constants,
@@ -1400,7 +1322,6 @@ def _execute_staged(
     except Exception as error:
         _add_staged_error_context(error, compiled.graph)
         raise
-    return tree_unflatten(compiled.output_treedef, output_leaves)
 
 
 class StagedProgram:
@@ -1588,16 +1509,9 @@ class StagedProgram:
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         artifact = self._artifact
-        concrete_tree = (args, kwargs)
-        concrete_leaves = _flatten_runtime_to_treedef(
-            concrete_tree,
-            artifact.call_treedef,
-        )
-        if len(artifact.call_specs) != len(concrete_leaves):
-            raise TypeError("Staged call leaf count differs from its compiled signature")
+        concrete_leaves = _flatten_runtime_to_treedef((args, kwargs), artifact.call_treedef)
         runtime_inputs: list[Any] = []
-        runtime_specs: list[ArraySpec] = []
-        scalar_runtime_inputs: list[bool] = []
+        restore_scalars = False
         for index, (spec, value) in enumerate(
             zip(artifact.call_specs, concrete_leaves, strict=True)
         ):
@@ -1605,25 +1519,16 @@ class StagedProgram:
                 if not _same_static_value(value, spec.value):
                     raise TypeError(f"Static staged argument leaf {index} changed value")
                 continue
-            is_python_scalar = type(value) in {bool, complex, float, int}
-            normalized = (
-                _normalize_weak_runtime_scalar(value, spec)
-                if spec.weak and is_python_scalar
-                else value
-            )
-            actual = (
-                ArraySpec(spec.shape, spec.dtype, device=spec.device, weak=True)
-                if spec.weak and is_python_scalar
-                else _value_spec(normalized)
-            )
-            if not isinstance(actual, ArraySpec):
-                raise TypeError(f"Staged array argument leaf {index} is not array-like")
-            device_matches = spec.device is None or actual.device == spec.device
+            if spec.weak and type(value) in {bool, complex, float, int}:
+                runtime_inputs.append(_normalize_weak_runtime_scalar(value, spec))
+                restore_scalars = True
+                continue
+            actual = _value_spec(value)
             if (
                 actual.shape != spec.shape
                 or actual.dtype != spec.dtype
                 or actual.weak != spec.weak
-                or not device_matches
+                or (spec.device is not None and actual.device != spec.device)
             ):
                 raise ValueError(
                     f"Staged argument leaf {index} expected shape={spec.shape}, "
@@ -1631,20 +1536,20 @@ class StagedProgram:
                     f"got shape={actual.shape}, dtype={actual.dtype}, "
                     f"device={actual.device}, weak={actual.weak}"
                 )
-            runtime_inputs.append(normalized)
-            runtime_specs.append(spec)
-            scalar_runtime_inputs.append(is_python_scalar)
+            runtime_inputs.append(value)
 
-        restore_scalar_outputs = any(
-            spec.weak and is_scalar
-            for spec, is_scalar in zip(runtime_specs, scalar_runtime_inputs, strict=True)
-        )
-
-        return _restore_staged_output_tree(
-            _execute_staged(artifact, self._execution_state, runtime_inputs),
-            output_specs=artifact.output_specs,
-            restore_scalars=restore_scalar_outputs,
-        )
+        outputs = _execute_staged(artifact, self._execution_state, runtime_inputs)
+        for index, spec in enumerate(artifact.output_specs):
+            if not spec.weak:
+                continue
+            leaf = outputs[index]
+            mark_weak = getattr(leaf, "_advect_mark_weak", None)
+            if callable(mark_weak):
+                mark_weak()
+            item = getattr(leaf, "item", None)
+            if restore_scalars and getattr(leaf, "shape", None) == () and callable(item):
+                outputs[index] = item()
+        return tree_unflatten(artifact.output_treedef, outputs)
 
 
 def stage(

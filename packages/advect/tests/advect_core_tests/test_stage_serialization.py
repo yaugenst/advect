@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 
 import pytest
 from hypothesis import example, given, strategies as st
 
 from advect.core._pytree import TreeDef, static, tree_flatten
-from advect.core._stage import _same_static_value, _static_identity
+from advect.core._stage import _same_static_value
 from advect.core._stage_serialization import (
     _decode_scalar,
     _decode_treedef,
@@ -61,10 +62,16 @@ _STATIC_VALUES = st.recursive(
     lambda children: st.one_of(
         st.lists(children, max_size=3),
         st.lists(children, max_size=3).map(tuple),
-        st.dictionaries(_STATIC_SCALARS, children, max_size=3),
+        st.dictionaries(
+            st.one_of(_STATIC_SCALARS, st.tuples(_STATIC_SCALARS)), children, max_size=3
+        ),
     ),
     max_leaves=8,
 )
+
+
+def _codec_identity(value: object) -> str:
+    return json.dumps(_encode_value(value))
 
 
 @given(_STATIC_VALUES, _STATIC_VALUES)
@@ -73,8 +80,10 @@ _STATIC_VALUES = st.recursive(
 @example(0.0, -0.0)
 @example((1,), [1])
 @example({1: "one"}, {1.0: "one"})
+@example({(1,): 0}, {(True,): 0})
+@example({"a": 1, "b": [2.0]}, {"b": [2.0], "a": 1})
 def test_static_value_comparison_matches_codec_identity(left: object, right: object) -> None:
-    assert _same_static_value(left, right) == (_static_identity(left) == _static_identity(right))
+    assert _same_static_value(left, right) == (_codec_identity(left) == _codec_identity(right))
     assert _same_static_value(_decode_value(_encode_value(left)), left)
 
 
