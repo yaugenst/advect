@@ -8,15 +8,18 @@ from typing import Any
 import array_api_strict as strict
 import numpy as np
 import pytest
+from hypothesis import given, settings, strategies as st
 
 import advect as ad
 from advect.autodiff._ephemeral import trace_call
-from advect.core._array_api import providers
+from advect.core._array_api import providers, signatures
 from advect.core._array_api.frontend import (
+    _FUNCTION_SPECS,
     ArrayAPINamespace,
     _accepts_array_api,
     bind_array_api_call,
 )
+from advect.core._array_api.profiles import LATEST_ARRAY_API_VERSION
 from advect.core._errors import MutationError
 
 
@@ -66,6 +69,22 @@ def test_call_binding_normalizes_optional_live_parameters() -> None:
             id="duplicate-positional-attribute",
         ),
         pytest.param(
+            "clip",
+            (object(), object()),
+            {"min": object()},
+            TypeError,
+            "received 'min' twice",
+            id="duplicate-positional-operand",
+        ),
+        pytest.param(
+            "sin",
+            (object(), 7),
+            {},
+            TypeError,
+            "takes 1 positional arguments but 2 were given",
+            id="excess-positional-argument",
+        ),
+        pytest.param(
             "concat",
             (object(),),
             {},
@@ -100,6 +119,101 @@ def test_call_binding_rejects_invalid_standard_forms(
 ) -> None:
     with pytest.raises(error, match=match):
         bind_array_api_call(path, args, kwargs)
+
+
+def test_staging_rejects_an_operand_bound_twice() -> None:
+    # Regression: the positional ``min`` used to become a third clip operand
+    # and stage a silently wrong program instead of the provider's TypeError.
+    value = _strict([-2.0, 0.5, 3.0], dtype=strict.float64)
+    bound = _strict(0.0, dtype=strict.float64)
+
+    def clip_twice(source: Any, lower: Any, upper: Any) -> Any:
+        return source.__array_namespace__().clip(source, lower, min=upper)
+
+    specs = (
+        ad.ArraySpec(value.shape, value.dtype),
+        ad.ArraySpec(bound.shape, bound.dtype),
+        ad.ArraySpec(bound.shape, bound.dtype),
+    )
+    with pytest.raises(TypeError, match="received 'min' twice"):
+        ad.stage(clip_twice, specs=specs)
+
+
+def _binding_sentinel(path: str, name: str, spec: Any) -> Any:
+    if name in spec.sequence_operands:
+        return (object(), object())
+    if path.endswith("matrix_transpose") and name == "x":
+        return SimpleNamespace(shape=(2, 2))
+    return object()
+
+
+@st.composite
+def _array_api_call_spellings(draw: st.DrawFn) -> tuple[str, dict[str, Any], list[int]]:
+    """Draw one bound call and several positional/keyword splits of it."""
+    path = draw(st.sampled_from(sorted(_FUNCTION_SPECS)))
+    spec = _FUNCTION_SPECS[path]
+    arguments = signatures._signature_arguments(path, LATEST_ARRAY_API_VERSION)
+    positional = (*arguments.posonlyargs, *arguments.args)
+    required_positional = len(positional) - len(arguments.defaults)
+    keyword_only_required = [default is None for default in arguments.kw_defaults]
+    bound_positional = draw(
+        st.integers(
+            min_value=max(required_positional, 0),
+            max_value=len(positional),
+        )
+    )
+    names = [argument.arg for argument in positional[:bound_positional]]
+    names.extend(
+        argument.arg
+        for argument, required in zip(arguments.kwonlyargs, keyword_only_required, strict=True)
+        if required or draw(st.booleans())
+    )
+    values = {name: _binding_sentinel(path, name, spec) for name in names}
+    posonly = len(arguments.posonlyargs)
+    spellings = [
+        draw(st.integers(min_value=min(posonly, bound_positional), max_value=bound_positional))
+        for _spelling in range(3)
+    ]
+    return path, values, [bound_positional, *spellings]
+
+
+def _spell(
+    path: str,
+    values: dict[str, Any],
+    positional_count: int,
+) -> tuple[Any, tuple[Any, ...], dict[str, Any]]:
+    names = list(values)
+    args = tuple(values[name] for name in names[:positional_count])
+    kwargs = {name: values[name] for name in names[positional_count:]}
+    return bind_array_api_call(path, args, kwargs), args, kwargs
+
+
+@settings(derandomize=True, deadline=None)
+@given(_array_api_call_spellings())
+def test_array_api_binding_is_independent_of_the_argument_spelling(
+    call: tuple[str, dict[str, Any], list[int]],
+) -> None:
+    path, values, spellings = call
+    spec = _FUNCTION_SPECS[path]
+    reference, args, kwargs = _spell(path, values, spellings[0])
+
+    expected: list[Any] = []
+    for name in spec.operands:
+        if name in values:
+            value = values[name]
+            expected.extend(value if name in spec.sequence_operands else (value,))
+    assert reference.operands == tuple(expected)
+    assert reference.op == spec.op
+    for positional_count in spellings[1:]:
+        binding, _args, _kwargs = _spell(path, values, positional_count)
+        assert binding == reference
+
+    if args:
+        with pytest.raises(TypeError, match="twice"):
+            bind_array_api_call(path, args, {**kwargs, next(iter(values)): object()})
+    if len(args) == len(spec.positional):
+        with pytest.raises(TypeError, match="positional arguments"):
+            bind_array_api_call(path, (*args, object()), kwargs)
 
 
 def test_accumulation_reports_a_missing_provider_dtype() -> None:

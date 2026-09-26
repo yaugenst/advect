@@ -117,9 +117,8 @@ _NONDIFFERENTIABLE_ARRAY_API_COMPOSITES = frozenset(
 class _FunctionSpec:
     op: str
     operands: tuple[str, ...]
+    positional: tuple[str, ...]
     sequence_operands: frozenset[str] = frozenset()
-    positional_operands: tuple[int, ...] = ()
-    positional_attrs: tuple[tuple[int, str], ...] = ()
 
 
 def _metadata_functions() -> frozenset[str]:
@@ -175,21 +174,12 @@ def _function_specs() -> dict[str, _FunctionSpec]:
         default_op = _canonical_array_family_op_name(suffix)
         op = aliases.get(path, default_op)
         schema = schemas[op]
-        parameters = official_parameter_names(path)
-        positional = official_positional_parameter_names(path)
-        operands = operand_exceptions.get(path, parameters[: schema.operands])
-        positional_operands = tuple(
-            parameters.index(name) for name in operands if name in positional
-        )
-        positional_attrs = tuple(
-            (parameters.index(name), name) for name in positional if name not in operands
-        )
+        operands = operand_exceptions.get(path, official_parameter_names(path)[: schema.operands])
         specs[path] = _FunctionSpec(
             op=op,
             operands=operands,
+            positional=official_positional_parameter_names(path),
             sequence_operands=(frozenset(operands[:1]) if schema.sequence_operand else frozenset()),
-            positional_operands=positional_operands,
-            positional_attrs=positional_attrs,
         )
     return specs
 
@@ -204,16 +194,8 @@ _INTERNAL_FUNCTION_SPECS: dict[str, _FunctionSpec] = {
     # Array API revision predates the standard cumulative-function names.
     "cumprod": _FUNCTION_SPECS["cumulative_prod"],
     "cumsum": _FUNCTION_SPECS["cumulative_sum"],
-    "ldexp": _FunctionSpec(
-        "array_ext.ldexp",
-        ("x", "exponent"),
-        positional_operands=(0, 1),
-    ),
-    "linalg.eig": _FunctionSpec(
-        "array_ext.linalg.eig",
-        ("x",),
-        positional_operands=(0,),
-    ),
+    "ldexp": _FunctionSpec("array_ext.ldexp", ("x", "exponent"), ("x", "exponent")),
+    "linalg.eig": _FunctionSpec("array_ext.linalg.eig", ("x",), ("x",)),
 }
 _BINARY_ARITY = 2
 _ARRAY_API_META_FUNCTIONS = _metadata_functions()
@@ -230,67 +212,51 @@ class ArrayAPICallBinding:
     num_outputs: int
 
 
-def _bind_array_api_arguments(
-    args: tuple[Any, ...],
-    kwargs: dict[str, Any],
-    spec: _FunctionSpec,
-) -> tuple[dict[str, Any], tuple[str, ...], dict[str, str]]:
-    bound = {f"__arg_{index}": value for index, value in enumerate(args)}
-    bound.update(kwargs)
-    aliases: dict[str, str] = {}
-    positional_names: list[str] = []
-    for operand_index, position in enumerate(spec.positional_operands):
-        positional_name = f"__arg_{position}"
-        positional_names.append(positional_name)
-        if operand_index < len(spec.operands):
-            aliases[positional_name] = spec.operands[operand_index]
-    operand_names = (*positional_names, *(name for name in spec.operands if name in bound))
-    return bound, operand_names, aliases
-
-
-def _move_positional_array_api_attrs(
+def _bind_array_api_parameters(
     path: str,
     spec: _FunctionSpec,
-    attrs: dict[str, Any],
-) -> None:
-    for position, name in spec.positional_attrs:
-        positional_name = f"__arg_{position}"
-        if positional_name not in attrs:
-            continue
-        if name in attrs:
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+) -> dict[str, Any]:
+    if len(args) > len(spec.positional):
+        msg = (
+            f"Array API {path}() takes {len(spec.positional)} positional arguments "
+            f"but {len(args)} were given"
+        )
+        raise TypeError(msg)
+    bound = dict(zip(spec.positional, args, strict=False))
+    for name, value in kwargs.items():
+        if name in bound:
             msg = f"Array API {path}() received {name!r} twice"
             raise TypeError(msg)
-        attrs[name] = attrs.pop(positional_name)
+        bound[name] = value
+    return bound
 
 
 def _collect_array_api_operands(
     path: str,
     spec: _FunctionSpec,
-    bound: dict[str, Any],
-    operand_names: tuple[str, ...],
-    operand_aliases: dict[str, str],
     attrs: dict[str, Any],
 ) -> list[Any]:
+    """Move bound operands out of ``attrs`` in the canonical schema order."""
     operands: list[Any] = []
-    for operand_name in operand_names:
-        if operand_name not in bound:
+    for name in spec.operands:
+        if name not in attrs:
             continue
-        value = bound[operand_name]
-        attrs.pop(operand_name, None)
-        canonical_name = operand_aliases.get(operand_name, operand_name)
-        if path == "clip" and canonical_name in {"min", "max"}:
-            attrs[f"_advect_clip_{canonical_name}_is_input"] = value is not None
+        value = attrs.pop(name)
+        if path == "clip" and name in {"min", "max"}:
+            attrs[f"_advect_clip_{name}_is_input"] = value is not None
             if value is None:
                 continue
-        if path == "linalg.pinv" and canonical_name == "rtol":
+        if path == "linalg.pinv" and name == "rtol":
             attrs["_advect_pinv_tolerance"] = "rtol" if value is not None else None
             if value is None:
                 continue
-        if canonical_name not in spec.sequence_operands:
+        if name not in spec.sequence_operands:
             operands.append(value)
             continue
         if not isinstance(value, (tuple, list)):
-            msg = f"Array API {path}() expects {canonical_name!r} to be a list or tuple"
+            msg = f"Array API {path}() expects {name!r} to be a list or tuple"
             raise TypeError(msg)
         if not value:
             msg = f"Array API {path}() requires a non-empty list or tuple of arrays"
@@ -346,21 +312,8 @@ def bind_array_api_call(
         )
         raise NotImplementedError(msg)
 
-    bound, operand_names, operand_aliases = _bind_array_api_arguments(
-        args,
-        kwargs,
-        spec,
-    )
-    attrs = dict(bound)
-    _move_positional_array_api_attrs(path, spec, attrs)
-    operands = _collect_array_api_operands(
-        path,
-        spec,
-        bound,
-        operand_names,
-        operand_aliases,
-        attrs,
-    )
+    attrs = _bind_array_api_parameters(path, spec, args, kwargs)
+    operands = _collect_array_api_operands(path, spec, attrs)
     _normalize_array_api_attrs(path, attrs, operands)
 
     return ArrayAPICallBinding(
