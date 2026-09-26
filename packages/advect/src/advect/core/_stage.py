@@ -1204,23 +1204,16 @@ def _coerce_constant(
     *,
     device: object | None,
 ) -> Any:
+    """Materialize one staged constant on a concrete or abstract provider."""
     dtype_name = value.dtype
     shape = value.shape
     if value.kind == "scalar":
         return next(iter_constant_values(value))
     if namespace is None:
         raise RuntimeError("Cannot materialize a staged array constant without an array namespace")
-    raw_namespace = getattr(namespace, "raw_namespace", namespace)
     abstract_materialize = getattr(namespace, "_advect_materialize_constant", None)
-    if not callable(abstract_materialize):
-        abstract_materialize = getattr(raw_namespace, "_advect_materialize_constant", None)
     if callable(abstract_materialize):
-        materialized = abstract_materialize(
-            value,
-            ArraySpec(shape, dtype_name),
-        )
-        if materialized is not NotImplemented:
-            return materialized
+        return abstract_materialize(value, ArraySpec(shape, dtype_name))
     asarray = getattr(namespace, "asarray", None)
     if not callable(asarray):
         raise TypeError("The runtime array namespace does not provide asarray()")
@@ -1230,7 +1223,7 @@ def _coerce_constant(
     kwargs: dict[str, object] = {"dtype": dtype}
     if device is not None:
         kwargs["device"] = device
-    frombuffer = getattr(raw_namespace, "frombuffer", None)
+    frombuffer = getattr(namespace, "frombuffer", None)
     materialized: Any
     if callable(frombuffer):
         # Some providers expose writable tensors over the supplied buffer and
@@ -1260,33 +1253,55 @@ def _coerce_constant(
 def _materialize_constants(
     compiled: _CompiledStage,
     state: _ExecutionState,
-    namespace: Any | None,
+    namespace: Any,
     *,
     device: object | None,
     device_key: str | None,
 ) -> tuple[object, ...]:
     if not compiled.constants:
         return ()
-    with state.materialization_lock:
-        for cached in state.materialized_constants:
-            if cached.namespace is namespace and cached.device == device_key:
-                return cached.values
-        values = tuple(
+    # A dynamic tracing namespace wraps the provider that owns the values.
+    provider = getattr(namespace, "raw_namespace", namespace)
+
+    def provider_values() -> tuple[object, ...]:
+        return tuple(
             _coerce_constant(
                 portable_constant_from_native(*compiled.graph._constant_parts(node_id)),
-                namespace,
+                provider,
                 device=device,
             )
             for node_id in compiled.graph.constant_ids()
         )
-        state.materialized_constants.append(
-            _MaterializedConstants(
-                namespace=namespace,
-                device=device_key,
-                values=values,
+
+    if callable(getattr(provider, "_advect_materialize_constant", None)):
+        # An abstract provider records the constants into its own staging trace.
+        values = provider_values()
+    else:
+        with state.materialization_lock:
+            cached_values = next(
+                (
+                    cached.values
+                    for cached in state.materialized_constants
+                    if cached.namespace is provider and cached.device == device_key
+                ),
+                None,
             )
-        )
+            if cached_values is None:
+                cached_values = provider_values()
+                state.materialized_constants.append(
+                    _MaterializedConstants(
+                        namespace=provider,
+                        device=device_key,
+                        values=cached_values,
+                    )
+                )
+            values = cached_values
+    if provider is namespace:
         return values
+    # Each dynamic trace lifts the provider arrays onto its own tape; Python
+    # scalar constants need no provider identity.
+    lift = namespace._advect_materialize_constant
+    return tuple(lift(value, None) if hasattr(value, "shape") else value for value in values)
 
 
 _STAGED_ERROR_NODE = re.compile(r"node %(\d+)")

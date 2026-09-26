@@ -93,6 +93,22 @@ def test_loaded_array_api_constant_materializes_once_per_runtime_boundary(
     assert materializations == 1
 
 
+def test_trace_bound_constant_materializations_are_not_cached() -> None:
+    kernel = np.array([0.5, -1.0, 2.0])
+    program = cast("ad.StagedProgram", ad.stage(lambda x: np.sum(x * kernel), np.zeros(3)))
+    value = np.array([1.0, 2.0, 3.0])
+
+    for _ in range(3):
+        ad.grad(program)
+        ad.stage(lambda x: 2 * program(x), value)
+        dynamic = ad.grad(lambda x: program(x))  # noqa: PLW0108 - explicit trace boundary
+        np.testing.assert_allclose(dynamic(value), kernel)
+    np.testing.assert_allclose(program(value), np.sum(value * kernel))
+
+    cache = cast("Any", program)._execution_state.materialized_constants
+    assert [(entry.namespace, entry.device) for entry in cache] == [(np, "cpu")]
+
+
 def test_public_staged_inspection_cannot_mutate_the_store() -> None:
     kernel = np.array([1.0, 2.0], dtype=np.float32)
     program = cast(

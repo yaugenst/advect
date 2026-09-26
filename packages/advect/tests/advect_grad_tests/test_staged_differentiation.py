@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import array_api_strict as strict
 import numpy as np
 import pytest
@@ -148,7 +150,7 @@ def test_staged_grad_preserves_unselected_outer_trace_operands() -> None:
 
 
 @pytest.mark.parametrize("declared", [False, True], ids=["example", "spec"])
-def test_staged_transforms_preserve_unselected_weak_scalar_operands(declared: bool) -> None:
+def test_staged_transforms_preserve_unselected_weak_scalar_operands(*, declared: bool) -> None:
     def loss(value: object, scale: object) -> object:
         return np.sum(scale * value * value)
 
@@ -423,26 +425,40 @@ def test_staged_grad_lifts_captured_array_constants() -> None:
 
 
 @pytest.mark.parametrize("restore", [False, True], ids=["staged", "restored"])
-def test_dynamic_transforms_compose_with_example_staged_numpy_programs(restore: bool) -> None:
-    weight = np.array([0.5, -1.0, 2.0])
+@pytest.mark.parametrize("xp", [np, strict], ids=["numpy", "array_api_strict"])
+def test_dynamic_transforms_compose_with_example_staged_programs(
+    xp: Any,
+    *,
+    restore: bool,
+) -> None:
+    weight = xp.asarray([0.5, -1.0, 2.0])
 
-    def field(x: object) -> object:
-        return np.sin(x) * weight
+    def field(x: Any) -> Any:
+        return x.__array_namespace__().sin(x) * weight
 
-    x = np.array([0.1, 0.2, 0.3])
+    def total(x: Any) -> Any:
+        return x.__array_namespace__().sum(x)
+
+    def dynamic(x: Any) -> Any:
+        return program(x)
+
+    x = xp.asarray([0.1, 0.2, 0.3])
     program = ad.stage(field, x)
     if restore:
         program = ad.StagedProgram.from_dict(program.to_dict())
-    tangent = np.array([1.0, -2.0, 0.5])
-    cotangent = np.array([0.25, 1.5, -1.0])
+    tangent = xp.asarray([1.0, -2.0, 0.5])
+    cotangent = xp.asarray([0.25, 1.5, -1.0])
+    derivative = np.cos(np.asarray(x)) * np.asarray(weight)
 
-    assert_allclose(ad.grad(lambda value: np.sum(program(value)))(x), np.cos(x) * weight)
-    primal, directional = ad.jvp(lambda value: program(value))(x, tangents=tangent)
-    assert_allclose(primal, field(x))
-    assert_allclose(directional, np.cos(x) * weight * tangent)
-    primal, pullback = ad.vjp(lambda value: program(value))(x)
-    assert_allclose(primal, field(x))
-    assert_allclose(pullback(cotangent), np.cos(x) * weight * cotangent)
+    assert len(program.constants) == 1
+    gradient = ad.grad(lambda value: total(dynamic(value)))(x)
+    assert_allclose(np.asarray(gradient), derivative)
+    primal, directional = ad.jvp(dynamic)(x, tangents=tangent)
+    assert_allclose(np.asarray(primal), np.asarray(field(x)))
+    assert_allclose(np.asarray(directional), derivative * np.asarray(tangent))
+    primal, pullback = ad.vjp(dynamic)(x)
+    assert_allclose(np.asarray(primal), np.asarray(field(x)))
+    assert_allclose(np.asarray(pullback(cotangent)), derivative * np.asarray(cotangent))
 
 
 def test_staged_grad_remains_provider_portable_array_api_code() -> None:

@@ -165,18 +165,16 @@ def test_byte_materialization_moves_to_the_selected_device() -> None:
         def __init__(self, device: str) -> None:
             self.device = device
 
-    class FakeRawNamespace:
-        @staticmethod
-        def frombuffer(_data: bytes, *, dtype: object) -> FakeArray:
-            assert dtype == "float32"
-            return FakeArray("cuda:0")
-
     class FakeNamespace:
-        raw_namespace = FakeRawNamespace()
         float32 = "float32"
 
         def __init__(self) -> None:
             self.requests: list[str] = []
+
+        @staticmethod
+        def frombuffer(_data: bytes, *, dtype: object) -> FakeArray:
+            assert dtype == "float32"
+            return FakeArray("cuda:0")
 
         def asarray(
             self,
