@@ -20,6 +20,7 @@ from advect.core._backends import get_hook
 from advect.core._basic_index import decode_basic_index
 from advect.core._graph_attrs import decode_graph_attrs_from_native
 from advect.core._primitive import evaluate_primitive
+from advect.core._primitive_call import _infer_namespace
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -381,7 +382,7 @@ def _bind_copy_evaluator(attrs: Mapping[str, Any]) -> BoundEvaluator:
         copy_value = getattr(value, "copy", None)
         if callable(copy_value):
             return copy_value() if order is None else copy_value(order=order)
-        namespace = context if context is not None else _namespace_from_inputs(input_vals)
+        namespace = context if context is not None else _infer_namespace(input_vals)
         asarray = None if namespace is None else getattr(namespace, "asarray", None)
         if callable(asarray):
             return asarray(value, copy=True)
@@ -430,14 +431,6 @@ def _can_donate_array(value: Any) -> bool:
     if writable is not None:
         return bool(writable)
     return _array_namespace_can_donate(value)
-
-
-def _namespace_from_inputs(inputs: tuple[Any, ...]) -> Any | None:
-    for value in inputs:
-        namespace = _get_array_namespace(value)
-        if namespace is not None:
-            return namespace
-    return None
 
 
 def _instance_specific_namespace(values: object) -> Any | None:
@@ -549,7 +542,7 @@ def _bind_array_op(op: str, attrs: Mapping[str, Any]) -> BoundEvaluator:  # noqa
                 return binary(left, right)
         if unary is not None and len(inputs) == 1 and type(inputs[0]) in _PYTHON_SCALARS:
             return unary(inputs[0])
-        resolved = context if context is not None else _namespace_from_inputs(inputs)
+        resolved = context if context is not None else _infer_namespace(inputs)
         if resolved is None:
             raise RuntimeError(f"Cannot execute {op!r} without an array namespace")
         namespace = (
