@@ -289,6 +289,12 @@ class TracedArray(NDArrayOperatorsMixin):
         return np.dtype(value.dtype)
 
     @property
+    def device(self) -> Any:
+        """Return the device of the underlying array."""
+        _node_id, value = self._advect_snapshot()
+        return getattr(value, "device", None)
+
+    @property
     def _advect_weak(self) -> bool:
         """Return the weak-scalar category of the current SSA value."""
         return self.recorder.is_weak(self.node_id)

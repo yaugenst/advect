@@ -422,6 +422,29 @@ def test_staged_grad_lifts_captured_array_constants() -> None:
     assert len(gradient.constants) >= 1
 
 
+@pytest.mark.parametrize("restore", [False, True], ids=["staged", "restored"])
+def test_dynamic_transforms_compose_with_example_staged_numpy_programs(restore: bool) -> None:
+    weight = np.array([0.5, -1.0, 2.0])
+
+    def field(x: object) -> object:
+        return np.sin(x) * weight
+
+    x = np.array([0.1, 0.2, 0.3])
+    program = ad.stage(field, x)
+    if restore:
+        program = ad.StagedProgram.from_dict(program.to_dict())
+    tangent = np.array([1.0, -2.0, 0.5])
+    cotangent = np.array([0.25, 1.5, -1.0])
+
+    assert_allclose(ad.grad(lambda value: np.sum(program(value)))(x), np.cos(x) * weight)
+    primal, directional = ad.jvp(lambda value: program(value))(x, tangents=tangent)
+    assert_allclose(primal, field(x))
+    assert_allclose(directional, np.cos(x) * weight * tangent)
+    primal, pullback = ad.vjp(lambda value: program(value))(x)
+    assert_allclose(primal, field(x))
+    assert_allclose(pullback(cotangent), np.cos(x) * weight * cotangent)
+
+
 def test_staged_grad_remains_provider_portable_array_api_code() -> None:
     def loss(x: object) -> object:
         xp = x.__array_namespace__()
