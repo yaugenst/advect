@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import zlib
 from dataclasses import replace
 from typing import Any
 
@@ -329,38 +330,61 @@ def test_portable_case_round_trips_on_numpy(case: object) -> None:
         )
 
 
-def _ones_like_tree(value: object, namespace: object) -> object:
+def _random_direction(value: Any, rng: np.random.Generator, namespace: Any) -> Any:
+    """Draw a seeded direction; discrete leaves carry no derivative."""
     if isinstance(value, tuple):
-        items = tuple(_ones_like_tree(item, namespace) for item in value)
-        if hasattr(value, "_fields"):
-            return type(value)(*items)
-        return items
+        items = tuple(_random_direction(item, rng, namespace) for item in value)
+        return type(value)(*items) if hasattr(value, "_fields") else items
     if isinstance(value, list):
-        return [_ones_like_tree(item, namespace) for item in value]
-    return namespace.ones_like(value)
+        return [_random_direction(item, rng, namespace) for item in value]
+    shape = tuple(value.shape)
+    if namespace.isdtype(value.dtype, "complex floating"):
+        data = rng.standard_normal(shape) + 1j * rng.standard_normal(shape)
+    elif namespace.isdtype(value.dtype, "real floating"):
+        data = rng.standard_normal(shape)
+    else:
+        return namespace.zeros_like(value)
+    return namespace.asarray(data, dtype=value.dtype)
 
 
-def _tree_leaves(value: object) -> tuple[object, ...]:
+def _tree_leaves(value: object) -> tuple[np.ndarray, ...]:
     if isinstance(value, tuple | list):
         return tuple(leaf for item in value for leaf in _tree_leaves(item))
-    return (value,)
-
-
-def _scaled_direction(value: object, scale: float, namespace: object) -> object:
-    scalar = namespace.asarray(scale, dtype=value.dtype)
-    return namespace.multiply(namespace.ones_like(value), scalar)
+    return (np.asarray(value),)
 
 
 def _real_pairing(left: object, right: object) -> float:
     return float(
         sum(
-            np.real(np.vdot(np.asarray(left_leaf), np.asarray(right_leaf)))
-            for left_leaf, right_leaf in zip(
-                _tree_leaves(left),
-                _tree_leaves(right),
-                strict=True,
-            )
+            np.real(np.vdot(left_leaf, right_leaf))
+            for left_leaf, right_leaf in zip(_tree_leaves(left), _tree_leaves(right), strict=True)
         )
+    )
+
+
+def _norm(value: object) -> float:
+    return float(np.sqrt(sum(np.vdot(leaf, leaf).real for leaf in _tree_leaves(value))))
+
+
+def _assert_adjoint(
+    cotangent: object,
+    directional: object,
+    reverse: object,
+    tangent: object,
+    *,
+    message: str,
+) -> None:
+    """Check Re<u, J v> == Re<J* u, v> relative to Cauchy-Schwarz bounds."""
+    forward = _real_pairing(cotangent, directional)
+    backward = _real_pairing(reverse, tangent)
+    epsilon = max(
+        np.finfo(leaf.dtype).eps
+        for leaf in (*_tree_leaves(cotangent), *_tree_leaves(tangent))
+        if np.issubdtype(leaf.dtype, np.inexact)
+    )
+    scale = _norm(cotangent) * _norm(directional) + _norm(reverse) * _norm(tangent)
+    assert abs(forward - backward) <= 64 * epsilon * scale, (
+        f"{message}: Re<u, Jv> = {forward!r}, Re<J*u, v> = {backward!r}"
     )
 
 
@@ -368,23 +392,24 @@ def _real_pairing(left: object, right: object) -> float:
     ("array_api_version", "case", "parameter", "argnums"),
     _DERIVATIVE_CASES,
 )
-@pytest.mark.parametrize("scale", [-0.75, 0.5, 1.5])
 def test_each_differentiable_parameter_executes_jvp_and_vjp(
     array_api_version: str,
     case: Any,
     parameter: str,
     argnums: tuple[int, ...],
-    scale: float,
 ) -> None:
+    # Seeded random (complex) directions expose permutation and conjugation
+    # errors that constant, collinear directions cannot distinguish.
     path = case.path
+    rng = np.random.default_rng(zlib.crc32(f"{array_api_version}:{path}:{parameter}".encode()))
     provider = qualifier._provider("array-api-strict", array_api_version)
     with qualifier._restrict_provider_revision(provider, array_api_version):
-        inputs = qualifier._materialize_inputs(case, provider.namespace)
+        namespace = provider.namespace
+        inputs = qualifier._materialize_inputs(case, namespace)
         function = qualifier._transformed(case)
-        expected = qualifier._invoke(case, provider.namespace, inputs)
-        tangents = tuple(
-            _scaled_direction(inputs[index], scale, provider.namespace) for index in argnums
-        )
+        expected = qualifier._invoke(case, namespace, inputs)
+        tangents = tuple(_random_direction(inputs[index], rng, namespace) for index in argnums)
+        tangent = tangents if len(argnums) > 1 else tangents[0]
 
         primal, directional = ad.jvp(function, argnums=argnums)(
             *inputs,
@@ -393,7 +418,7 @@ def test_each_differentiable_parameter_executes_jvp_and_vjp(
         qualifier.assert_output_matches(expected, primal, compare_values=case.compare_values)
 
         value, pullback = ad.vjp(function, argnums=argnums)(*inputs)
-        seed = _ones_like_tree(value, provider.namespace)
+        seed = _random_direction(value, rng, namespace)
         try:
             cotangents = pullback(seed)
         finally:
@@ -404,17 +429,12 @@ def test_each_differentiable_parameter_executes_jvp_and_vjp(
             assert tuple(cotangent.shape) == tuple(inputs[index].shape), parameter
             assert cotangent.dtype == inputs[index].dtype, parameter
         reverse = cotangent_items if len(argnums) > 1 else cotangent_items[0]
-        forward_pairing = _real_pairing(seed, directional)
-        reverse_pairing = _real_pairing(
+        _assert_adjoint(
+            seed,
+            directional,
             reverse,
-            tangents if len(argnums) > 1 else tangents[0],
-        )
-        np.testing.assert_allclose(
-            reverse_pairing,
-            forward_pairing,
-            rtol=1e-5,
-            atol=1e-6,
-            err_msg=f"{path}.{parameter} violates the JVP/VJP adjoint identity",
+            tangent,
+            message=f"{path}.{parameter} violates the JVP/VJP adjoint identity",
         )
 
         if "serialized" not in case.modes:
@@ -429,17 +449,12 @@ def test_each_differentiable_parameter_executes_jvp_and_vjp(
 
         assert derivative_program.array_api_version == array_api_version
         for program in (derivative_program, restored_derivative):
-            staged_reverse = program(*inputs, cotangent=seed)
-            staged_pairing = _real_pairing(
-                staged_reverse,
-                tangents if len(argnums) > 1 else tangents[0],
-            )
-            np.testing.assert_allclose(
-                staged_pairing,
-                forward_pairing,
-                rtol=1e-5,
-                atol=1e-6,
-                err_msg=(
+            _assert_adjoint(
+                seed,
+                directional,
+                program(*inputs, cotangent=seed),
+                tangent,
+                message=(
                     f"{path}.{parameter} violates the staged serialized VJP identity "
                     f"for Array API {array_api_version}"
                 ),
