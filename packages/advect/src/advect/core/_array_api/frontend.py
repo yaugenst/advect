@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from functools import partial, wraps
+from functools import partial
 from typing import TYPE_CHECKING, Any, cast
 
 from advect.core._abstract_domains import operation_semantics
@@ -124,8 +124,7 @@ class _FunctionSpec:
     optional_operands: frozenset[str] = frozenset()
 
 
-def _metadata_functions() -> frozenset[str]:
-    return frozenset({"can_cast", "finfo", "iinfo", "isdtype", "result_type"})
+_ARRAY_API_META_FUNCTIONS = frozenset({"can_cast", "finfo", "iinfo", "isdtype", "result_type"})
 
 
 def _function_specs() -> dict[str, _FunctionSpec]:
@@ -171,7 +170,7 @@ def _function_specs() -> dict[str, _FunctionSpec]:
     schemas = {name: schema for name, schema, _evaluator in operation_semantics()}
     specs: dict[str, _FunctionSpec] = {}
     for path in OFFICIAL_SIGNATURES:
-        if path in unsupported or path in _metadata_functions():
+        if path in unsupported or path in _ARRAY_API_META_FUNCTIONS:
             continue
         suffix = path
         default_op = _canonical_array_family_op_name(suffix)
@@ -206,7 +205,6 @@ _INTERNAL_FUNCTION_SPECS: dict[str, _FunctionSpec] = {
     "linalg.eig": _FunctionSpec("array_ext.linalg.eig", ("x",), ("x",)),
 }
 _BINARY_ARITY = 2
-_ARRAY_API_META_FUNCTIONS = _metadata_functions()
 # Official static parameters recorded under another node attribute name.
 # Frontend-private ``_advect_*`` attributes bypass abstract attribute schemas.
 _RENAMED_PARAMETERS = {"device": "_advect_device", "repetitions": "reps"}
@@ -1086,37 +1084,18 @@ class ArrayAPINamespace:
                 array_api_version=self._array_api_version,
             )
         if callable(value):
-            if isinstance(self._namespace, ArrayAPINamespace):
-                raw_owner = self._namespace
-                while isinstance(raw_owner, ArrayAPINamespace):
-                    raw_owner = raw_owner._namespace  # noqa: SLF001 - nested proxy unwrapping
-                raw_function = getattr(raw_owner, name)
-                traced_function = value
-
-                @wraps(raw_function)
-                def call_through_parent(*args: Any, **kwargs: Any) -> Any:
-                    return traced_function(*args, **kwargs)
-
-                value = call_through_parent
+            # A nested proxy's value already calls through its parent proxy.
             return partial(self._call, path, value)
         return value
 
     def __dir__(self) -> list[str]:
-        names = set(super().__dir__()) | set(dir(self._namespace))
-        if self._path:
-            names = {
-                name
-                for name in names
-                if f"{self._path}.{name}" not in OFFICIAL_SIGNATURES
-                or self._profile.admits(f"{self._path}.{name}")
-            }
-        else:
-            names = {
-                name
-                for name in names
-                if name not in OFFICIAL_SIGNATURES or self._profile.admits(name)
-            }
-        return sorted(names)
+        prefix = f"{self._path}." if self._path else ""
+        return sorted(
+            name
+            for name in set(super().__dir__()) | set(dir(self._namespace))
+            if f"{prefix}{name}" not in OFFICIAL_SIGNATURES
+            or self._profile.admits(f"{prefix}{name}")
+        )
 
     def _asarray_live_sequence(
         self,
@@ -1161,10 +1140,6 @@ class ArrayAPINamespace:
             array_api_version=self._array_api_version,
         )
 
-    @staticmethod
-    def _lift_discrete_composite(namespace: ArrayAPINamespace, value: Any) -> Any:
-        return namespace._advect_materialize_constant(value, None)
-
     def _dynamic_array_api_composite(
         self,
         path: str,
@@ -1181,7 +1156,7 @@ class ArrayAPINamespace:
 
         if path == "nonzero":
             result = raw_function(raw_source)
-            return tuple(self._lift_discrete_composite(namespace, value) for value in result)
+            return tuple(namespace._advect_materialize_constant(value, None) for value in result)
 
         all_result = self.raw_namespace.unique_all(raw_source)
         flattened = namespace.reshape(source, (-1,))
@@ -1203,7 +1178,7 @@ class ArrayAPINamespace:
             raise AssertionError(message)
         return type(result)(
             values,
-            *(self._lift_discrete_composite(namespace, value) for value in metadata),
+            *(namespace._advect_materialize_constant(value, None) for value in metadata),
         )
 
     def _call(  # noqa: PLR0911 - one closed frontend dispatch
