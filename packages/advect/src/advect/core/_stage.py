@@ -354,7 +354,7 @@ def _encode_spec(spec: ArraySpec | StaticSpec) -> dict[str, object]:
         return {
             "kind": "array",
             "shape": list(spec.shape),
-            "dtype": str(spec.dtype),
+            "dtype": spec.dtype,
             "device": spec.device,
             "weak": spec.weak,
         }
@@ -380,7 +380,7 @@ def _decode_spec(payload: object) -> ArraySpec | StaticSpec:
             raise TypeError("Staged array device must be a string or None")
         if not isinstance(weak, bool):
             raise TypeError("Staged array weak flag must be a bool")
-        return ArraySpec(tuple(shape), dtype, device=device, weak=weak)
+        return ArraySpec(tuple(shape), _dtype_name(dtype), device=device, weak=weak)
     if kind == "static":
         if set(payload) != {"kind", "value"}:
             raise ValueError("Staged static spec has invalid fields")
@@ -523,7 +523,7 @@ def _normalize_weak_runtime_scalar(value: object, spec: ArraySpec) -> object:
     """Normalize one Python scalar to the exact declared weak dtype category."""
     if type(value) not in {bool, complex, float, int}:
         return value
-    dtype = _dtype_name(spec.dtype)
+    dtype = spec.dtype
     if dtype == "bool":
         if type(value) is not bool:
             raise ValueError(
@@ -798,10 +798,12 @@ def _compile_stage(
     )
     spec_leaves, call_treedef = tree_flatten(call_tree)
     stage_scope = array_factory._advect_stage_context(tuple(_function_captures(function)))
+    call_specs: list[ArraySpec | StaticSpec] = []
     traced_leaves: list[Any] = []
     weak_input_ids: set[int] = set()
     for index, spec in enumerate(spec_leaves):
         if isinstance(spec, StaticSpec):
+            call_specs.append(spec)
             traced_leaves.append(_snapshot_static_value(spec.value))
             continue
         if not isinstance(spec, ArraySpec):
@@ -810,9 +812,12 @@ def _compile_stage(
                 f"got {type(spec).__name__}"
             )
             raise TypeError(msg)
+        # The artifact stores canonical dtype names; the trace sees the declared spec.
+        stored_spec = replace(spec, dtype=_dtype_name(spec.dtype))
+        call_specs.append(stored_spec)
         node_id = graph_builder.append_input_node(
-            spec.shape,
-            spec.dtype,
+            stored_spec.shape,
+            stored_spec.dtype,
             name=f"arg{index}",
         )
         if spec.weak:
@@ -877,7 +882,7 @@ def _compile_stage(
             weak_source_ids.add(remapped_id)
     scalar_output_mask = _scalar_output_mask(graph, weak_source_ids)
     output_specs = tuple(
-        replace(spec, weak=restore and spec.shape == ())
+        replace(spec, dtype=_dtype_name(spec.dtype), weak=restore and spec.shape == ())
         for spec, restore in zip(output_specs, scalar_output_mask, strict=True)
     )
 
@@ -885,7 +890,7 @@ def _compile_stage(
         graph=graph,
         execution_plan=_bind_staged_execution(graph),
         call_treedef=call_treedef,
-        call_specs=tuple(spec_leaves),
+        call_specs=tuple(call_specs),
         output_treedef=output_treedef,
         output_specs=output_specs,
         constants=tuple(constants),
@@ -1055,7 +1060,7 @@ def _decode_artifact(payload: object) -> _CompiledStage:
         input_specs = tuple(spec for spec in call_specs if isinstance(spec, ArraySpec))
         input_nodes = tuple(graph.get_node(node_id) for node_id in graph.inputs)
         if len(input_nodes) != len(input_specs) or any(
-            tuple(node.shape) != spec.shape or _dtype_name(node.dtype) != _dtype_name(spec.dtype)
+            tuple(node.shape) != spec.shape or _dtype_name(node.dtype) != spec.dtype
             for node, spec in zip(input_nodes, input_specs, strict=True)
         ):
             raise ValueError("Staged graph inputs do not match its call specs")
@@ -1063,9 +1068,7 @@ def _decode_artifact(payload: object) -> _CompiledStage:
             raise ValueError("Staged graph output count does not match its output pytree")
         for node_id, spec in zip(graph.outputs, output_specs, strict=True):
             node = graph.get_node(node_id)
-            if tuple(node.shape) != spec.shape or _dtype_name(node.dtype) != _dtype_name(
-                spec.dtype
-            ):
+            if tuple(node.shape) != spec.shape or _dtype_name(node.dtype) != spec.dtype:
                 raise ValueError("Staged output specs do not match graph outputs")
         if graph.node_count != optimization.nodes_after:
             raise ValueError("Staged graph node count does not match its optimization report")
@@ -1630,7 +1633,7 @@ class StagedProgram:
             device_matches = spec.device is None or actual.device == spec.device
             if (
                 actual.shape != spec.shape
-                or _dtype_name(actual.dtype) != _dtype_name(spec.dtype)
+                or actual.dtype != spec.dtype
                 or actual.weak != spec.weak
                 or not device_matches
             ):

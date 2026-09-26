@@ -258,6 +258,51 @@ def test_serialized_output_specs_are_validated_against_the_graph() -> None:
         ad.StagedProgram.from_dict(payload)
 
 
+def _double(value: Any) -> Any:
+    return value * 2
+
+
+@pytest.mark.parametrize(
+    "dtype",
+    [np.float32, np.dtype(">f4"), strict.float32, "float32"],
+    ids=["numpy-type", "big-endian", "array-api", "name"],
+)
+def test_equivalent_dtype_spellings_stage_one_canonical_artifact(dtype: object) -> None:
+    program = cast("ad.StagedProgram", ad.stage(_double, specs=(ad.ArraySpec((2,), dtype),)))
+    reference = cast(
+        "ad.StagedProgram",
+        ad.stage(_double, specs=(ad.ArraySpec((2,), "float32"),)),
+    )
+
+    assert program.to_dict() == reference.to_dict()
+    assert program.signature == ((ad.ArraySpec((2,), "float32"),), {})
+    value = np.array([1.0, 2.0], dtype=np.float32)
+    np.testing.assert_array_equal(ad.StagedProgram.from_dict(program.to_dict())(value), value * 2)
+
+
+def test_loaded_dtype_spellings_are_stored_canonically() -> None:
+    program = cast("ad.StagedProgram", ad.stage(_double, specs=(ad.ArraySpec((2,), "float32"),)))
+    payload = cast("dict[str, Any]", deepcopy(program.to_dict()))
+    payload["program"]["call_specs"][0]["dtype"] = "<class 'numpy.float32'>"
+    payload["program"]["output_specs"][0]["dtype"] = "array_api_strict.float32"
+
+    assert ad.StagedProgram.from_dict(payload).to_dict() == program.to_dict()
+
+
+def test_non_native_byte_order_capture_views_round_trip() -> None:
+    captured = np.arange(6.0).reshape(2, 3).astype(">f8")
+    program = cast(
+        "ad.StagedProgram",
+        ad.stage(lambda x: (x + 1, captured.T, captured[0]), np.zeros((2, 3))),
+    )
+    payload = cast("dict[str, Any]", program.to_dict())
+
+    assert [spec["dtype"] for spec in payload["program"]["output_specs"]] == ["float64"] * 3
+    _shifted, transposed, row = ad.StagedProgram.from_dict(payload)(np.zeros((2, 3)))
+    np.testing.assert_array_equal(transposed, captured.T)
+    np.testing.assert_array_equal(row, captured[0])
+
+
 def test_non_array_dynamic_leaves_require_explicit_static_spec() -> None:
     value = np.array([1.0, 2.0], dtype=np.float32)
     explicit = cast(
