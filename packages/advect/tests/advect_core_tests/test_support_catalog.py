@@ -213,7 +213,7 @@ def test_compatibility_tables_show_user_capabilities() -> None:
     assert "**No** means no derivative rule is available" in array_api
     assert "| `add` | yes | yes |" in array_api
     assert "| `all` | yes | n/a |" in array_api
-    assert "| `arange` | yes | no |" in array_api
+    assert "| `arange` | no | no |" in array_api
 
 
 def test_compact_table_preserves_asymmetric_capabilities() -> None:

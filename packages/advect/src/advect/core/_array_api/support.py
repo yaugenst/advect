@@ -19,6 +19,7 @@ from advect.core._array_api.frontend import (
     _ARRAY_API_META_FUNCTIONS,
     _FUNCTION_SPECS,
     _NONDIFFERENTIABLE_ARRAY_API_COMPOSITES,
+    _RENAMED_PARAMETERS,
     _STAGED_ARRAY_API_COMPOSITES,
 )
 from advect.core._array_api.profiles import (
@@ -97,15 +98,11 @@ _PARTIAL_PARAMETERS = {
 _SPECIAL_STAGED_PARAMETERS = frozenset(
     {
         ("asarray", "copy"),
-        ("asarray", "device"),
         ("diff", "append"),
         ("diff", "prepend"),
         ("searchsorted", "sorter"),
     }
 )
-_STAGED_PARAMETER_ALIASES = {
-    ("tile", "repetitions"): "reps",
-}
 
 
 def _operand_names(path: str) -> frozenset[str]:
@@ -142,8 +139,12 @@ def _fully_staged(path: str, *, version: str) -> bool:
     for name in official_parameter_names(path, version):
         if name in operand_names or (path, name) in _SPECIAL_STAGED_PARAMETERS:
             continue
-        alias = _STAGED_PARAMETER_ALIASES.get((path, name), name)
-        if alias not in rule.allowed_attrs and alias not in rule.positional_attrs:
+        attribute = _RENAMED_PARAMETERS.get(name, name)
+        if not (
+            attribute.startswith("_advect_")
+            or attribute in rule.allowed_attrs
+            or attribute in rule.positional_attrs
+        ):
             return False
     return True
 

@@ -207,6 +207,9 @@ _INTERNAL_FUNCTION_SPECS: dict[str, _FunctionSpec] = {
 }
 _BINARY_ARITY = 2
 _ARRAY_API_META_FUNCTIONS = _metadata_functions()
+# Official static parameters recorded under another node attribute name.
+# Frontend-private ``_advect_*`` attributes bypass abstract attribute schemas.
+_RENAMED_PARAMETERS = {"device": "_advect_device", "repetitions": "reps"}
 _ACCUMULATION_FUNCTIONS = frozenset({"prod", "sum"})
 
 
@@ -283,14 +286,13 @@ def _normalize_array_api_attrs(
 ) -> None:
     if path == "asarray":
         attrs["_advect_array_api_asarray"] = True
-    device = attrs.pop("device", None)
-    if device is not None:
-        attrs["_advect_device"] = str(device)
+    for name, attribute in _RENAMED_PARAMETERS.items():
+        value = attrs.pop(name, None)
+        if value is not None:
+            attrs[attribute] = str(value) if name == "device" else value
     if path == "clip":
         attrs.setdefault("_advect_clip_min_is_input", False)
         attrs.setdefault("_advect_clip_max_is_input", False)
-    if path == "tile" and "repetitions" in attrs:
-        attrs["reps"] = attrs.pop("repetitions")
     if path == "sort":
         attrs.setdefault("descending", False)
         attrs.setdefault("stable", True)

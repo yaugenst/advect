@@ -102,9 +102,17 @@ def _array_api_extension() -> dict[str, object]:
         SUPPORTED_ARRAY_API_VERSIONS,
         materialize_array_api_profile,
     )
-    from advect.core._array_api.support import build_support_profile  # noqa: PLC0415
+    from advect.core._array_api.support import (  # noqa: PLC0415
+        _expected_modes,
+        build_support_profile,
+    )
 
     selected_profile = materialize_array_api_profile(LATEST_ARRAY_API_VERSION)
+
+    def staged(path: str) -> bool:
+        # Lifetimes come from the executable evidence contract, not from the
+        # mere presence of an abstract rule.
+        return "staged" in _expected_modes(path, version=LATEST_ARRAY_API_VERSION)
 
     rows = [
         _function_row(
@@ -113,7 +121,7 @@ def _array_api_extension() -> dict[str, object]:
             kind="function",
             lowering=spec.op,
             backed_by="array_api",
-            staged=_has_abstract_semantics(spec.op),
+            staged=staged(path),
         )
         for path, spec in _FUNCTION_SPECS.items()
         if selected_profile.admits(path)
@@ -127,7 +135,7 @@ def _array_api_extension() -> dict[str, object]:
             kind="function",
             lowering="composite",
             backed_by="composite",
-            staged=path in _STAGED_ARRAY_API_COMPOSITES,
+            staged=staged(path),
         )
         if path not in _STAGED_ARRAY_API_COMPOSITES:
             row["abstract"] = "no"
@@ -142,7 +150,7 @@ def _array_api_extension() -> dict[str, object]:
             kind="metadata",
             lowering="metadata",
             backed_by="metadata",
-            staged=True,
+            staged=staged(path),
         )
         for path in _ARRAY_API_META_FUNCTIONS
         if path not in _FUNCTION_SPECS

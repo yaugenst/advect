@@ -194,7 +194,6 @@ _RIGHT = ArrayInput([[0.75, 1.5, 2.0], [2.5, 1.25, 0.5]], "float64")
 _DYNAMIC_ONLY_PATHS = frozenset(
     {
         "arange",
-        "astype",
         "empty",
         "eye",
         "fft.fftfreq",

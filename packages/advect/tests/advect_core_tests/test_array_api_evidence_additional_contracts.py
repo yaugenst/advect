@@ -10,6 +10,7 @@ import array_api_strict as strict
 import numpy as np
 import pytest
 
+import advect as ad
 from advect.autodiff._ephemeral import trace_call
 from advect.core._array_api import support
 from advect.core._array_api.evidence import (
@@ -31,6 +32,30 @@ def _trace(function: Any, value: Any) -> Any:
         return traced.output
     finally:
         traced.tape.release_payloads()
+
+
+def test_array_api_catalog_modes_are_the_evidenced_support_profile() -> None:
+    # Regression: the catalog claimed staged/serialized whenever an abstract
+    # rule existed, e.g. for default-dtype `zeros`, which cannot stage.
+    catalog = ad.support_catalog()["extensions"]["array_api"]["functions"]
+    profile = {str(row["path"]): row for row in support.build_support_profile()["callables"]}
+    evidence: dict[str, list[tuple[str, ...]]] = {}
+    for case in (
+        *operation_evidence_cases(support._static_parameters(version=LATEST_ARRAY_API_VERSION)),
+        *support.metadata_cases(),
+    ):
+        evidence.setdefault(case.path, []).append(case.modes)
+    partial_notes = set(support._PARTIAL_PARAMETERS.values())
+
+    for row in catalog:
+        path = str(row["callable"])
+        claimed = [mode for mode in ("dynamic", "staged", "serialized") if row[mode]]
+        declared = profile[path]
+        assert all(set(claimed) <= set(modes) for modes in evidence[path]), path
+        if declared["complete"]:
+            assert claimed == declared["modes"], path
+        else:
+            assert set(str(declared["note"]).split("; ")) <= partial_notes, path
 
 
 def test_support_profile_fails_closed_for_missing_metadata_evidence(

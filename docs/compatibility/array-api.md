@@ -36,7 +36,7 @@ Every listed function works in dynamic transforms. **Stage/save** says whether t
 | `add` | yes | yes |
 | `all` | yes | n/a |
 | `any` | yes | n/a |
-| `arange` | yes | no |
+| `arange` | no | no |
 | `argmax` | yes | n/a |
 | `argmin` | yes | n/a |
 | `argsort` | yes | n/a |
@@ -62,15 +62,15 @@ Every listed function works in dynamic transforms. **Stage/save** says whether t
 | `cos` | yes | yes |
 | `cosh` | yes | yes |
 | `divide` | yes | yes |
-| `empty` | yes | no |
+| `empty` | no | no |
 | `empty_like` | yes | yes |
 | `equal` | yes | n/a |
 | `exp` | yes | yes |
 | `expand_dims` | yes | yes |
 | `expm1` | yes | yes |
-| `eye` | yes | no |
+| `eye` | no | no |
 | `fft.fft` | yes | yes |
-| `fft.fftfreq` | yes | no |
+| `fft.fftfreq` | no | no |
 | `fft.fftn` | yes | yes |
 | `fft.fftshift` | yes | yes |
 | `fft.hfft` | yes | yes |
@@ -81,7 +81,7 @@ Every listed function works in dynamic transforms. **Stage/save** says whether t
 | `fft.irfft` | yes | yes |
 | `fft.irfftn` | yes | yes |
 | `fft.rfft` | yes | yes |
-| `fft.rfftfreq` | yes | no |
+| `fft.rfftfreq` | no | no |
 | `fft.rfftn` | yes | yes |
 | `finfo` | yes | n/a |
 | `flip` | yes | yes |
@@ -122,7 +122,7 @@ Every listed function works in dynamic transforms. **Stage/save** says whether t
 | `linalg.trace` | yes | yes |
 | `linalg.vecdot` | yes | yes |
 | `linalg.vector_norm` | yes | yes |
-| `linspace` | yes | yes |
+| `linspace` | no | yes |
 | `log` | yes | yes |
 | `log10` | yes | yes |
 | `log1p` | yes | yes |
@@ -142,7 +142,7 @@ Every listed function works in dynamic transforms. **Stage/save** says whether t
 | `negative` | yes | yes |
 | `nonzero` | no | n/a |
 | `not_equal` | yes | n/a |
-| `ones` | yes | no |
+| `ones` | no | no |
 | `ones_like` | yes | yes |
 | `permute_dims` | yes | yes |
 | `positive` | yes | yes |
@@ -179,7 +179,7 @@ Every listed function works in dynamic transforms. **Stage/save** says whether t
 | `var` | yes | yes |
 | `vecdot` | yes | yes |
 | `where` | yes | yes |
-| `zeros` | yes | no |
+| `zeros` | no | no |
 | `zeros_like` | yes | yes |
 
 ## Added in 2023.12
