@@ -380,17 +380,19 @@ def test_metadata_arrays_xarray_compares_with_eq_work_until_compared() -> None:
 
     # xarray shares index-coordinate attributes between copies, and a 0-d
     # array compares unambiguously, so these comparisons succeed.
-    for value in (
-        _field().assign_coords(x=("x", [1, 2], {"config": _WINDOW})),
-        _field(config={"window": np.array(2)}),
-    ):
-        _output, tangent = ad.jvp(lambda field: 2.0 * field)(value, tangents=value)
-        xr.testing.assert_identical(tangent, 2.0 * value)
-        _output, pullback = ad.vjp(lambda field: 2.0 * field)(value)
-        try:
-            xr.testing.assert_identical(pullback(value), 2.0 * value)
-        finally:
-            pullback.close()
+    # Older xarray versions drop attrs during arithmetic unless requested.
+    with xr.set_options(keep_attrs=True):
+        for value in (
+            _field().assign_coords(x=("x", [1, 2], {"config": _WINDOW})),
+            _field(config={"window": np.array(2)}),
+        ):
+            _output, tangent = ad.jvp(lambda field: 2.0 * field)(value, tangents=value)
+            xr.testing.assert_identical(tangent, 2.0 * value)
+            _output, pullback = ad.vjp(lambda field: 2.0 * field)(value)
+            try:
+                xr.testing.assert_identical(pullback(value), 2.0 * value)
+            finally:
+                pullback.close()
 
 
 def test_every_metadata_array_eq_cannot_compare_is_named() -> None:

@@ -25,5 +25,5 @@ def test_cupy_scientific_provider_qualification(array_api_version: str) -> None:
     assert result.report["name"] == "cupy"
     assert result.report["selected_array_api_version"] == array_api_version
     assert result.report["captured_constant"]["result_dtype"] == str(
-        _reduction_dtype(array_api_version)
+        cp.dtype(_reduction_dtype(array_api_version))
     )
