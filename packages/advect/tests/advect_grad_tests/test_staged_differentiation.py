@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import array_api_strict as strict
 import numpy as np
 import pytest
@@ -147,6 +149,86 @@ def test_staged_grad_preserves_unselected_outer_trace_operands() -> None:
     assert_allclose(restored(value, weight, scale=scale), expected)
 
 
+@pytest.mark.parametrize("declared", [False, True], ids=["example", "spec"])
+def test_staged_transforms_preserve_unselected_weak_scalar_operands(*, declared: bool) -> None:
+    def loss(value: object, scale: object) -> object:
+        return np.sum(scale * value * value)
+
+    value = np.array([1.0, 2.0, 3.0])
+    scale = 2.5
+    primal = (
+        ad.stage(
+            loss,
+            specs=(ad.ArraySpec(value.shape, value.dtype), ad.ArraySpec((), "float64", weak=True)),
+        )
+        if declared
+        else ad.stage(loss, value, scale)
+    )
+    expected = 2 * scale * value
+
+    gradient = ad.grad(primal)
+    assert_allclose(gradient(value, scale), expected)
+    result, actual = ad.value_and_grad(primal)(value, scale)
+    assert_allclose(result, loss(value, scale))
+    assert_allclose(actual, expected)
+    cotangent = np.array(1.5)
+    assert_allclose(
+        ad.vjp_program(primal)(value, scale, cotangent=cotangent),
+        cotangent * expected,
+    )
+    restored = ad.StagedProgram.from_dict(gradient.to_dict())
+    assert_allclose(restored(value, scale), expected)
+
+
+def _unrolled_scalar_update(steps: int) -> Any:
+    def loss(value: Any) -> Any:
+        for _step in range(steps):
+            value = np.sin(value) * 0.5 + 0.25 * value
+        return np.sum(value)
+
+    return loss
+
+
+@pytest.mark.parametrize(
+    "derivative",
+    [
+        pytest.param(lambda f, x: ad.grad(ad.stage(f, x)), id="grad"),
+        pytest.param(lambda f, x: ad.vjp_program(ad.stage(f, x)), id="vjp_program"),
+        pytest.param(
+            lambda f, x: ad.stage(lambda v, t: ad.jvp(f)(v, tangents=t)[1], x, x),
+            id="staged-jvp",
+        ),
+    ],
+)
+def test_staged_derivatives_reuse_weak_scalar_coefficients(derivative: Any) -> None:
+    """A Python-float partial scales through its one constant, not a cast literal per use."""
+    value = np.linspace(0.1, 1.0, 4)
+
+    def operations(steps: int) -> list[str]:
+        graph = derivative(_unrolled_scalar_update(steps), value).graph
+        return [graph.get_node(node_id).op for node_id in graph.node_ids()]
+
+    short, long = operations(2), operations(4)
+
+    assert "array.astype" not in long
+    assert long.count("advect.const") == short.count("advect.const")
+
+
+@pytest.mark.parametrize(("index", "mode"), [(1, "raise"), (-1, "raise"), (5, "wrap")])
+def test_staged_pullbacks_scatter_a_weak_integer_take_index(index: int, mode: str) -> None:
+    """Staging keeps a Python-int index weak, so the replayed take VJP sees an int."""
+
+    def loss(value: object) -> object:
+        return np.take(value * value, index, mode=mode)
+
+    value = np.array([1.0, 2.0, 3.0])
+    primal = ad.stage(loss, value)
+    expected = ad.grad(loss)(value)
+
+    assert_allclose(ad.grad(primal)(value), expected)
+    assert_allclose(ad.vjp_program(primal)(value, cotangent=np.float64(1.0)), expected)
+
+
 def test_vjp_program_is_a_serializable_staged_pullback() -> None:
     def transform(value: object, weight: object) -> dict[str, object]:
         return {
@@ -175,7 +257,7 @@ def test_vjp_program_is_a_serializable_staged_pullback() -> None:
 
     payload = pullback.to_dict()
     assert payload["format"] == "advect.ssa-program"
-    assert payload["version"] == 2
+    assert payload["version"] == 3
     artifact = payload["program"]
     assert artifact["output_specs"] == [
         {
@@ -236,6 +318,23 @@ def test_vjp_program_roundtrip_preserves_extreme_ldexp_scaling() -> None:
         actual = program(value, exponent, cotangent=cotangent)
         assert actual.dtype == np.dtype("float64")
         assert_allclose(actual, expected)
+
+
+@pytest.mark.parametrize("extension", [np.nanmax, np.nansum])
+def test_vjp_program_replays_numpy_extensions_beside_portable_operations(
+    extension: Any,
+) -> None:
+    # Only the NumPy frontend evaluates the extension inside the pullback's
+    # nested trace; the portable maximum after it must still see that trace's tracer.
+    def select(value: Any) -> Any:
+        return np.maximum(extension(value.reshape(2, 2), axis=1), np.array([1.5, 0.25]))
+
+    value = np.array([1.0, 3.0, 0.25, 0.75])
+    cotangent = np.array([0.5, 2.0])
+    restored = ad.StagedProgram.from_dict(ad.stage(select, value).to_dict())
+    _primal, pullback = ad.vjp(select)(value)
+
+    assert_allclose(ad.vjp_program(restored)(value, cotangent=cotangent), pullback(cotangent))
 
 
 def test_vjp_program_supports_multi_argument_and_named_selection() -> None:
@@ -327,42 +426,7 @@ def test_vjp_program_rejects_reserved_keyword_and_nonstaged_callable() -> None:
         ad.vjp_program(primal)
 
 
-def test_staged_grad_compiles_once_at_construction() -> None:
-    calls = 0
-
-    def loss(x: object) -> object:
-        nonlocal calls
-        calls += 1
-        return np.sum(x * x)
-
-    primal = ad.stage(loss, specs=(ad.ArraySpec((5,), "float64"),))
-    gradient = ad.grad(primal)
-    assert calls == 1
-    assert primal.graph.node_count > 0
-    assert gradient.graph.node_count > 0
-
-    x = np.arange(5.0)
-    assert_allclose(gradient(x), 2 * x)
-    assert_allclose(gradient(x + 1), 2 * (x + 1))
-    assert calls == 1
-
-
-def test_staged_grad_covers_functionalized_mutation_and_complex_values() -> None:
-    def stencil_loss(field: object) -> object:
-        field = field.copy()
-        laplacian = field[2:] - 2 * field[1:-1] + field[:-2]
-        field[1:-1] += 0.1 * laplacian
-        return np.sum(field * field)
-
-    field = np.arange(6.0)
-    staged_stencil = ad.grad(
-        ad.stage(
-            stencil_loss,
-            specs=(ad.ArraySpec(field.shape, field.dtype),),
-        )
-    )
-    assert_allclose(staged_stencil(field), ad.grad(stencil_loss)(field))
-
+def test_staged_grad_uses_the_real_adjoint_of_complex_values() -> None:
     z = np.array([1 + 2j, -3 + 0.5j], dtype=np.complex64)
     staged_complex = ad.grad(
         ad.stage(
@@ -391,21 +455,90 @@ def test_staged_grad_lifts_captured_array_constants() -> None:
     assert len(gradient.constants) >= 1
 
 
-def test_staged_grad_remains_provider_portable_array_api_code() -> None:
-    def loss(x: object) -> object:
+@pytest.mark.parametrize("restore", [False, True], ids=["staged", "restored"])
+@pytest.mark.parametrize("xp", [np, strict], ids=["numpy", "array_api_strict"])
+def test_dynamic_transforms_compose_with_example_staged_programs(
+    xp: Any,
+    *,
+    restore: bool,
+) -> None:
+    weight = xp.asarray([0.5, -1.0, 2.0])
+
+    def field(x: Any) -> Any:
+        return x.__array_namespace__().sin(x) * weight
+
+    def total(x: Any) -> Any:
+        return x.__array_namespace__().sum(x)
+
+    def dynamic(x: Any) -> Any:
+        return program(x)
+
+    x = xp.asarray([0.1, 0.2, 0.3])
+    program = ad.stage(field, x)
+    if restore:
+        program = ad.StagedProgram.from_dict(program.to_dict())
+    tangent = xp.asarray([1.0, -2.0, 0.5])
+    cotangent = xp.asarray([0.25, 1.5, -1.0])
+    derivative = np.cos(np.asarray(x)) * np.asarray(weight)
+
+    assert len(program.constants) == 1
+    gradient = ad.grad(lambda value: total(dynamic(value)))(x)
+    assert_allclose(np.asarray(gradient), derivative)
+    primal, directional = ad.jvp(dynamic)(x, tangents=tangent)
+    assert_allclose(np.asarray(primal), np.asarray(field(x)))
+    assert_allclose(np.asarray(directional), derivative * np.asarray(tangent))
+    primal, pullback = ad.vjp(dynamic)(x)
+    assert_allclose(np.asarray(primal), np.asarray(field(x)))
+    assert_allclose(np.asarray(pullback(cotangent)), derivative * np.asarray(cotangent))
+
+
+@pytest.mark.parametrize(
+    "held",
+    [lambda xp, y: xp.sin(y), lambda _xp, y: y * y, lambda _xp, y: y - 1.0],
+    ids=["xp.sin(y)", "y * y", "y - 1.0"],
+)
+def test_dynamic_transforms_replay_a_held_array_api_operand_against_a_tracer(
+    held: Any,
+) -> None:
+    # Replay computed the held operand as a strict array and applied its
+    # operator to the traced one; strict raises "Expected Array or Python
+    # scalar" instead of returning NotImplemented, so the tracer's reflected
+    # operator never ran.
+    y = strict.asarray([0.1, 0.2, 0.3], dtype=strict.float32)
+    x = strict.asarray([0.3, 0.6, 0.9], dtype=strict.float32)
+
+    def field(y: Any, x: Any) -> Any:
         xp = x.__array_namespace__()
-        return xp.sum(xp.sin(x) * x)
+        return held(xp, y) * x, held(xp, y) < x
 
-    gradient = ad.grad(
-        ad.stage(
-            loss,
-            specs=(ad.ArraySpec((3,), "float64"),),
-        )
+    program = ad.stage(field, y, x)
+    (product, less), (tangent, _) = ad.jvp(program, argnums=1)(y, x, tangents=strict.ones_like(x))
+    expected_product, expected_less = field(y, x)
+
+    assert_allclose(np.asarray(product), np.asarray(expected_product))
+    assert_allclose(np.asarray(tangent), np.asarray(held(strict, y)))
+    assert np.array_equal(np.asarray(less), np.asarray(expected_less))
+
+
+def test_nested_transforms_replay_derivative_conversions_on_numpy_tracers() -> None:
+    """Replay a staged derivative's Array API asarray on a NumPy tracer.
+
+    The clip derivative records asarray conversions, and NumPy's asarray
+    reaches a traced operand only through like=.
+    """
+    x = np.array([-1.4, -0.3, 0.6, 1.7])
+    tangent = np.array([0.5, -1.0, 2.0, 0.25])
+
+    def loss(value: Any) -> Any:
+        return np.sum(np.sin(np.clip(value, -0.5, 1.0)))
+
+    program = ad.stage(loss, x)
+
+    assert_allclose(ad.hessian(program)(x), ad.hessian(loss)(x))
+    assert_allclose(
+        ad.jvp(ad.grad(program))(x, tangents=tangent)[1],
+        ad.jvp(ad.grad(loss))(x, tangents=tangent)[1],
     )
-    x = strict.asarray([1.0, 2.0, 3.0], dtype=strict.float64)
-    expected = np.sin([1.0, 2.0, 3.0]) + np.arange(1.0, 4.0) * np.cos([1.0, 2.0, 3.0])
-
-    assert_allclose(np.asarray(gradient(x)), expected)
 
 
 @pytest.mark.parametrize(

@@ -2,34 +2,44 @@
 
 from __future__ import annotations
 
+import itertools
+import warnings
 from dataclasses import dataclass
 from threading import Lock
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 
 import advect as ad
-from advect.core._eval_dispatch import _evaluate_array_op, evaluate_node_value
-from advect.core._pytree import tree_flatten, tree_map
+from advect.autodiff.rules.array_family._backend_runtime import (
+    run_with_array_family_backend_provider,
+)
+from advect.autodiff.rules.array_family.providers import resolve_array_family_backend_provider
+from advect.core._eval_dispatch import _bind_array_op, bind_node_evaluator
+from advect.core._pytree import tree_map
 from advect.core._registry import get_registry
-from advect.testing import _real_inner_product, _real_inner_product_magnitude
-from advect_conformance_tests._harness._cases import Law, NumericalReference
+from advect_conformance_tests._harness._cases import Law
 from advect_conformance_tests._harness._frontends import to_numpy
 from advect_conformance_tests._harness._laws import (
     ConformanceError,
-    _align_eigen_output,
+    Probes,
+    _assert_adjoint,
     _assert_close,
-    _finite_difference_step,
+    _directional_oracle,
+    _directions,
     _numerical_tolerances,
-    _numpy_leaves,
+    _oracle_step,
     _probe_like,
     _promote_numerical_reference,
     _seed_for,
+    _shifted,
     _traced_arguments,
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping, Sequence
+    from collections.abc import Callable, Mapping
+
+    from hypothesis.strategies import DataObject
 
     from advect_conformance_tests._harness._cases import InvocationCase
 
@@ -68,24 +78,21 @@ class RawRuleCase:
     numerical: bool = True
 
 
+# Raw operands are small float64 values, so a fixed central step suffices.
+_RAW_STEP = 1e-6
+
 # Replacing a registry rule is process-global. Pytest runs tests serially inside
 # one worker, and this lock makes that assumption explicit for any future
 # threaded runner. xdist workers have separate processes and registries.
 _CAPTURE_LOCK = Lock()
 
 
-def _directions(case: InvocationCase, values: Sequence[Any]) -> tuple[Any, ...]:
-    return tuple(
-        _probe_like(values[index], position)
-        for position, index in enumerate(case.differentiable_indices)
-    )
-
-
 def _capture_calls(
     case: InvocationCase,
     values: tuple[Any, ...],
+    probes: Probes,
 ) -> tuple[_CapturedRuleCall, ...]:
-    directions = _directions(case, values)
+    directions = _directions(case, values, probes)
     arguments = _traced_arguments(case, values)
     tangent_arguments = _traced_arguments(case, directions)
 
@@ -164,21 +171,25 @@ def _evaluate_rule_op(
                 dict(attrs),
             )
         else:
-            result = _evaluate_array_op(op, operands, attrs, namespace)
+            result = _bind_array_op(op, attrs)(operands, namespace, None)
     elif op == "advect.getitem":
         result = operands[0][attrs["index"]]
     elif op == "advect.index_update":
         result = operands[0].copy()
-        if attrs.get("mode", "set") == "add":
-            result[attrs["index"]] += operands[1]
-        else:
-            result[attrs["index"]] = operands[1]
+        # Like NumPy's setitem, a complex replacement of a real base drops its
+        # imaginary part; the invocation silences the same warning.
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", np.exceptions.ComplexWarning)
+            if attrs.get("mode", "set") == "add":
+                result[attrs["index"]] += operands[1]
+            else:
+                result[attrs["index"]] = operands[1]
     elif op == "advect.copy":
         result = operands[0].copy()
     elif op == "advect.getoutput":
         result = operands[0][int(attrs["index"])]
     else:
-        result = evaluate_node_value(op, operands, attrs)
+        result = bind_node_evaluator(op, attrs)(operands, None, None)
     # NumPy 2 returns namedtuple subclasses for decompositions while Advect's
     # atomic multi-output node deliberately owns a plain tuple.
     if isinstance(result, tuple) and type(result) is not tuple:
@@ -186,79 +197,39 @@ def _evaluate_rule_op(
     return result
 
 
-def _shift_operands(
+def _rule_oracle(
+    case: InvocationCase,
     operands: tuple[Any, ...],
     tangents: tuple[Any | None, ...],
-    step: complex,
-) -> tuple[Any, ...]:
-    def shift(operand: Any, tangent: Any) -> Any:
-        if tangent is None:
-            return operand
-        if isinstance(operand, tuple) and isinstance(tangent, tuple):
-            return tuple(
-                shift(item, item_tangent)
-                for item, item_tangent in zip(operand, tangent, strict=True)
-            )
-        return operand + step * tangent
-
-    return tuple(
-        shift(operand, tangent) for operand, tangent in zip(operands, tangents, strict=True)
-    )
-
-
-def _pairing_leaves(value: Any) -> list[Any]:
-    return [
-        None if leaf is None else _promote_numerical_reference(to_numpy(leaf))
-        for leaf in tree_flatten(value)[0]
-    ]
-
-
-def _raw_numerical_derivative(
-    case: InvocationCase,
-    captured: _CapturedRuleCall,
+    attrs: Mapping[str, Any],
 ) -> list[Any]:
-    if case.numerical_reference is NumericalReference.COMPLEX_STEP:
-        operands = tuple(_promote_numerical_reference(value) for value in captured.operands)
-        tangents = tuple(
-            None if value is None else _promote_numerical_reference(value)
-            for value in captured.tangents
-        )
-        step = case.tolerance.complex_step
-        shifted = _evaluate_rule_op(
-            case.op,
-            _shift_operands(operands, tangents, 1j * step),
-            captured.attrs,
-        )
-        return [np.imag(to_numpy(leaf)) / step for leaf in tree_flatten(shifted)[0]]
-
-    operands = tuple(_promote_numerical_reference(value) for value in captured.operands)
+    operands = tuple(map(_promote_numerical_reference, operands))
     tangents = tuple(
-        None if value is None else _promote_numerical_reference(value)
-        for value in captured.tangents
+        None if value is None else _promote_numerical_reference(value) for value in tangents
     )
-    reference = _evaluate_rule_op(case.op, operands, captured.attrs)
-    step = _finite_difference_step(case, operands)
-    positive = _evaluate_rule_op(
-        case.op,
-        _shift_operands(operands, tangents, step),
-        captured.attrs,
+    return _directional_oracle(
+        lambda step: _evaluate_rule_op(case.op, _shifted(operands, tangents, step), attrs),
+        _oracle_step(case, operands),
+        op=case.op,
+        input_is_real=not np.iscomplexobj(operands[0]),
     )
-    negative = _evaluate_rule_op(
-        case.op,
-        _shift_operands(operands, tangents, -step),
-        captured.attrs,
+
+
+def _call_vjp(
+    vjp: _VjpRule,
+    answer: Any,
+    operands: tuple[Any, ...],
+    cotangent: Any,
+    attrs: Mapping[str, Any],
+) -> tuple[Any | None, ...]:
+    """Call a VJP in the provider scope that a reverse sweep establishes."""
+    provider = resolve_array_family_backend_provider(answer, *operands, cotangent)
+    return cast(
+        "tuple[Any | None, ...]",
+        run_with_array_family_backend_provider(
+            provider, vjp, answer, *operands, g=cotangent, **attrs
+        ),
     )
-    input_is_real = not np.iscomplexobj(operands[0])
-    positive = _align_eigen_output(case.op, reference, positive, input_is_real=input_is_real)
-    negative = _align_eigen_output(case.op, reference, negative, input_is_real=input_is_real)
-    return [
-        (to_numpy(upper) - to_numpy(lower)) / (2.0 * step)
-        for upper, lower in zip(
-            tree_flatten(positive)[0],
-            tree_flatten(negative)[0],
-            strict=True,
-        )
-    ]
 
 
 def check_registered_jvp(
@@ -266,13 +237,14 @@ def check_registered_jvp(
     values: tuple[Any, ...],
     *,
     variant: int = 0,
+    data: DataObject | None = None,
 ) -> None:
     """Check the exact registered JVP reached by one frontend invocation."""
     case = case.resolve_variant(variant)
     if Law.FINITE_DIFFERENCE not in case.laws:
         msg = f"{case.op}: direct JVP check requires a numerical-reference law"
         raise ValueError(msg)
-    for captured in _capture_calls(case, values):
+    for captured in _capture_calls(case, values, Probes(data)):
         evaluated = _evaluate_rule_op(case.op, captured.operands, captured.attrs)
         _assert_close(
             evaluated,
@@ -290,7 +262,7 @@ def check_registered_jvp(
         rtol, atol = _numerical_tolerances(case)
         _assert_close(
             tangent,
-            _raw_numerical_derivative(case, captured),
+            _rule_oracle(case, captured.operands, captured.tangents, captured.attrs),
             rtol=rtol,
             atol=atol,
             context=f"\n  op: {case.op}\n  boundary: registered JVP",
@@ -302,44 +274,78 @@ def check_registered_vjp(
     values: tuple[Any, ...],
     *,
     variant: int = 0,
+    data: DataObject | None = None,
 ) -> None:
     """Check an explicit VJP directly against the registered JVP."""
     case = case.resolve_variant(variant)
-    for captured in _capture_calls(case, values):
+    probes = Probes(data)
+    for captured in _capture_calls(case, values, probes):
         if captured.vjp is None:
             msg = f"{case.op}: no explicit VJP is registered"
             raise ValueError(msg)
-        cotangent = _seed_for(case, captured.answer)
+        cotangent = _seed_for(case, captured.answer, probes)
         tangent = captured.jvp(
             captured.answer,
             *captured.operands,
             tangents=captured.tangents,
             **captured.attrs,
         )
-        contributions = captured.vjp(
+        contributions = _call_vjp(
+            captured.vjp,
             captured.answer,
-            *(captured.operands if captured.vjp_needs_inputs else ()),
-            g=cotangent,
-            **captured.attrs,
+            captured.operands if captured.vjp_needs_inputs else (),
+            cotangent,
+            captured.attrs,
         )
-        cotangent_leaves = _numpy_leaves(cotangent)
-        tangent_leaves = _numpy_leaves(tangent)
-        contribution_leaves = _pairing_leaves(contributions)
-        captured_tangent_leaves = _pairing_leaves(captured.tangents)
-        left = _real_inner_product(cotangent_leaves, tangent_leaves)
-        right = _real_inner_product(contribution_leaves, captured_tangent_leaves)
-        scale = max(
-            _real_inner_product_magnitude(cotangent_leaves, tangent_leaves),
-            _real_inner_product_magnitude(contribution_leaves, captured_tangent_leaves),
-            1.0,
+        _assert_adjoint(
+            cotangent,
+            tangent,
+            contributions,
+            captured.tangents,
+            rtol=case.tolerance.adjoint_rtol,
+            atol=case.tolerance.adjoint_atol,
+            context=f"\n  op: {case.op}\n  boundary: registered VJP",
         )
-        tolerance = case.tolerance.adjoint_atol + case.tolerance.adjoint_rtol * scale
-        if abs(left - right) > tolerance:
-            msg = (
-                f"{case.op}: registered VJP violates the direct-rule adjoint identity: "
-                f"left={left!r}, right={right!r}, tolerance={tolerance:.3e}"
+        _check_selective_vjp(case, captured, cotangent, contributions)
+
+
+def _check_selective_vjp(
+    case: InvocationCase,
+    captured: _CapturedRuleCall,
+    cotangent: Any,
+    contributions: tuple[Any | None, ...],
+) -> None:
+    """Require the input-selective rule reverse sweeps prefer to slice the full one."""
+    selective = getattr(captured.vjp, "__advect_vjp_for_input_indices__", None)
+    if not callable(selective):
+        return
+    active = [index for index, tangent in enumerate(captured.tangents) if tangent is not None]
+    for size in range(1, len(active) + 1):
+        for subset in itertools.combinations(active, size):
+            selected = _call_vjp(
+                selective,
+                captured.answer,
+                captured.operands if captured.vjp_needs_inputs else (),
+                cotangent,
+                {**captured.attrs, "active_input_indices": subset},
             )
-            raise ConformanceError(msg)
+            context = f"\n  op: {case.op}\n  boundary: selective VJP for inputs {subset}"
+            for index, (partial, full) in enumerate(zip(selected, contributions, strict=True)):
+                if index not in subset:
+                    if partial is not None:
+                        msg = f"inactive input {index} received a cotangent{context}"
+                        raise ConformanceError(msg)
+                elif (partial is None) != (full is None):
+                    msg = f"input {index} cotangent presence differs from the full rule{context}"
+                    raise ConformanceError(msg)
+                elif full is not None:
+                    _assert_close(
+                        partial,
+                        full,
+                        rtol=case.tolerance.adjoint_rtol,
+                        atol=case.tolerance.adjoint_atol,
+                        context=context,
+                    )
 
 
 def check_raw_jvp(case: RawRuleCase) -> None:
@@ -356,25 +362,12 @@ def check_raw_jvp(case: RawRuleCase) -> None:
         **case.attrs,
     )
     if case.numerical:
-        step = 1e-6
-        positive = _evaluate_rule_op(
-            case.op,
-            _shift_operands(case.operands, case.tangents, step),
-            case.attrs,
+        reference = _directional_oracle(
+            lambda step: _evaluate_rule_op(
+                case.op, _shifted(case.operands, case.tangents, step), case.attrs
+            ),
+            _RAW_STEP,
         )
-        negative = _evaluate_rule_op(
-            case.op,
-            _shift_operands(case.operands, case.tangents, -step),
-            case.attrs,
-        )
-        reference = [
-            (to_numpy(upper) - to_numpy(lower)) / (2.0 * step)
-            for upper, lower in zip(
-                tree_flatten(positive)[0],
-                tree_flatten(negative)[0],
-                strict=True,
-            )
-        ]
     else:
         reference = tree_map(lambda value: np.zeros_like(to_numpy(value)), answer)
     _assert_close(
@@ -400,26 +393,19 @@ def check_raw_vjp(case: RawRuleCase) -> None:
         **case.attrs,
     )
     cotangent = tree_map(_probe_like, answer)
-    contributions = definition.vjp(
+    contributions = _call_vjp(
+        definition.vjp,
         answer,
-        *(case.operands if definition.vjp_needs_inputs else ()),
-        g=cotangent,
-        **case.attrs,
+        case.operands if definition.vjp_needs_inputs else (),
+        cotangent,
+        case.attrs,
     )
-    cotangent_leaves = _pairing_leaves(cotangent)
-    tangent_leaves = _pairing_leaves(tangent)
-    contribution_leaves = _pairing_leaves(contributions)
-    case_tangent_leaves = _pairing_leaves(case.tangents)
-    left = _real_inner_product(cotangent_leaves, tangent_leaves)
-    right = _real_inner_product(contribution_leaves, case_tangent_leaves)
-    scale = max(
-        _real_inner_product_magnitude(cotangent_leaves, tangent_leaves),
-        _real_inner_product_magnitude(contribution_leaves, case_tangent_leaves),
-        1.0,
+    _assert_adjoint(
+        cotangent,
+        tangent,
+        contributions,
+        case.tangents,
+        rtol=case.tolerance,
+        atol=0.0,
+        context=f"\n  op: {case.op}\n  boundary: raw registered VJP",
     )
-    if abs(left - right) > case.tolerance * scale:
-        msg = (
-            f"{case.op}: raw registered VJP violates the adjoint identity: "
-            f"left={left!r}, right={right!r}"
-        )
-        raise ConformanceError(msg)

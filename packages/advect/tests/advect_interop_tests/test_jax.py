@@ -5,6 +5,8 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+import advect as ad
+
 jax = pytest.importorskip("jax")
 jnp = pytest.importorskip("jax.numpy")
 _enable_x64 = jax.enable_x64 if hasattr(jax, "enable_x64") else jax.experimental.enable_x64
@@ -195,6 +197,45 @@ def test_jax_bridge_preserves_pytree_arguments_and_outputs(
         )
 
 
+@pytest.mark.parametrize("staged", [False, True], ids=["eager", "jit"])
+@pytest.mark.parametrize(
+    ("function", "loss", "gradient"),
+    [
+        pytest.param(
+            np.linalg.eigh,
+            lambda result: jnp.sum(result.eigenvalues**2),
+            lambda a: 2 * np.tril(a) + 2 * np.tril(a, -1),
+            id="named-result",
+        ),
+        pytest.param(
+            lambda a: {"upper": np.triu(a), "lower": np.tril(a)},
+            lambda result: jnp.sum(result["upper"]) + 2 * jnp.sum(result["lower"]),
+            lambda a: np.triu(np.ones_like(a)) + 2 * np.tril(np.ones_like(a)),
+            id="unsorted-dict",
+        ),
+    ],
+)
+def test_jax_bridge_places_cotangents_in_the_traced_output_structure(
+    function, loss, gradient, *, staged: bool
+) -> None:
+    """Advect's named results and dict order differ from JAX's view of the output."""
+    matrix = jnp.asarray([[2.0, 0.5], [0.5, 1.0]], dtype=jnp.float32)
+    specs = (
+        jax.tree_util.tree_map(
+            lambda leaf: jax.ShapeDtypeStruct(leaf.shape, leaf.dtype),
+            function(np.asarray(matrix)),
+        )
+        if staged
+        else None
+    )
+    bridged = wrap(function, result_shape_dtypes=specs)
+    transform = jax.grad(lambda a: loss(bridged(a)))
+
+    actual = (jax.jit(transform) if staged else transform)(matrix)
+
+    np.testing.assert_allclose(actual, gradient(np.asarray(matrix)), rtol=1e-6)
+
+
 def test_jax_bridge_translates_the_complex_adjoint_convention() -> None:
     with _enable_x64(True):  # noqa: FBT003 - JAX exposes a positional context API
         coefficient = 2.0 + 3.0j
@@ -272,6 +313,40 @@ def test_jax_reverse_mode_replays_the_pure_advect_function_once(
         gradient.block_until_ready()
 
         assert calls == 2
+
+
+def test_jax_reverse_mode_releases_a_replay_whose_output_structure_changed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A replay that gains output leaves rejects JAX's cotangents and still frees its trace."""
+    calls = 0
+
+    def operation(value):
+        nonlocal calls
+        calls += 1
+        return value * 2.0 if calls == 1 else (value * 2.0, value * 3.0)
+
+    pullbacks = []
+    vjp = ad.vjp
+
+    def recording_vjp(*args, **kwargs):
+        transform = vjp(*args, **kwargs)
+
+        def call(*values):
+            output, pullback = transform(*values)
+            pullbacks.append(pullback)
+            return output, pullback
+
+        return call
+
+    monkeypatch.setattr(ad, "vjp", recording_vjp)
+    _, pullback = jax.vjp(wrap(operation), jnp.asarray([1.0, 2.0]))
+
+    with pytest.raises(ValueError, match="zip"):
+        pullback(jnp.ones(2))
+    (replayed,) = pullbacks
+    with pytest.raises(RuntimeError, match="closed or consumed"):
+        replayed((np.ones(2), np.ones(2)))
 
 
 def test_jax_bridge_rejects_integer_input_leaves() -> None:

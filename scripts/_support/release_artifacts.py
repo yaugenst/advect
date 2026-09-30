@@ -7,30 +7,31 @@ import hashlib
 import json
 import re
 import tarfile
+import tomllib
 import zipfile
 from dataclasses import asdict, dataclass
 from email.parser import BytesParser
 from itertools import product
 from pathlib import Path
 
+_PROJECT = tomllib.loads(
+    (Path(__file__).resolve().parents[2] / "pyproject.toml").read_text(encoding="utf-8")
+)["project"]
+_PYTHON_TAGS = tuple(
+    f"cp3{match[1]}"
+    for classifier in _PROJECT["classifiers"]
+    if (match := re.fullmatch(r"Programming Language :: Python :: 3\.(\d+)", classifier))
+)
+_REQUIRED_LICENSE_FILES = frozenset(_PROJECT["license-files"])
 _EXPECTED_WHEELS = frozenset(
     (python_tag, python_tag, platform)
     for python_tag, platform in product(
-        ("cp312", "cp313", "cp314", "cp315"),
+        _PYTHON_TAGS,
         ("linux-x86_64", "linux-aarch64", "macos-x86_64", "macos-arm64", "windows-x86_64"),
     )
 )
 _SOURCE_REVISION = re.compile(r"[0-9a-f]{40}")
 _WHEEL_NAME_PARTS = 5
-_REQUIRED_LICENSE_FILES = frozenset(
-    {
-        "LICENSE",
-        "RUST_STDLIB_COPYRIGHT.html",
-        "RUST_STDLIB_LICENSE_MIT.txt",
-        "RUST_STDLIB_LICENSE_UNICODE_3_0.txt",
-        "THIRD_PARTY_LICENSES.txt",
-    }
-)
 _REQUIRED_PACKAGE_FILES = frozenset({"advect/_native_core.pyi", "advect/py.typed"})
 
 

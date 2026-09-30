@@ -2,24 +2,35 @@
 
 from __future__ import annotations
 
+import functools
 import itertools
+import json
+import math
 from typing import TYPE_CHECKING, Any
 
+import hypothesis.strategies as st
 import numpy as np
 
 import advect as ad
-from advect.core._pytree import tree_flatten, tree_unflatten
+from advect.core._pytree import tree_flatten, tree_map
 from advect.core._registry import get_registry
 from advect.testing import _real_inner_product, _real_inner_product_magnitude
 from advect_conformance_tests._harness._cases import Law, NumericalReference
-from advect_conformance_tests._harness._frontends import is_python_number, to_numpy, wrap_for
+from advect_conformance_tests._harness._frontends import (
+    Frontend,
+    is_python_number,
+    to_numpy,
+    wrap_for,
+)
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
+
+    from hypothesis.strategies import DataObject
 
     from advect_conformance_tests._harness._cases import InvocationCase
 
-__all__ = ["ConformanceError", "check_law"]
+__all__ = ["ConformanceError", "Probes", "check_law"]
 
 
 class ConformanceError(AssertionError):
@@ -45,7 +56,10 @@ def _leaves(value: Any) -> list[Any]:
 
 
 def _numpy_leaves(value: Any) -> list[Any]:
-    return [_promote_numerical_reference(to_numpy(leaf)) for leaf in _leaves(value)]
+    return [
+        None if leaf is None else _promote_numerical_reference(to_numpy(leaf))
+        for leaf in _leaves(value)
+    ]
 
 
 def _invoke(case: InvocationCase, values: Sequence[Any]) -> Any:
@@ -55,6 +69,20 @@ def _invoke(case: InvocationCase, values: Sequence[Any]) -> Any:
 
 def _traced_arguments(case: InvocationCase, values: Sequence[Any]) -> tuple[Any, ...]:
     return tuple(wrap_for(case.frontend, value) for value in values)
+
+
+def _transformed_output(case: InvocationCase, values: Sequence[Any]) -> Any:
+    """Return a transformed call's output, which cotangent seeds mirror.
+
+    Its result containers may differ from the concrete provider's (for example
+    linalg results).
+    """
+    value, pullback = ad.vjp(case.call, case.differentiable_indices)(
+        *_traced_arguments(case, values),
+        **dict(case.static),
+    )
+    with pullback:
+        return value
 
 
 def _stage_specs(values: Sequence[Any]) -> tuple[ad.ArraySpec, ...]:
@@ -71,34 +99,85 @@ def _stage_specs(values: Sequence[Any]) -> tuple[ad.ArraySpec, ...]:
 def _probe_like(value: Any, ordinal: int = 0) -> Any:
     """Return a deterministic, dense direction with the primal's metadata."""
     array = np.asarray(to_numpy(value))
-    size = max(array.size, 1)
+    direction = _probe_pattern(array.shape, array.dtype, ordinal)
+    if is_python_number(value):
+        return type(value)(direction.reshape(()).item())
+    return direction.copy()
+
+
+@functools.cache
+def _probe_pattern(
+    shape: tuple[int, ...],
+    dtype: np.dtype[Any],
+    ordinal: int,
+) -> np.ndarray[Any, Any]:
+    size = max(int(np.prod(shape, dtype=np.int64)), 1)
     positions = np.arange(size, dtype=np.float64)
     real = 1.0 + ((positions + ordinal) % 5.0)
     real[1::2] *= -1.0
     direction: np.ndarray[Any, Any]
-    if np.issubdtype(array.dtype, np.complexfloating):
+    if np.issubdtype(dtype, np.complexfloating):
         imaginary = 1.0 + ((positions[::-1] + 2 * ordinal) % 7.0)
         direction = real + 1j * imaginary
     else:
         direction = real
-    direction = (direction / np.max(np.abs(direction))).reshape(array.shape).astype(array.dtype)
-    if is_python_number(value):
-        return type(value)(direction.reshape(()).item())
-    return direction
+    return (direction / np.max(np.abs(direction))).reshape(shape).astype(dtype)
 
 
-def _perturbed(
-    values: Sequence[Any],
-    directions: Sequence[Any],
-    indices: Sequence[int],
-    step: complex,
-) -> tuple[Any, ...]:
-    moved = list(values)
-    for position, index in enumerate(indices):
-        original = values[index]
-        shifted = np.asarray(original) + step * np.asarray(directions[position])
-        moved[index] = type(original)(shifted) if is_python_number(original) else shifted
-    return tuple(moved)
+class Probes:
+    """Independent dense tangent and cotangent probes for one law check.
+
+    Every request takes the next ``_probe_like`` ordinal, so a cotangent seed
+    never equals a tangent direction and an untransposed pullback cannot
+    satisfy the adjoint identity by symmetry. Under Hypothesis, a drawn offset
+    of at most one half per component searches around that anchor and shrinks
+    back to it; renormalising keeps every probe's largest magnitude at one.
+    """
+
+    __slots__ = ("_data", "_ordinals")
+
+    def __init__(self, data: DataObject | None = None) -> None:
+        self._data = data
+        self._ordinals = itertools.count()
+
+    def __call__(self, like: Any) -> Any:
+        anchor = _probe_like(like, next(self._ordinals))
+        if self._data is None:
+            return anchor
+        array = np.asarray(anchor)
+        complex_parts = np.iscomplexobj(array)
+        raw = self._data.draw(
+            _offset_bytes(array.size * (2 if complex_parts else 1)), label="probe"
+        )
+        shift = np.frombuffer(raw, dtype=np.int8) / 256.0
+        if complex_parts:
+            shift = shift[0::2] + 1j * shift[1::2]
+        moved = array + shift.reshape(array.shape)
+        probe = np.asarray(moved / np.max(np.abs(moved)), dtype=array.dtype)
+        return type(anchor)(probe.item()) if is_python_number(anchor) else probe
+
+
+@functools.cache
+def _offset_bytes(size: int) -> st.SearchStrategy[bytes]:
+    return st.binary(min_size=size, max_size=size)
+
+
+def _shifted(values: Sequence[Any], tangents: Sequence[Any], step: complex) -> tuple[Any, ...]:
+    """Move each value ``step`` along its tangent; a ``None`` tangent holds it fixed.
+
+    Values keep their kind: a Python number stays a number, a NumPy value
+    stays an array, and another provider's array uses its own arithmetic.
+    """
+
+    def shift(value: Any, tangent: Any) -> Any:
+        if tangent is None:
+            return value
+        if isinstance(value, tuple):
+            return _shifted(value, tangent, step)
+        moved = value + step * tangent
+        return np.asarray(moved) if isinstance(value, np.ndarray | np.generic) else moved
+
+    return tuple(shift(value, tangent) for value, tangent in zip(values, tangents, strict=True))
 
 
 def _promote_numerical_reference(value: Any) -> Any:
@@ -119,6 +198,42 @@ def _finite_difference_step(case: InvocationCase, values: Sequence[Any]) -> floa
         default=1.0,
     )
     return case.tolerance.finite_difference_step * (1.0 + magnitude)
+
+
+def _oracle_step(case: InvocationCase, values: Sequence[Any]) -> complex:
+    """Return the central step for ``values``, or the imaginary complex step."""
+    if case.numerical_reference is NumericalReference.COMPLEX_STEP:
+        return 1j * case.tolerance.complex_step
+    return _finite_difference_step(case, values)
+
+
+def _directional_oracle(
+    shifted: Callable[[complex], Any],
+    step: complex,
+    *,
+    op: str = "",
+    input_is_real: bool = True,
+) -> list[Any]:
+    """Differentiate ``shifted``, a call moved by its argument along a probe, at zero.
+
+    Callers promote low-precision values first, so the oracle runs above their
+    roundoff. A complex step reads the imaginary part of one evaluation; it is
+    only declared for real-analytic calls. Central differences of a gauged
+    decomposition ``op`` are aligned to its unshifted outputs.
+    """
+    if isinstance(step, complex):
+        return [np.imag(to_numpy(leaf)) / step.imag for leaf in _leaves(shifted(step))]
+    upper, lower = shifted(step), shifted(-step)
+    if op in _GAUGED_OPS:
+        reference = shifted(0.0)
+        upper, lower = (
+            _align_gauge(op, reference, candidate, input_is_real=input_is_real)
+            for candidate in (upper, lower)
+        )
+    return [
+        (to_numpy(high) - to_numpy(low)) / (2.0 * step)
+        for high, low in zip(_leaves(upper), _leaves(lower), strict=True)
+    ]
 
 
 def _numerical_tolerances(case: InvocationCase) -> tuple[float, float]:
@@ -194,11 +309,8 @@ def _assert_same_metadata(
             raise ConformanceError(msg)
 
 
-def _directions(case: InvocationCase, values: Sequence[Any], ordinal: int = 0) -> tuple[Any, ...]:
-    return tuple(
-        _probe_like(values[index], ordinal + position)
-        for position, index in enumerate(case.differentiable_indices)
-    )
+def _directions(case: InvocationCase, values: Sequence[Any], probes: Probes) -> tuple[Any, ...]:
+    return tuple(probes(values[index]) for index in case.differentiable_indices)
 
 
 def _zero_direction(value: Any) -> Any:
@@ -231,12 +343,9 @@ def _direction_variants(
     return (*independent, ("combined", directions))
 
 
-def _seed_for(case: InvocationCase, output: Any, ordinal: int = 0) -> Any:
-    leaves = [
-        wrap_for(case.frontend, _probe_like(to_numpy(leaf), ordinal + position))
-        for position, leaf in enumerate(_leaves(output))
-    ]
-    return leaves[0] if len(leaves) == 1 else tuple(leaves)
+def _seed_for(case: InvocationCase, output: Any, probes: Probes) -> Any:
+    # Mirror the output container, including field-named results.
+    return tree_map(lambda leaf: wrap_for(case.frontend, probes(to_numpy(leaf))), output)
 
 
 def _jvp(
@@ -254,11 +363,11 @@ def _jvp(
 def _law_primal(
     case: InvocationCase,
     values: tuple[Any, ...],
-    directions: tuple[Any, ...],
+    probes: Probes,
     context: str,
 ) -> None:
     reference = _invoke(case, values)
-    traced, _tangent = _jvp(case, values, directions)
+    traced, _tangent = _jvp(case, values, _directions(case, values, probes))
     _assert_close(
         traced,
         reference,
@@ -273,40 +382,18 @@ def _numerical_directional_derivative(
     values: tuple[Any, ...],
     directions: tuple[Any, ...],
 ) -> list[Any]:
-    indices = case.differentiable_indices
-    input_is_real = not np.iscomplexobj(values[0])
-    reference = _invoke(case, values)
-    if case.numerical_reference is NumericalReference.COMPLEX_STEP:
-        oracle_values = tuple(_promote_numerical_reference(value) for value in values)
-        oracle_directions = tuple(
-            _promote_numerical_reference(direction) for direction in directions
-        )
-        step = case.tolerance.complex_step
-        shifted = _invoke(
-            case,
-            _perturbed(oracle_values, oracle_directions, indices, 1j * step),
-        )
-        shifted = _align_eigen_output(case.op, reference, shifted, input_is_real=input_is_real)
-        return [np.imag(to_numpy(leaf)) / step for leaf in _leaves(shifted)]
-
-    oracle_values = tuple(_promote_numerical_reference(value) for value in values)
-    oracle_directions = tuple(_promote_numerical_reference(direction) for direction in directions)
-    reference = _invoke(case, oracle_values)
-    step = _finite_difference_step(case, oracle_values)
-    forward = _invoke(
-        case,
-        _perturbed(oracle_values, oracle_directions, indices, step),
+    oracle_values = tuple(map(_promote_numerical_reference, values))
+    by_index = dict(zip(case.differentiable_indices, directions, strict=True))
+    tangents = tuple(
+        None if index not in by_index else _promote_numerical_reference(by_index[index])
+        for index in range(len(values))
     )
-    backward = _invoke(
-        case,
-        _perturbed(oracle_values, oracle_directions, indices, -step),
+    return _directional_oracle(
+        lambda step: _invoke(case, _shifted(oracle_values, tangents, step)),
+        _oracle_step(case, oracle_values),
+        op=case.op,
+        input_is_real=not np.iscomplexobj(values[0]),
     )
-    forward = _align_eigen_output(case.op, reference, forward, input_is_real=input_is_real)
-    backward = _align_eigen_output(case.op, reference, backward, input_is_real=input_is_real)
-    return [
-        (to_numpy(upper) - to_numpy(lower)) / (2.0 * step)
-        for upper, lower in zip(_leaves(forward), _leaves(backward), strict=True)
-    ]
 
 
 def _eigenvalue_permutation(
@@ -322,15 +409,18 @@ def _eigenvalue_permutation(
     )
 
 
+def _unit_phase(overlap: np.ndarray[Any, Any]) -> np.ndarray[Any, Any]:
+    """Return the sign or phase of each overlap, or one where it vanishes."""
+    magnitude = np.abs(overlap)
+    return np.where(magnitude == 0, 1, overlap / np.where(magnitude == 0, 1, magnitude))
+
+
 def _align_eigenvectors(
     reference: np.ndarray[Any, Any],
     candidate: np.ndarray[Any, Any],
 ) -> np.ndarray[Any, Any]:
     aligned = np.array(candidate, copy=True)
-    overlap = np.sum(np.conjugate(aligned) * reference, axis=-2)
-    magnitude = np.abs(overlap)
-    phase = np.where(magnitude == 0, 1, overlap / np.where(magnitude == 0, 1, magnitude))
-    aligned *= phase[..., None, :]
+    aligned *= _unit_phase(np.sum(np.conjugate(aligned) * reference, axis=-2))[..., None, :]
     return aligned
 
 
@@ -347,9 +437,7 @@ def _align_svd_output(reference: Any, candidate: Any) -> Any:
     rank = int(candidate_s.shape[-1])
     reference_v = np.swapaxes(np.conjugate(reference_vh[..., :rank, :]), -1, -2)
     candidate_v = np.swapaxes(np.conjugate(candidate_vh[..., :rank, :]), -1, -2)
-    overlap = np.sum(np.conjugate(candidate_v) * reference_v, axis=-2)
-    magnitude = np.abs(overlap)
-    phase = np.where(magnitude == 0, 1, overlap / np.where(magnitude == 0, 1, magnitude))
+    phase = _unit_phase(np.sum(np.conjugate(candidate_v) * reference_v, axis=-2))
     aligned_u = np.array(candidate_u, copy=True)
     aligned_vh = np.array(candidate_vh, copy=True)
     aligned_u[..., :rank] *= phase[..., None, :]
@@ -357,22 +445,53 @@ def _align_svd_output(reference: Any, candidate: Any) -> Any:
     return aligned_u, candidate_s, aligned_vh
 
 
-def _align_eigen_output(
+def _align_qr_output(reference: Any, candidate: Any) -> Any:
+    """Align R's rows, and Q's columns, to the reference's diagonal sign or phase.
+
+    A Householder QR flips a row's sign where its pivot crosses zero, which
+    a low-precision difference step can straddle.
+    """
+    reference_r = np.asarray(to_numpy(reference[-1] if isinstance(reference, tuple) else reference))
+    if not isinstance(candidate, tuple):
+        candidate = (None, candidate)
+    candidate_q, candidate_r = (
+        None if leaf is None else np.asarray(to_numpy(leaf)) for leaf in candidate
+    )
+    phase = _unit_phase(
+        np.diagonal(reference_r, axis1=-2, axis2=-1)
+        * np.conjugate(np.diagonal(candidate_r, axis1=-2, axis2=-1))
+    )
+    aligned_r = candidate_r * phase[..., :, None]
+    if candidate_q is None:
+        return aligned_r
+    return candidate_q * np.conjugate(phase)[..., None, :], aligned_r
+
+
+# Decompositions whose outputs carry an arbitrary order, sign or vector phase.
+_GAUGED_OPS = frozenset(
+    {
+        "array_ext.linalg.eig",
+        "array_ext.linalg.eigh",
+        "array_ext.linalg.eigvals",
+        "array_ext.linalg.qr",
+        "array_ext.linalg.qr_r",
+        "array_ext.linalg.svd",
+    },
+)
+
+
+def _align_gauge(
     op: str,
     reference: Any,
     candidate: Any,
     *,
     input_is_real: bool,
 ) -> Any:
-    """Match unordered eigenpairs and align their arbitrary vector phase."""
+    """Match the unordered or phase-free outputs of a gauged decomposition ``op``."""
     if op == "array_ext.linalg.svd":
         return _align_svd_output(reference, candidate)
-    if op not in {
-        "array_ext.linalg.eig",
-        "array_ext.linalg.eigh",
-        "array_ext.linalg.eigvals",
-    }:
-        return candidate
+    if op in {"array_ext.linalg.qr", "array_ext.linalg.qr_r"}:
+        return _align_qr_output(reference, candidate)
 
     reference_values = np.asarray(reference[0] if isinstance(reference, tuple) else reference)
     candidate_values = np.asarray(candidate[0] if isinstance(candidate, tuple) else candidate)
@@ -404,10 +523,11 @@ def _align_eigen_output(
 def _law_finite_difference(
     case: InvocationCase,
     values: tuple[Any, ...],
-    directions: tuple[Any, ...],
+    probes: Probes,
     context: str,
 ) -> None:
     rtol, atol = _numerical_tolerances(case)
+    directions = _directions(case, values, probes)
     for label, probe_directions in _direction_variants(case, values, directions):
         numerical = _numerical_directional_derivative(case, values, probe_directions)
         _value, tangent = _jvp(case, values, probe_directions)
@@ -420,64 +540,118 @@ def _law_finite_difference(
         )
 
 
+def _assert_adjoint(
+    cotangent: Any,
+    tangent: Any,
+    input_cotangent: Any,
+    direction: Any,
+    *,
+    rtol: float,
+    atol: float,
+    context: str,
+) -> None:
+    """Require ``Re <v, J u> == Re <J* v, u>`` above the pairings' roundoff.
+
+    Matching NaNs or infinities agree; a lone one does not.
+    """
+    forward = (_numpy_leaves(cotangent), _numpy_leaves(tangent))
+    reverse = (_numpy_leaves(input_cotangent), _numpy_leaves(direction))
+    forward_pairing = _real_inner_product(*forward)
+    reverse_pairing = _real_inner_product(*reverse)
+    scale = max(
+        _real_inner_product_magnitude(*forward),
+        _real_inner_product_magnitude(*reverse),
+        1.0,
+    )
+    deviation = abs(forward_pairing - reverse_pairing)
+    tolerance = atol + rtol * scale
+    if not (
+        forward_pairing == reverse_pairing
+        or (math.isnan(forward_pairing) and math.isnan(reverse_pairing))
+        or deviation <= tolerance
+    ):
+        msg = (
+            f"adjoint identity violated by {deviation:.3e} (tolerance {tolerance:.3e}){context}"
+            f"\n  <v, J u>    : {forward_pairing!r}"
+            f"\n  <J* v, u>   : {reverse_pairing!r}"
+        )
+        raise ConformanceError(msg)
+
+
+def _pull_back(
+    case: InvocationCase,
+    arguments: tuple[Any, ...],
+    seed: Any,
+    tangent: Any = None,
+) -> Any:
+    """Apply one pullback to ``seed``, or trace it and push ``tangent`` through."""
+    _value, pullback = ad.vjp(case.call, case.differentiable_indices)(
+        *arguments,
+        **dict(case.static),
+    )
+    with pullback:
+        return pullback(seed) if tangent is None else ad.jvp(pullback)(seed, tangents=tangent)
+
+
 def _law_adjoint(
     case: InvocationCase,
     values: tuple[Any, ...],
-    directions: tuple[Any, ...],
+    probes: Probes,
     context: str,
 ) -> None:
-    indices = case.differentiable_indices
-    static = dict(case.static)
-    value = _invoke(case, values)
-    cotangent = _seed_for(case, value)
-    _value, pullback = ad.vjp(case.call, indices)(
-        *_traced_arguments(case, values),
-        **static,
-    )
+    """Pair ``J u`` with seeds pulled back through the public reverse path.
+
+    The ordinary pullback applies the first seed. A forward transform over a
+    second pullback carries the first seed as a traced value and a second
+    seed as its tangent, so the law also requires every pullback to be linear
+    and traceable unless the case declares, and still raises, a first-order
+    boundary.
+    """
+    value = _transformed_output(case, values)
+    arguments = _traced_arguments(case, values)
+    directions = _directions(case, values, probes)
+    seed, traced_seed = _seed_for(case, value, probes), _seed_for(case, value, probes)
+    pairs = [("pullback", seed, _pull_back(case, arguments, seed))]
     try:
-        input_cotangent = pullback(cotangent)
-    finally:
-        close = getattr(pullback, "close", None)
-        if callable(close):
-            close()
+        traced_value, traced_tangent = _pull_back(case, arguments, seed, traced_seed)
+    except NotImplementedError as refusal:
+        if not case.first_order or case.first_order not in str(refusal):
+            raise
+    else:
+        if case.first_order:
+            msg = f"the declared first-order pullback now traces{context}"
+            raise ConformanceError(msg)
+        pairs += [
+            ("traced pullback value", seed, traced_value),
+            ("traced pullback tangent", traced_seed, traced_tangent),
+        ]
 
     for label, probe_directions in _direction_variants(case, values, directions):
         _value, tangent = _jvp(case, values, probe_directions)
-        cotangent_leaves = _numpy_leaves(cotangent)
-        tangent_leaves = _numpy_leaves(tangent)
-        input_cotangent_leaves = _numpy_leaves(input_cotangent)
-        direction_leaves = [to_numpy(direction) for direction in probe_directions]
-        forward_pairing = _real_inner_product(cotangent_leaves, tangent_leaves)
-        reverse_pairing = _real_inner_product(input_cotangent_leaves, direction_leaves)
-        scale = max(
-            _real_inner_product_magnitude(cotangent_leaves, tangent_leaves),
-            _real_inner_product_magnitude(input_cotangent_leaves, direction_leaves),
-            1.0,
-        )
-        deviation = abs(forward_pairing - reverse_pairing)
-        tolerance = case.tolerance.adjoint_atol + case.tolerance.adjoint_rtol * scale
-        if deviation > tolerance:
-            msg = (
-                f"adjoint identity violated by {deviation:.3e} "
-                f"(tolerance {tolerance:.3e}){context}"
-                f"\n  direction   : {label}"
-                f"\n  <v, J u>    : {forward_pairing!r}"
-                f"\n  <J* v, u>   : {reverse_pairing!r}"
+        for seed_label, cotangent, input_cotangent in pairs:
+            _assert_adjoint(
+                cotangent,
+                tangent,
+                input_cotangent,
+                probe_directions,
+                rtol=case.tolerance.adjoint_rtol,
+                atol=case.tolerance.adjoint_atol,
+                context=f"{context}\n  direction   : {label}\n  cotangent   : {seed_label}",
             )
-            raise ConformanceError(msg)
 
 
 def _law_dependence(
     case: InvocationCase,
     values: tuple[Any, ...],
+    probes: Probes,
     context: str,
 ) -> None:
     """Check an explicit domain-backed promise of locally nonzero activity."""
     arguments = _traced_arguments(case, values)
     for index in sorted(case.dependence_indices):
         active = False
-        for ordinal in range(3):
-            direction = wrap_for(case.frontend, _probe_like(values[index], ordinal))
+        for _attempt in range(3):
+            direction = wrap_for(case.frontend, probes(values[index]))
             _value, tangent = ad.jvp(case.call, (index,))(
                 *arguments,
                 tangents=(direction,),
@@ -495,22 +669,14 @@ def _law_dependence(
             raise ConformanceError(msg)
 
 
-def _pullback_once(case: InvocationCase, values: tuple[Any, ...]) -> tuple[Any, Any]:
-    value, pullback = ad.vjp(case.call, case.differentiable_indices)(
-        *_traced_arguments(case, values),
-        **dict(case.static),
-    )
-    try:
-        cotangents = pullback(_seed_for(case, value))
-    finally:
-        close = getattr(pullback, "close", None)
-        if callable(close):
-            close()
-    return value, cotangents
-
-
-def _law_structure(case: InvocationCase, values: tuple[Any, ...], context: str) -> None:
-    _value, cotangents = _pullback_once(case, values)
+def _law_structure(
+    case: InvocationCase,
+    values: tuple[Any, ...],
+    probes: Probes,
+    context: str,
+) -> None:
+    seed = _seed_for(case, _transformed_output(case, values), probes)
+    cotangents = _pull_back(case, _traced_arguments(case, values), seed)
     for position, index in enumerate(case.differentiable_indices):
         primal = np.asarray(values[index])
         cotangent = np.asarray(to_numpy(cotangents[position]))
@@ -532,11 +698,12 @@ def _law_structure(case: InvocationCase, values: tuple[Any, ...], context: str) 
 def _law_dtype(
     case: InvocationCase,
     values: tuple[Any, ...],
-    directions: tuple[Any, ...],
+    probes: Probes,
     context: str,
 ) -> None:
     reference = _invoke(case, values)
-    traced, _tangent = _jvp(case, values, directions)
+    traced, tangent = _jvp(case, values, _directions(case, values, probes))
+    _assert_same_metadata(tangent, traced, label="tangent", context=context)
     reference_leaves = _leaves(reference)
     traced_leaves = _leaves(traced)
     if len(reference_leaves) != len(traced_leaves):
@@ -555,105 +722,192 @@ def _law_dtype(
             raise ConformanceError(msg)
 
 
-def _assert_unchanged(
-    values: Sequence[Any],
-    snapshots: Sequence[np.ndarray[Any, Any]],
-    *,
-    context: str,
-) -> None:
-    for position, (value, snapshot) in enumerate(zip(values, snapshots, strict=True)):
-        current = np.asarray(to_numpy(value))
-        if current.dtype != snapshot.dtype or not np.array_equal(current, snapshot, equal_nan=True):
-            msg = f"input {position} was mutated{context}"
-            raise ConformanceError(msg)
+def _unmutated[T](call: Callable[[], T], context: str, **inputs: Sequence[Any]) -> T:
+    """Return ``call()`` after requiring it left each named input's leaves unchanged."""
+    snapshots = {
+        name: [np.array(to_numpy(leaf), copy=True) for leaf in _leaves(values)]
+        for name, values in inputs.items()
+    }
+    result = call()
+    for name, values in inputs.items():
+        for position, (leaf, snapshot) in enumerate(
+            zip(_leaves(values), snapshots[name], strict=True),
+        ):
+            current = np.asarray(to_numpy(leaf))
+            if current.dtype != snapshot.dtype or not np.array_equal(
+                current, snapshot, equal_nan=True
+            ):
+                msg = f"{name} {position} was mutated{context}"
+                raise ConformanceError(msg)
+    return result
 
 
 def _law_no_input_mutation(
     case: InvocationCase,
     values: tuple[Any, ...],
-    directions: tuple[Any, ...],
+    probes: Probes,
     context: str,
 ) -> None:
-    provider_inputs = _traced_arguments(case, values)
-    provider_snapshots = [np.array(to_numpy(value), copy=True) for value in provider_inputs]
-    case.call(*provider_inputs, **dict(case.static))
-    _assert_unchanged(provider_inputs, provider_snapshots, context=context)
+    inputs = _traced_arguments(case, values)
+    _unmutated(lambda: case.call(*inputs, **dict(case.static)), context, input=inputs)
 
-    traced_inputs = _traced_arguments(case, values)
-    traced_snapshots = [np.array(to_numpy(value), copy=True) for value in traced_inputs]
-    traced_directions = _traced_arguments(case, directions)
-    direction_snapshots = [np.array(to_numpy(value), copy=True) for value in traced_directions]
-    ad.jvp(case.call, case.differentiable_indices)(
-        *traced_inputs,
-        tangents=traced_directions,
-        **dict(case.static),
-    )
-    _assert_unchanged(traced_inputs, traced_snapshots, context=context)
-    _assert_unchanged(
-        traced_directions,
-        direction_snapshots,
-        context=f"{context}\n  derivative input: tangent",
+    inputs = _traced_arguments(case, values)
+    tangents = _traced_arguments(case, _directions(case, values, probes))
+    _unmutated(
+        lambda: ad.jvp(case.call, case.differentiable_indices)(
+            *inputs,
+            tangents=tangents,
+            **dict(case.static),
+        ),
+        f"{context}\n  transform: jvp",
+        input=inputs,
+        tangent=tangents,
     )
 
 
-def _law_second_order(case: InvocationCase, values: tuple[Any, ...], context: str) -> None:
-    indices = case.differentiable_indices
-    primary = indices[0]
-    weights = _probe_like(_invoke(case, values))
-
-    def scalar(argument: Any) -> Any:
-        arguments = list(_traced_arguments(case, values))
-        arguments[primary] = argument
-        return np.sum(case.call(*arguments, **dict(case.static)) * weights)
-
-    direction = _probe_like(values[primary])
-    _value, curvature = ad.hvp(scalar)(values[primary], vectors=direction)
-    dense = np.asarray(ad.hessian(scalar)(values[primary]))
-    flat = np.reshape(dense, (np.size(direction), np.size(direction)))
-    expected = np.reshape(flat @ np.ravel(direction), np.shape(direction))
-    _assert_close(
-        curvature,
-        expected,
-        rtol=case.tolerance.finite_difference_rtol,
-        atol=case.tolerance.finite_difference_atol,
-        context=f"{context}\n  second-order oracle: dense Hessian",
-    )
-
-    step = _finite_difference_step(case, (values[primary],))
-    gradient = ad.grad(scalar)
-    positive_argument = _perturbed((values[primary],), (direction,), (0,), step)[0]
-    negative_argument = _perturbed((values[primary],), (direction,), (0,), -step)[0]
-    positive = gradient(wrap_for(case.frontend, positive_argument))
-    negative = gradient(wrap_for(case.frontend, negative_argument))
-    numerical = (np.asarray(positive) - np.asarray(negative)) / (2.0 * step)
-    _assert_close(
-        curvature,
-        numerical,
-        rtol=case.tolerance.finite_difference_rtol,
-        atol=case.tolerance.finite_difference_atol,
-        context=f"{context}\n  second-order oracle: directional gradient difference",
-    )
+def _weighted_sum(output: Any, weights: Any) -> Any:
+    """Reduce outputs to the real scalar ``<weights, output>`` in their namespace."""
+    total: Any = 0.0
+    for leaf, weight in zip(_leaves(output), _leaves(weights), strict=True):
+        namespace = getattr(leaf, "__array_namespace__", None)
+        xp = namespace() if callable(namespace) else np
+        if np.iscomplexobj(to_numpy(weight)):
+            total = total + xp.real(xp.sum(leaf * xp.conj(weight)))
+        else:
+            total = total + xp.sum(leaf * weight)
+    return total
 
 
-def _law_staged(case: InvocationCase, values: tuple[Any, ...], context: str) -> None:
-    dynamic = _invoke(case, values)
+def _law_second_order(
+    case: InvocationCase,
+    values: tuple[Any, ...],
+    probes: Probes,
+    context: str,
+) -> None:
+    """Nested derivatives match the dense Hessian and central differences.
+
+    Along the first differentiable argument ``x``, forward-over-reverse
+    ``hvp`` of the probe-weighted outputs must equal the dense
+    reverse-over-reverse Hessian and a difference of gradients, and
+    forward-over-forward must equal a difference of JVPs.
+    The differences run above low-precision roundoff, like the first-order
+    oracle.
+    """
+    primary = case.differentiable_indices[0]
+    weights = _seed_for(case, _invoke(case, values), probes)
+    direction, second = probes(values[primary]), probes(values[primary])
+    oracle = tuple(_promote_numerical_reference(value) for value in values)
+    step = _finite_difference_step(case, (oracle[primary],))
+
+    def restricted(point: tuple[Any, ...], *, promote: bool) -> tuple[Any, Any]:
+        """Return the weighted scalar and the JVP along ``direction``, in ``x``."""
+        lift = _promote_numerical_reference if promote else (lambda value: value)
+        arguments = list(_traced_arguments(case, point))
+        weight = tree_map(lambda leaf: wrap_for(case.frontend, lift(to_numpy(leaf))), weights)
+        tangent = wrap_for(case.frontend, lift(direction))
+
+        def call(argument: Any) -> Any:
+            arguments[primary] = argument
+            return case.call(*arguments, **dict(case.static))
+
+        def scalar(argument: Any) -> Any:
+            return _weighted_sum(call(argument), weight)
+
+        def along(argument: Any) -> Any:
+            return ad.jvp(call)(argument, tangents=tangent)[1]
+
+        return scalar, along
+
+    def difference(function: Any, vector: Any) -> list[Any]:
+        shift = (_promote_numerical_reference(vector),)
+        return _directional_oracle(
+            lambda moved: function(
+                wrap_for(case.frontend, _shifted((oracle[primary],), shift, moved)[0])
+            ),
+            step,
+        )
+
+    scalar, along = restricted(values, promote=False)
+    oracle_scalar, oracle_along = restricted(oracle, promote=True)
+    x = wrap_for(case.frontend, values[primary])
+    _value, curvature = ad.hvp(scalar)(x, vectors=wrap_for(case.frontend, direction))
+    _value, forward = ad.jvp(along)(x, tangents=wrap_for(case.frontend, second))
+    checks = [
+        (
+            "directional gradient difference",
+            curvature,
+            difference(ad.grad(oracle_scalar), direction),
+        ),
+        ("directional JVP difference", forward, difference(oracle_along, second)),
+    ]
+    # The dense Hessian needs real inputs and a NumPy-compatible namespace.
+    if case.frontend is Frontend.NUMPY and not np.iscomplexobj(values[primary]):
+        size = np.size(direction)
+        dense = np.reshape(np.asarray(to_numpy(ad.hessian(scalar)(x))), (size, size))
+        expected = np.reshape(dense @ np.ravel(direction), np.shape(direction))
+        checks.append(("dense Hessian", curvature, expected))
+    for label, actual, expected in checks:
+        _assert_close(
+            actual,
+            expected,
+            rtol=case.tolerance.finite_difference_rtol,
+            atol=case.tolerance.finite_difference_atol,
+            context=f"{context}\n  second-order oracle: {label}",
+        )
+
+
+def _serialized(program: ad.StagedProgram, context: str) -> ad.StagedProgram:
+    """Round-trip through real JSON, as documented persistence does."""
+    payload = program.to_dict()
+    restored = ad.StagedProgram.from_dict(json.loads(json.dumps(payload)))
+    if restored.to_dict() != payload:
+        msg = f"serialized program does not reload to the same record{context}"
+        raise ConformanceError(msg)
+    return restored
+
+
+@functools.cache
+def _staged(
+    case: InvocationCase,
+    specs: tuple[ad.ArraySpec, ...],
+) -> tuple[ad.StagedProgram, ad.StagedProgram]:
+    """Stage one signature and reload it; programs do not depend on values."""
 
     def call(*arguments: Any) -> Any:
         return case.call(*arguments, **dict(case.static))
 
+    program = ad.stage(call, specs=specs)
+    return program, _serialized(program, f"\n  op: {case.op}")
+
+
+@functools.cache
+def _staged_pullback(
+    case: InvocationCase,
+    specs: tuple[ad.ArraySpec, ...],
+) -> tuple[ad.StagedProgram, ad.StagedProgram]:
+    """Build and reload the pullback program of the reloaded primal program."""
+    program = ad.vjp_program(_staged(case, specs)[1], argnums=case.differentiable_indices)
+    return program, _serialized(program, f"\n  op: {case.op}")
+
+
+def _law_staged(
+    case: InvocationCase,
+    values: tuple[Any, ...],
+    probes: Probes,
+    context: str,
+) -> None:
+    dynamic = _invoke(case, values)
     arguments = _traced_arguments(case, values)
-    argument_snapshots = [np.array(to_numpy(value), copy=True) for value in arguments]
-    program = ad.stage(call, specs=_stage_specs(values))
-    restored = ad.StagedProgram.from_dict(program.to_dict())
+    specs = _stage_specs(values)
+    program, restored = _staged(case, specs)
     for label, staged_program in (
         ("compiled primal", program),
         ("serialized primal", restored),
     ):
-        staged = staged_program(*arguments)
-        _assert_unchanged(
-            arguments,
-            argument_snapshots,
-            context=f"{context}\n  staged transform: {label}",
+        staged = _unmutated(
+            functools.partial(staged_program, *arguments),
+            f"{context}\n  staged transform: {label}",
+            input=arguments,
         )
         _assert_close(
             staged,
@@ -675,82 +929,50 @@ def _law_staged(case: InvocationCase, values: tuple[Any, ...], context: str) -> 
     ):
         return
 
-    cotangent = _seed_for(case, dynamic)
-    cotangent_leaves, cotangent_treedef = tree_flatten(cotangent)
-    staged_cotangent = tree_unflatten(
-        cotangent_treedef,
-        [
-            wrap_for(case.frontend, np.asarray(leaf)) if is_python_number(leaf) else leaf
-            for leaf in cotangent_leaves
-        ],
-    )
-    dynamic_arguments = _traced_arguments(case, values)
-    dynamic_argument_snapshots = [
-        np.array(to_numpy(value), copy=True) for value in dynamic_arguments
-    ]
-    cotangent_leaves = _leaves(cotangent)
-    cotangent_snapshots = [np.array(to_numpy(value), copy=True) for value in cotangent_leaves]
-    _dynamic_value, dynamic_pullback = ad.vjp(
-        case.call,
-        case.differentiable_indices,
-    )(
-        *dynamic_arguments,
-        **dict(case.static),
-    )
-    try:
-        dynamic_cotangents = dynamic_pullback(cotangent)
-    finally:
-        close = getattr(dynamic_pullback, "close", None)
-        if callable(close):
-            close()
-    _assert_unchanged(
-        dynamic_arguments,
-        dynamic_argument_snapshots,
-        context=f"{context}\n  derivative input: dynamic primal",
-    )
-    _assert_unchanged(
-        cotangent_leaves,
-        cotangent_snapshots,
-        context=f"{context}\n  derivative input: dynamic cotangent",
-    )
-    pullback_program = ad.vjp_program(
-        restored,
-        argnums=case.differentiable_indices,
-    )
-    staged_cotangent_leaves = _leaves(staged_cotangent)
-    staged_cotangent_snapshots = [
-        np.array(to_numpy(value), copy=True) for value in staged_cotangent_leaves
-    ]
-    staged_cotangents = pullback_program(*arguments, cotangent=staged_cotangent)
-    _assert_unchanged(
-        arguments,
-        argument_snapshots,
-        context=f"{context}\n  derivative input: compiled-vjp primal",
-    )
-    _assert_unchanged(
-        staged_cotangent_leaves,
-        staged_cotangent_snapshots,
-        context=f"{context}\n  derivative input: compiled-vjp cotangent",
-    )
-    restored_pullback = ad.StagedProgram.from_dict(pullback_program.to_dict())
-    roundtrip_cotangents = restored_pullback(
+    # A loaded program is also an ordinary function under dynamic transforms.
+    directions = _directions(case, values, probes)
+    _value, staged_tangent = ad.jvp(restored, case.differentiable_indices)(
         *arguments,
-        cotangent=staged_cotangent,
+        tangents=_traced_arguments(case, directions),
     )
-    _assert_unchanged(
-        arguments,
-        argument_snapshots,
-        context=f"{context}\n  derivative input: serialized-vjp primal",
+    transformed, dynamic_tangent = _jvp(case, values, directions)
+    _assert_close(
+        staged_tangent,
+        dynamic_tangent,
+        rtol=case.tolerance.adjoint_rtol,
+        atol=case.tolerance.adjoint_atol,
+        context=f"{context}\n  staged transform: jvp of serialized primal",
     )
-    _assert_unchanged(
-        staged_cotangent_leaves,
-        staged_cotangent_snapshots,
-        context=f"{context}\n  derivative input: serialized-vjp cotangent",
+    _assert_same_metadata(
+        staged_tangent,
+        dynamic_tangent,
+        label="jvp of serialized primal tangent",
+        context=context,
     )
-    for label, result in (
-        ("compiled vjp", staged_cotangents),
-        ("serialized vjp", roundtrip_cotangents),
+
+    cotangent = _seed_for(case, transformed, probes)
+    dynamic_arguments = _traced_arguments(case, values)
+    dynamic_cotangents = _unmutated(
+        functools.partial(_pull_back, case, dynamic_arguments, cotangent),
+        f"{context}\n  transform: dynamic vjp",
+        input=dynamic_arguments,
+        cotangent=cotangent,
+    )
+    staged_cotangent = tree_map(
+        lambda leaf: wrap_for(case.frontend, np.asarray(leaf)) if is_python_number(leaf) else leaf,
+        cotangent,
+    )
+    for label, pullback_program in zip(
+        ("compiled vjp", "serialized vjp"),
+        _staged_pullback(case, specs),
+        strict=True,
     ):
+        result = _unmutated(
+            functools.partial(pullback_program, *arguments, cotangent=staged_cotangent),
+            f"{context}\n  staged transform: {label}",
+            input=arguments,
+            cotangent=staged_cotangent,
+        )
         _assert_close(
             result,
             dynamic_cotangents,
@@ -766,36 +988,36 @@ def _law_staged(case: InvocationCase, values: tuple[Any, ...], context: str) -> 
         )
 
 
+_LAWS = {
+    Law.PRIMAL: _law_primal,
+    Law.FINITE_DIFFERENCE: _law_finite_difference,
+    Law.ADJOINT: _law_adjoint,
+    Law.DEPENDENCE: _law_dependence,
+    Law.STRUCTURE: _law_structure,
+    Law.NO_INPUT_MUTATION: _law_no_input_mutation,
+    Law.DTYPE: _law_dtype,
+    Law.SECOND_ORDER: _law_second_order,
+    Law.STAGED: _law_staged,
+}
+assert set(_LAWS) == set(Law), "every law needs exactly one implementation"
+# These contracts do not depend on probe values, so they keep the anchors.
+_PROBE_INDEPENDENT_LAWS = frozenset({Law.PRIMAL, Law.STRUCTURE, Law.NO_INPUT_MUTATION, Law.DTYPE})
+
+
 def check_law(
     case: InvocationCase,
     law: Law,
     values: tuple[Any, ...],
     *,
     variant: int = 0,
+    data: DataObject | None = None,
 ) -> None:
-    """Run one public-transform law on a Hypothesis-drawn invocation."""
-    context = _describe(case, law, variant)
-    case = case.resolve_variant(variant)
-    directions = _directions(case, values)
+    """Run one public-transform law on a Hypothesis-drawn invocation.
 
-    if law is Law.PRIMAL:
-        _law_primal(case, values, directions, context)
-    elif law is Law.FINITE_DIFFERENCE:
-        _law_finite_difference(case, values, directions, context)
-    elif law is Law.ADJOINT:
-        _law_adjoint(case, values, directions, context)
-    elif law is Law.DEPENDENCE:
-        _law_dependence(case, values, context)
-    elif law is Law.STRUCTURE:
-        _law_structure(case, values, context)
-    elif law is Law.NO_INPUT_MUTATION:
-        _law_no_input_mutation(case, values, directions, context)
-    elif law is Law.DTYPE:
-        _law_dtype(case, values, directions, context)
-    elif law is Law.SECOND_ORDER:
-        _law_second_order(case, values, context)
-    elif law is Law.STAGED:
-        _law_staged(case, values, context)
-    else:  # Exhaustive over a closed enum.
-        msg = f"Law {law.value} has no implementation"
-        raise ConformanceError(msg)
+    With ``data``, laws whose verdict depends on probe values also draw their
+    tangent and cotangent probes; otherwise they use the deterministic,
+    mutually independent anchors of ``Probes``.
+    """
+    context = _describe(case, law, variant)
+    probes = Probes(None if law in _PROBE_INDEPENDENT_LAWS else data)
+    _LAWS[law](case.resolve_variant(variant), values, probes, context)

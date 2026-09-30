@@ -9,17 +9,15 @@ from advect.autodiff.api._scalar_boundary import (
     _is_real_python_scalar,
     _lift_scalar_to_array,
 )
-from advect.autodiff.api.trace import _wrap_input
+from advect.autodiff.api.trace import _LEAF_TREEDEF, _wrap_input
 from advect.core._array_api.profiles import LATEST_ARRAY_API_VERSION
 from advect.core._array_api.providers import _get_array_namespace
 from advect.core._context import _get_active_array_api_version
-from advect.core._pytree import TreeDef, _get_node_impl
+from advect.core._pytree import _get_node_impl
 
 if TYPE_CHECKING:
     from advect.core._native import DynamicTape
-
-
-_LEAF_TREEDEF = TreeDef(node_type=None, aux_data=None, children=(), num_leaves=1)
+    from advect.core._pytree import TreeDef
 
 
 def _array_namespace_for_input(
@@ -87,26 +85,28 @@ def _trace_leaf_as_input(
     if not is_traceable:
         return None
 
-    restore_python_scalar = False
-    primal = value
-    if (not is_existing_traced) and _is_real_python_scalar(value):
-        primal = _lift_scalar_to_array(value, namespace=xp)
-        restore_python_scalar = True
+    traced, leaf_spec = _trace_leaf(graph, value, name=prefix, xp=xp)
+    return traced, _TracedInputSpec(treedef=_LEAF_TREEDEF, leaf_specs=(leaf_spec,))
 
+
+def _trace_leaf(
+    graph: DynamicTape,
+    leaf: object,
+    *,
+    name: str | None,
+    xp: object | None,
+) -> tuple[object, _LeafTraceSpec]:
+    """Record one traceable leaf as an input, lifting a real Python scalar first."""
+    restore_python_scalar = _is_real_python_scalar(leaf)
+    primal = _lift_scalar_to_array(leaf, namespace=xp) if restore_python_scalar else leaf
     traced, node_id = _wrap_input(
         primal,
         graph,
-        name=prefix,
-        weak=restore_python_scalar or bool(getattr(value, "_advect_weak", False)),
+        name=name,
+        weak=restore_python_scalar or bool(getattr(leaf, "_advect_weak", False)),
     )
-    spec = _TracedInputSpec(
-        treedef=_LEAF_TREEDEF,
-        leaf_specs=(
-            _LeafTraceSpec(
-                node_id=node_id,
-                primal=primal,
-                restore_python_scalar=restore_python_scalar,
-            ),
-        ),
+    return traced, _LeafTraceSpec(
+        node_id=node_id,
+        primal=primal,
+        restore_python_scalar=restore_python_scalar,
     )
-    return traced, spec

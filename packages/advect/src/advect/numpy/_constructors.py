@@ -15,6 +15,7 @@ from advect._array import (
 )
 from advect.core._errors import TracingError
 from advect.core._protocols import _snapshot_traced
+from advect.numpy._composite_lowering import operand_dtype
 
 type _ArrayOrder = Literal["A", "C", "F", "K"]
 
@@ -51,10 +52,6 @@ def _validate_device(device: object | None) -> None:
     if device not in {None, "cpu"}:
         msg = f'Device not understood. Only "cpu" is allowed, but received: {device}'
         raise ValueError(msg)
-
-
-def _same_dtype(value: object, dtype: object) -> bool:
-    return np.dtype(cast("Any", value).dtype) == np.dtype(cast("Any", dtype))
 
 
 def _known_layout(value: object) -> tuple[bool, bool] | None:
@@ -131,8 +128,8 @@ def _convert_traced(
     direct: bool,
 ) -> Any:
     del subok  # Tracer wrappers do not preserve ndarray subclass identity.
-    target_dtype = value.dtype if dtype is None else np.dtype(cast("Any", dtype))
-    dtype_requires_copy = not _same_dtype(value, target_dtype)
+    target_dtype = None if dtype is None else np.dtype(cast("Any", dtype))
+    dtype_requires_copy = target_dtype is not None and operand_dtype(value) != target_dtype
     order_requires_copy = _order_requires_copy(value, order)
 
     if copy is False:

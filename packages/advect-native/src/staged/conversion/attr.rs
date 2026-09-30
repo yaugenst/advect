@@ -9,54 +9,6 @@ use pyo3::exceptions::{PyOverflowError, PyTypeError};
 use pyo3::prelude::*;
 use pyo3::types::{PyBool, PyBytes, PyDict, PyFloat, PyInt, PyList, PyString, PyTuple};
 
-/// Construction-only identity cache for common immutable Python mappings.
-#[derive(Debug, Default)]
-pub(crate) struct AttrMapCache {
-    entries: Vec<(Py<PyDict>, AttrCacheKey, AttrMap)>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-enum AttrCacheKey {
-    Empty,
-    Backend(String),
-}
-
-impl AttrMapCache {
-    pub(crate) fn resolve(
-        &mut self,
-        py: Python<'_>,
-        attrs: &Bound<'_, PyDict>,
-    ) -> PyResult<AttrMap> {
-        let cache_key = cache_key(attrs)?;
-        if let Some((_owner, _key, values)) = cache_key.as_ref().and_then(|key| {
-            self.entries
-                .iter()
-                .find(|(owner, cached_key, _)| owner.bind(py).is(attrs) && cached_key == key)
-        }) {
-            return Ok(values.clone());
-        }
-        let values = attr_map_from_python(attrs)?;
-        if let Some(cache_key) = cache_key {
-            self.entries
-                .push((attrs.clone().unbind(), cache_key, values.clone()));
-        }
-        Ok(values)
-    }
-}
-
-fn cache_key(attrs: &Bound<'_, PyDict>) -> PyResult<Option<AttrCacheKey>> {
-    if attrs.is_empty() {
-        return Ok(Some(AttrCacheKey::Empty));
-    }
-    if attrs.len() != 1 {
-        return Ok(None);
-    }
-    attrs
-        .get_item("_advect_backend")?
-        .map(|value| value.extract::<String>().map(AttrCacheKey::Backend))
-        .transpose()
-}
-
 pub(crate) fn attr_map_from_python(attrs: &Bound<'_, PyDict>) -> PyResult<AttrMap> {
     let mut active_containers = HashSet::new();
     map_from_python(attrs, "attrs", &mut active_containers)

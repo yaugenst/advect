@@ -10,7 +10,7 @@ import numpy as np
 
 from advect.core._context import _set_active_recorder
 from advect.core._native import DynamicTape
-from advect.numpy._protocol_ufunc import UFUNC_RUNTIME
+from advect.numpy._protocol_ufunc import handle_ufunc
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -81,12 +81,8 @@ def test_handle_ufunc_records_single_output_node() -> None:
     y = _DummyTraced(y_value, _record_input(recorder, y_value), recorder)
 
     with _active(recorder):
-        result, node_id = UFUNC_RUNTIME.handle_ufunc(
-            ufunc=cast("UfuncLike", np.add),
-            recorder=recorder,
-            traced_type=_DummyTraced,
-            inputs=(x, y),
-            kwargs={},
+        result, node_id = handle_ufunc(
+            cast("UfuncLike", np.add), recorder, _DummyTraced, (x, y), {}
         )
 
     assert isinstance(result, np.ndarray)
@@ -103,12 +99,8 @@ def test_handle_ufunc_normalizes_structural_array_to_backend_literal() -> None:
     foreign = _ForeignArray(np.array([3.0, 4.0]))
 
     with _active(recorder):
-        result, node_id = UFUNC_RUNTIME.handle_ufunc(
-            ufunc=cast("UfuncLike", np.add),
-            recorder=recorder,
-            traced_type=_DummyTraced,
-            inputs=(x, foreign),
-            kwargs={},
+        result, node_id = handle_ufunc(
+            cast("UfuncLike", np.add), recorder, _DummyTraced, (x, foreign), {}
         )
 
     assert isinstance(result, np.ndarray)
@@ -123,12 +115,8 @@ def test_handle_ufunc_multi_output_creates_getoutput_nodes() -> None:
     x = _DummyTraced(x_value, _record_input(recorder, x_value), recorder)
 
     with _active(recorder):
-        result, node_ids = UFUNC_RUNTIME.handle_ufunc(
-            ufunc=cast("UfuncLike", np.modf),
-            recorder=recorder,
-            traced_type=_DummyTraced,
-            inputs=(x,),
-            kwargs={},
+        result, node_ids = handle_ufunc(
+            cast("UfuncLike", np.modf), recorder, _DummyTraced, (x,), {}
         )
 
     assert isinstance(result, tuple)

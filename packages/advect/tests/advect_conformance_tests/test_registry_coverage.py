@@ -10,8 +10,6 @@ from advect.core._primitive_classification import STRUCTURAL_OPS as _STRUCTURAL_
 from advect.core._registry import OpRegistry, _register_builtin_ops, get_registry
 from advect_conformance_tests._builtin_cases import (
     BUILTIN_INVOCATIONS,
-    DYNAMIC_ONLY_STAGING_INVOCATIONS,
-    INVOCATIONS_BY_ID,
     PORTABLE_ARRAY_API_INVOCATIONS,
     STAGED_ONLY_INVOCATIONS,
 )
@@ -106,7 +104,8 @@ def test_every_differentiable_invocation_has_a_registered_jvp() -> None:
 
 
 def test_every_invocation_with_a_jvp_has_direct_rule_coverage() -> None:
-    # test_registered_rules parameterises exactly this set. The assertion keeps
+    # test_builtin_conformance checks the registered JVP of every invocation
+    # cell, which requires this numerical reference. The assertion keeps
     # a future law narrowing from silently dropping the direct-rule boundary.
     missing = sorted(
         invocation.op
@@ -117,15 +116,6 @@ def test_every_invocation_with_a_jvp_has_direct_rule_coverage() -> None:
         "invocations with JVPs but no numerical rule reference need an explicit "
         f"raw rule contract: {missing}"
     )
-
-
-def test_every_invocation_has_an_explicit_staging_classification() -> None:
-    dynamic_only = {
-        identifier
-        for identifier, invocation in INVOCATIONS_BY_ID.items()
-        if Law.STAGED not in invocation.laws
-    }
-    assert dynamic_only == DYNAMIC_ONLY_STAGING_INVOCATIONS
 
 
 def test_staged_array_invocations_have_an_abstract_classification() -> None:

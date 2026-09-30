@@ -1,10 +1,12 @@
 //! Fixed conservative cleanup for durable staged graphs.
 
+use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap};
 
+use crate::graph::GraphData;
 use crate::{
-    AttrMap, AttrValue, GraphError, GraphStore, NodeCore, NodeId, NodeMetadata, PortableConstant,
-    RawArena, SchemaVersion,
+    AttrMap, AttrValue, GraphError, GraphStore, NodeId, NodeMetadata, NodeRef, OpId,
+    PortableConstant, RawArena,
 };
 
 const TRANSPOSE: &str = "array.transpose";
@@ -158,49 +160,14 @@ impl WorkingGraph {
             })
     }
 
-    fn node(&self, node_id: NodeId) -> Result<NodeCore, GraphError> {
-        self.store
-            .arena()
-            .node(node_id)
-            .ok_or_else(|| GraphError::at_node(node_id, "optimizer node does not exist"))
-    }
-
-    fn metadata(&self, node_id: NodeId) -> Result<&NodeMetadata, GraphError> {
-        self.store
-            .metadata()
-            .get(node_index(node_id)?)
-            .ok_or_else(|| GraphError::at_node(node_id, "optimizer metadata is unavailable"))
-    }
-
-    fn op(&self, node_id: NodeId) -> Result<&str, GraphError> {
-        let node = self.node(node_id)?;
-        self.store
-            .arena()
-            .op_name(node.op())
-            .ok_or_else(|| GraphError::at_node(node_id, "optimizer operation ID is invalid"))
-    }
-
-    fn schema_version(&self, node_id: NodeId) -> Result<SchemaVersion, GraphError> {
-        let node = self.node(node_id)?;
-        self.store
-            .arena()
-            .op_schema(node.op())
-            .map(crate::OpSchema::schema_version)
-            .ok_or_else(|| GraphError::at_node(node_id, "optimizer operation schema is invalid"))
-    }
-
-    fn parents(&self, node_id: NodeId) -> Result<Vec<NodeId>, GraphError> {
-        let node = self.node(node_id)?;
-        self.store
-            .arena()
-            .parents(node)
-            .map(crate::Parents::to_vec)
-            .ok_or_else(|| GraphError::at_node(node_id, "optimizer parent range is invalid"))
+    fn node(&self, node_id: NodeId) -> Result<NodeRef<'_>, GraphError> {
+        self.store.node(node_id)
     }
 
     fn resolved_parents(&self, node_id: NodeId) -> Result<Vec<NodeId>, GraphError> {
-        self.parents(node_id)?
-            .into_iter()
+        self.node(node_id)?
+            .parents
+            .iter()
             .map(|parent_id| {
                 self.resolve(parent_id).ok_or_else(|| {
                     GraphError::at_node(
@@ -253,7 +220,10 @@ impl WorkingGraph {
 
     fn prune_unreachable(&mut self) -> Result<usize, GraphError> {
         let before = self.node_count();
-        let reachable = self.reachable_mask()?;
+        let mut roots = self.effect_roots()?;
+        roots.extend_from_slice(self.store.inputs());
+        roots.extend_from_slice(self.store.outputs());
+        let reachable = self.ancestors(roots)?;
         for index in 0..self.aliases.len() {
             let node_id = node_id(index)?;
             if self.aliases.get(index) == Some(&Some(node_id))
@@ -268,55 +238,32 @@ impl WorkingGraph {
         Ok(before.saturating_sub(self.node_count()))
     }
 
-    fn reachable_mask(&self) -> Result<Vec<bool>, GraphError> {
-        let mut reachable = vec![false; self.aliases.len()];
-        let mut pending =
-            Vec::with_capacity(self.store.inputs().len() + self.store.outputs().len());
-        pending.extend(self.store.inputs().iter().copied());
-        pending.extend(self.store.outputs().iter().copied());
+    /// Active nodes whose effects must be preserved.
+    fn effect_roots(&self) -> Result<Vec<NodeId>, GraphError> {
+        let mut roots = Vec::new();
         for node_id in self.node_ids() {
-            if !is_known_pure(self.op(node_id)?) {
-                pending.push(node_id);
+            if !is_known_pure(self.node(node_id)?.schema.name()) {
+                roots.push(node_id);
             }
         }
-        while let Some(raw_id) = pending.pop() {
-            let Some(node_id) = self.resolve(raw_id) else {
-                continue;
-            };
-            let seen = reachable
-                .get_mut(node_index(node_id)?)
-                .ok_or_else(|| GraphError::at_node(node_id, "reachability slot is unavailable"))?;
-            if *seen {
-                continue;
-            }
-            *seen = true;
-            pending.extend(self.parents(node_id)?);
-        }
-        Ok(reachable)
+        Ok(roots)
     }
 
-    fn effect_ancestors(&self) -> Result<Vec<bool>, GraphError> {
-        let mut observed = vec![false; self.aliases.len()];
-        let mut pending = Vec::new();
-        for node_id in self.node_ids() {
-            if !is_known_pure(self.op(node_id)?) {
-                pending.push(node_id);
-            }
-        }
+    /// Mask of the active nodes reachable from `pending` through parents.
+    fn ancestors(&self, mut pending: Vec<NodeId>) -> Result<Vec<bool>, GraphError> {
+        let mut seen = vec![false; self.aliases.len()];
         while let Some(raw_id) = pending.pop() {
             let Some(node_id) = self.resolve(raw_id) else {
                 continue;
             };
-            let seen = observed
+            let slot = seen
                 .get_mut(node_index(node_id)?)
-                .ok_or_else(|| GraphError::at_node(node_id, "effect slot is unavailable"))?;
-            if *seen {
-                continue;
+                .ok_or_else(|| GraphError::at_node(node_id, "ancestor slot is unavailable"))?;
+            if !std::mem::replace(slot, true) {
+                pending.extend(self.node(node_id)?.parents.iter());
             }
-            *seen = true;
-            pending.extend(self.parents(node_id)?);
         }
-        Ok(observed)
+        Ok(seen)
     }
 
     fn finish(self) -> Result<(GraphStore, Vec<Option<NodeId>>), GraphError> {
@@ -358,30 +305,30 @@ impl WorkingGraph {
 }
 
 fn simplify(graph: &mut WorkingGraph) -> Result<usize, GraphError> {
-    let effect_ancestors = graph.effect_ancestors()?;
+    let effect_ancestors = graph.ancestors(graph.effect_roots()?)?;
     let node_ids = graph.node_ids().collect::<Vec<_>>();
-    let mut rewrites = Vec::new();
+    let mut rewrites = 0_usize;
     for node_id in node_ids {
         if graph.is_output(node_id)
             || effect_ancestors
                 .get(node_index(node_id)?)
                 .copied()
                 .unwrap_or(true)
-            || graph.op(node_id)? != TRANSPOSE
+            || graph.node(node_id)?.schema.name() != TRANSPOSE
         {
             continue;
         }
+        // Alias immediately so later nodes see the cancelled value in
+        // topological order.
         if let Some(replacement_id) = transpose_replacement(graph, node_id)? {
-            rewrites.push((node_id, replacement_id));
+            graph.alias_node(node_id, replacement_id)?;
+            rewrites += 1;
         }
     }
-    for &(node_id, replacement_id) in &rewrites {
-        graph.alias_node(node_id, replacement_id)?;
-    }
-    if !rewrites.is_empty() {
+    if rewrites > 0 {
         let _ = graph.prune_unreachable()?;
     }
-    Ok(rewrites.len())
+    Ok(rewrites)
 }
 
 fn transpose_replacement(
@@ -392,18 +339,18 @@ fn transpose_replacement(
     let [inner_id] = outer_inputs.as_slice() else {
         return Ok(None);
     };
-    if graph.op(*inner_id)? != TRANSPOSE
-        || graph.schema_version(outer_id)? != graph.schema_version(*inner_id)?
-    {
+    let outer = graph.node(outer_id)?;
+    let inner = graph.node(*inner_id)?;
+    if inner.schema != outer.schema {
         return Ok(None);
     }
     let inner_inputs = graph.resolved_parents(*inner_id)?;
     let [replacement_id] = inner_inputs.as_slice() else {
         return Ok(None);
     };
-    let outer_metadata = graph.metadata(outer_id)?;
-    let inner_metadata = graph.metadata(*inner_id)?;
-    let replacement_metadata = graph.metadata(*replacement_id)?;
+    let outer_metadata = outer.metadata;
+    let inner_metadata = inner.metadata;
+    let replacement_metadata = graph.node(*replacement_id)?.metadata;
     if transpose_backend(outer_metadata.attrs()) != transpose_backend(inner_metadata.attrs())
         || !safe_transpose_attrs(outer_metadata.attrs())
         || !safe_transpose_attrs(inner_metadata.attrs())
@@ -473,55 +420,83 @@ fn normalized_axes(attrs: &AttrMap, ndim: usize) -> Option<Vec<usize>> {
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 struct CseKey {
-    op: String,
-    schema_version: SchemaVersion,
+    /// Within one arena an operation ID fixes both name and schema version.
+    op: OpId,
     parents: Vec<NodeId>,
-    flags: (bool, bool, Option<bool>, Option<bool>),
     metadata: NodeMetadata,
 }
 
 fn cse(graph: &mut WorkingGraph) -> Result<usize, GraphError> {
-    let effect_ancestors = graph.effect_ancestors()?;
+    let effect_ancestors = graph.ancestors(graph.effect_roots()?)?;
     let node_ids = graph.node_ids().collect::<Vec<_>>();
-    let mut expressions = HashMap::<CseKey, NodeId>::new();
-    let mut rewrites = Vec::new();
+    let mut expressions = HashMap::<CseKey, NodeId>::with_capacity(node_ids.len());
+    let mut rewrites = 0_usize;
     for node_id in node_ids {
-        let op = graph.op(node_id)?;
+        let node = graph.node(node_id)?;
+        let op = node.schema.name();
         if !is_known_pure(op) {
             expressions.clear();
             continue;
         }
         let index = node_index(node_id)?;
-        if graph.is_output(node_id)
-            || effect_ancestors.get(index).copied().unwrap_or(true)
-            || !is_cse_candidate(op)
-        {
+        if effect_ancestors.get(index).copied().unwrap_or(true) || !is_cse_candidate(op) {
             continue;
         }
-        let node = graph.node(node_id)?;
-        let flags = node.flags();
+        let parents = graph.resolved_parents(node_id)?;
+        let metadata = canonical_transpose_metadata(graph, op, &parents, node.metadata)?
+            .unwrap_or_else(|| node.metadata.clone());
         let key = CseKey {
-            op: op.to_owned(),
-            schema_version: graph.schema_version(node_id)?,
-            parents: graph.resolved_parents(node_id)?,
-            flags: (
-                flags.is_input(),
-                flags.is_active(),
-                flags.inline_parent_is_active(0),
-                flags.inline_parent_is_active(1),
-            ),
-            metadata: graph.metadata(node_id)?.clone(),
+            op: node.op,
+            parents,
+            metadata,
         };
-        if let Some(&canonical_id) = expressions.get(&key) {
-            rewrites.push((node_id, canonical_id));
-        } else {
-            expressions.insert(key, node_id);
+        // Value numbering in topological order: aliasing immediately lets
+        // later keys resolve through this duplicate to its canonical node.
+        // Outputs keep their own nodes but can absorb later duplicates.
+        match expressions.entry(key) {
+            Entry::Occupied(canonical) if !graph.is_output(node_id) => {
+                graph.alias_node(node_id, *canonical.get())?;
+                rewrites += 1;
+            }
+            Entry::Occupied(_) => {}
+            Entry::Vacant(slot) => {
+                slot.insert(node_id);
+            }
         }
     }
-    for &(node_id, canonical_id) in &rewrites {
-        graph.alias_node(node_id, canonical_id)?;
+    Ok(rewrites)
+}
+
+/// Spell a transpose's axes as one explicit permutation, so omitted, null and
+/// explicit spellings of the same permutation share a CSE key.
+fn canonical_transpose_metadata(
+    graph: &WorkingGraph,
+    op: &str,
+    parents: &[NodeId],
+    metadata: &NodeMetadata,
+) -> Result<Option<NodeMetadata>, GraphError> {
+    let (TRANSPOSE, [parent_id]) = (op, parents) else {
+        return Ok(None);
+    };
+    let attrs = metadata.attrs();
+    if !safe_transpose_attrs(attrs) {
+        return Ok(None);
     }
-    Ok(rewrites.len())
+    let ndim = graph.node(*parent_id)?.metadata.shape().len();
+    let Some(axes) = normalized_axes(attrs, ndim) else {
+        return Ok(None);
+    };
+    let mut canonical = attrs.clone();
+    canonical.insert(
+        "axes".to_owned(),
+        AttrValue::Tuple(
+            axes.into_iter()
+                .map(|axis| i64::try_from(axis).map(AttrValue::Integer))
+                .collect::<Result<_, _>>()
+                .map_err(|_| GraphError::new("transpose axis exceeded its range"))?,
+        ),
+    );
+    Ok(Some(metadata.with_attrs(canonical)))
 }
 
 fn is_cse_candidate(op: &str) -> bool {
@@ -542,6 +517,7 @@ fn is_known_pure(op: &str) -> bool {
                 | "advect.getitem"
                 | "advect.getoutput"
                 | "advect.index_update"
+                | "advect.scatter_add"
         )
 }
 
@@ -550,16 +526,11 @@ fn materialize(
     aliases: &[Option<NodeId>],
     old_to_new: &[Option<NodeId>],
 ) -> Result<(GraphStore, Vec<Option<NodeId>>), GraphError> {
-    let (
-        required_array_api_version,
-        source_arena,
-        source_metadata,
-        source_inputs,
-        source_outputs,
-        source_constants,
-    ) = store.into_parts();
+    let source = store.into_data();
+    let source_arena = source.arena;
     let mut arena = RawArena::default();
-    let mut metadata = source_metadata
+    let mut metadata = source
+        .metadata
         .into_iter()
         .map(Some)
         .collect::<Vec<Option<NodeMetadata>>>();
@@ -613,17 +584,14 @@ fn materialize(
                 .ok_or_else(|| GraphError::at_node(old_id, "optimizer metadata is unavailable"))?,
         );
     }
-    let inputs = remap_endpoints(&source_inputs, old_to_new, "input")?;
-    let outputs = remap_endpoints(&source_outputs, old_to_new, "output")?;
-    let constants = remap_constants(source_constants, old_to_new);
-    let store = GraphStore::from_parts(
-        required_array_api_version,
+    let store = GraphStore::new(GraphData {
+        required_array_api_version: source.required_array_api_version,
         arena,
-        retained_metadata,
-        inputs,
-        outputs,
-        constants,
-    )?;
+        metadata: retained_metadata,
+        inputs: remap_endpoints(&source.inputs, old_to_new, "input")?,
+        outputs: remap_endpoints(&source.outputs, old_to_new, "output")?,
+        constants: remap_constants(source.constants, old_to_new),
+    })?;
     Ok((store, old_to_new.to_vec()))
 }
 
@@ -677,20 +645,11 @@ fn node_index(node_id: NodeId) -> Result<usize, GraphError> {
 )]
 mod tests {
     use super::*;
-    use crate::{AttrMap, DTypeDescriptor, GraphBuilder, NodeFlags};
+    use crate::GraphBuilder;
+    use crate::test_support;
 
     fn metadata() -> NodeMetadata {
-        NodeMetadata::new(
-            AttrMap::new(),
-            vec![2],
-            DTypeDescriptor::from_name("float32").unwrap(),
-            None,
-            1,
-            None,
-            None,
-            None,
-        )
-        .unwrap()
+        test_support::metadata(vec![2], "float32", AttrMap::new())
     }
 
     #[test]
@@ -698,22 +657,16 @@ mod tests {
         let mut builder = GraphBuilder::new();
         let input = builder.append_input(metadata()).unwrap();
         let first = builder
-            .append_operation("array.sin", 1, &[input], NodeFlags::NONE, metadata())
+            .append_operation("array.sin", 1, &[input], metadata())
             .unwrap();
         let duplicate = builder
-            .append_operation("array.sin", 1, &[input], NodeFlags::NONE, metadata())
+            .append_operation("array.sin", 1, &[input], metadata())
             .unwrap();
-        let dead = builder
-            .append_operation("array.cos", 1, &[input], NodeFlags::NONE, metadata())
+        builder
+            .append_operation("array.cos", 1, &[input], metadata())
             .unwrap();
         let output = builder
-            .append_operation(
-                "array.add",
-                1,
-                &[first, duplicate],
-                NodeFlags::NONE,
-                metadata(),
-            )
+            .append_operation("array.add", 1, &[first, duplicate], metadata())
             .unwrap();
         builder.append_output(output).unwrap();
         let result = builder.finish().unwrap();
@@ -721,21 +674,497 @@ mod tests {
             result.old_to_new,
             [Some(0), Some(1), Some(1), None, Some(2)]
         );
+        assert_eq!(result.store.node_count(), 3);
+        let report = &result.report;
         assert_eq!(
-            result
-                .report
+            (
+                report.nodes_before,
+                report.nodes_after,
+                report.rewritten_nodes
+            ),
+            (5, 3, 2)
+        );
+        assert_eq!(
+            report
                 .passes
                 .iter()
-                .map(|pass| pass.name)
+                .map(|pass| (
+                    pass.name,
+                    pass.nodes_before,
+                    pass.nodes_after,
+                    pass.removed_nodes(),
+                    pass.rewritten_nodes
+                ))
                 .collect::<Vec<_>>(),
-            ["dce", "simplify", "cse"]
+            [
+                ("dce", 5, 4, 1, 1),
+                ("simplify", 4, 4, 0, 0),
+                ("cse", 4, 3, 1, 1)
+            ]
         );
+    }
+
+    #[test]
+    fn scatter_add_is_eliminated_and_merged_as_a_pure_operation() {
+        let mut builder = GraphBuilder::new();
+        let values = builder.append_input(metadata()).unwrap();
+        let indices = builder.append_input(metadata()).unwrap();
+        let mut scatter = |parents: &[NodeId]| {
+            builder
+                .append_operation("advect.scatter_add", 1, parents, metadata())
+                .unwrap()
+        };
+        let (first, duplicate) = (scatter(&[values, indices]), scatter(&[values, indices]));
+        scatter(&[duplicate, indices]);
+        let output = builder
+            .append_operation("array.add", 1, &[first, duplicate], metadata())
+            .unwrap();
+        builder.append_output(output).unwrap();
+
+        let result = builder.finish().unwrap();
+
+        assert_eq!(
+            result.old_to_new,
+            [Some(0), Some(1), Some(2), Some(2), None, Some(3)]
+        );
+    }
+
+    fn assert_optimization_is_idempotent(store: GraphStore) {
+        let node_count = store.node_count();
+        let report = optimize(store).unwrap().report;
+        assert_eq!(
+            (report.nodes_before, report.nodes_after),
+            (node_count, node_count)
+        );
+        assert_eq!(report.rewritten_nodes, 0);
+    }
+
+    #[test]
+    fn cse_merges_cascaded_duplicates_in_one_pass() {
+        let mut builder = GraphBuilder::new();
+        let input = builder.append_input(metadata()).unwrap();
+        let mut branches = Vec::new();
+        for _ in 0..2 {
+            let sin = builder
+                .append_operation("array.sin", 1, &[input], metadata())
+                .unwrap();
+            branches.push(
+                builder
+                    .append_operation("array.cos", 1, &[sin], metadata())
+                    .unwrap(),
+            );
+        }
+        let output = builder
+            .append_operation("array.add", 1, &branches, metadata())
+            .unwrap();
+        builder.append_output(output).unwrap();
+
+        let result = builder.finish().unwrap();
+
+        assert_eq!(result.store.node_count(), 4);
+        assert_eq!(
+            result.old_to_new,
+            [Some(0), Some(1), Some(2), Some(1), Some(2), Some(3)]
+        );
+        assert_optimization_is_idempotent(result.store);
+    }
+
+    #[test]
+    fn cse_merges_duplicates_into_earlier_outputs_but_keeps_outputs_distinct() {
+        let mut builder = GraphBuilder::new();
+        let input = builder.append_input(metadata()).unwrap();
+        let mut sin = || {
+            builder
+                .append_operation("array.sin", 1, &[input], metadata())
+                .unwrap()
+        };
+        let (first, second, internal) = (sin(), sin(), sin());
+        let output = builder
+            .append_operation("array.cos", 1, &[internal], metadata())
+            .unwrap();
+        for node in [first, second, output] {
+            builder.append_output(node).unwrap();
+        }
+
+        let result = builder.finish().unwrap();
+
+        assert_eq!(
+            result.old_to_new,
+            [Some(0), Some(1), Some(2), Some(1), Some(3)]
+        );
+        assert_eq!(result.store.outputs(), [1, 2, 3]);
+        assert_optimization_is_idempotent(result.store);
+    }
+
+    fn transpose_metadata(shape: Vec<usize>, axes: Option<[i64; 3]>) -> NodeMetadata {
+        let mut attrs = AttrMap::new();
+        if let Some(axes) = axes {
+            attrs.insert(
+                "axes".to_owned(),
+                AttrValue::Tuple(axes.into_iter().map(AttrValue::Integer).collect()),
+            );
+        }
+        test_support::metadata(shape, "float32", attrs)
+    }
+
+    #[test]
+    fn simplify_cancels_transposes_exposed_by_an_earlier_cancellation() {
+        const SWAP: [i64; 3] = [1, 0, 2];
+        let mut builder = GraphBuilder::new();
+        let input = builder
+            .append_input(transpose_metadata(vec![2, 3, 4], None))
+            .unwrap();
+        let mut transpose = |parent, shape, axes| {
+            builder
+                .append_operation(
+                    TRANSPOSE,
+                    1,
+                    &[parent],
+                    transpose_metadata(shape, Some(axes)),
+                )
+                .unwrap()
+        };
+        let swapped = transpose(input, vec![3, 2, 4], SWAP);
+        let rotated = transpose(swapped, vec![2, 4, 3], [1, 2, 0]);
+        // Cancels `rotated`, which exposes `swapped` as the parent of `restored`.
+        let unrotated = transpose(rotated, vec![3, 2, 4], [2, 0, 1]);
+        let restored = transpose(unrotated, vec![2, 3, 4], SWAP);
+        let output = builder
+            .append_operation(
+                "array.sin",
+                1,
+                &[restored],
+                transpose_metadata(vec![2, 3, 4], None),
+            )
+            .unwrap();
+        builder.append_output(output).unwrap();
+
+        let result = builder.finish().unwrap();
+
+        assert_eq!(result.store.node_count(), 2);
+        assert_eq!(result.store.outputs(), [1]);
+        assert_optimization_is_idempotent(result.store);
+    }
+
+    #[test]
+    fn simplify_and_cse_recover_a_transpose_cancellation_hidden_by_an_output() {
+        let mut builder = GraphBuilder::new();
+        let input = builder
+            .append_input(transpose_metadata(vec![2, 3], None))
+            .unwrap();
+        let mut transpose = |parent, shape: [usize; 2]| {
+            builder
+                .append_operation(
+                    TRANSPOSE,
+                    1,
+                    &[parent],
+                    transpose_metadata(shape.into(), None),
+                )
+                .unwrap()
+        };
+        let first = transpose(input, [3, 2]);
+        let cancelled = transpose(first, [2, 3]);
+        let duplicate = transpose(cancelled, [3, 2]);
+        let last = transpose(duplicate, [2, 3]);
+        builder.append_output(first).unwrap();
+        builder.append_output(last).unwrap();
+
+        let result = builder.finish().unwrap();
+
+        // `cancelled` resolves to the input, so `duplicate` repeats `first`,
+        // an output that CSE keeps and merges `duplicate` into.
+        assert_eq!(
+            result.old_to_new,
+            [Some(0), Some(1), Some(0), Some(1), Some(2)]
+        );
+        assert_optimization_is_idempotent(result.store);
+    }
+
+    #[test]
+    fn cse_merges_transposes_that_spell_one_permutation_differently() {
+        let square = |attrs| test_support::metadata(vec![3, 3], "float32", attrs);
+        let mut builder = GraphBuilder::new();
+        let input = builder.append_input(square(AttrMap::new())).unwrap();
+        let swapped = builder
+            .append_operation(
+                TRANSPOSE,
+                1,
+                &[input],
+                square(attrs([("axes", axes(&[1, 0]))])),
+            )
+            .unwrap();
+        // Four reversals of `swapped`: simplify cancels two pairs and leaves
+        // two reversals of the input, which repeat `swapped` with axes omitted.
+        let mut value = swapped;
+        for _ in 0..4 {
+            value = builder
+                .append_operation(TRANSPOSE, 1, &[value], square(AttrMap::new()))
+                .unwrap();
+        }
+        let output = builder
+            .append_operation("array.sin", 1, &[value], square(AttrMap::new()))
+            .unwrap();
+        builder.append_output(swapped).unwrap();
+        builder.append_output(output).unwrap();
+
+        let result = builder.finish().unwrap();
+
         assert_eq!(result.store.node_count(), 3);
-        assert!(
-            result
-                .old_to_new
-                .get(usize::try_from(dead).unwrap())
-                .is_some()
-        );
+        assert_eq!(result.store.outputs(), [1, 2]);
+        assert_eq!(result.store.node(2).unwrap().parents.to_vec(), [1]);
+        assert_optimization_is_idempotent(result.store);
+    }
+
+    #[test]
+    fn a_transpose_of_another_operation_is_kept() {
+        // Omitted axes read as a reversal; only the schema check keeps this
+        // reversal from cancelling against `array.sin` as if it were one.
+        let cube = || test_support::metadata(vec![2, 2, 2], "float32", AttrMap::new());
+        let mut builder = GraphBuilder::new();
+        let input = builder.append_input(cube()).unwrap();
+        let sin = builder
+            .append_operation("array.sin", 1, &[input], cube())
+            .unwrap();
+        let reversed = builder
+            .append_operation(TRANSPOSE, 1, &[sin], cube())
+            .unwrap();
+        let output = builder
+            .append_operation("array.cos", 1, &[reversed], cube())
+            .unwrap();
+        builder.append_output(output).unwrap();
+
+        let result = builder.finish().unwrap();
+
+        assert_eq!(result.old_to_new, [Some(0), Some(1), Some(2), Some(3)]);
+    }
+
+    /// How the graph uses a transpose pair `input -> inner -> outer`.
+    #[derive(Clone, Copy, Debug)]
+    enum PairUse {
+        /// `outer -> array.sin -> output`.
+        Pure,
+        /// `outer` is itself a graph output.
+        Output,
+        /// `outer -> custom.effect -> output`.
+        Effect,
+        /// Like `Pure`, and `inner` is a graph output too.
+        SharedInner,
+    }
+
+    /// Optimize `input -> inner -> outer` over a 2x2x2 input, so every axis
+    /// order has the same shape, and return where `inner` and `outer` went.
+    /// The input is always `%0`.
+    fn optimize_transpose_pair(
+        inner: AttrMap,
+        outer: AttrMap,
+        outer_dtype: &str,
+        pair_use: PairUse,
+    ) -> (Option<NodeId>, Option<NodeId>) {
+        let cube = |dtype, attrs| test_support::metadata(vec![2, 2, 2], dtype, attrs);
+        let mut builder = GraphBuilder::new();
+        let input = builder
+            .append_input(cube("float32", AttrMap::new()))
+            .unwrap();
+        let inner_id = builder
+            .append_operation(TRANSPOSE, 1, &[input], cube("float32", inner))
+            .unwrap();
+        let outer_id = builder
+            .append_operation(TRANSPOSE, 1, &[inner_id], cube(outer_dtype, outer))
+            .unwrap();
+        let consumer = match pair_use {
+            PairUse::Output => None,
+            PairUse::Effect => Some("custom.effect"),
+            PairUse::Pure | PairUse::SharedInner => Some("array.sin"),
+        };
+        let output = consumer.map_or(outer_id, |op| {
+            builder
+                .append_operation(op, 1, &[outer_id], cube(outer_dtype, AttrMap::new()))
+                .unwrap()
+        });
+        builder.append_output(output).unwrap();
+        if matches!(pair_use, PairUse::SharedInner) {
+            builder.append_output(inner_id).unwrap();
+        }
+        let old_to_new = builder.finish().unwrap().old_to_new;
+        let remapped = |node_id: NodeId| {
+            old_to_new
+                .get(usize::try_from(node_id).unwrap())
+                .copied()
+                .flatten()
+        };
+        (remapped(inner_id), remapped(outer_id))
+    }
+
+    fn attrs<const N: usize>(entries: [(&str, AttrValue); N]) -> AttrMap {
+        entries
+            .into_iter()
+            .map(|(key, value)| (key.to_owned(), value))
+            .collect()
+    }
+
+    fn axes(axes: &[i64]) -> AttrValue {
+        AttrValue::Tuple(axes.iter().copied().map(AttrValue::Integer).collect())
+    }
+
+    fn backend(name: &str) -> AttrValue {
+        AttrValue::String(name.to_owned())
+    }
+
+    const ROTATE: [i64; 3] = [1, 2, 0];
+    const UNROTATE: [i64; 3] = [2, 0, 1];
+
+    fn rotate() -> AttrMap {
+        attrs([("axes", axes(&ROTATE))])
+    }
+
+    fn unrotate() -> AttrMap {
+        attrs([("axes", axes(&UNROTATE))])
+    }
+
+    #[test]
+    fn transpose_pairs_that_compose_to_the_identity_cancel() {
+        let negative_list = AttrValue::List(vec![
+            AttrValue::Integer(-2),
+            AttrValue::Integer(-1),
+            AttrValue::Integer(-3),
+        ]);
+        let with_backend = |axes| attrs([("axes", axes), ("_advect_backend", backend("numpy"))]);
+        let cases = [
+            ("inverse permutations", rotate(), unrotate(), PairUse::Pure),
+            (
+                "omitted axes",
+                AttrMap::new(),
+                AttrMap::new(),
+                PairUse::Pure,
+            ),
+            (
+                "null and omitted axes",
+                attrs([("axes", AttrValue::Null)]),
+                AttrMap::new(),
+                PairUse::Pure,
+            ),
+            (
+                "negative axes in a list",
+                attrs([("axes", negative_list)]),
+                unrotate(),
+                PairUse::Pure,
+            ),
+            (
+                "same backend",
+                with_backend(axes(&ROTATE)),
+                with_backend(axes(&UNROTATE)),
+                PairUse::Pure,
+            ),
+            (
+                "inner transpose has another use",
+                rotate(),
+                unrotate(),
+                PairUse::SharedInner,
+            ),
+        ];
+        for (label, inner, outer, pair_use) in cases {
+            let (inner_id, outer_id) = optimize_transpose_pair(inner, outer, "float32", pair_use);
+            assert_eq!(outer_id, Some(0), "{label}");
+            let shared = matches!(pair_use, PairUse::SharedInner);
+            assert_eq!(inner_id.is_some(), shared, "{label}");
+        }
+    }
+
+    #[test]
+    fn transpose_pairs_are_kept_unless_provably_the_identity() {
+        let unrotate_with = |key, value| attrs([("axes", axes(&UNROTATE)), (key, value)]);
+        let string_axis = AttrValue::Tuple(vec![
+            AttrValue::Integer(2),
+            AttrValue::Integer(0),
+            AttrValue::String("1".to_owned()),
+        ]);
+        let cases = [
+            (
+                "non-inverse permutations",
+                rotate(),
+                rotate(),
+                PairUse::Pure,
+            ),
+            (
+                "different backends",
+                attrs([
+                    ("axes", axes(&ROTATE)),
+                    ("_advect_backend", backend("numpy")),
+                ]),
+                unrotate_with("_advect_backend", backend("cupy")),
+                PairUse::Pure,
+            ),
+            (
+                "backend on one side",
+                rotate(),
+                unrotate_with("_advect_backend", backend("numpy")),
+                PairUse::Pure,
+            ),
+            (
+                "non-string backends",
+                attrs([
+                    ("axes", axes(&ROTATE)),
+                    ("_advect_backend", AttrValue::Integer(1)),
+                ]),
+                unrotate_with("_advect_backend", AttrValue::Integer(1)),
+                PairUse::Pure,
+            ),
+            (
+                "extra inner attribute",
+                attrs([("axes", axes(&ROTATE)), ("copy", AttrValue::Bool(true))]),
+                unrotate(),
+                PairUse::Pure,
+            ),
+            (
+                "extra outer attribute",
+                rotate(),
+                unrotate_with("copy", AttrValue::Bool(true)),
+                PairUse::Pure,
+            ),
+            (
+                "non-integer axis",
+                rotate(),
+                attrs([("axes", string_axis)]),
+                PairUse::Pure,
+            ),
+            (
+                "duplicate axes",
+                attrs([("axes", axes(&[1, 1, 0]))]),
+                unrotate(),
+                PairUse::Pure,
+            ),
+            (
+                "out-of-range axis",
+                attrs([("axes", axes(&[1, 2, -4]))]),
+                unrotate(),
+                PairUse::Pure,
+            ),
+            (
+                "axes of another rank",
+                attrs([("axes", axes(&[1, 0]))]),
+                attrs([("axes", axes(&[1, 0]))]),
+                PairUse::Pure,
+            ),
+            (
+                "outer transpose is an output",
+                rotate(),
+                unrotate(),
+                PairUse::Output,
+            ),
+            (
+                "pair feeds an effect",
+                rotate(),
+                unrotate(),
+                PairUse::Effect,
+            ),
+        ];
+        for (label, inner, outer, pair_use) in cases {
+            let (inner_id, outer_id) = optimize_transpose_pair(inner, outer, "float32", pair_use);
+            assert_eq!((inner_id, outer_id), (Some(1), Some(2)), "{label}");
+        }
+
+        // The input must also carry the outer transpose's exact metadata.
+        let (_, outer_id) = optimize_transpose_pair(rotate(), unrotate(), "float64", PairUse::Pure);
+        assert_eq!(outer_id, Some(2));
     }
 }

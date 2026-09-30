@@ -14,13 +14,15 @@ from numpy.lib.stride_tricks import sliding_window_view
 from advect.core._errors import TracingError
 from advect.core._protocols import _snapshot_traced
 from advect.numpy._array_function.composite import (
+    _concrete,
     _finish,
     _first_traced,
     _lift_composite_constant,
-    _ndim,
     _normalize_axes,
 )
+from advect.numpy._array_function.emission import _emit, _get_value
 from advect.numpy._array_function.normalization import _bind_optional_positionals
+from advect.numpy._composite_lowering import operand_ndim
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -109,31 +111,12 @@ def _chebyshev_evaluate(value: Any, coefficients: tuple[float, ...]) -> Any:
     return 0.5 * (current - before_previous)
 
 
-def _lift_typed_constant(value: object, anchor: TracedArrayLike) -> Any:
-    array = np.asarray(value)
-    zero = np.astype(np.sum(np.zeros_like(anchor)), array.dtype)
-    return zero + array
-
-
-def _concrete_value(value: Any, traced_type: type[TracedArrayLike]) -> Any:
-    if isinstance(value, traced_type):
-        return _snapshot_traced(value)[1]
-    if isinstance(value, tuple):
-        return tuple(_concrete_value(item, traced_type) for item in value)
-    if isinstance(value, list):
-        return [_concrete_value(item, traced_type) for item in value]
-    return value
-
-
 def _i0_handler(
     _graph: DynamicTape,
     traced_type: type[TracedArrayLike],
     args: tuple[Any, ...],
-    kwargs: dict[str, Any],
+    _kwargs: dict[str, Any],
 ) -> CompositeResult:
-    if len(args) != 1 or kwargs:
-        msg = "numpy.i0 expects one real array during tracing"
-        raise TracingError(msg)
     value = args[0]
     dtype = np.dtype(value.dtype)
     if np.issubdtype(dtype, np.complexfloating):
@@ -173,10 +156,6 @@ def _arange_handler(
         optional=("stop", "step", "dtype"),
         keyword_only=frozenset({"device", "like"}),
     )
-    unsupported = set(values) - {"stop", "step", "dtype", "device", "like"}
-    if unsupported:
-        msg = f"numpy.arange kwargs not supported during tracing: {sorted(unsupported)}"
-        raise TracingError(msg)
     if len(args) == 1 and "stop" not in values:
         start: Any = 0
         stop = args[0]
@@ -191,24 +170,21 @@ def _arange_handler(
         (start, stop, step, values.get("like")),
         traced_type=traced_type,
     )
-    if anchor is None:
-        msg = "numpy.arange requires a traced bound, step, or like= operand"
-        raise TracingError(msg)
     call_kwargs: dict[str, Any] = {}
     if values.get("dtype") is not None:
         call_kwargs["dtype"] = values["dtype"]
     if values.get("device") is not None:
         call_kwargs["device"] = values["device"]
-    concrete_start = _concrete_value(start, traced_type)
-    concrete_stop = _concrete_value(stop, traced_type)
-    concrete_step = _concrete_value(step, traced_type)
+    concrete_start = _concrete(start)
+    concrete_stop = _concrete(stop)
+    concrete_step = _concrete(step)
     expected = np.arange(
         concrete_start,
         concrete_stop,
         concrete_step,
         **call_kwargs,
     )
-    result = _lift_typed_constant(expected, anchor)
+    result = _lift_composite_constant(expected, anchor)
     positions = np.arange(expected.size)
     if isinstance(start, traced_type):
         result = result + (cast("Any", start) - concrete_start)
@@ -240,19 +216,13 @@ def _block_handler(
     _graph: DynamicTape,
     traced_type: type[TracedArrayLike],
     args: tuple[Any, ...],
-    kwargs: dict[str, Any],
+    _kwargs: dict[str, Any],
 ) -> CompositeResult:
-    if len(args) != 1 or kwargs:
-        msg = "numpy.block expects one nested list during tracing"
-        raise TracingError(msg)
     arrays = args[0]
     depth = _block_depth(arrays)
     leaves = _block_leaves(arrays)
     anchor = _first_traced(leaves, traced_type=traced_type)
-    if anchor is None:
-        msg = "numpy.block requires a traced operand"
-        raise TracingError(msg)
-    result_ndim = max(depth, *(_ndim(item) for item in leaves))
+    result_ndim = max(depth, *(operand_ndim(item) for item in leaves))
 
     def assemble(value: object, level: int) -> Any:
         if not isinstance(value, list):
@@ -273,9 +243,6 @@ def _apply_along_axis_handler(
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
 ) -> CompositeResult:
-    if len(args) < _TERNARY_ARITY:
-        msg = "numpy.apply_along_axis expects (func1d, axis, arr, *args) during tracing"
-        raise TracingError(msg)
     function, axis_raw, array, *function_args = args
     if not callable(function):
         msg = "numpy.apply_along_axis func1d must be callable"
@@ -316,11 +283,8 @@ def _apply_over_axes_handler(
     _graph: DynamicTape,
     traced_type: type[TracedArrayLike],
     args: tuple[Any, ...],
-    kwargs: dict[str, Any],
+    _kwargs: dict[str, Any],
 ) -> CompositeResult:
-    if len(args) != _TERNARY_ARITY or kwargs:
-        msg = "numpy.apply_over_axes expects (func, a, axes) during tracing"
-        raise TracingError(msg)
     function, array, axes_raw = args
     if not callable(function):
         msg = "numpy.apply_over_axes func must be callable"
@@ -362,6 +326,18 @@ def _logspace_handler(
     base = values.get("base", 10.0)
     dtype = values.get("dtype")
     axis = int(values.get("axis", 0))
+    if not isinstance(base, (float, int)) and np.ndim(_concrete(base)):
+        # Like NumPy, an array base shares the endpoints' rank and is placed on axis.
+        operands = tuple(
+            value if isinstance(value, traced_type) else np.asarray(value)
+            for value in (start, stop, base)
+        )
+        rank = max(int(value.ndim) for value in operands)
+        start, stop, base = (
+            np.reshape(value, (1,) * (rank - int(value.ndim)) + tuple(value.shape))
+            for value in operands
+        )
+        base = np.expand_dims(base, axis=axis)
     exponents = np.linspace(start, stop, num=num, endpoint=endpoint, axis=axis)
     result = np.power(base, exponents)
     if dtype is not None:
@@ -388,9 +364,9 @@ def _geomspace_handler(
     dtype = values.get("dtype")
     axis = int(values.get("axis", 0))
     anchor = _first_traced((start, stop), traced_type=traced_type)
-    if anchor is None:
-        msg = "numpy.geomspace requires a traced endpoint"
-        raise TracingError(msg)
+    if any(np.any(_concrete(value) == 0) for value in (start, stop)):
+        msg = "Geometric sequence cannot include zero"
+        raise ValueError(msg)
     computation_dtype = np.result_type(start, stop, float(num))
     start_value = np.astype(
         start if isinstance(start, traced_type) else _lift_composite_constant(start, anchor),
@@ -433,9 +409,6 @@ def _unstack_handler(
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
 ) -> CompositeResult:
-    if len(args) != 1 or set(kwargs) - {"axis"}:
-        msg = "numpy.unstack expects (x, *, axis=0) during tracing"
-        raise TracingError(msg)
     array = args[0]
     axis = _normalize_axes(int(kwargs.get("axis", 0)), int(array.ndim))[0]
     result = tuple(np.take(array, index, axis=axis) for index in range(int(array.shape[axis])))
@@ -448,19 +421,6 @@ def _sliding_window_view_handler(
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
 ) -> CompositeResult:
-    if len(args) not in {_BINARY_ARITY, _TERNARY_ARITY}:
-        msg = "numpy.lib.stride_tricks.sliding_window_view expects (x, window_shape, axis=None)"
-        raise TracingError(msg)
-    unsupported = set(kwargs) - {"axis", "subok", "writeable"}
-    if unsupported:
-        msg = (
-            "numpy.lib.stride_tricks.sliding_window_view kwargs not supported during "
-            f"tracing: {sorted(unsupported)}"
-        )
-        raise TracingError(msg)
-    if len(args) == _TERNARY_ARITY and "axis" in kwargs:
-        msg = "numpy.lib.stride_tricks.sliding_window_view received axis twice"
-        raise TracingError(msg)
     if bool(kwargs.get("subok", False)) or bool(kwargs.get("writeable", False)):
         msg = "sliding_window_view tracing returns a non-writeable base-independent array"
         raise TracingError(msg)
@@ -502,11 +462,8 @@ def _sort_complex_handler(
     _graph: DynamicTape,
     traced_type: type[TracedArrayLike],
     args: tuple[Any, ...],
-    kwargs: dict[str, Any],
+    _kwargs: dict[str, Any],
 ) -> CompositeResult:
-    if len(args) != 1 or kwargs:
-        msg = "numpy.sort_complex expects one array during tracing"
-        raise TracingError(msg)
     dtype = (
         args[0].dtype
         if np.issubdtype(args[0].dtype, np.complexfloating)
@@ -579,9 +536,6 @@ def _bincount_handler(
     )
     indices = args[0]
     anchor = _first_traced((indices, values.get("weights")), traced_type=traced_type)
-    if anchor is None:
-        msg = "numpy.bincount requires a traced indices or weights operand"
-        raise TracingError(msg)
     concrete_indices = (
         np.asarray(_snapshot_traced(indices)[1])
         if isinstance(indices, traced_type)
@@ -610,7 +564,7 @@ def _bincount_handler(
     weights = values.get("weights")
     if weights is None:
         counts = np.bincount(concrete_indices, minlength=minlength)
-        result = _lift_typed_constant(counts, anchor)
+        result = _lift_composite_constant(counts, anchor)
         return _finish(result, traced_type=traced_type)
     weight_array = np.atleast_1d(
         weights if isinstance(weights, traced_type) else _lift_composite_constant(weights, anchor)
@@ -618,23 +572,11 @@ def _bincount_handler(
     if weight_array.ndim != 1 or weight_array.shape[0] != concrete_indices.shape[0]:
         msg = "numpy.bincount weights must be one-dimensional and match indices"
         raise TracingError(msg)
-    weight_node_id, concrete_weights = _snapshot_traced(weight_array)
-    result = np.bincount(
-        concrete_indices,
-        weights=np.asarray(concrete_weights),
-        minlength=minlength,
-    )
-    node_id = graph.record_operation_with_literals(
-        "array_ext.bincount",
-        (weight_node_id,),
-        (1,),
-        (concrete_indices,),
-        result,
-        {"minlength": minlength, "_advect_backend": "numpy"},
-        result.shape,
-        result.dtype,
-    )
-    return result, node_id
+    # One trace level down, so an enclosing trace records the weighted count too.
+    weight_value = _get_value(weight_array, traced_type)
+    result = np.bincount(concrete_indices, weights=weight_value, minlength=minlength)
+    operands = (concrete_indices, weight_array)
+    return _emit(graph, traced_type, "numpy.bincount", operands, result, {"minlength": minlength})
 
 
 def _insert_handler(
@@ -655,9 +597,6 @@ def _insert_handler(
         msg = "numpy.insert obj= must be static because it controls output shape"
         raise TracingError(msg)
     anchor = _first_traced((array_raw, inserted_raw), traced_type=traced_type)
-    if anchor is None:
-        msg = "numpy.insert requires a traced array or values operand"
-        raise TracingError(msg)
     array: Any = (
         array_raw
         if isinstance(array_raw, traced_type)
@@ -704,7 +643,7 @@ def _insert_handler(
             output_shape,
         )
     else:
-        source_values = np.zeros(output_shape, dtype=array.dtype) + np.sum(array) * 0
+        source_values = _lift_composite_constant(np.zeros(output_shape, dtype=array.dtype), array)
     if not np.any(inserted_mask):
         return _finish(source_values, traced_type=traced_type)
     inserted_values = np.reshape(
@@ -729,33 +668,28 @@ def _histogram_edges(
 ) -> Any:
     if isinstance(bins, traced_type):
         return bins
-    concrete_bins = _concrete_value(bins, traced_type)
+    concrete_bins = _concrete(bins)
     if np.ndim(concrete_bins) == 1:
-        return _lift_typed_constant(concrete_edges, anchor)
+        return _lift_composite_constant(concrete_edges, anchor)
 
-    bin_count = int(concrete_bins)
+    minimum: Any
+    maximum: Any
     if histogram_range is None:
-        if concrete_samples.size == 0:
-            minimum = _lift_typed_constant(0.0, anchor)
-            maximum = _lift_typed_constant(1.0, anchor)
-        else:
-            traced_samples = (
-                samples
-                if isinstance(samples, traced_type)
-                else _lift_typed_constant(samples, anchor)
-            )
-            minimum = np.min(traced_samples)
-            maximum = np.max(traced_samples)
-            if concrete_samples.min() == concrete_samples.max():
-                minimum = minimum - 0.5
-                maximum = maximum + 0.5
+        if concrete_samples.size == 0 or not isinstance(samples, traced_type):
+            return _lift_composite_constant(concrete_edges, anchor)
+        minimum, maximum = np.min(samples), np.max(samples)
     else:
-        minimum, maximum = histogram_range
-        if not isinstance(minimum, traced_type):
-            minimum = _lift_typed_constant(minimum, anchor)
-        if not isinstance(maximum, traced_type):
-            maximum = _lift_typed_constant(maximum, anchor)
-    return np.linspace(minimum, maximum, bin_count + 1)
+        if not any(isinstance(bound, traced_type) for bound in histogram_range):
+            return _lift_composite_constant(concrete_edges, anchor)
+        minimum, maximum = (
+            bound if isinstance(bound, traced_type) else _lift_composite_constant(bound, anchor)
+            for bound in histogram_range
+        )
+    if _concrete(minimum) == _concrete(maximum):
+        # NumPy widens an empty range by 0.5 on each side.
+        minimum, maximum = minimum - 0.5, maximum + 0.5
+    edges = np.linspace(minimum, maximum, int(concrete_bins) + 1)
+    return edges if edges.dtype == concrete_edges.dtype else np.astype(edges, concrete_edges.dtype)
 
 
 def _histogram_indices(
@@ -766,6 +700,46 @@ def _histogram_indices(
     bin_indices[concrete_samples == concrete_edges[-1]] = concrete_edges.size - 2
     valid = (bin_indices >= 0) & (bin_indices < concrete_edges.size - 1)
     return bin_indices, valid
+
+
+def _histogram_counts(
+    concrete_columns: tuple[np.ndarray[Any, Any], ...],
+    concrete_edges: tuple[Any, ...],
+    expected: np.ndarray[Any, Any],
+    weights: object,
+    *,
+    anchor: TracedArrayLike,
+    traced_type: type[TracedArrayLike],
+) -> Any:
+    """Scatter the weights into NumPy's bins; unweighted counts are constants."""
+    if weights is None:
+        return _lift_composite_constant(expected, anchor)
+    valid: Any = True
+    linear_indices: Any = 0
+    for concrete_column, concrete_edge in zip(concrete_columns, concrete_edges, strict=True):
+        edge = np.asarray(concrete_edge)
+        indices, column_valid = _histogram_indices(concrete_column, edge)
+        valid = valid & column_valid
+        linear_indices = linear_indices * (edge.size - 1) + indices
+    weight_array = np.ravel(
+        weights if isinstance(weights, traced_type) else _lift_composite_constant(weights, anchor)
+    )
+    counts = np.bincount(
+        np.where(valid, linear_indices, 0),
+        weights=weight_array * valid,
+        minlength=int(expected.size),
+    )
+    return np.reshape(np.astype(counts, expected.dtype), expected.shape)
+
+
+def _histogram_density(histogram: Any, edges: tuple[Any, ...]) -> Any:
+    """Divide by each axis's float64 bin widths, then by the total, as NumPy does."""
+    total = np.sum(histogram)
+    for axis, edge in enumerate(edges):
+        width_shape = [1] * len(edges)
+        width_shape[axis] = -1
+        histogram = histogram / np.reshape(np.astype(np.diff(edge), np.float64), width_shape)
+    return histogram / total
 
 
 def _histogram_handler(
@@ -789,16 +763,13 @@ def _histogram_handler(
         (samples, weights, bins, histogram_range),
         traced_type=traced_type,
     )
-    if anchor is None:
-        msg = "numpy.histogram requires a traced samples, bins, range, or weights operand"
-        raise TracingError(msg)
-    concrete_array = np.asarray(_concrete_value(samples, traced_type))
+    concrete_array = np.asarray(_concrete(samples))
     if isinstance(bins, str):
         msg = "numpy.histogram string bin estimators are data-dependent and not traceable"
         raise TracingError(msg)
-    concrete_bins = _concrete_value(bins, traced_type)
-    concrete_range = _concrete_value(histogram_range, traced_type)
-    concrete_weights = None if weights is None else _concrete_value(weights, traced_type)
+    concrete_bins = _concrete(bins)
+    concrete_range = _concrete(histogram_range)
+    concrete_weights = None if weights is None else _concrete(weights)
     expected_histogram, concrete_edges = np.histogram(
         concrete_array,
         bins=concrete_bins,
@@ -814,27 +785,16 @@ def _histogram_handler(
         anchor=anchor,
         traced_type=traced_type,
     )
-    if weights is None:
-        histogram: Any = _lift_typed_constant(expected_histogram, anchor)
-    else:
-        weight_array = np.ravel(
-            weights if isinstance(weights, traced_type) else _lift_typed_constant(weights, anchor)
-        )
-        if weight_array.shape != samples.shape:
-            msg = "numpy.histogram weights must match the sample shape"
-            raise TracingError(msg)
-        bin_indices, valid = _histogram_indices(concrete_array, concrete_edges)
-        safe_indices = np.where(valid, bin_indices, 0)
-        histogram = np.astype(
-            np.bincount(
-                safe_indices,
-                weights=weight_array * valid,
-                minlength=int(expected_histogram.size),
-            ),
-            expected_histogram.dtype,
-        )
+    histogram = _histogram_counts(
+        (concrete_array,),
+        (concrete_edges,),
+        expected_histogram,
+        weights,
+        anchor=anchor,
+        traced_type=traced_type,
+    )
     if bool(values.get("density", False)):
-        histogram = histogram / np.sum(histogram) / np.diff(edges)
+        histogram = _histogram_density(histogram, (edges,))
     return _finish((histogram, edges), traced_type=traced_type)
 
 
@@ -859,18 +819,15 @@ def _histogram_bin_edges_handler(
         (samples, bins, histogram_range, weights),
         traced_type=traced_type,
     )
-    if anchor is None:
-        msg = "numpy.histogram_bin_edges requires a traced operand"
-        raise TracingError(msg)
     if isinstance(bins, str):
         msg = "numpy.histogram_bin_edges string estimators are data-dependent and not traceable"
         raise TracingError(msg)
-    concrete_samples = np.asarray(_concrete_value(samples, traced_type))
+    concrete_samples = np.asarray(_concrete(samples))
     concrete_edges = np.histogram_bin_edges(
         concrete_samples,
-        bins=_concrete_value(bins, traced_type),
-        range=_concrete_value(histogram_range, traced_type),
-        weights=None if weights is None else _concrete_value(weights, traced_type),
+        bins=_concrete(bins),
+        range=_concrete(histogram_range),
+        weights=None if weights is None else _concrete(weights),
     )
     edges = _histogram_edges(
         samples,
@@ -913,14 +870,11 @@ def _histogram2d_handler(
         (x, y, bins, histogram_range, weights),
         traced_type=traced_type,
     )
-    if anchor is None:
-        msg = "numpy.histogram2d requires a traced operand"
-        raise TracingError(msg)
-    concrete_x = np.asarray(_concrete_value(x, traced_type))
-    concrete_y = np.asarray(_concrete_value(y, traced_type))
-    concrete_bins = _concrete_value(bins, traced_type)
-    concrete_range = _concrete_value(histogram_range, traced_type)
-    concrete_weights = None if weights is None else _concrete_value(weights, traced_type)
+    concrete_x = np.asarray(_concrete(x))
+    concrete_y = np.asarray(_concrete(y))
+    concrete_bins = _concrete(bins)
+    concrete_range = _concrete(histogram_range)
+    concrete_weights = None if weights is None else _concrete(weights)
     expected, concrete_x_edges, concrete_y_edges = np.histogram2d(
         concrete_x,
         concrete_y,
@@ -948,43 +902,23 @@ def _histogram2d_handler(
         anchor=anchor,
         traced_type=traced_type,
     )
-    if weights is None:
-        histogram: Any = _lift_typed_constant(expected, anchor)
-    else:
-        weight_array = np.ravel(
-            weights if isinstance(weights, traced_type) else _lift_typed_constant(weights, anchor)
-        )
-        if weight_array.shape != x.shape:
-            msg = "numpy.histogram2d weights must match x and y"
-            raise TracingError(msg)
-        x_indices, x_valid = _histogram_indices(concrete_x, concrete_x_edges)
-        y_indices, y_valid = _histogram_indices(concrete_y, concrete_y_edges)
-        y_bins = int(expected.shape[1])
-        valid = x_valid & y_valid
-        linear_indices = x_indices * y_bins + y_indices
-        safe_indices = np.where(valid, linear_indices, 0)
-        histogram = np.reshape(
-            np.astype(
-                np.bincount(
-                    safe_indices,
-                    weights=weight_array * valid,
-                    minlength=int(expected.size),
-                ),
-                expected.dtype,
-            ),
-            expected.shape,
-        )
+    histogram = _histogram_counts(
+        (concrete_x, concrete_y),
+        (concrete_x_edges, concrete_y_edges),
+        expected,
+        weights,
+        anchor=anchor,
+        traced_type=traced_type,
+    )
     if bool(values.get("density", False)):
-        histogram = (
-            histogram / np.sum(histogram) / np.diff(x_edges)[:, None] / np.diff(y_edges)[None, :]
-        )
+        histogram = _histogram_density(histogram, (x_edges, y_edges))
     return _finish(
         (histogram, x_edges, y_edges),
         traced_type=traced_type,
     )
 
 
-def _histogramdd_handler(  # noqa: PLR0912, PLR0915
+def _histogramdd_handler(
     _graph: DynamicTape,
     traced_type: type[TracedArrayLike],
     args: tuple[Any, ...],
@@ -1019,22 +953,17 @@ def _histogramdd_handler(  # noqa: PLR0912, PLR0915
         (raw_columns, bins, histogram_range, weights),
         traced_type=traced_type,
     )
-    if anchor is None:
-        msg = "numpy.histogramdd requires a traced operand"
-        raise TracingError(msg)
 
-    concrete_columns = tuple(
-        np.asarray(_concrete_value(column, traced_type)) for column in raw_columns
-    )
+    concrete_columns = tuple(np.asarray(_concrete(column)) for column in raw_columns)
     sample_count = int(concrete_columns[0].size)
     if any(int(column.size) != sample_count for column in concrete_columns):
         msg = "numpy.histogramdd sample columns must have equal lengths"
         raise TracingError(msg)
     dimensions = len(concrete_columns)
     concrete_sample = np.stack(concrete_columns, axis=1)
-    concrete_bins = _concrete_value(bins, traced_type)
-    concrete_range = _concrete_value(histogram_range, traced_type)
-    concrete_weights = None if weights is None else _concrete_value(weights, traced_type)
+    concrete_bins = _concrete(bins)
+    concrete_range = _concrete(histogram_range)
+    concrete_weights = None if weights is None else _concrete(weights)
     expected, concrete_edges = np.histogramdd(
         concrete_sample,
         bins=concrete_bins,
@@ -1047,10 +976,8 @@ def _histogramdd_handler(  # noqa: PLR0912, PLR0915
     elif dimensions == 1 and isinstance(bins, traced_type):
         bin_specs = (bins,)
     else:
+        # NumPy's histogramdd above already rejected a bins/sample dimension mismatch.
         bin_specs = tuple(bins)
-    if len(bin_specs) != dimensions:
-        msg = "numpy.histogramdd bins must provide one specification per dimension"
-        raise TracingError(msg)
     range_specs = (None,) * dimensions if histogram_range is None else tuple(histogram_range)
     if len(range_specs) != dimensions:
         msg = "numpy.histogramdd range must provide one pair per dimension"
@@ -1079,52 +1006,16 @@ def _histogramdd_handler(  # noqa: PLR0912, PLR0915
             strict=True,
         )
     ]
-    indexed_columns = [
-        _histogram_indices(concrete_column, np.asarray(concrete_edge))
-        for concrete_column, concrete_edge in zip(
-            concrete_columns,
-            concrete_edges,
-            strict=True,
-        )
-    ]
-    bin_shape = tuple(int(np.asarray(edge).size - 1) for edge in concrete_edges)
-
-    if weights is None:
-        histogram: Any = _lift_typed_constant(expected, anchor)
-    else:
-        weight_array = np.ravel(
-            weights if isinstance(weights, traced_type) else _lift_typed_constant(weights, anchor)
-        )
-        if tuple(weight_array.shape) != (sample_count,):
-            msg = "numpy.histogramdd weights must match the number of samples"
-            raise TracingError(msg)
-        valid = np.ones(sample_count, dtype=bool)
-        linear_indices = np.zeros(sample_count, dtype=np.intp)
-        for (indices, dimension_valid), bin_count in zip(
-            indexed_columns,
-            bin_shape,
-            strict=True,
-        ):
-            valid &= dimension_valid
-            linear_indices = linear_indices * bin_count + indices
-        safe_indices = np.where(valid, linear_indices, 0)
-        histogram = np.reshape(
-            np.astype(
-                np.bincount(
-                    safe_indices,
-                    weights=weight_array * valid,
-                    minlength=int(expected.size),
-                ),
-                expected.dtype,
-            ),
-            expected.shape,
-        )
+    histogram = _histogram_counts(
+        concrete_columns,
+        tuple(concrete_edges),
+        expected,
+        weights,
+        anchor=anchor,
+        traced_type=traced_type,
+    )
     if bool(values.get("density", False)):
-        histogram = histogram / np.sum(histogram)
-        for dimension, edge in enumerate(edges):
-            width_shape = [1] * dimensions
-            width_shape[dimension] = bin_shape[dimension]
-            histogram = histogram / np.reshape(np.diff(edge), tuple(width_shape))
+        histogram = _histogram_density(histogram, tuple(edges))
     return _finish((histogram, edges), traced_type=traced_type)
 
 

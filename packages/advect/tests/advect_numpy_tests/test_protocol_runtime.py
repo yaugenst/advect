@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-import advect.numpy._array_function.runtime as array_function_runtime_module
+import advect.numpy._signature as signature_module
 from advect.core._errors import TracingError
 from advect.numpy._protocol_runtime import NUMPY_PROTOCOL_RUNTIME
 
@@ -19,19 +19,13 @@ class _Traced:
         self.recorder = recorder
 
 
-class _BinaryUfunc:
-    __name__ = "binary"
-    nin = 2
-    nout = 1
-
-
 def test_array_function_signature_is_resolved_once(monkeypatch: Any) -> None:
     def target(first: object, second: object, *, optional: object = None) -> object:
         del second, optional
         return first
 
-    array_function_runtime_module._cached_positional_parameters.cache_clear()
-    original_signature = array_function_runtime_module.inspect.signature
+    signature_module.positional_parameters.cache_clear()
+    original_signature = signature_module.inspect.signature
     calls = 0
 
     def counted_signature(func: object) -> object:
@@ -40,7 +34,7 @@ def test_array_function_signature_is_resolved_once(monkeypatch: Any) -> None:
             calls += 1
         return original_signature(func)
 
-    monkeypatch.setattr(array_function_runtime_module.inspect, "signature", counted_signature)
+    monkeypatch.setattr(signature_module.inspect, "signature", counted_signature)
 
     first = NUMPY_PROTOCOL_RUNTIME._normalize_array_function_args_and_kwargs(
         func=target,
@@ -58,69 +52,22 @@ def test_array_function_signature_is_resolved_once(monkeypatch: Any) -> None:
     assert calls == 1
 
 
-def test_unhashable_callable_signature_bypasses_cache() -> None:
-    class UnhashableCallable:
-        def __call__(
-            self,
-            first: object,
-            second: object,
-            *,
-            optional: object = None,
-        ) -> object:
-            del second, optional
-            return first
-
-    type.__setattr__(UnhashableCallable, "__hash__", None)
-
-    parameters = array_function_runtime_module._positional_parameters(UnhashableCallable())
-
-    assert tuple(parameter.name for parameter in parameters) == ("first", "second")
-
-
-def test_array_function_normalizes_einsum_keyword_operands() -> None:
-    def einsum(*values: object, **kwargs: object) -> object:
-        return values, kwargs
-
-    args, kwargs = NUMPY_PROTOCOL_RUNTIME._normalize_array_function_args_and_kwargs(
-        func=einsum,
-        args=(),
-        kwargs={
-            "subscripts": "ij,jk->ik",
-            "x1": "left",
-            "x2": "right",
-            "optimize": True,
-        },
-    )
-
-    assert args == ("ij,jk->ik", "left", "right")
-    assert kwargs == {"optimize": True}
-
-
-def test_array_function_normalizes_known_positional_aliases() -> None:
-    def clip(value: object, minimum: object, maximum: object) -> object:
-        return value, minimum, maximum
-
-    args, kwargs = NUMPY_PROTOCOL_RUNTIME._normalize_array_function_args_and_kwargs(
-        func=clip,
-        args=("value",),
-        kwargs={"a_min": 0, "a_max": 1},
-    )
-
-    assert args == ("value", 0, 1)
-    assert kwargs == {}
-
-
 def test_array_function_normalization_preserves_uninspectable_callables(
     monkeypatch: Any,
 ) -> None:
     def target(value: object) -> object:
         return value
 
-    def unavailable(_func: object) -> None:
-        message = "signature unavailable"
-        raise ValueError(message)
+    original_signature = signature_module.inspect.signature
 
-    monkeypatch.setattr(array_function_runtime_module, "_positional_parameters", unavailable)
+    def unavailable(func: object) -> object:
+        if func is target:
+            message = "signature unavailable"
+            raise ValueError(message)
+        return original_signature(func)
+
+    signature_module.positional_parameters.cache_clear()
+    monkeypatch.setattr(signature_module.inspect, "signature", unavailable)
 
     args, kwargs = NUMPY_PROTOCOL_RUNTIME._normalize_array_function_args_and_kwargs(
         func=target,
@@ -130,6 +77,43 @@ def test_array_function_normalization_preserves_uninspectable_callables(
 
     assert args == ("value",)
     assert kwargs == {"flag": True}
+
+
+class _UninspectableFunction:
+    """Stand-in for a NumPy 2.0 C function whose signature ``inspect`` cannot read."""
+
+    def __init__(self, name: str) -> None:
+        self.__name__ = name
+
+
+@pytest.mark.parametrize(
+    ("name", "args", "kwargs", "expected"),
+    [
+        ("bincount", (), {"x": 1, "minlength": 2}, "'x'"),
+        ("dot", (), {"a": 1, "b": 2}, ((1, 2), {})),
+        ("lexsort", (), {"keys": 1, "axis": 0}, ((1,), {"axis": 0})),
+        ("concatenate", (), {"arrays": 1}, "'arrays'"),
+        ("inner", (1,), {"b": 2}, "'b'"),
+        ("vdot", (), {"a": 1, "b": 2}, "'a, b'"),
+        ("where", (1,), {"x": 2, "y": 3}, "'x, y'"),
+        # NumPy's C empty_like accepts the prototype its signature marks positional-only.
+        ("empty_like", (), {"prototype": 1, "dtype": 2}, ((1,), {"dtype": 2})),
+    ],
+)
+def test_uninspectable_c_functions_bind_their_published_signatures(
+    name: str,
+    args: tuple[object, ...],
+    kwargs: dict[str, object],
+    expected: object,
+) -> None:
+    signature_module.positional_parameters.cache_clear()
+    function = _UninspectableFunction(name)
+    normalize = NUMPY_PROTOCOL_RUNTIME._normalize_array_function_args_and_kwargs
+    if isinstance(expected, str):
+        with pytest.raises(TypeError, match=f"passed as keyword arguments: {expected}"):
+            normalize(func=function, args=args, kwargs=kwargs)
+    else:
+        assert normalize(func=function, args=args, kwargs=kwargs) == expected
 
 
 def test_array_function_normalization_stops_at_optional_or_missing_parameters() -> None:
@@ -181,20 +165,3 @@ def test_array_function_result_tree_is_wrapped_without_backend_adapter() -> None
         ("middle", 4, recorder),
         ("right", 5, recorder),
     ]
-
-
-def test_ufunc_keyword_operands_are_normalized_once() -> None:
-    inputs, kwargs = NUMPY_PROTOCOL_RUNTIME._normalize_ufunc_inputs_and_kwargs(
-        ufunc=_BinaryUfunc(),
-        inputs=("left",),
-        kwargs={"x2": "right", "where": True},
-    )
-
-    assert inputs == ("left", "right")
-    assert kwargs == {"where": True}
-    with pytest.raises(TracingError, match="duplicate operand"):
-        NUMPY_PROTOCOL_RUNTIME._normalize_ufunc_inputs_and_kwargs(
-            ufunc=_BinaryUfunc(),
-            inputs=("left", "right"),
-            kwargs={"x2": "duplicate"},
-        )

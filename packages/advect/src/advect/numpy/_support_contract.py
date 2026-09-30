@@ -85,8 +85,7 @@ _DECLARATIONS = (
         diag_indices_from digitize flatnonzero identity in1d isclose iscomplex
         iscomplexobj isin isneginf isposinf isreal isrealobj ix_ lexsort
         linalg.matrix_rank nanargmax nanargmin ndim nonzero ravel_multi_index
-        result_type shape tri tril_indices_from triu_indices_from unique
-        unique_counts unique_inverse unravel_index
+        result_type shape tri tril_indices_from triu_indices_from unravel_index
         """,
         has_derivatives=False,
     ),
@@ -109,8 +108,9 @@ _DECLARATIONS = (
         piecewise place poly polyadd polyder polydiv polyfit polyint polymul polysub
         polyval ptp put put_along_axis putmask quantile ravel real_if_close resize
         rollaxis roots rot90 round row_stack select setdiff1d setxor1d sinc
-        sort_complex split swapaxes trapezoid trapz trim_zeros union1d unique_all
-        unique_values unstack unwrap vander vdot vsplit vstack
+        sort_complex split swapaxes trapezoid trapz trim_zeros union1d unique unique_all
+        unique_counts unique_inverse unique_values unstack unwrap vander vdot vsplit
+        vstack
         """,
         has_derivatives=True,
     ),
@@ -119,8 +119,8 @@ _DECLARATIONS = (
         _ALL_MODES,
         """
         bitwise_and bitwise_or bitwise_xor equal greater greater_equal invert
-        isfinite isinf isnan less less_equal logical_and logical_not logical_or
-        logical_xor not_equal signbit
+        isfinite isinf isnan left_shift less less_equal logical_and logical_not
+        logical_or logical_xor not_equal right_shift signbit
         """,
         has_derivatives=False,
     ),

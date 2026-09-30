@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 from advect.core._abstract_helpers import (
     accumulation_dtype,
+    division_dtype,
     dtype_name,
     normalize_axis,
     real_dtype,
@@ -25,72 +26,31 @@ RULES: dict[str, AbstractRule] = {
     "array.all": rule("bool_reduction", 1, allowed=("axis", "keepdims")),
     "array.any": rule("bool_reduction", 1, allowed=("axis", "keepdims")),
     "array.count_nonzero": rule("index_reduction", 1, allowed=("axis", "keepdims")),
-    "array.cumprod": rule(
-        "cumulative",
-        1,
-        allowed=("axis", "dtype", "include_initial"),
-    ),
-    "array.cumsum": rule(
-        "cumulative",
-        1,
-        allowed=("axis", "dtype", "include_initial"),
-    ),
-    "array.diff": rule(
-        "diff",
-        1,
-        allowed=("append", "axis", "n", "prepend"),
-    ),
+    "array.cumprod": rule("cumulative", 1, allowed=("axis", "dtype", "include_initial")),
+    "array.cumsum": rule("cumulative", 1, allowed=("axis", "dtype", "include_initial")),
+    "array.diff": rule("diff", 1, allowed=("axis", "n")),
 }
 
-for _op in ("array.sum", "array.prod"):
-    RULES[_op] = rule(
+# Reductions with a positional axis, keyed by result kind, with their other attributes.
+for _kind, _ops, _extra in (
+    (
         "accumulation_reduction",
-        1,
-        positional=("axis",),
-        allowed=("axis", "dtype", "keepdims", "initial"),
-    )
-for _op in ("array.mean", "array.max", "array.min"):
-    RULES[_op] = rule(
-        "reduction",
-        1,
-        positional=("axis",),
-        allowed=("axis", "dtype", "keepdims", "initial"),
-    )
-for _op in ("array.std", "array.var"):
-    RULES[_op] = rule(
-        "real_reduction",
-        1,
-        positional=("axis",),
-        allowed=("axis", "dtype", "keepdims", "correction", "ddof"),
-    )
-for _op in ("array_ext.nansum", "array_ext.nanprod"):
-    RULES[_op] = rule(
-        "accumulation_reduction",
-        1,
-        positional=("axis",),
-        allowed=("axis", "dtype", "keepdims", "initial"),
-    )
-for _op in ("array_ext.nanmean", "array_ext.nanmin", "array_ext.nanmax"):
-    RULES[_op] = rule(
-        "reduction",
-        1,
-        positional=("axis",),
-        allowed=("axis", "dtype", "keepdims", "initial"),
-    )
-for _op in ("array_ext.nanstd", "array_ext.nanvar"):
-    RULES[_op] = rule(
-        "real_reduction",
-        1,
-        positional=("axis",),
-        allowed=("axis", "dtype", "keepdims", "correction", "ddof"),
-    )
+        "array.sum array.prod array_ext.nansum array_ext.nanprod",
+        "initial",
+    ),
+    ("reduction", "array.max array.min array_ext.nanmax array_ext.nanmin", "initial"),
+    ("mean_reduction", "array.mean array_ext.nanmean", "initial"),
+    ("real_reduction", "array.std array.var array_ext.nanstd array_ext.nanvar", "correction ddof"),
+):
+    for _op in _ops.split():
+        RULES[_op] = rule(
+            _kind,
+            1,
+            positional=("axis",),
+            allowed=("axis", "dtype", "keepdims", *_extra.split()),
+        )
 for _op in ("array.argmax", "array.argmin"):
-    RULES[_op] = rule(
-        "index_reduction",
-        1,
-        positional=("axis",),
-        allowed=("axis", "keepdims"),
-    )
+    RULES[_op] = rule("index_reduction", 1, positional=("axis",), allowed=("axis", "keepdims"))
 
 
 def _reduction(
@@ -100,7 +60,7 @@ def _reduction(
     kind: str,
 ) -> tuple[ArraySpec, ...]:
     first = specs[0]
-    dtype = dtype_name(attrs["dtype"]) if attrs.get("dtype") is not None else None
+    dtype = attrs.get("dtype")
     shape = reduction_shape(
         first.shape,
         attrs.get("axis"),
@@ -110,8 +70,10 @@ def _reduction(
         result_dtype = "bool"
     elif kind == "index_reduction":
         result_dtype = "int64"
+    elif kind == "mean_reduction":
+        result_dtype = dtype or division_dtype(first.dtype)
     elif kind == "real_reduction":
-        result_dtype = dtype or real_dtype(first.dtype)
+        result_dtype = dtype or real_dtype(division_dtype(first.dtype))
     elif kind == "accumulation_reduction":
         result_dtype = dtype or accumulation_dtype(
             first.dtype,
@@ -135,17 +97,11 @@ def _cumulative(
             )
     else:
         normalize_axis(axis, len(first.shape))
-    dtype = dtype_name(attrs["dtype"]) if attrs.get("dtype") is not None else None
-    return (
-        ArraySpec(
-            first.shape,
-            dtype
-            or accumulation_dtype(
-                first.dtype,
-                array_api_version=attrs.get("_advect_array_api_version"),
-            ),
-        ),
+    dtype = attrs.get("dtype") or accumulation_dtype(
+        first.dtype,
+        array_api_version=attrs.get("_advect_array_api_version"),
     )
+    return (ArraySpec(first.shape, dtype),)
 
 
 def _diff(
@@ -168,6 +124,7 @@ EVALUATORS: dict[str, ResultEvaluator] = {
         "accumulation_reduction",
         "bool_reduction",
         "reduction",
+        "mean_reduction",
         "real_reduction",
         "index_reduction",
     )

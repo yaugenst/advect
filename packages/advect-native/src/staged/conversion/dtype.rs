@@ -9,6 +9,7 @@ use pyo3::types::{PyList, PyString, PyTuple, PyType};
 const BUILTIN_DTYPE_NAMES: &[&str] = &["bool", "int", "float", "complex"];
 const DTYPE_NAMESPACE_ROOTS: &[&str] = &["array_api_strict", "cupy", "numpy"];
 
+/// Identity cache for provider dtype objects, which are typically singletons.
 #[derive(Debug, Default)]
 pub(crate) struct DTypeCache {
     entries: Vec<(Py<PyAny>, DTypeDescriptor)>,
@@ -20,17 +21,38 @@ impl DTypeCache {
         py: Python<'_>,
         value: &Bound<'_, PyAny>,
     ) -> PyResult<DTypeDescriptor> {
-        if let Some((_owner, descriptor)) = self
-            .entries
-            .iter()
-            .find(|(owner, _)| owner.bind(py).is(value))
-        {
+        // Dtype strings are usually fresh objects, so an identity cache would
+        // only grow; parsing the name directly is cheap.
+        if value.is_exact_instance_of::<PyString>() {
+            return dtype_from_python(value);
+        }
+        if let Some(descriptor) = self.cached(py, value) {
             return Ok(descriptor.clone());
         }
         let descriptor = dtype_from_python(value)?;
         self.entries
             .push((value.clone().unbind(), descriptor.clone()));
         Ok(descriptor)
+    }
+
+    /// Compare against an expected descriptor without cloning a cached one.
+    pub(crate) fn matches(
+        &mut self,
+        py: Python<'_>,
+        value: &Bound<'_, PyAny>,
+        expected: &DTypeDescriptor,
+    ) -> PyResult<bool> {
+        if let Some(descriptor) = self.cached(py, value) {
+            return Ok(descriptor == expected);
+        }
+        Ok(self.resolve(py, value)? == *expected)
+    }
+
+    fn cached(&self, py: Python<'_>, value: &Bound<'_, PyAny>) -> Option<&DTypeDescriptor> {
+        self.entries
+            .iter()
+            .find(|(owner, _)| owner.bind(py).is(value))
+            .map(|(_owner, descriptor)| descriptor)
     }
 
     pub(crate) fn resolve_sequence(

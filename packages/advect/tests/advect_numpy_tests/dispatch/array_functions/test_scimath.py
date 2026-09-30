@@ -9,12 +9,12 @@ import pytest
 from numpy.lib import scimath
 
 import advect as ad
+from advect_numpy_tests._assertions import assert_jvp_matches_central_difference
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
 
-_STEP = 1e-6
 _UNARY_FUNCTIONS = (
     scimath.sqrt,
     scimath.log,
@@ -81,42 +81,15 @@ def _direction_like(value: np.ndarray[Any, Any], *, second: bool = False) -> np.
     return np.asarray(raw, dtype=value.dtype)
 
 
-def _cotangent_like(value: np.ndarray[Any, Any]) -> np.ndarray[Any, Any]:
-    raw = (0.7 + 0.2j, -0.4 + 0.3j) if np.iscomplexobj(value) else (0.7, -0.4)
-    return np.asarray(raw, dtype=value.dtype)
-
-
-def _real_inner_product(left: np.ndarray[Any, Any], right: np.ndarray[Any, Any]) -> float:
-    return float(np.vdot(left, right).real)
-
-
 @pytest.mark.parametrize(("function", "raw_values"), _UNARY_CASES)
 def test_scimath_unary_dynamic_contract(
     function: Callable[..., Any],
     raw_values: tuple[complex, complex],
 ) -> None:
     values = np.asarray(raw_values)
-    direction = _direction_like(values)
 
-    primal, tangent = ad.jvp(function)(values, tangents=direction)
-    numerical = (function(values + _STEP * direction) - function(values - _STEP * direction)) / (
-        2 * _STEP
-    )
-    expected = function(values)
-
-    assert primal.dtype == expected.dtype
-    np.testing.assert_allclose(primal, expected)
-    np.testing.assert_allclose(tangent, numerical, rtol=2e-6, atol=2e-7)
-
-    cotangent = _cotangent_like(primal)
-    _value, pullback = ad.vjp(function)(values)
-    input_cotangent = pullback(cotangent)
-    assert input_cotangent.dtype == values.dtype
-    np.testing.assert_allclose(
-        _real_inner_product(cotangent, tangent),
-        _real_inner_product(input_cotangent, direction),
-        rtol=2e-6,
-        atol=2e-7,
+    assert_jvp_matches_central_difference(
+        function, (values,), (_direction_like(values),), rtol=2e-6, atol=2e-7
     )
 
 
@@ -126,48 +99,34 @@ def test_scimath_binary_dynamic_contract_covers_both_operands(
     raw_inputs: tuple[tuple[complex, complex], tuple[complex, complex]],
 ) -> None:
     inputs = tuple(np.asarray(value) for value in raw_inputs)
-    directions = tuple(
+    first, second = (
         _direction_like(value, second=index == 1) for index, value in enumerate(inputs)
     )
 
-    for active_index in range(2):
-        active_directions = tuple(
-            direction if index == active_index else np.zeros_like(direction)
-            for index, direction in enumerate(directions)
-        )
-        primal, tangent = ad.jvp(function, argnums=(0, 1))(
-            *inputs,
-            tangents=active_directions,
-        )
-        positive = list(inputs)
-        negative = list(inputs)
-        positive[active_index] = inputs[active_index] + _STEP * directions[active_index]
-        negative[active_index] = inputs[active_index] - _STEP * directions[active_index]
-        numerical = (function(*positive) - function(*negative)) / (2 * _STEP)
+    for directions in ((first, np.zeros_like(second)), (np.zeros_like(first), second)):
+        assert_jvp_matches_central_difference(function, inputs, directions, rtol=3e-6, atol=3e-7)
+    assert_jvp_matches_central_difference(function, inputs, (first, second), rtol=3e-6, atol=3e-7)
 
-        np.testing.assert_allclose(primal, function(*inputs))
-        np.testing.assert_allclose(tangent, numerical, rtol=3e-6, atol=3e-7)
 
-    primal, tangent = ad.jvp(function, argnums=(0, 1))(
-        *inputs,
-        tangents=directions,
-    )
-    cotangent = _cotangent_like(primal)
-    _value, pullback = ad.vjp(function, argnums=(0, 1))(*inputs)
-    input_cotangents = pullback(cotangent)
-    assert all(
-        result.dtype == source.dtype
-        for result, source in zip(input_cotangents, inputs, strict=True)
-    )
-    np.testing.assert_allclose(
-        _real_inner_product(cotangent, tangent),
-        sum(
-            _real_inner_product(input_cotangent, direction)
-            for input_cotangent, direction in zip(input_cotangents, directions, strict=True)
-        ),
-        rtol=3e-6,
-        atol=3e-7,
-    )
+@pytest.mark.parametrize(
+    "function",
+    [
+        *(pytest.param(function, id=function.__name__) for function in _UNARY_FUNCTIONS),
+        pytest.param(lambda x: scimath.logn(x, -2.0), id="logn"),
+        pytest.param(lambda x: scimath.power(x, -1.5), id="power"),
+    ],
+)
+def test_scimath_second_derivatives_read_values_through_nested_traces(
+    function: Callable[..., Any],
+) -> None:
+    # A negative input takes each function's complex continuation branch.
+    values = np.array([0.3, -0.6])
+    direction = np.array([0.2, -0.1])
+
+    def derivative(x: Any) -> Any:
+        return ad.jvp(function)(x, tangents=direction)[1]
+
+    assert_jvp_matches_central_difference(derivative, (values,), (direction,), rtol=2e-5, atol=2e-6)
 
 
 @pytest.mark.parametrize(

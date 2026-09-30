@@ -3,10 +3,10 @@
 use std::collections::HashSet;
 
 use pyo3::basic::CompareOp;
-use pyo3::exceptions::{PyAttributeError, PyRuntimeError, PyTypeError, PyValueError};
+use pyo3::exceptions::{PyRuntimeError, PyTypeError, PyValueError};
+use pyo3::intern;
 use pyo3::prelude::*;
 
-use super::layout::{self, OperandLayout};
 use super::lifecycle::DynamicTape;
 use advect_runtime::NodeId;
 
@@ -168,103 +168,107 @@ fn operand_linearity(
     parents: &[NodeId],
     states: &[Linearity],
 ) -> PyResult<Vec<Linearity>> {
-    let (parent_positions, literal_range) = layout::snapshot_layout(
-        &tape.operand_layouts,
-        &tape.operand_positions,
-        current_index,
-        parents.len(),
-    )?;
-    let operand_count = match *tape.operand_layouts.get(current_index).ok_or_else(|| {
-        PyRuntimeError::new_err("dynamic tape operand layout arena is inconsistent")
-    })? {
-        OperandLayout::ParentsOnly => parents.len(),
-        OperandLayout::Mixed { operand_count, .. } => usize::try_from(operand_count)
-            .map_err(|_| PyRuntimeError::new_err("operand count is out of range"))?,
-    };
-    let mut inputs: Vec<Option<Linearity>> = vec![None; operand_count];
-
-    for (&parent, &position) in parents.iter().zip(&parent_positions) {
-        let parent_index = usize::try_from(parent)
-            .map_err(|_| PyValueError::new_err("dynamic tape node ID is out of range"))?;
-        let parent_state = states
-            .get(parent_index)
-            .ok_or_else(|| PyRuntimeError::new_err("parent linearity state is unavailable"))?
-            .clone();
-        *inputs
-            .get_mut(position)
-            .ok_or_else(|| PyRuntimeError::new_err("operand position is unavailable"))? =
-            Some(parent_state);
-    }
-
-    if let Some((literal_start, literal_count)) = literal_range {
-        let literal_end = literal_start
-            .checked_add(literal_count)
-            .ok_or_else(|| PyRuntimeError::new_err("literal range overflowed"))?;
-        let mut literals = tape
-            .literals
-            .get(literal_start..literal_end)
-            .ok_or_else(|| PyRuntimeError::new_err("literal range is invalid"))?
-            .iter();
-        for input in &mut inputs {
-            if input.is_some() {
-                continue;
-            }
-            let literal = literals
-                .next()
-                .ok_or_else(|| PyRuntimeError::new_err("literal layout is inconsistent"))?
-                .as_ref()
-                .ok_or_else(|| {
-                    PyRuntimeError::new_err(
-                        "literal payload was released before linearity analysis",
-                    )
-                })?;
-            *input = Some(if value_is_zero(py, literal.bind(py))? {
+    let layout = tape.operands(current_index, parents.len())?;
+    let parent_states = parents
+        .iter()
+        .map(|&parent| {
+            usize::try_from(parent)
+                .ok()
+                .and_then(|parent_index| states.get(parent_index))
+                .cloned()
+                .ok_or_else(|| PyRuntimeError::new_err("parent linearity state is unavailable"))
+        })
+        .collect::<PyResult<Vec<_>>>()?;
+    let literal_states = tape
+        .literal_payloads(&layout)?
+        .iter()
+        .map(|literal| {
+            let literal = literal.as_ref().ok_or_else(|| {
+                PyRuntimeError::new_err("literal payload was released before linearity analysis")
+            })?;
+            Ok(if value_is_zero(py, literal.bind(py))? {
                 Linearity::zero()
             } else {
                 Linearity::constant()
-            });
-        }
-        if literals.next().is_some() {
-            return Err(PyRuntimeError::new_err(
-                "literal layout retained unused values",
-            ));
-        }
-    }
-
-    inputs
-        .into_iter()
-        .map(|input| {
-            input.ok_or_else(|| PyRuntimeError::new_err("operand linearity slot is uninitialized"))
+            })
         })
-        .collect()
+        .collect::<PyResult<Vec<_>>>()?;
+    layout.interleave(parent_states, literal_states)
 }
 
 fn classify_node(op: &str, inputs: &[Linearity]) -> Linearity {
-    let suffix = op.rsplit('.').next().unwrap_or(op);
-    match suffix {
-        "add" | "sub" | "subtract" => combine_add(inputs),
-        "cross" | "dot" | "einsum" | "inner" | "kron" | "matmul" | "mul" | "multiply" | "outer"
-        | "tensordot" => combine_product(inputs),
-        "divide" | "true_divide" | "truediv" => classify_division(inputs),
-        "take" | "take_along_axis" => classify_gather(inputs),
-        "solve" => classify_solve(inputs),
-        "astype" | "atleast_1d" | "atleast_2d" | "atleast_3d" | "broadcast_to" | "conj"
-        | "conjugate" | "copy" | "cumsum" | "diag" | "diagonal" | "diff" | "expand_dims"
-        | "fft" | "fft2" | "fftshift" | "fftn" | "flatten" | "flip" | "fliplr" | "flipud"
-        | "getoutput" | "getitem" | "ifft" | "ifft2" | "ifftshift" | "ifftn" | "imag" | "irfft"
-        | "irfft2" | "irfftn" | "mean" | "moveaxis" | "negative" | "neg" | "pad" | "positive"
-        | "pos" | "ravel" | "real" | "repeat" | "reshape" | "rfft" | "rfft2" | "rfftn" | "roll"
-        | "rot90" | "squeeze" | "sum" | "swapaxes" | "tile" | "trace" | "transpose" | "tril"
-        | "triu"
+    // Only canonical built-in IDs have known linearity. Custom primitives are
+    // opaque even when their names end like a linear built-in.
+    match op {
+        "advect.index_update"
+        | "array.add"
+        | "array.concatenate"
+        | "array.stack"
+        | "array.subtract" => combine_add(inputs),
+        "array.cross" | "array.matmul" | "array.multiply" | "array.outer" | "array.tensordot"
+        | "array_ext.dot" | "array_ext.einsum" | "array_ext.inner" | "array_ext.kron" => {
+            combine_product(inputs)
+        }
+        "array.divide" | "array_ext.true_divide" => classify_division(inputs),
+        "array.take" | "array.take_along_axis" => classify_gather(inputs),
+        "array_ext.linalg.solve" => classify_solve(inputs),
+        "advect.copy"
+        | "advect.getitem"
+        | "advect.getoutput"
+        | "array.astype"
+        | "array.atleast_1d"
+        | "array.atleast_2d"
+        | "array.atleast_3d"
+        | "array.broadcast_to"
+        | "array.conjugate"
+        | "array.cumsum"
+        | "array.diagonal"
+        | "array.diff"
+        | "array.expand_dims"
+        | "array.flip"
+        | "array.imag"
+        | "array.mean"
+        | "array.moveaxis"
+        | "array.negative"
+        | "array.positive"
+        | "array.real"
+        | "array.repeat"
+        | "array.reshape"
+        | "array.roll"
+        | "array.squeeze"
+        | "array.sum"
+        | "array.swapaxes"
+        | "array.tile"
+        | "array.trace"
+        | "array.transpose"
+        | "array.tril"
+        | "array.triu"
+        | "array_ext.diag"
+        | "array_ext.fft.fft"
+        | "array_ext.fft.fft2"
+        | "array_ext.fft.fftn"
+        | "array_ext.fft.fftshift"
+        | "array_ext.fft.ifft"
+        | "array_ext.fft.ifft2"
+        | "array_ext.fft.ifftn"
+        | "array_ext.fft.ifftshift"
+        | "array_ext.fft.irfft"
+        | "array_ext.fft.irfft2"
+        | "array_ext.fft.irfftn"
+        | "array_ext.fft.rfft"
+        | "array_ext.fft.rfft2"
+        | "array_ext.fft.rfftn"
+        | "array_ext.fliplr"
+        | "array_ext.flipud"
+        | "array_ext.pad"
+        | "array_ext.ravel"
+        | "array_ext.rot90"
             if inputs.len() == 1 =>
         {
             inputs.first().cloned().unwrap_or_else(Linearity::constant)
         }
-        "concatenate" | "concat" | "index_update" | "stack" | "vstack" | "hstack" => {
-            combine_add(inputs)
-        }
-        "where" if inputs.len() == WHERE_ARITY => classify_where(inputs),
-        "zeros" | "zeros_like" => Linearity::zero(),
+        "array.where" if inputs.len() == WHERE_ARITY => classify_where(inputs),
+        "array.zeros" | "array.zeros_like" => Linearity::zero(),
         _ if inputs
             .iter()
             .all(|value| matches!(value.kind, LinearityKind::Zero | LinearityKind::Constant)) =>
@@ -346,9 +350,8 @@ fn classify_division(inputs: &[Linearity]) -> Linearity {
     ) {
         return Linearity::nonlinear("uses a tangent-dependent denominator", inputs);
     }
-    if denominator.kind == LinearityKind::Zero {
-        return Linearity::nonlinear("divides by a structural zero", inputs);
-    }
+    // A denominator that is zero at this point is still tangent-independent:
+    // the quotient scales the numerator to IEEE infinities, as forward mode does.
     numerator.clone()
 }
 
@@ -377,9 +380,9 @@ fn classify_solve(inputs: &[Linearity]) -> Linearity {
 
 fn node_value_is_zero(py: Python<'_>, tape: &DynamicTape, node_index: usize) -> PyResult<bool> {
     let value = tape
-        .values
-        .get(node_index)
-        .and_then(Option::as_ref)
+        .node(node_index)?
+        .value
+        .as_ref()
         .ok_or_else(|| PyRuntimeError::new_err("dynamic tape node value is unavailable"))?;
     value_is_zero(py, value.bind(py))
 }
@@ -398,14 +401,142 @@ fn value_is_zero(py: Python<'_>, value: &Bound<'_, PyAny>) -> PyResult<bool> {
 }
 
 fn value_is_zero_inner(py: Python<'_>, value: &Bound<'_, PyAny>) -> PyResult<bool> {
-    if value.hasattr("node_id")? {
+    if value.hasattr(intern!(py, "node_id"))? {
         return Ok(false);
     }
     let comparison = value.rich_compare(0, CompareOp::Eq)?;
-    match comparison.getattr("all") {
-        Ok(all_method) if all_method.is_callable() => all_method.call0()?.is_truthy(),
-        Ok(_all_attribute) => comparison.is_truthy(),
-        Err(error) if error.is_instance_of::<PyAttributeError>(py) => comparison.is_truthy(),
-        Err(error) => Err(error),
+    match comparison.getattr_opt(intern!(py, "all"))? {
+        Some(all_method) if all_method.is_callable() => all_method.call0()?.is_truthy(),
+        _ => comparison.is_truthy(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::LinearityKind::{Constant, Linear, Nonlinear, Zero};
+    use super::{Linearity, LinearityKind, classify_node};
+
+    const KINDS: [LinearityKind; 4] = [Zero, Constant, Linear, Nonlinear];
+
+    /// Operation, operand kinds, result kind, and a fragment of its reason.
+    const CASES: &[(&str, &[LinearityKind], LinearityKind, &str)] = &[
+        ("array.add", &[Linear, Linear], Linear, ""),
+        ("array.add", &[Zero, Linear], Linear, ""),
+        ("array.add", &[Constant, Zero], Constant, ""),
+        ("array.add", &[Zero, Zero], Zero, ""),
+        ("array.subtract", &[Linear, Constant], Nonlinear, "offset"),
+        (
+            "array.stack",
+            &[Nonlinear, Zero, Linear],
+            Nonlinear,
+            "nonlinear",
+        ),
+        ("array.multiply", &[Zero, Nonlinear], Zero, ""),
+        ("array.matmul", &[Constant, Linear], Linear, ""),
+        ("array.multiply", &[Constant, Constant], Constant, ""),
+        ("array.outer", &[Linear, Linear], Nonlinear, "multiplies"),
+        (
+            "array.multiply",
+            &[Linear, Nonlinear],
+            Nonlinear,
+            "nonlinear",
+        ),
+        ("array.divide", &[Linear, Constant], Linear, ""),
+        (
+            "array.divide",
+            &[Constant, Linear],
+            Nonlinear,
+            "denominator",
+        ),
+        // A constant denominator that is zero here still scales linearly.
+        ("array.divide", &[Linear, Zero], Linear, ""),
+        ("array.divide", &[Linear], Nonlinear, "arity"),
+        ("array.where", &[Constant, Linear, Zero], Linear, ""),
+        (
+            "array.where",
+            &[Constant, Linear, Constant],
+            Nonlinear,
+            "offset",
+        ),
+        ("array.where", &[Linear, Zero, Zero], Nonlinear, "mask"),
+        ("array.take", &[Linear, Constant], Linear, ""),
+        ("array.take", &[Constant, Linear], Nonlinear, "indices"),
+        ("array_ext.linalg.solve", &[Constant, Linear], Linear, ""),
+        (
+            "array_ext.linalg.solve",
+            &[Linear, Constant],
+            Nonlinear,
+            "matrix",
+        ),
+        ("array.zeros_like", &[Nonlinear], Zero, ""),
+        ("array.negative", &[Linear], Linear, ""),
+        (
+            "array.negative",
+            &[Linear, Linear],
+            Nonlinear,
+            "unsupported",
+        ),
+        ("array.sin", &[Zero, Constant], Constant, ""),
+        ("array.sin", &[Linear], Nonlinear, "'array.sin'"),
+        ("custom.array.negative", &[Linear], Nonlinear, "unsupported"),
+    ];
+
+    fn state(kind: LinearityKind) -> Linearity {
+        match kind {
+            Zero => Linearity::zero(),
+            Constant => Linearity::constant(),
+            Linear => Linearity::linear(),
+            Nonlinear => Linearity::nonlinear("operand", &[Linearity::linear()]),
+        }
+    }
+
+    fn classify(op: &str, kinds: &[LinearityKind]) -> Linearity {
+        let inputs = kinds.iter().copied().map(state).collect::<Vec<_>>();
+        classify_node(op, &inputs)
+    }
+
+    #[test]
+    fn classification_table_pins_each_rule_and_reason() {
+        for &(op, kinds, expected, reason) in CASES {
+            let result = classify(op, kinds);
+            let context = format!("{op} over {kinds:?}: {result:?}");
+            let dependent_input = kinds.iter().any(|kind| matches!(kind, Linear | Nonlinear));
+            assert_eq!(result.kind, expected, "{context}");
+            assert_eq!(
+                result.tangent_dependent,
+                expected == Linear || (expected == Nonlinear && dependent_input),
+                "{context}"
+            );
+            assert_eq!(result.reason.is_some(), expected == Nonlinear, "{context}");
+            assert!(
+                result.reason.unwrap_or_default().contains(reason),
+                "{context}"
+            );
+        }
+    }
+
+    #[test]
+    fn additive_and_product_rules_ignore_operand_order() {
+        for op in ["array.add", "array.multiply"] {
+            for arity in [2, 3] {
+                for index in 0..KINDS.len().pow(arity) {
+                    let kinds = (0..arity)
+                        .scan(index, |rest, _| {
+                            let kind = KINDS.get(*rest % KINDS.len()).copied();
+                            *rest /= KINDS.len();
+                            kind
+                        })
+                        .collect::<Vec<_>>();
+                    let expected = classify(op, &kinds).kind;
+                    let mut permuted = kinds.clone();
+                    for _ in 0..arity {
+                        permuted.rotate_left(1);
+                        assert_eq!(classify(op, &permuted).kind, expected, "{op} {kinds:?}");
+                    }
+                    permuted.reverse();
+                    assert_eq!(classify(op, &permuted).kind, expected, "{op} {kinds:?}");
+                }
+            }
+        }
     }
 }

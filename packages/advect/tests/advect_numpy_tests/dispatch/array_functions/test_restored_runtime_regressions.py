@@ -5,6 +5,7 @@ from __future__ import annotations
 import numpy as np
 
 import advect as ad
+from advect_numpy_tests._assertions import assert_staged_round_trip
 
 
 def test_arange_preserves_the_consumed_like_dispatch_anchor() -> None:
@@ -17,10 +18,7 @@ def test_arange_preserves_the_consumed_like_dispatch_anchor() -> None:
     np.testing.assert_array_equal(primal, np.arange(4, dtype=np.float64))
     np.testing.assert_array_equal(tangent, np.zeros(4, dtype=np.float64))
 
-    program = ad.stage(call, specs=(ad.ArraySpec(anchor.shape, anchor.dtype),))
-    restored = ad.StagedProgram.from_dict(program.to_dict())
-    for staged in (program, restored):
-        np.testing.assert_array_equal(staged(anchor), primal)
+    assert_staged_round_trip(call, anchor, rtol=0.0)
 
 
 def test_lstsq_rank_dtype_matches_numpy_2_4() -> None:

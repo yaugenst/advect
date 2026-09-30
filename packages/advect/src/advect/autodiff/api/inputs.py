@@ -4,20 +4,20 @@ from __future__ import annotations
 
 import functools
 import inspect
+import sys
 import warnings
+import weakref
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from advect.autodiff.api._input_trace import (
     _array_namespace_for_input,
     _LeafTraceSpec,
+    _trace_leaf,
     _trace_leaf_as_input,
     _TracedInputSpec,
 )
-from advect.autodiff.api._scalar_boundary import (
-    _is_real_python_scalar,
-    _lift_scalar_to_array,
-)
+from advect.autodiff.api._scalar_boundary import _is_real_python_scalar
 from advect.autodiff.api.trace import _wrap_input
 from advect.core._context import _get_active_trace_level, is_debug
 from advect.core._pytree import (
@@ -49,6 +49,12 @@ class _SignatureMetadata:
 
 
 _SIGNATURE_METADATA_CACHE_SIZE = 512
+
+# Weak keys keep metadata for as long as a transformed callable lives without
+# retaining closures, bound instances, or the concrete values they capture.
+_WEAK_SIGNATURE_METADATA: weakref.WeakKeyDictionary[Callable[..., object], _SignatureMetadata] = (
+    weakref.WeakKeyDictionary()
+)
 
 
 def _build_signature_metadata(sig: inspect.Signature) -> _SignatureMetadata:
@@ -91,12 +97,45 @@ def _get_signature_metadata_cached(f: Callable[..., object]) -> _SignatureMetada
     return _get_signature_metadata_uncached(f)
 
 
+def _staged_program_signature_metadata() -> _SignatureMetadata:
+    call_signature = inspect.signature(StagedProgram.__call__)
+    _self, *parameters = call_signature.parameters.values()
+    return _build_signature_metadata(call_signature.replace(parameters=parameters))
+
+
+# Staged programs cannot be weakly referenced and may embed large graph
+# constants, but every program shares the `(*args, **kwargs)` call signature.
+_STAGED_PROGRAM_SIGNATURE_METADATA = _staged_program_signature_metadata()
+
+
+def _is_module_attribute(f: object) -> bool:
+    """Return whether `f` is exported by its module, and so lives as long as it."""
+    module_name = getattr(f, "__module__", None)
+    qualname = getattr(f, "__qualname__", None)
+    if not isinstance(module_name, str) or not isinstance(qualname, str):
+        return False
+    return getattr(sys.modules.get(module_name), qualname, None) is f
+
+
 def _get_signature_metadata(f: Callable[..., object]) -> _SignatureMetadata:
+    if isinstance(f, StagedProgram):
+        return _STAGED_PROGRAM_SIGNATURE_METADATA
     try:
-        return _get_signature_metadata_cached(f)
+        metadata = _WEAK_SIGNATURE_METADATA.get(f)
     except TypeError:
-        # Unhashable callable objects cannot be cached by lru_cache keys.
-        return _get_signature_metadata_uncached(f)
+        # `f` is unhashable or cannot be weakly referenced. Only module-level
+        # callables, such as NumPy's array-function dispatchers and ufuncs, use
+        # the bounded strong cache; caching any other object would retain it.
+        if not _is_module_attribute(f):
+            return _get_signature_metadata_uncached(f)
+        try:
+            return _get_signature_metadata_cached(f)
+        except TypeError:
+            # Unhashable callable objects cannot be cached by lru_cache keys.
+            return _get_signature_metadata_uncached(f)
+    if metadata is None:
+        metadata = _WEAK_SIGNATURE_METADATA[f] = _get_signature_metadata_uncached(f)
+    return metadata
 
 
 def _get_signature(f: Callable[..., object]) -> inspect.Signature:
@@ -159,26 +198,9 @@ def _trace_value_as_inputs(
             )
             continue
 
-        restore_python_scalar = False
-        primal = leaf
-        if (not is_existing_traced) and _is_real_python_scalar(leaf):
-            primal = _lift_scalar_to_array(leaf, namespace=xp)
-            restore_python_scalar = True
-
-        traced, node_id = _wrap_input(
-            primal,
-            graph,
-            name=leaf_name,
-            weak=restore_python_scalar or bool(getattr(leaf, "_advect_weak", False)),
-        )
+        traced, leaf_spec = _trace_leaf(graph, leaf, name=leaf_name, xp=xp)
         traced_leaves.append(traced)
-        leaf_specs.append(
-            _LeafTraceSpec(
-                node_id=node_id,
-                primal=primal,
-                restore_python_scalar=restore_python_scalar,
-            )
-        )
+        leaf_specs.append(leaf_spec)
 
     traced_tree = tree_unflatten(treedef, traced_leaves)
     if is_debug() and untraceable:
@@ -204,7 +226,13 @@ def _trace_passive_outer_value(
 ) -> object:
     """Lift outer tracers into this tape without differentiating their positions."""
     if callable(getattr(value, "_advect_snapshot", None)):
-        traced, _node_id = _wrap_input(value, graph, name=prefix, active=False)
+        traced, _node_id = _wrap_input(
+            value,
+            graph,
+            name=prefix,
+            active=False,
+            weak=bool(getattr(value, "_advect_weak", False)),
+        )
         return traced
 
     paths, leaves, treedef = tree_flatten_with_paths(value)
@@ -215,7 +243,13 @@ def _trace_passive_outer_value(
         if traced_leaves is None:
             traced_leaves = list(leaves)
         leaf_name = _format_leaf_name(prefix, path)
-        traced, _node_id = _wrap_input(leaf, graph, name=leaf_name, active=False)
+        traced, _node_id = _wrap_input(
+            leaf,
+            graph,
+            name=leaf_name,
+            active=False,
+            weak=bool(getattr(leaf, "_advect_weak", False)),
+        )
         traced_leaves[index] = traced
 
     return value if traced_leaves is None else tree_unflatten(treedef, traced_leaves)
@@ -294,6 +328,15 @@ def _normalize_argnums_spec(argnums: int | tuple[int, ...]) -> tuple[tuple[int, 
     return argnums, False
 
 
+def _resolve_selection(
+    argnums: int | tuple[int, ...] | None,
+    argnames: tuple[str, ...] | None,
+) -> tuple[tuple[int, ...], bool]:
+    """Select argument zero by default, or no positions when only names are given."""
+    resolved = 0 if argnums is None and argnames is None else (() if argnums is None else argnums)
+    return _normalize_argnums_spec(resolved)
+
+
 def _normalize_argnums_for_call(argnums: tuple[int, ...], *, nargs: int) -> list[int]:
     """Normalize argnums for a specific call and validate they are in-range and unique."""
     normalized_argnums: list[int] = []
@@ -341,8 +384,6 @@ def _check_argnums_argnames_overlap(
         return
 
     metadata = _get_signature_metadata(f)
-    _validate_argnames(metadata.signature, argnames)
-
     for argnum in normalized_argnums:
         if argnum >= len(metadata.fixed_positional_names):
             continue
@@ -415,8 +456,6 @@ def _trace_named_selections(
         return traced_args, traced_kwargs, named_specs
 
     metadata = _get_signature_metadata(f)
-    _validate_argnames(metadata.signature, argnames)
-
     named_specs: dict[str, _TracedInputSpec] = {}
 
     for name in argnames:
@@ -466,6 +505,8 @@ def _trace_selected_args_and_kwargs(
     dict[str, _TracedInputSpec],
 ]:
     """Trace selected positional args and argnames (pytree-aware)."""
+    if argnames is not None and not isinstance(f, StagedProgram):
+        _validate_argnames(_get_signature_metadata(f).signature, argnames)
     _check_argnums_argnames_overlap(f, normalized_argnums=normalized_argnums, argnames=argnames)
 
     traced_args, pos_specs = _trace_positional_selections(

@@ -14,8 +14,12 @@ from advect.core import ArraySpec, primitive
 from advect.core._context import is_tracing
 from advect.scipy._frontend import (
     _array_operand,
+    _concrete_scipy,
+    _numpy_dtype,
+    _operand_dtype,
     _replace_out as _replace_traced_out,
     _require_numpy_values as _require_scipy_numpy_values,
+    _traceable_astype,
 )
 
 if TYPE_CHECKING:
@@ -37,148 +41,71 @@ type _UfuncOptions = tuple[
 _DEFAULT_UFUNC_OPTIONS: _UfuncOptions = ("same_kind", "K", None, True, None)
 _REFLECTION_BOUNDARY = 0.5
 _ERFCX_ASYMPTOTIC_BOUNDARY = 8.0
+_scipy_parity = _concrete_scipy(_scipy_special)
 
 
 def gammaln(x: object, /, out: object = None, **kwargs: object) -> object:
     """Compute the logarithm of the absolute gamma function."""
-    return _call_unary(
-        name="gammaln",
-        function=_scipy_special.gammaln,
-        primitive=_gammaln_primitive,
-        x=x,
-        out=out,
-        kwargs=kwargs,
-    )
+    return _call_unary("gammaln", x, out, kwargs)
 
 
 def digamma(x: object, /, out: object = None, **kwargs: object) -> object:
     """Compute the logarithmic derivative of the gamma function."""
-    return _call_unary(
-        name="digamma",
-        function=_scipy_special.digamma,
-        primitive=_digamma_primitive,
-        x=x,
-        out=out,
-        kwargs=kwargs,
-    )
+    return _call_unary("digamma", x, out, kwargs)
 
 
+@_scipy_parity
 def polygamma(n: object, x: object) -> object:
     """Compute the ``n``-th derivative of ``digamma`` with SciPy broadcasting."""
-    if not is_tracing():
-        _require_numpy_values("polygamma", n, x)
-        return _scipy_special.polygamma(n, x)
     return _polygamma_primitive(n=_array_operand(n), x=_array_operand(x))
 
 
 def erf(x: object, /, out: object = None, **kwargs: object) -> object:
     """Compute the error function."""
-    return _call_unary(
-        name="erf",
-        function=_scipy_special.erf,
-        primitive=_erf_primitive,
-        x=x,
-        out=out,
-        kwargs=kwargs,
-    )
+    return _call_unary("erf", x, out, kwargs)
 
 
 def erfc(x: object, /, out: object = None, **kwargs: object) -> object:
     """Compute the complementary error function."""
-    return _call_unary(
-        name="erfc",
-        function=_scipy_special.erfc,
-        primitive=_erfc_primitive,
-        x=x,
-        out=out,
-        kwargs=kwargs,
-    )
+    return _call_unary("erfc", x, out, kwargs)
 
 
 def erfcx(x: object, /, out: object = None, **kwargs: object) -> object:
     """Compute the scaled complementary error function."""
-    return _call_unary(
-        name="erfcx",
-        function=_scipy_special.erfcx,
-        primitive=_erfcx_primitive,
-        x=x,
-        out=out,
-        kwargs=kwargs,
-    )
+    return _call_unary("erfcx", x, out, kwargs)
 
 
 def erfinv(y: object, /, out: object = None, **kwargs: object) -> object:
     """Compute the inverse error function."""
-    return _call_unary(
-        name="erfinv",
-        function=_scipy_special.erfinv,
-        primitive=_erfinv_primitive,
-        x=y,
-        out=out,
-        kwargs=kwargs,
-    )
+    return _call_unary("erfinv", y, out, kwargs)
 
 
 def expit(x: object, /, out: object = None, **kwargs: object) -> object:
     """Compute the logistic sigmoid."""
-    return _call_unary(
-        name="expit",
-        function=_scipy_special.expit,
-        primitive=_expit_primitive,
-        x=x,
-        out=out,
-        kwargs=kwargs,
-    )
+    return _call_unary("expit", x, out, kwargs)
 
 
 def log_expit(x: object, /, out: object = None, **kwargs: object) -> object:
     """Compute the logarithm of the logistic sigmoid."""
-    return _call_unary(
-        name="log_expit",
-        function=_scipy_special.log_expit,
-        primitive=_log_expit_primitive,
-        x=x,
-        out=out,
-        kwargs=kwargs,
-    )
+    return _call_unary("log_expit", x, out, kwargs)
 
 
 def ndtr(x: object, /, out: object = None, **kwargs: object) -> object:
     """Compute the standard normal cumulative distribution function."""
-    return _call_unary(
-        name="ndtr",
-        function=_scipy_special.ndtr,
-        primitive=_ndtr_primitive,
-        x=x,
-        out=out,
-        kwargs=kwargs,
-    )
+    return _call_unary("ndtr", x, out, kwargs)
 
 
 def log_ndtr(x: object, /, out: object = None, **kwargs: object) -> object:
     """Compute the logarithm of the standard normal cumulative distribution."""
-    return _call_unary(
-        name="log_ndtr",
-        function=_scipy_special.log_ndtr,
-        primitive=_log_ndtr_primitive,
-        x=x,
-        out=out,
-        kwargs=kwargs,
-    )
+    return _call_unary("log_ndtr", x, out, kwargs)
 
 
 def ndtri(p: object, /, out: object = None, **kwargs: object) -> object:
     """Compute the inverse standard normal cumulative distribution."""
-    return _call_unary(
-        name="ndtri",
-        function=_scipy_special.ndtri,
-        primitive=_ndtri_primitive,
-        x=p,
-        out=out,
-        kwargs=kwargs,
-    )
+    return _call_unary("ndtri", p, out, kwargs)
 
 
+@_scipy_parity
 def logsumexp(
     a: object,
     axis: object = None,
@@ -187,15 +114,6 @@ def logsumexp(
     return_sign: bool = False,  # noqa: FBT001, FBT002 - SciPy-compatible spelling.
 ) -> object:
     """Compute SciPy-compatible weighted, optionally signed log-sum-exp."""
-    if not is_tracing():
-        _require_numpy_values("logsumexp", a, b)
-        return _scipy_special.logsumexp(
-            a,
-            axis=axis,
-            b=b,
-            keepdims=keepdims,
-            return_sign=return_sign,
-        )
     has_b = b is not None
     result, sign = _logsumexp_primitive(
         a=_array_operand(a),
@@ -208,22 +126,18 @@ def logsumexp(
     return (result, sign) if return_sign else result
 
 
+@_scipy_parity
 def softmax(x: object, axis: object = None) -> object:
     """Compute the softmax function along ``axis``."""
-    if not is_tracing():
-        _require_numpy_values("softmax", x)
-        return _scipy_special.softmax(x, axis=axis)
     return _softmax_primitive(
         x=_array_operand(x),
         axis=_static_axis(axis, name="softmax"),
     )
 
 
+@_scipy_parity
 def log_softmax(x: object, axis: object = None) -> object:
     """Compute the logarithm of the softmax function along ``axis``."""
-    if not is_tracing():
-        _require_numpy_values("log_softmax", x)
-        return _scipy_special.log_softmax(x, axis=axis)
     return _log_softmax_primitive(
         x=_array_operand(x),
         axis=_static_axis(axis, name="log_softmax"),
@@ -322,23 +236,15 @@ def _replace_out(destination: object, replacement: object) -> object:
     )
 
 
-def _call_unary(
-    *,
-    name: str,
-    function: Callable[..., Any],
-    primitive: Primitive[..., Any],
-    x: object,
-    out: object,
-    kwargs: dict[str, object],
-) -> object:
+def _call_unary(name: str, x: object, out: object, kwargs: dict[str, object]) -> object:
     if not is_tracing():
         _require_numpy_values(name, x, out, kwargs.get("where"))
-        return function(x, out=out, **kwargs)
+        return getattr(_scipy_special, name)(x, out=out, **kwargs)
 
     destination = _normalize_out(out)
     has_out = destination is not None
     options = _normalize_ufunc_options(kwargs)
-    replacement = primitive(
+    replacement = _UNARY_PRIMITIVES[name](
         x=_array_operand(x),
         destination=_array_operand(x if destination is None else destination),
         has_out=has_out,
@@ -408,16 +314,6 @@ def _reduction_shape(
     return tuple(size for index, size in enumerate(shape) if index not in axes)
 
 
-def _numpy_dtype(dtype: Any) -> np.dtype[Any]:
-    try:
-        return np.dtype(dtype)
-    except (TypeError, ValueError) as error:
-        msg = (
-            f"advect.scipy special functions support NumPy dtype specifications only; got {dtype!r}"
-        )
-        raise TypeError(msg) from error
-
-
 def _ufunc_runtime_kwargs(
     *,
     options: _UfuncOptions,
@@ -437,28 +333,18 @@ def _ufunc_runtime_kwargs(
     return kwargs
 
 
-def _operand_dtype(value: Any) -> np.dtype[Any]:
-    dtype = getattr(value, "dtype", None)
-    return np.asarray(value).dtype if dtype is None else _numpy_dtype(dtype)
-
-
 def _is_inexact_dtype(dtype: np.dtype[Any]) -> bool:
     return np.issubdtype(dtype, np.inexact)
 
 
-def _traceable_astype(value: Any, dtype: np.dtype[Any]) -> Any:
-    source_dtype = _operand_dtype(value)
-    if source_dtype == dtype:
-        return value
-    if np.issubdtype(source_dtype, np.complexfloating) and not np.issubdtype(
-        dtype,
-        np.complexfloating,
-    ):
-        value = np.real(value)
-    astype = getattr(value, "astype", None)
-    if callable(astype):
-        return astype(dtype)
-    return np.asarray(value, dtype=dtype)
+def _cotangent_at_primal_precision(cotangent: Any, primal: Any) -> Any:
+    """Cast ``cotangent`` to an inexact primal's dtype.
+
+    SciPy may compute in a wider float than the primal. An integer or boolean
+    primal keeps that working precision instead of a truncating cast.
+    """
+    dtype = _operand_dtype(primal)
+    return _traceable_astype(cotangent, dtype) if _is_inexact_dtype(dtype) else cotangent
 
 
 def _unary_loop_dtypes(
@@ -555,11 +441,9 @@ def _unary_abstract(
     )
 
 
-def _install_unary(
-    name: str,
-    implementation: Callable[[Any], Any],
-    derivative: Callable[[Any], Any],
-) -> Primitive[..., Any]:
+def _install_unary(name: str, derivative: Callable[[Any], Any]) -> Primitive[..., Any]:
+    implementation = getattr(_scipy_special, name)
+
     @primitive(
         name=f"scipy.special.{name}",
         static_argnames=("has_out", "options"),
@@ -705,8 +589,8 @@ def _complex_trigamma(x: Any) -> Any:
 
 
 def _expit_derivative(x: Any) -> Any:
-    value = cast("Any", expit(x))
-    return value * (1 - value)
+    # ``1 - expit(x)`` cancels in the upper tail; ``expit(-x)`` stays exact.
+    return cast("Any", expit(x)) * cast("Any", expit(-x))
 
 
 def _erfcx_derivative(x: Any) -> Any:
@@ -731,7 +615,20 @@ def _erfinv_derivative(x: Any) -> Any:
 
 
 def _log_ndtr_derivative(x: Any) -> Any:
-    return math.sqrt(2 / math.pi) / cast("Any", erfcx(-x / math.sqrt(2)))
+    # Scaling by erfcx keeps the lower tail exact, but erfcx overflows in the
+    # real upper tail, where the nested derivative of its reciprocal would
+    # divide infinities. There ndtr(x) = erfc(-x / sqrt(2)) / 2 stays near one
+    # and exp(-x**2 / 2) underflows smoothly instead.
+    scale = math.sqrt(2 / math.pi)
+    if _operand_dtype(x).kind == "c":
+        return scale / cast("Any", erfcx(-x / math.sqrt(2)))
+    upper = x > 0
+    lower_x, upper_x = np.where(upper, 0, x), np.where(upper, x, 0)
+    lower_tail = scale / cast("Any", erfcx(-lower_x / math.sqrt(2)))
+    upper_tail = (
+        scale * np.exp(-0.5 * upper_x * upper_x) / cast("Any", erfc(-upper_x / math.sqrt(2)))
+    )
+    return np.where(upper, upper_tail, lower_tail)
 
 
 def _ndtri_derivative(x: Any) -> Any:
@@ -775,7 +672,8 @@ def _polygamma_transpose(
 ) -> tuple[None, Any]:
     del output
     n, x = primals
-    return None, np.conj(cast("Any", polygamma(n + 1, x))) * cotangent
+    x_cotangent = np.conj(cast("Any", polygamma(n + 1, x))) * cotangent
+    return None, _cotangent_at_primal_precision(x_cotangent, x)
 
 
 def _logsumexp_impl(
@@ -922,17 +820,15 @@ def _logsumexp_transpose(
         axis=axis,
         keepdims=keepdims,
     )
-    a_cotangent = np.conj(weights * b) * expanded_cotangent
-    b_cotangent = np.conj(weights) * expanded_cotangent if has_b else None
-    return a_cotangent, b_cotangent
+    a_cotangent = _cotangent_at_primal_precision(np.conj(weights * b) * expanded_cotangent, a)
+    if not has_b:
+        return a_cotangent, None
+    return a_cotangent, _cotangent_at_primal_precision(np.conj(weights) * expanded_cotangent, b)
 
 
-def _install_normalization(
-    name: str,
-    implementation: Callable[..., Any],
-    *,
-    logarithmic: bool,
-) -> Primitive[..., Any]:
+def _install_normalization(name: str, *, logarithmic: bool) -> Primitive[..., Any]:
+    implementation = getattr(_scipy_special, name)
+
     @primitive(
         name=f"scipy.special.{name}",
         static_argnames=("axis",),
@@ -1044,43 +940,24 @@ _logsumexp_primitive.def_abstract(_logsumexp_abstract)
 _logsumexp_primitive.def_jvp(_logsumexp_jvp)
 _logsumexp_primitive.def_transpose(_logsumexp_transpose)
 
-_gammaln_primitive = _install_unary("gammaln", _scipy_special.gammaln, digamma)
-_digamma_primitive = _install_unary("digamma", _scipy_special.digamma, _complex_trigamma)
-_erf_primitive = _install_unary(
-    "erf",
-    _scipy_special.erf,
-    lambda x: (2.0 / math.sqrt(math.pi)) * np.exp(-(x * x)),
-)
-_erfc_primitive = _install_unary(
-    "erfc",
-    _scipy_special.erfc,
-    lambda x: (-2.0 / math.sqrt(math.pi)) * np.exp(-(x * x)),
-)
-_erfcx_primitive = _install_unary("erfcx", _scipy_special.erfcx, _erfcx_derivative)
-_erfinv_primitive = _install_unary("erfinv", _scipy_special.erfinv, _erfinv_derivative)
-_expit_primitive = _install_unary("expit", _scipy_special.expit, _expit_derivative)
-_log_expit_primitive = _install_unary(
-    "log_expit",
-    _scipy_special.log_expit,
-    lambda x: cast("Any", expit(-x)),
-)
-_ndtr_primitive = _install_unary(
-    "ndtr",
-    _scipy_special.ndtr,
-    lambda x: np.exp(-0.5 * x * x) / math.sqrt(2.0 * math.pi),
-)
-_log_ndtr_primitive = _install_unary("log_ndtr", _scipy_special.log_ndtr, _log_ndtr_derivative)
-_ndtri_primitive = _install_unary("ndtri", _scipy_special.ndtri, _ndtri_derivative)
-_softmax_primitive = _install_normalization(
-    "softmax",
-    _scipy_special.softmax,
-    logarithmic=False,
-)
-_log_softmax_primitive = _install_normalization(
-    "log_softmax",
-    _scipy_special.log_softmax,
-    logarithmic=True,
-)
+_UNARY_DERIVATIVES: dict[str, Callable[[Any], Any]] = {
+    "gammaln": digamma,
+    "digamma": _complex_trigamma,
+    "erf": lambda x: (2.0 / math.sqrt(math.pi)) * np.exp(-(x * x)),
+    "erfc": lambda x: (-2.0 / math.sqrt(math.pi)) * np.exp(-(x * x)),
+    "erfcx": _erfcx_derivative,
+    "erfinv": _erfinv_derivative,
+    "expit": _expit_derivative,
+    "log_expit": lambda x: cast("Any", expit(-x)),
+    "ndtr": lambda x: np.exp(-0.5 * x * x) / math.sqrt(2.0 * math.pi),
+    "log_ndtr": _log_ndtr_derivative,
+    "ndtri": _ndtri_derivative,
+}
+_UNARY_PRIMITIVES = {
+    name: _install_unary(name, derivative) for name, derivative in _UNARY_DERIVATIVES.items()
+}
+_softmax_primitive = _install_normalization("softmax", logarithmic=False)
+_log_softmax_primitive = _install_normalization("log_softmax", logarithmic=True)
 
 
 __all__ = [

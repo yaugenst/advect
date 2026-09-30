@@ -5,10 +5,12 @@ from __future__ import annotations
 from types import SimpleNamespace
 from typing import Any
 
+import array_api_strict as strict
 import numpy as np
 import pytest
 
 from advect.autodiff.rules.array_family.providers import (
+    _runtime_array_api_provider,
     resolve_array_family_backend_provider,
     try_resolve_array_family_backend_provider,
 )
@@ -32,13 +34,19 @@ def _nonstandard_runtime_namespace(name: str) -> SimpleNamespace:
     )
 
 
-def test_numpy_resolves_directly_from_its_runtime_namespace() -> None:
-    value = np.asarray([1.0, 2.0])
-
+@pytest.mark.parametrize(
+    ("value", "backend", "namespace"),
+    [
+        (np.asarray([1.0, 2.0]), "numpy", np),
+        (strict.asarray([1.0, 2.0], dtype=strict.float64), "array_api_strict", strict),
+    ],
+    ids=["numpy", "array-api-strict"],
+)
+def test_runtime_value_resolves_its_own_namespace(value: Any, backend: str, namespace: Any) -> None:
     provider = resolve_array_family_backend_provider(value)
 
-    assert provider.backend == "numpy"
-    assert provider.namespace is np
+    assert provider.backend == backend
+    assert provider.namespace is namespace
 
 
 def test_module_provider_is_reused() -> None:
@@ -60,3 +68,22 @@ def test_provider_resolution_does_not_guess_from_python_scalars() -> None:
     assert try_resolve_array_family_backend_provider(1.0) is None
     with pytest.raises(RuntimeError, match="Could not resolve"):
         resolve_array_family_backend_provider(1.0)
+
+
+@pytest.mark.parametrize(
+    ("reported", "accepted"),
+    [("2024.12", True), ("2025.12", True), ("2023.12", False), ("latest", False)],
+)
+def test_derivative_provider_requires_the_negotiated_revision(
+    reported: str,
+    accepted: bool,  # noqa: FBT001 - parametrized expectation
+) -> None:
+    # Rules and negotiation share one predicate, so a derivative provider is
+    # never built for a namespace that could not have negotiated the revision.
+    namespace = _nonstandard_runtime_namespace("provider")
+    namespace.__array_api_version__ = reported
+    namespace.zeros_like = namespace.ones_like = lambda value: value
+
+    provider = _runtime_array_api_provider("provider", namespace, array_api_version="2024.12")
+
+    assert (provider is not None) is accepted

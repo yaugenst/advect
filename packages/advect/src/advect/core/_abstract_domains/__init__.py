@@ -20,6 +20,8 @@ from advect.core._abstract_domains import (
 if TYPE_CHECKING:
     from advect.core._abstract_model import AbstractRule, ResultEvaluator
 
+_DOMAINS = (elementwise, creation, reductions, shape, indexing, contractions, linalg, fft, signal)
+
 
 def _merge_unique[T](
     tables: tuple[dict[str, T], ...],
@@ -39,34 +41,8 @@ def _merge_unique[T](
 @lru_cache(maxsize=1)
 def operation_semantics() -> tuple[tuple[str, AbstractRule, ResultEvaluator], ...]:
     """Return each built-in operation's schema with its abstract evaluator."""
-    rules = _merge_unique(
-        (
-            elementwise.RULES,
-            creation.RULES,
-            reductions.RULES,
-            shape.RULES,
-            indexing.RULES,
-            contractions.RULES,
-            linalg.RULES,
-            fft.RULES,
-            signal.RULES,
-        ),
-        label="operation",
-    )
-    evaluators = _merge_unique(
-        (
-            elementwise.EVALUATORS,
-            creation.EVALUATORS,
-            reductions.EVALUATORS,
-            shape.EVALUATORS,
-            indexing.EVALUATORS,
-            contractions.EVALUATORS,
-            linalg.EVALUATORS,
-            fft.EVALUATORS,
-            signal.EVALUATORS,
-        ),
-        label="result-kind",
-    )
+    rules = _merge_unique(tuple(domain.RULES for domain in _DOMAINS), label="operation")
+    evaluators = _merge_unique(tuple(domain.EVALUATORS for domain in _DOMAINS), label="result-kind")
     declared_kinds = {rule.kind for rule in rules.values()}
     missing_evaluators = declared_kinds - evaluators.keys()
     orphan_evaluators = evaluators.keys() - declared_kinds

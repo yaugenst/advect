@@ -69,9 +69,15 @@ assembled in `advect/_builtin_ops.py` from authorities that remain separate:
 
 - abstract operand and result semantics live in
   `core/_abstract_domains/<family>.py`;
-- JVP-first formulas live under `autodiff/rules/array_family/jvp/`;
-- the smaller set of explicit real-adjoint formulas lives under
-  `autodiff/rules/array_family/vjp/`;
+- JVP-first formulas live under `autodiff/rules/array_family/jvp/`. A
+  diagonal elementwise operation is one entry in `jvp/elementwise_partials.py`:
+  its JVP and VJP are both generated from those partials, and the table that
+  holds the entry sets which primal values reverse mode retains;
+- the other explicit real-adjoint formulas live under
+  `autodiff/rules/array_family/vjp/`. An adjoint that accumulates into indexed
+  positions calls `scatter_add` from `core/_scatter_add.py`, which records the
+  internal `advect.scatter_add` operation on any trace and otherwise evaluates
+  it through the provider; never build a one-hot basis;
 - NumPy reachability belongs to its protocol path: ufunc admission in
   `numpy/_supported_ufuncs.py`, array-function handlers under
   `numpy/_array_function/`, canonical naming in `numpy/_op_bindings.py`, and
@@ -85,6 +91,15 @@ assembled in `advect/_builtin_ops.py` from authorities that remain separate:
 For a multi-output op, add its fixed arity there and make each frontend agree
 with that result structure. Do not create one registry operation per result:
 `advect.getoutput` is the structural projection from the canonical parent.
+
+A dynamic derivative sweep holds a weak operand as its Python scalar. The
+rules of the operations in `WEAK_SCALAR_OPS`
+(`advect/core/_array_protocol_helpers.py`), the unary and binary elementwise
+operations and creation from a prototype, receive it that way and promote it
+by NEP 50. Every other array-family rule receives each Python-scalar operand,
+tangent, and cotangent as a rank-zero provider array, so it may read shapes
+and dtypes directly. Other rules, such as those of custom primitives and of
+the SciPy frontend, receive the Python scalar unchanged.
 
 Complete all applicable owners as one coherent change. Define abstract
 semantics for each staged form, install the JVP, and add an explicit VJP only
@@ -100,8 +115,11 @@ different.
 
 Choose a Hypothesis domain on which every generated example is smooth and well
 conditioned. Encode constraints in the domain rather than widening tolerances
-around kinks, singularities, ties, or unstable decompositions. If a law truly
-does not apply, narrow `laws` and give the case a `reason`.
+around kinks, singularities, ties, or unstable decompositions; a separate
+lattice law checks forward and reverse agreement at those points. If a law
+truly does not apply, narrow `laws` and give the case a `reason`. If nested
+transforms cannot differentiate the invocation's pullback, quote the documented
+refusal in `first_order`; the adjoint law then checks that they still raise it.
 
 Then classify the operation and each invocation precisely:
 
@@ -156,10 +174,9 @@ bespoke derivative rule.
 
 Dynamic and abstract dispatch are related but distinct implementations. For a
 new array-valued or data-dependent array-function form, put its concrete traced
-handler in the owning `_array_function/` family, expose it through that
-family's `register_*_handlers()`, and let
-`families.register_family_handlers()` and `registry._register_all_handlers()`
-aggregate it. A trace-independent metadata form instead belongs in
+handler in the owning `_array_function/` family and register it in that
+family's `register_*_handlers()`, which `registry._register_all_handlers()`
+calls. A trace-independent metadata form instead belongs in
 `registry._STATIC_ARRAY_FUNCTIONS` and resolves from concrete or abstract
 metadata without a handler or graph node. Do not create another handler
 registry or derive a support claim from either dispatch table.
@@ -187,14 +204,22 @@ For every new or materially different public form:
 2. Add a test-only `NumpySupportCase` in
    `advect_numpy_tests/_support_cases.py` or
    `advect_numpy_tests/_support_case_families.py`.
-3. Set `derivative_argnums` to the exact independently active input-role groups
-   and every meaningful combined group. These integers index
-   `NumpySupportCase.inputs`, which are the arguments passed to the test's
-   internal `call(*inputs)` wrapper; they are not positions in NumPy's public
-   signature. An `Input(i)` may place the same test input inside a nested
-   positional argument or keyword value.
-4. Exercise every claimed `dynamic`, `staged`, and `serialized` lifetime.
-   Unsupported lifetimes must remain undeclared.
+3. A differentiable case differentiates each floating input alone and all of
+   them together. When those are not the independently active input roles, set
+   `derivative_argnums` to the exact groups and every meaningful combination.
+   These integers index `NumpySupportCase.inputs`, which are the arguments
+   passed to the test's internal `call(*inputs)` wrapper; they are not
+   positions in NumPy's public signature. An `Input(i)` may place the same test
+   input inside a nested positional argument or keyword value. The gate checks
+   each group's derivative values against central differences and the adjoint
+   identity.
+4. The gate exercises every declared `dynamic`, `staged`, and `serialized`
+   lifetime, and requires a dynamic-only form to have a case that staging
+   rejects. Unsupported lifetimes must remain undeclared; mark a documented
+   spelling that stages within a dynamic-only form with `stages=True`. A staged
+   differentiable case also stages forward mode and stages its pullback program
+   again at the oldest Array API revision, so its derivative rules may emit only
+   functions of the program's target revision.
 5. For a non-differentiable form, still prove primal values, dtype, no input
    mutation, and every declared staged or serialized mode.
 6. Add an `InvocationCase` as well if the form introduces or newly exposes a

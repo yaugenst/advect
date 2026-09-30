@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import sys
 import tomllib
 from pathlib import Path
 
@@ -15,7 +16,21 @@ def _is_type_checking_guard(test: ast.AST) -> bool:
     return False
 
 
-class _BackendImportVisitor(ast.NodeVisitor):
+# The native extension and the lazy registry bootstrap are core's only
+# dependencies outside the standard library and advect.core itself.
+_ALLOWED_ADVECT_MODULES = frozenset({"advect._native_core", "advect._builtin_ops"})
+
+
+def _is_allowed_core_import(module: str) -> bool:
+    return (
+        module.partition(".")[0] in sys.stdlib_module_names
+        or module == "advect.core"
+        or module.startswith("advect.core.")
+        or module in _ALLOWED_ADVECT_MODULES
+    )
+
+
+class _RuntimeImportVisitor(ast.NodeVisitor):
     def __init__(self) -> None:
         self.offenders: list[tuple[int, str]] = []
         self.in_type_checking_stack: list[bool] = [False]
@@ -36,29 +51,20 @@ class _BackendImportVisitor(ast.NodeVisitor):
         for stmt in node.orelse:
             self.visit(stmt)
 
-    def _record_if_banned(self, module: str, lineno: int) -> None:
-        if self.in_type_checking:
-            return
-        if module == "numpy" or module.startswith("numpy."):
-            self.offenders.append((lineno, module))
-        if module == "cupy" or module.startswith("cupy."):
-            self.offenders.append((lineno, module))
-        if module in {"advect.numpy", "advect.cupy"} or module.startswith(
-            ("advect.numpy.", "advect.cupy.")
-        ):
+    def _record_unless_allowed(self, module: str, lineno: int) -> None:
+        if not self.in_type_checking and not _is_allowed_core_import(module):
             self.offenders.append((lineno, module))
 
     def visit_Import(self, node: ast.Import) -> None:
         for alias in node.names:
-            self._record_if_banned(alias.name, node.lineno)
+            self._record_unless_allowed(alias.name, node.lineno)
 
     def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
-        if node.module is None:
-            return
-        self._record_if_banned(node.module, node.lineno)
+        # Core uses absolute imports only, so a relative import is reported too.
+        self._record_unless_allowed("." * node.level + (node.module or ""), node.lineno)
 
 
-def test_core_does_not_runtime_import_provider_frontends() -> None:
+def test_core_runtime_imports_only_the_standard_library_and_core() -> None:
     core_dir = Path(__file__).resolve().parents[2] / "src" / "advect" / "core"
     protocol_files = sorted(core_dir.rglob("_array_protocol_*.py"))
     assert [path.relative_to(core_dir).as_posix() for path in protocol_files] == [
@@ -68,7 +74,7 @@ def test_core_does_not_runtime_import_provider_frontends() -> None:
     offenders: list[str] = []
     for path in sorted(core_dir.rglob("*.py")):
         tree = ast.parse(path.read_text())
-        visitor = _BackendImportVisitor()
+        visitor = _RuntimeImportVisitor()
         visitor.visit(tree)
         for lineno, module in visitor.offenders:
             relative_path = path.relative_to(core_dir).as_posix()

@@ -33,15 +33,12 @@ def _jvp_full(
     ans: xp.ndarray,
     fill_value: xp.ndarray | complex,
     *rest: xp.ndarray,
-    tangents: tuple[xp.ndarray | None, ...],
+    tangents: tuple[xp.ndarray, ...],
     **attrs: Any,
 ) -> xp.ndarray:
     """JVP for numpy.full."""
     _ = fill_value, rest, attrs
-    tangent = tangents[0] if tangents else None
-    if tangent is None:
-        return _zeros_output_tangent(ans, tangents)
-    broadcasted = xp.broadcast_to(tangent, _shape_unwrapped(ans))
+    broadcasted = xp.broadcast_to(tangents[0], _shape_unwrapped(ans))
     casted = _astype_preserving_trace(broadcasted, dtype=ans.dtype)
     return cast("xp.ndarray[Any, Any]", _copy_if_untraced_array(casted))
 

@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 import numpy as np
 from scipy import ndimage as _scipy_ndimage
 
-from advect.core._context import is_tracing
+from advect.scipy._frontend import _concrete_scipy
 from advect.scipy._ndimage.common import (
     _call_primitive,
     _finish_output,
@@ -23,7 +23,6 @@ from advect.scipy._ndimage.common import (
     _normalize_sequence,
     _operand_dtype,
     _output_dtype,
-    _require_numpy_values,
     _static_scalar,
     _traceable_astype,
     _validate_ufunc_output_cast,
@@ -59,6 +58,10 @@ if TYPE_CHECKING:
         __advect_lowering__: str
 
 
+_scipy_parity = _concrete_scipy(_scipy_ndimage)
+
+
+@_scipy_parity
 def gaussian_filter(
     input: object,
     sigma: object,
@@ -72,19 +75,6 @@ def gaussian_filter(
     axes: object = None,
 ) -> object:
     """Apply a multidimensional Gaussian filter with exact boundary adjoints."""
-    if not is_tracing():
-        _require_numpy_values("gaussian_filter", input, output)
-        return _scipy_ndimage.gaussian_filter(
-            input,
-            sigma,
-            order=order,
-            output=output,
-            mode=mode,
-            cval=cval,
-            truncate=truncate,
-            radius=radius,
-            axes=axes,
-        )
     normalized_axes = _normalize_axes(axes, _ndim_of(input))
     return _call_primitive(
         _gaussian_filter_primitive,
@@ -103,6 +93,7 @@ def gaussian_filter(
     )
 
 
+@_scipy_parity
 def gaussian_filter1d(
     input: object,
     sigma: object,
@@ -116,19 +107,6 @@ def gaussian_filter1d(
     radius: object = None,
 ) -> object:
     """Apply a one-dimensional Gaussian filter along ``axis``."""
-    if not is_tracing():
-        _require_numpy_values("gaussian_filter1d", input, output)
-        return _scipy_ndimage.gaussian_filter1d(
-            input,
-            sigma,
-            axis=axis,
-            order=order,
-            output=output,
-            mode=mode,
-            cval=cval,
-            truncate=truncate,
-            radius=radius,
-        )
     normalized_axis = _normalize_axis(axis, _ndim_of(input))
     return _call_primitive(
         _gaussian_filter1d_primitive,
@@ -147,6 +125,7 @@ def gaussian_filter1d(
     )
 
 
+@_scipy_parity
 def uniform_filter(
     input: object,
     size: object = 3,
@@ -158,17 +137,6 @@ def uniform_filter(
     axes: object = None,
 ) -> object:
     """Apply a multidimensional uniform filter."""
-    if not is_tracing():
-        _require_numpy_values("uniform_filter", input, output)
-        return _scipy_ndimage.uniform_filter(
-            input,
-            size=size,
-            output=output,
-            mode=mode,
-            cval=cval,
-            origin=origin,
-            axes=axes,
-        )
     normalized_axes = _normalize_axes(axes, _ndim_of(input))
     return _call_primitive(
         _uniform_filter_primitive,
@@ -188,6 +156,7 @@ def uniform_filter(
     )
 
 
+@_scipy_parity
 def uniform_filter1d(
     input: object,
     size: object,
@@ -198,17 +167,6 @@ def uniform_filter1d(
     origin: object = 0,
 ) -> object:
     """Apply a one-dimensional uniform filter along ``axis``."""
-    if not is_tracing():
-        _require_numpy_values("uniform_filter1d", input, output)
-        return _scipy_ndimage.uniform_filter1d(
-            input,
-            size,
-            axis=axis,
-            output=output,
-            mode=mode,
-            cval=cval,
-            origin=origin,
-        )
     normalized_axis = _normalize_axis(axis, _ndim_of(input))
     return _call_primitive(
         _uniform_filter1d_primitive,
@@ -225,6 +183,7 @@ def uniform_filter1d(
     )
 
 
+@_scipy_parity
 def convolve(
     input: object,
     weights: object,
@@ -236,17 +195,6 @@ def convolve(
     axes: object = None,
 ) -> object:
     """Multidimensional convolution with differentiable input and weights."""
-    if not is_tracing():
-        _require_numpy_values("convolve", input, weights, output)
-        return _scipy_ndimage.convolve(
-            input,
-            weights,
-            output=output,
-            mode=mode,
-            cval=cval,
-            origin=origin,
-            axes=axes,
-        )
     return _correlation_call(
         "convolve",
         _convolve_primitive,
@@ -261,6 +209,7 @@ def convolve(
     )
 
 
+@_scipy_parity
 def correlate(
     input: object,
     weights: object,
@@ -272,17 +221,6 @@ def correlate(
     axes: object = None,
 ) -> object:
     """Multidimensional correlation with differentiable input and weights."""
-    if not is_tracing():
-        _require_numpy_values("correlate", input, weights, output)
-        return _scipy_ndimage.correlate(
-            input,
-            weights,
-            output=output,
-            mode=mode,
-            cval=cval,
-            origin=origin,
-            axes=axes,
-        )
     return _correlation_call(
         "correlate",
         _correlate_primitive,
@@ -297,6 +235,7 @@ def correlate(
     )
 
 
+@_scipy_parity
 def convolve1d(
     input: object,
     weights: object,
@@ -307,17 +246,6 @@ def convolve1d(
     origin: object = 0,
 ) -> object:
     """One-dimensional convolution with differentiable input and weights."""
-    if not is_tracing():
-        _require_numpy_values("convolve1d", input, weights, output)
-        return _scipy_ndimage.convolve1d(
-            input,
-            weights,
-            axis=axis,
-            output=output,
-            mode=mode,
-            cval=cval,
-            origin=origin,
-        )
     return _correlation_call(
         "convolve1d",
         _convolve1d_primitive,
@@ -332,6 +260,7 @@ def convolve1d(
     )
 
 
+@_scipy_parity
 def correlate1d(
     input: object,
     weights: object,
@@ -342,17 +271,6 @@ def correlate1d(
     origin: object = 0,
 ) -> object:
     """One-dimensional correlation with differentiable input and weights."""
-    if not is_tracing():
-        _require_numpy_values("correlate1d", input, weights, output)
-        return _scipy_ndimage.correlate1d(
-            input,
-            weights,
-            axis=axis,
-            output=output,
-            mode=mode,
-            cval=cval,
-            origin=origin,
-        )
     return _correlation_call(
         "correlate1d",
         _correlate1d_primitive,
@@ -367,6 +285,7 @@ def correlate1d(
     )
 
 
+@_scipy_parity
 def laplace(
     input: object,
     output: object = None,
@@ -376,15 +295,6 @@ def laplace(
     axes: object = None,
 ) -> object:
     """Apply the discrete multidimensional Laplace operator."""
-    if not is_tracing():
-        _require_numpy_values("laplace", input, output)
-        return _scipy_ndimage.laplace(
-            input,
-            output=output,
-            mode=mode,
-            cval=cval,
-            axes=axes,
-        )
     normalized_axes = _normalize_axes(axes, _ndim_of(input))
     if not normalized_axes:
         return _finish_output(
@@ -417,6 +327,7 @@ def laplace(
     )
 
 
+@_scipy_parity
 def gaussian_laplace(
     input: object,
     sigma: object,
@@ -428,17 +339,6 @@ def gaussian_laplace(
     **kwargs: object,
 ) -> object:
     """Apply a Laplacian of Gaussian filter."""
-    if not is_tracing():
-        _require_numpy_values("gaussian_laplace", input, output)
-        return _scipy_ndimage.gaussian_laplace(
-            input,
-            sigma,
-            output=output,
-            mode=mode,
-            cval=cval,
-            axes=axes,
-            **kwargs,
-        )
     ndim = _ndim_of(input)
     normalized_axes = _normalize_axes(axes, ndim)
     if not normalized_axes:
@@ -526,6 +426,7 @@ def _edge_filter(
     )
 
 
+@_scipy_parity
 def sobel(
     input: object,
     axis: object = -1,
@@ -534,15 +435,6 @@ def sobel(
     cval: object = 0.0,
 ) -> object:
     """Calculate an axis-specific Sobel filter."""
-    if not is_tracing():
-        _require_numpy_values("sobel", input, output)
-        return _scipy_ndimage.sobel(
-            input,
-            axis=axis,
-            output=output,
-            mode=mode,
-            cval=cval,
-        )
     return _edge_filter(
         "sobel",
         input,
@@ -554,6 +446,7 @@ def sobel(
     )
 
 
+@_scipy_parity
 def prewitt(
     input: object,
     axis: object = -1,
@@ -562,15 +455,6 @@ def prewitt(
     cval: object = 0.0,
 ) -> object:
     """Calculate an axis-specific Prewitt filter."""
-    if not is_tracing():
-        _require_numpy_values("prewitt", input, output)
-        return _scipy_ndimage.prewitt(
-            input,
-            axis=axis,
-            output=output,
-            mode=mode,
-            cval=cval,
-        )
     return _edge_filter(
         "prewitt",
         input,
@@ -586,6 +470,7 @@ for _composite in (laplace, gaussian_laplace, sobel, prewitt):
     cast("_LoweringMetadata", _composite).__advect_lowering__ = "composite"
 
 
+@_scipy_parity
 def maximum_filter(
     input: object,
     size: object = None,
@@ -598,18 +483,6 @@ def maximum_filter(
     axes: object = None,
 ) -> object:
     """Calculate a multidimensional maximum filter with symmetric tie gradients."""
-    if not is_tracing():
-        _require_numpy_values("maximum_filter", input, footprint, output)
-        return _scipy_ndimage.maximum_filter(
-            input,
-            size=size,
-            footprint=footprint,
-            output=output,
-            mode=mode,
-            cval=cval,
-            origin=origin,
-            axes=axes,
-        )
     return _selection_call(
         "maximum_filter",
         _maximum_filter_primitive,
@@ -625,6 +498,7 @@ def maximum_filter(
     )
 
 
+@_scipy_parity
 def minimum_filter(
     input: object,
     size: object = None,
@@ -637,18 +511,6 @@ def minimum_filter(
     axes: object = None,
 ) -> object:
     """Calculate a multidimensional minimum filter with symmetric tie gradients."""
-    if not is_tracing():
-        _require_numpy_values("minimum_filter", input, footprint, output)
-        return _scipy_ndimage.minimum_filter(
-            input,
-            size=size,
-            footprint=footprint,
-            output=output,
-            mode=mode,
-            cval=cval,
-            origin=origin,
-            axes=axes,
-        )
     return _selection_call(
         "minimum_filter",
         _minimum_filter_primitive,
@@ -664,6 +526,7 @@ def minimum_filter(
     )
 
 
+@_scipy_parity
 def maximum_filter1d(
     input: object,
     size: object,
@@ -674,17 +537,6 @@ def maximum_filter1d(
     origin: object = 0,
 ) -> object:
     """Calculate a one-dimensional maximum filter."""
-    if not is_tracing():
-        _require_numpy_values("maximum_filter1d", input, output)
-        return _scipy_ndimage.maximum_filter1d(
-            input,
-            size,
-            axis=axis,
-            output=output,
-            mode=mode,
-            cval=cval,
-            origin=origin,
-        )
     return _selection_call(
         "maximum_filter1d",
         _maximum_filter1d_primitive,
@@ -701,6 +553,7 @@ def maximum_filter1d(
     )
 
 
+@_scipy_parity
 def minimum_filter1d(
     input: object,
     size: object,
@@ -711,17 +564,6 @@ def minimum_filter1d(
     origin: object = 0,
 ) -> object:
     """Calculate a one-dimensional minimum filter."""
-    if not is_tracing():
-        _require_numpy_values("minimum_filter1d", input, output)
-        return _scipy_ndimage.minimum_filter1d(
-            input,
-            size,
-            axis=axis,
-            output=output,
-            mode=mode,
-            cval=cval,
-            origin=origin,
-        )
     return _selection_call(
         "minimum_filter1d",
         _minimum_filter1d_primitive,
@@ -738,6 +580,7 @@ def minimum_filter1d(
     )
 
 
+@_scipy_parity
 def grey_dilation(
     input: object,
     size: object = None,
@@ -751,19 +594,6 @@ def grey_dilation(
     axes: object = None,
 ) -> object:
     """Calculate a greyscale dilation with symmetric tie gradients."""
-    if not is_tracing():
-        _require_numpy_values("grey_dilation", input, footprint, structure, output)
-        return _scipy_ndimage.grey_dilation(
-            input,
-            size=size,
-            footprint=footprint,
-            structure=structure,
-            output=output,
-            mode=mode,
-            cval=cval,
-            origin=origin,
-            axes=axes,
-        )
     if size is None and footprint is None and structure is None:
         raise ValueError("size, footprint, or structure must be specified")
     return _selection_call(
@@ -781,6 +611,7 @@ def grey_dilation(
     )
 
 
+@_scipy_parity
 def grey_erosion(
     input: object,
     size: object = None,
@@ -794,19 +625,6 @@ def grey_erosion(
     axes: object = None,
 ) -> object:
     """Calculate a greyscale erosion with symmetric tie gradients."""
-    if not is_tracing():
-        _require_numpy_values("grey_erosion", input, footprint, structure, output)
-        return _scipy_ndimage.grey_erosion(
-            input,
-            size=size,
-            footprint=footprint,
-            structure=structure,
-            output=output,
-            mode=mode,
-            cval=cval,
-            origin=origin,
-            axes=axes,
-        )
     if size is None and footprint is None and structure is None:
         raise ValueError("size, footprint, or structure must be specified")
     return _selection_call(
@@ -824,6 +642,7 @@ def grey_erosion(
     )
 
 
+@_scipy_parity
 def median_filter(
     input: object,
     size: object = None,
@@ -836,18 +655,6 @@ def median_filter(
     axes: object = None,
 ) -> object:
     """Calculate a multidimensional median filter."""
-    if not is_tracing():
-        _require_numpy_values("median_filter", input, footprint, output)
-        return _scipy_ndimage.median_filter(
-            input,
-            size=size,
-            footprint=footprint,
-            output=output,
-            mode=mode,
-            cval=cval,
-            origin=origin,
-            axes=axes,
-        )
     return _selection_call(
         "median_filter",
         _median_filter_primitive,
@@ -863,6 +670,7 @@ def median_filter(
     )
 
 
+@_scipy_parity
 def rank_filter(
     input: object,
     rank: object,
@@ -876,19 +684,6 @@ def rank_filter(
     axes: object = None,
 ) -> object:
     """Calculate a multidimensional rank filter."""
-    if not is_tracing():
-        _require_numpy_values("rank_filter", input, footprint, output)
-        return _scipy_ndimage.rank_filter(
-            input,
-            rank,
-            size=size,
-            footprint=footprint,
-            output=output,
-            mode=mode,
-            cval=cval,
-            origin=origin,
-            axes=axes,
-        )
     return _selection_call(
         "rank_filter",
         _rank_filter_primitive,
@@ -905,6 +700,7 @@ def rank_filter(
     )
 
 
+@_scipy_parity
 def percentile_filter(
     input: object,
     percentile: object,
@@ -918,19 +714,6 @@ def percentile_filter(
     axes: object = None,
 ) -> object:
     """Calculate a multidimensional percentile filter."""
-    if not is_tracing():
-        _require_numpy_values("percentile_filter", input, footprint, output)
-        return _scipy_ndimage.percentile_filter(
-            input,
-            percentile,
-            size=size,
-            footprint=footprint,
-            output=output,
-            mode=mode,
-            cval=cval,
-            origin=origin,
-            axes=axes,
-        )
     return _selection_call(
         "percentile_filter",
         _percentile_filter_primitive,
@@ -969,9 +752,6 @@ def _grey_open_or_close(
         "origin": origin,
         "axes": axes,
     }
-    if not is_tracing():
-        _require_numpy_values(name, input, footprint, structure, output)
-        return getattr(_scipy_ndimage, name)(input, output=output, **options)
     first, second = (
         (grey_erosion, grey_dilation) if name == "grey_opening" else (grey_dilation, grey_erosion)
     )
@@ -979,6 +759,7 @@ def _grey_open_or_close(
     return second(intermediate, output=output, **options)
 
 
+@_scipy_parity
 def grey_opening(
     input: object,
     size: object = None,
@@ -1006,6 +787,7 @@ def grey_opening(
     )
 
 
+@_scipy_parity
 def grey_closing(
     input: object,
     size: object = None,
@@ -1072,6 +854,7 @@ def _morphology_pair(
     return dilated, eroded, destination, dtype
 
 
+@_scipy_parity
 def morphological_gradient(
     input: object,
     size: object = None,
@@ -1085,19 +868,6 @@ def morphological_gradient(
     axes: object = None,
 ) -> object:
     """Calculate the difference between greyscale dilation and erosion."""
-    if not is_tracing():
-        _require_numpy_values("morphological_gradient", input, footprint, structure, output)
-        return _scipy_ndimage.morphological_gradient(
-            input,
-            size=size,
-            footprint=footprint,
-            structure=structure,
-            output=output,
-            mode=mode,
-            cval=cval,
-            origin=origin,
-            axes=axes,
-        )
     dilated, eroded, destination, dtype = _morphology_pair(
         input,
         size=size,
@@ -1120,6 +890,7 @@ def morphological_gradient(
     )
 
 
+@_scipy_parity
 def morphological_laplace(
     input: object,
     size: object = None,
@@ -1133,19 +904,6 @@ def morphological_laplace(
     axes: object = None,
 ) -> object:
     """Calculate the morphological Laplace operator."""
-    if not is_tracing():
-        _require_numpy_values("morphological_laplace", input, footprint, structure, output)
-        return _scipy_ndimage.morphological_laplace(
-            input,
-            size=size,
-            footprint=footprint,
-            structure=structure,
-            output=output,
-            mode=mode,
-            cval=cval,
-            origin=origin,
-            axes=axes,
-        )
     dilated, eroded, destination, dtype = _morphology_pair(
         input,
         size=size,
@@ -1193,9 +951,6 @@ def _tophat(
         "origin": origin,
         "axes": axes,
     }
-    if not is_tracing():
-        _require_numpy_values(name, input, footprint, structure, output)
-        return getattr(_scipy_ndimage, name)(input, output=output, **options)
     morphology = grey_opening if name == "white_tophat" else grey_closing
     filtered = cast(
         "Any",
@@ -1216,6 +971,7 @@ def _tophat(
     )
 
 
+@_scipy_parity
 def white_tophat(
     input: object,
     size: object = None,
@@ -1243,6 +999,7 @@ def white_tophat(
     )
 
 
+@_scipy_parity
 def black_tophat(
     input: object,
     size: object = None,

@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import gc
+import re
 import weakref
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 
 from advect import _native_core as native
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 def _input(
@@ -33,30 +37,16 @@ def _operation(
     attrs: dict[str, object] | None = None,
     residual: object | None = None,
 ) -> int:
-    shape = tuple(getattr(value, "shape", ()))
-    dtype = getattr(value, "dtype", "float64")
-    positions = list(range(len(parents))) if parent_positions is None else parent_positions
-    literal_values = [] if literals is None else literals
-    if literal_values:
-        node_id = tape.record_operation_with_literals(
-            op,
-            parents,
-            positions,
-            literal_values,
-            value,
-            {} if attrs is None else attrs,
-            shape,
-            dtype,
-        )
-    else:
-        node_id = tape.record_operation(
-            op,
-            parents,
-            value,
-            {} if attrs is None else attrs,
-            shape,
-            dtype,
-        )
+    node_id = tape.record_operation(
+        op,
+        parents,
+        value,
+        {} if attrs is None else attrs,
+        tuple(getattr(value, "shape", ())),
+        getattr(value, "dtype", "float64"),
+        input_positions=parent_positions,
+        literals=() if literals is None else literals,
+    )
     if residual is not None:
         tape.record_residual(node_id, residual)
     return node_id
@@ -193,11 +183,16 @@ def test_native_real_linearity_analysis_returns_dependency_set_and_specific_erro
         parent_positions=[0],
         literals=[0.0],
     )
+    # A constant that is zero at this point is still tangent-independent, so
+    # dividing by it scales linearly to IEEE infinities, as forward mode does.
+    zero = _operation(linear, "advect.const", [], 0.0)
+    divided = _operation(linear, "array.divide", [tangent, zero], 0.0)
     linear.mark_output(output)
     linear.mark_output(zeroed)
+    linear.mark_output(divided)
     _freeze(linear)
 
-    assert linear.analyze_real_linearity([tangent], "tests.linear") == [tangent, output]
+    assert linear.analyze_real_linearity([tangent], "tests.linear") == [tangent, output, divided]
     linear.release_payloads()
 
     nonlinear = native.DynamicTape()
@@ -215,75 +210,299 @@ def test_native_real_linearity_analysis_returns_dependency_set_and_specific_erro
     nonlinear.release_payloads()
 
 
-def test_native_forward_and_reverse_handle_repeated_parents() -> None:
-    def multiply_jvp(
-        _output: float,
-        operands: tuple[float, float],
-        tangents: tuple[float | None, float | None],
-        _attrs: object,
-        _source: object,
-    ) -> float:
-        left, right = operands
-        left_tangent = 0.0 if tangents[0] is None else tangents[0]
-        right_tangent = 0.0 if tangents[1] is None else tangents[1]
-        return left_tangent * right + left * right_tangent
-
-    def multiply_vjp(
-        _output: float,
-        operands: tuple[float, float],
-        cotangent: float,
-        _attrs: object,
-        _active: tuple[int, ...],
-        _residual: object,
-        _parent_specs: object,
-        _source: object,
-    ) -> list[float]:
-        left, right = operands
-        return [cotangent * right, cotangent * left]
-
+@pytest.mark.parametrize(
+    "op",
+    ["custom.mylib.negative", "custom.tests.nonlinear.sum", "custom.array.transpose"],
+)
+def test_native_real_linearity_does_not_trust_custom_names_of_linear_builtins(op: str) -> None:
     tape = native.DynamicTape()
-    left = _input(tape, 2.0)
-    right = _input(tape, 3.0)
-    product = _operation(tape, "multiply", [left, right], 6.0)
-    square = _operation(tape, "multiply", [product, product], 36.0)
-    tape.mark_output(square)
-    _freeze(
-        tape,
-        jvps={"multiply": multiply_jvp},
-        vjps={"multiply": multiply_vjp},
-    )
+    tangent = _input(tape, 0.0)
+    output = _operation(tape, op, [tangent], 0.0)
+    tape.mark_output(output)
+    _freeze(tape)
 
-    assert native.dynamic_jvp(tape, [(left, 1.0), (right, 1.0)], [square]) == [60.0]
-    assert native.dynamic_vjp(tape, [(square, 1.0)], [left, right]) == [36.0, 24.0]
-    assert native.dynamic_jvp_many(
-        tape,
-        [
-            [(left, 1.0), (right, 0.0)],
-            [(left, 0.0), (right, 1.0)],
-        ],
-        [square],
-    ) == [[36.0], [24.0]]
-    assert native.dynamic_vjp_many(
-        tape,
-        [
-            [(square, 1.0)],
-            [(square, 2.0)],
-        ],
-        [left, right],
-    ) == [[36.0, 24.0], [72.0, 48.0]]
+    with pytest.raises(
+        ValueError,
+        match=rf"uses unsupported tangent-dependent operation '{re.escape(op)}'",
+    ):
+        tape.analyze_real_linearity([tangent], "tests.custom_name")
+    tape.release_payloads()
+
+    builtin = native.DynamicTape()
+    tangent = _input(builtin, 0.0)
+    output = _operation(builtin, "array.negative", [tangent], 0.0)
+    builtin.mark_output(output)
+    _freeze(builtin)
+    assert builtin.analyze_real_linearity([tangent], "tests.builtin") == [tangent, output]
+    builtin.release_payloads()
+
+
+def _identity_tape(
+    *, frozen: bool = True, vjp: Callable[..., object] | None = None
+) -> native.DynamicTape:
+    """Record %0 = input 2.0 and %1 = identity(%0), a marked output."""
+    tape = native.DynamicTape()
+    _operation(tape, "identity", [_input(tape, 2.0)], 2.0)
+    tape.mark_output(1)
+    if frozen:
+        _freeze(tape, vjps={} if vjp is None else {"identity": vjp})
+    return tape
+
+
+# message fragment -> (frozen, error, misuse of an identity tape without rules)
+_MISUSE: dict[str, tuple[bool, type[Exception], Callable[[native.DynamicTape], object]]] = {
+    "dynamic tape operation name must not be empty": (
+        False,
+        ValueError,
+        lambda tape: tape.record_operation("", [0], 1.0, {}, (), "float64"),
+    ),
+    "dynamic operand layout has 1 literals but no parent positions": (
+        False,
+        ValueError,
+        lambda tape: tape.record_operation("add", [0], 2.0, {}, (), "float64", literals=[1.0]),
+    ),
+    "operand layout repeats parent position 0": (
+        False,
+        ValueError,
+        lambda tape: tape.record_operation(
+            "add", [0, 0], 2.0, {}, (), "float64", input_positions=[0, 0]
+        ),
+    ),
+    "dynamic tape output %1 is already marked": (
+        False,
+        ValueError,
+        lambda tape: tape.mark_output(1),
+    ),
+    "DynamicTape is already bound to a trace frame": (
+        False,
+        RuntimeError,
+        lambda tape: [tape.bind_trace_frame(0, 1) for _ in range(2)],
+    ),
+    "DynamicTape node %1 already owns a primitive residual": (
+        False,
+        RuntimeError,
+        lambda tape: [tape.record_residual(1, _Residual(None, [])) for _ in range(2)],
+    ),
+    "only rank-zero dynamic tape values can be weak scalars": (
+        False,
+        ValueError,
+        lambda tape: tape.mark_weak(tape.record_input(1.0, (2,), "float64")),
+    ),
+    "dynamic tape node %9 does not exist": (False, ValueError, lambda tape: tape.value(9)),
+    "DynamicTape JVP binding count 0 does not match operation count 2": (
+        False,
+        ValueError,
+        lambda tape: tape.freeze([], [], []),
+    ),
+    "DynamicTape JVP binding 1 must be callable or None": (
+        False,
+        ValueError,
+        lambda tape: tape.freeze([None, 1], [None, None], [None, None]),
+    ),
+    "DynamicTape reverse-needs count 1 does not match operation count 2": (
+        False,
+        ValueError,
+        lambda tape: tape.freeze([None, None], [None, None], [None]),
+    ),
+    "DynamicTape VJP binding 1 is missing reverse-needs metadata": (
+        False,
+        ValueError,
+        lambda tape: tape.freeze([None, None], [None, print], [None, None]),
+    ),
+    "DynamicTape reverse-needs metadata 1 has no VJP binding": (
+        False,
+        ValueError,
+        lambda tape: tape.freeze([None, None], [None, None], [None, (True, True, False)]),
+    ),
+    "DynamicTape must be frozen before differentiation": (
+        False,
+        RuntimeError,
+        lambda tape: native.dynamic_vjp(tape, [(1, 1.0)], [0]),
+    ),
+    "DynamicTape is frozen": (
+        True,
+        RuntimeError,
+        lambda tape: tape.record_input(1.0, (), "float64"),
+    ),
+    "cannot replace DynamicTape activity after reverse payload pruning": (
+        True,
+        RuntimeError,
+        lambda tape: (tape.prune_reverse_payloads(), tape.set_active_nodes([0])),
+    ),
+    "DynamicTape has released its invocation payloads": (
+        True,
+        RuntimeError,
+        lambda tape: (tape.release_payloads(), native.dynamic_vjp(tape, [(1, 1.0)], [0])),
+    ),
+    "dynamic JVP supports at most 16 seeds per traversal": (
+        True,
+        ValueError,
+        lambda tape: native.dynamic_jvp_many(tape, [[(0, 1.0)]] * 17, [1]),
+    ),
+    "dynamic VJP supports at most 16 seeds per traversal": (
+        True,
+        ValueError,
+        lambda tape: native.dynamic_vjp_many(tape, [[(1, 1.0)]] * 17, [0]),
+    ),
+    "dynamic JVP seed node %1 is not a tape input": (
+        True,
+        ValueError,
+        lambda tape: native.dynamic_jvp(tape, [(1, 1.0)], [1]),
+    ),
+    "dynamic JVP repeats input seed %0": (
+        True,
+        ValueError,
+        lambda tape: native.dynamic_jvp(tape, [(0, 1.0), (0, 2.0)], [1]),
+    ),
+    "dynamic JVP requested node %0, which is not a marked output": (
+        True,
+        ValueError,
+        lambda tape: native.dynamic_jvp(tape, [(0, 1.0)], [0]),
+    ),
+    "dynamic VJP seed node %0 is not a marked output": (
+        True,
+        ValueError,
+        lambda tape: native.dynamic_vjp(tape, [(0, 1.0)], [0]),
+    ),
+    "dynamic VJP repeats output seed %1": (
+        True,
+        ValueError,
+        lambda tape: native.dynamic_vjp(tape, [(1, 1.0), (1, 2.0)], [0]),
+    ),
+    "dynamic VJP requested node %1, which is not a tape input": (
+        True,
+        ValueError,
+        lambda tape: native.dynamic_vjp(tape, [(1, 1.0)], [1]),
+    ),
+    "dynamic operation 'identity' has no JVP binding": (
+        True,
+        RuntimeError,
+        lambda tape: native.dynamic_jvp(tape, [(0, 1.0)], [1]),
+    ),
+    "dynamic operation 'identity' has no VJP binding": (
+        True,
+        RuntimeError,
+        lambda tape: native.dynamic_vjp(tape, [(1, 1.0)], [0]),
+    ),
+}
+
+
+@pytest.mark.parametrize(("message", "case"), _MISUSE.items(), ids=list(_MISUSE))
+def test_dynamic_tape_rejects_misuse_with_a_specific_error(
+    message: str,
+    case: tuple[bool, type[Exception], Callable[[native.DynamicTape], object]],
+) -> None:
+    frozen, error, misuse = case
+    tape = _identity_tape(frozen=frozen)
+
+    with pytest.raises(error, match=re.escape(message)):
+        misuse(tape)
     tape.release_payloads()
 
 
-def test_native_multi_seed_traversals_are_bounded() -> None:
-    tape = native.DynamicTape()
-    value = _input(tape, 2.0)
-    tape.mark_output(value)
-    _freeze(tape)
+@pytest.mark.parametrize(
+    "query",
+    [
+        lambda tape: tape.is_weak(1),
+        lambda tape: tape.weak_mask([0, 1]),
+        lambda tape: tape.record_residual(1, object()),
+    ],
+    ids=["is_weak", "weak_mask", "record_residual"],
+)
+def test_node_queries_after_release_name_the_released_payloads(
+    query: Callable[[native.DynamicTape], object],
+) -> None:
+    tape = _identity_tape()
+    tape.release_payloads()
 
-    with pytest.raises(ValueError, match="at most 16 seeds"):
-        native.dynamic_jvp_many(tape, [[(value, 1.0)]] * 17, [value])
-    with pytest.raises(ValueError, match="at most 16 seeds"):
-        native.dynamic_vjp_many(tape, [[(value, 1.0)]] * 17, [value])
+    with pytest.raises(RuntimeError, match="released its invocation payloads"):
+        query(tape)
+
+
+def _batched_vjp(many: Callable[..., object]) -> Callable[..., object]:
+    def vjp(*_args: object) -> list[float]:
+        return [1.0]
+
+    cast("Any", vjp).__advect_vjp_many__ = many
+    return vjp
+
+
+@pytest.mark.parametrize(
+    ("vjp", "message"),
+    [
+        (lambda *_args: 1.0, "VJP for 'identity' at dynamic node %1 must return a sequence"),
+        (
+            lambda *_args: [1.0, 2.0],
+            "VJP for 'identity' at dynamic node %1 returned 2 contributions for 1 operands",
+        ),
+        (
+            _batched_vjp(lambda *_args: 1.0),
+            "Batched VJP for 'identity' at dynamic node %1 must return a sequence of sequences",
+        ),
+        (
+            _batched_vjp(lambda *_args: [[1.0]]),
+            "Batched VJP for 'identity' at dynamic node %1 returned 1 contribution sets",
+        ),
+        (
+            _batched_vjp(lambda *_args: [[1.0], []]),
+            "Batched VJP for 'identity' at dynamic node %1 returned 0 contributions for 1 operands",
+        ),
+    ],
+)
+def test_reverse_validates_vjp_results(vjp: Callable[..., object], message: str) -> None:
+    tape = _identity_tape(vjp=vjp)
+
+    with pytest.raises(ValueError, match=re.escape(message)):
+        native.dynamic_vjp_many(tape, [[(1, 1.0)], [(1, 2.0)]], [0])
+    tape.release_payloads()
+
+
+def _raise_rule_error(*_args: object) -> object:
+    message = "rule failed"
+    raise RuntimeError(message)
+
+
+@pytest.mark.parametrize(
+    ("rules", "traverse", "seeds", "requested"),
+    [
+        ("vjps", native.dynamic_vjp, [(1, 1.0)], [0]),
+        ("jvps", native.dynamic_jvp, [(0, 1.0)], [1]),
+    ],
+)
+def test_rule_errors_propagate_with_the_rule_and_node_noted(
+    rules: str,
+    traverse: Callable[..., object],
+    seeds: list[tuple[int, float]],
+    requested: list[int],
+) -> None:
+    tape = _identity_tape(frozen=False)
+    _freeze(tape, **{rules: {"identity": _raise_rule_error}})
+
+    with pytest.raises(RuntimeError, match="rule failed") as caught:
+        traverse(tape, seeds, requested)
+    label = rules[:3].upper()
+    assert caught.value.__notes__ == [f"while executing {label} for 'identity' at dynamic node %1"]
+    tape.release_payloads()
+
+
+@pytest.mark.parametrize(
+    ("later", "message"),
+    [
+        ((1.0,), "cannot add cotangent tuples with lengths 1 and 2"),
+        (1.0, "cannot add tuple and non-tuple cotangents"),
+    ],
+)
+def test_reverse_rejects_mismatched_cotangent_structures(later: object, message: str) -> None:
+    tape = native.DynamicTape()
+    pair = _input(tape, (1.0, 2.0))
+    outputs = [_operation(tape, op, [pair], 1.0) for op in ("first", "second")]
+    for output in outputs:
+        tape.mark_output(output)
+    # The reverse sweep reaches "second" first, then adds "first".
+    _freeze(tape, vjps={"first": lambda *_args: [(1.0, 1.0)], "second": lambda *_args: [later]})
+
+    with pytest.raises(ValueError, match=re.escape(message)):
+        native.dynamic_vjp(tape, [(output, 1.0) for output in outputs], [pair])
     tape.release_payloads()
 
 
@@ -471,6 +690,23 @@ def test_consuming_reverse_releases_a_primal_at_its_last_callback() -> None:
     assert seen == ["second", "first"]
     assert middle_ref() is None
     assert tape.stats()["retained_value_count"] == 0
+
+
+def test_consuming_reverse_skips_an_unreached_operation_without_a_transpose() -> None:
+    tape = native.DynamicTape()
+    value = _input(tape, 1.0)
+    output = _operation(tape, "identity", [value], 1.0)
+    _operation(tape, "unreached", [value], 2.0)
+    tape.mark_output(output)
+    _freeze(
+        tape,
+        vjps={"identity": lambda _output, _operands, cotangent, *_args: [cotangent]},
+        reverse_needs={"identity": (False, False, False)},
+    )
+
+    assert native.dynamic_vjp(tape, [(output, 1.0)], [value]) == [1.0]
+    assert native.dynamic_vjp(tape, [(output, 1.0)], [value], consume=True) == [1.0]
+    assert tape.is_consumed
 
 
 def test_reusable_reverse_retains_and_closes_residual_once() -> None:

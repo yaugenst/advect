@@ -1,80 +1,22 @@
-"""Exercise registered derivative functions directly, below public transforms."""
+"""Exercise registered derivative functions directly, below public transforms.
+
+Every drawn invocation cell of ``test_builtin_conformance`` also checks the
+rules it captures; this module owns raw rules and saved rule regressions.
+"""
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
-import hypothesis.strategies as st
 import numpy as np
 import pytest
-from hypothesis import HealthCheck, given, settings
 
 from advect.core._registry import get_registry
 from advect_conformance_tests._builtin_cases import INVOCATIONS_BY_ID
-from advect_conformance_tests._harness import Law, argument_tuples
 from advect_conformance_tests._harness._rules import (
     check_raw_jvp,
     check_raw_vjp,
-    check_registered_jvp,
     check_registered_vjp,
 )
 from advect_conformance_tests._raw_rule_cases import RAW_RULE_CASES
-
-if TYPE_CHECKING:
-    from hypothesis.strategies import DataObject
-
-_SEARCH_EXAMPLES = max(2, min(50, settings.default.max_examples // 50))
-
-_JVP_PARAMETERS = [
-    pytest.param(identifier, variant, id=f"{identifier}-{case.variant_ids[variant]}")
-    for identifier, case in INVOCATIONS_BY_ID.items()
-    if Law.FINITE_DIFFERENCE in case.laws
-    for variant in range(case.variant_count)
-]
-
-
-@pytest.mark.parametrize(("identifier", "variant"), _JVP_PARAMETERS)
-@given(data=st.data())
-@settings(
-    max_examples=_SEARCH_EXAMPLES,
-    deadline=None,
-    suppress_health_check=[HealthCheck.function_scoped_fixture],
-)
-def test_registered_jvp_matches_raw_operation(
-    identifier: str,
-    variant: int,
-    data: DataObject,
-) -> None:
-    case = INVOCATIONS_BY_ID[identifier]
-    values = data.draw(argument_tuples(case, variant), label="arguments")
-    check_registered_jvp(case, values, variant=variant)
-
-
-def _explicit_vjp_parameters() -> list[object]:
-    registry = get_registry()
-    return [
-        pytest.param(identifier, variant, id=f"{identifier}-{case.variant_ids[variant]}")
-        for identifier, case in INVOCATIONS_BY_ID.items()
-        if registry.has_vjp(case.op)
-        for variant in range(case.variant_count)
-    ]
-
-
-@pytest.mark.parametrize(("identifier", "variant"), _explicit_vjp_parameters())
-@given(data=st.data())
-@settings(
-    max_examples=_SEARCH_EXAMPLES,
-    deadline=None,
-    suppress_health_check=[HealthCheck.function_scoped_fixture],
-)
-def test_registered_vjp_is_adjoint_of_registered_jvp(
-    identifier: str,
-    variant: int,
-    data: DataObject,
-) -> None:
-    case = INVOCATIONS_BY_ID[identifier]
-    values = data.draw(argument_tuples(case, variant), label="arguments")
-    check_registered_vjp(case, values, variant=variant)
 
 
 def test_divide_broadcast_float32_vjp_regression() -> None:

@@ -5,23 +5,11 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+from dataclasses import asdict
 
 import numpy as np
 import pytest
 from scripts import bench_runtime_memory as benchmark
-
-
-@pytest.mark.parametrize(
-    ("raw", "expected"),
-    [
-        ("1024", 1024),
-        ("1 KiB", 1024),
-        ("1.5MiB", 1_572_864),
-        ("2_gib", 2 * 1024**3),
-    ],
-)
-def test_parse_byte_size(raw: str, expected: int) -> None:
-    assert benchmark._parse_byte_size(raw) == expected
 
 
 def test_byte_budget_sizing_respects_factor_and_cap() -> None:
@@ -78,17 +66,14 @@ def test_named_acceptance_profiles_own_exact_case_matrices() -> None:
     )
 
 
-def test_every_profile_advect_case_receives_a_correctness_preflight() -> None:
-    cases = benchmark._ACCEPTANCE_PROFILES["cpu-runtime"].cases
-
-    assert [case.name for case in benchmark._correctness_preflight_cases(cases)] == [
-        "elementwise:advect:dynamic:numpy",
-        "stencil:advect:dynamic:numpy",
-        "checkpoint:advect:plain:numpy",
-        "checkpoint:advect:checkpoint:numpy",
-        "residual:advect:retained:numpy",
-        "linear_map:advect:reusable:numpy",
-        "captured_constant:advect:staged:numpy",
+@pytest.mark.parametrize(
+    "profile", tuple(benchmark._ACCEPTANCE_PROFILES.values()), ids=lambda profile: profile.name
+)
+def test_every_profile_case_except_the_probe_receives_a_correctness_preflight(
+    profile: benchmark._AcceptanceProfile,
+) -> None:
+    assert [case.name for case in benchmark._correctness_preflight_cases(profile.cases)] == [
+        case.name for case in profile.cases if case.workload != "allocation_probe"
     ]
 
 
@@ -338,6 +323,44 @@ def test_memory_stability_uses_robust_median_absolute_variation() -> None:
     assert summary["median_absolute_variation"] == pytest.approx(0.01)
 
 
+def test_case_summary_reduces_each_metric_over_its_markers() -> None:
+    markers = [
+        {"phase": "baseline", "provider_pool_used_bytes": 10, "device_free_bytes": 1000},
+        {"phase": "forward", "provider_owned_live_bytes": 5, "provider_pool_used_bytes": 30},
+        {"phase": "reverse_retained", "provider_owned_live_bytes": 7, "device_free_bytes": 900},
+        {
+            "phase": "closed",
+            "provider_owned_live_bytes": 0,
+            "provider_pool_used_bytes": 20,
+            "recomputation_count": 4,
+            "tracemalloc_peak_delta_bytes": None,
+        },
+    ]
+    run = {"status": "ok", "peak_rss_delta_bytes": 64, "compile_seconds": 0.5, "markers": markers}
+    case = benchmark._Case("linear_map", "advect", "reusable", "numpy")
+
+    summary = benchmark._summarize_case_runs(case, [run, {"status": "error"}], [])
+
+    medians = {name: values.get("median") for name, values in summary["memory"]["summary"].items()}
+    assert summary["status"] == "error"
+    assert medians == {
+        "peak_rss_delta_bytes": 64.0,
+        "peak_tracemalloc_delta_bytes": None,
+        "peak_provider_delta_bytes": None,
+        "peak_provider_pool_used_delta_bytes": 20.0,
+        "peak_provider_pool_reserved_delta_bytes": None,
+        "peak_device_used_delta_bytes": 100.0,
+        "reverse_entry_provider_owned_bytes": 5.0,
+        "reverse_retained_provider_owned_bytes": 7.0,
+        "post_close_provider_owned_bytes": 0.0,
+        "provider_cache_live_bytes": None,
+        "native_structural_bytes": None,
+        "recomputation_count": 4.0,
+        "residual_release_count": None,
+        "compile_seconds": 0.5,
+    }
+
+
 def test_acceptance_rejects_unrecorded_source_revision() -> None:
     payload = {
         "config": {
@@ -365,6 +388,19 @@ def test_acceptance_rejects_unrecorded_source_revision() -> None:
     )
 
 
+def test_baseline_marker_reports_zero_provider_growth(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    reporter = benchmark._Reporter(np, hold_seconds=0.0)
+    reporter.start(roots=(np.ones(64, dtype=np.float64),))
+    reporter.stop()
+
+    baseline = json.loads(capsys.readouterr().out.splitlines()[-1])
+    assert baseline["phase"] == "baseline"
+    assert baseline["provider_peak_delta_bytes"] == 0
+    assert baseline["tracemalloc_peak_delta_bytes"] < 16 * 1024
+
+
 def test_provider_cache_is_reported_but_excluded_from_owned_bytes(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -390,7 +426,7 @@ def test_provider_cache_is_reported_but_excluded_from_owned_bytes(
 def test_allocation_probe_runs_in_an_isolated_child() -> None:
     case = benchmark._Case("allocation_probe", "python", "allocate", "host")
     spec = benchmark._WorkerSpec(
-        case=case,
+        cases=(case,),
         byte_budget=8 * 1024**2,
         max_bytes=16 * 1024**2,
         sample_hold_seconds=0.01,
@@ -398,7 +434,7 @@ def test_allocation_probe_runs_in_an_isolated_child() -> None:
         timing_iterations=1,
     )
 
-    result = benchmark._run_isolated(
+    (result,) = benchmark._run_isolated(
         spec,
         sample_interval_seconds=0.001,
         include_samples=True,
@@ -411,28 +447,30 @@ def test_allocation_probe_runs_in_an_isolated_child() -> None:
     assert phases == ["baseline", "allocated", "closed"]
 
 
-@pytest.mark.skipif(sys.platform != "linux", reason="parent RSS sampling uses Linux procfs")
-def test_partitioned_checkpoint_reports_four_recomputations() -> None:
-    case = benchmark._Case("checkpoint", "advect", "checkpoint", "numpy")
+def test_one_preflight_worker_reports_each_scenario_in_order(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    unknown = benchmark._Case("unknown", "advect", "dynamic", "numpy")
+    elementwise = benchmark._Case("elementwise", "advect", "dynamic", "numpy")
     spec = benchmark._WorkerSpec(
-        case=case,
-        byte_budget=2 * 1024**2,
-        max_bytes=8 * 1024**2,
-        sample_hold_seconds=0.001,
-        measurement="memory",
+        cases=(unknown, elementwise),
+        byte_budget=64 * 1024,
+        max_bytes=1024**2,
+        sample_hold_seconds=0.0,
+        measurement="correctness",
         timing_iterations=1,
     )
 
-    result = benchmark._run_isolated(
-        spec,
-        sample_interval_seconds=0.001,
-        include_samples=False,
-    )
+    returncode = benchmark._worker_main(json.dumps(asdict(spec)))
 
-    assert result["status"] == "ok"
-    reverse = next(marker for marker in result["markers"] if marker["phase"] == "reverse")
-    assert reverse["forward_calls"] == 4
-    assert reverse["recomputation_count"] == 4
+    results = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert returncode == 1
+    assert [(result["case"]["workload"], result["status"]) for result in results] == [
+        ("unknown", "error"),
+        ("elementwise", "ok"),
+    ]
+    assert results[1]["scenario"] == elementwise.name
+    assert results[1]["correct"] is True
 
 
 def test_json_smoke_reports_separate_memory_metrics() -> None:
@@ -453,22 +491,47 @@ def test_json_smoke_reports_separate_memory_metrics() -> None:
         text=True,
     )
     payload = json.loads(completed.stdout)
-    summary = payload["cases"][0]["memory"]["summary"]
+    profile = benchmark._ACCEPTANCE_PROFILES["cpu-runtime"]
 
     assert payload["schema_version"] == 2
     assert payload["report_kind"] == "advect.runtime-memory"
     assert payload["environment"]["source_revision"]
     assert payload["environment"]["python"]
+    assert isinstance(payload["environment"]["linux_procfs"], bool)
     assert set(payload["environment"]["machine"]) == {
         "architecture",
         "node",
         "platform",
         "processor",
     }
-    assert payload["cases"][0]["status"] == "ok"
-    assert "peak_rss_delta_bytes" in summary
-    assert "peak_tracemalloc_delta_bytes" in summary
-    assert "peak_provider_delta_bytes" in summary
+    assert {case["name"]: case["status"] for case in payload["cases"]} == {
+        case.name: "ok" for case in profile.cases
+    }
+    preflights = {case.name for case in benchmark._correctness_preflight_cases(profile.cases)}
+    assert {
+        preflight["scenario"]
+        for preflight in payload["correctness_preflights"]
+        if preflight["status"] == "ok" and preflight["correct"] is True
+    } == preflights
+    statuses = {check["name"]: check["status"] for check in payload["acceptance"]["gated_checks"]}
+    assert statuses.pop("checkpoint memory/runtime tradeoff") == "unavailable"
+    assert statuses == dict.fromkeys(statuses, "passed")
+    assert {f"{name} post-close release" for name in preflights} < set(statuses)
+    checkpointed = next(
+        case for case in payload["cases"] if case["name"] == "checkpoint:advect:checkpoint:numpy"
+    )
+    reverse = next(
+        marker
+        for marker in checkpointed["memory"]["runs"][0]["markers"]
+        if marker["phase"] == "reverse"
+    )
+    assert reverse["forward_calls"] == benchmark._CHECKPOINT_REGIONS
+    assert reverse["recomputation_count"] == benchmark._CHECKPOINT_REGIONS
+    assert {
+        "peak_rss_delta_bytes",
+        "peak_tracemalloc_delta_bytes",
+        "peak_provider_delta_bytes",
+    } <= set(payload["cases"][0]["memory"]["summary"])
 
 
 def test_controller_requires_a_named_profile() -> None:

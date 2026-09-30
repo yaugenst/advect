@@ -77,6 +77,23 @@ before running its concrete implementation.
   rank-zero derivative results are returned as Python scalars. Booleans are
   nondifferentiable, and complex Python scalar primals require an explicit
   array until a separate scalar convention is admitted.
+- One weak-scalar rule, NEP 50, holds in every lifetime: a value is weak
+  exactly where eager Python holds a Python scalar. Python scalar inputs and
+  Python operators applied only to weak values are weak, and augmented
+  assignment rebinds a weak value as Python does. The `real` and `imag`
+  functions read those attributes, and `diff` with `n=0` returns its input, as
+  NumPy's do, so they keep a weak value weak; other NumPy and Array API
+  function calls, array methods on a lifted scalar, and indexed updates are
+  strong even on weak arguments. A primitive
+  result is weak when its implementation returns a Python scalar from weak
+  operands, as its abstract rule must declare; when none of those operands is
+  traced and every output leaf is such a Python scalar, the result stays that
+  Python scalar, as it is eagerly, and any other untraced result is recorded
+  as a traced constant.
+  `advect.array` and `advect.asarray` are strong, as NumPy's are, and
+  `advect.stop_gradient` keeps a weak value weak. The frontend call that spells
+  an operation decides the category, not the canonical operation it records;
+  the dynamic tape and staged specifications only store it.
 - Python control flow and data-dependent shapes use the current values.
 - `DynamicTape` owns one `RawArena`; node identity is an arena position and
   operation identity is a dense arena-local ID backed by a stable
@@ -280,10 +297,10 @@ There is no `holomorphic=True` promise in the initial API.
   `array-api-strict`. A separately identified portable subset runs through the
   same lifetimes on every provider named by its checked evidence.
 - An executable support inventory materializes each supported revision's
-  official function surface and joins it to the live
-  binder, abstract-rule, and derivative registries. Every official function is
-  classified as staged, dynamic-only, compile-time metadata, provider
-  passthrough, a missing binder, or an unsupported result structure. The
+  official function surface and joins it to the public support catalog's
+  lowering, abstract-rule, and derivative columns and to the revision's support
+  profile. Every official function is classified as staged, dynamic-only,
+  compile-time metadata, provider passthrough, or a missing binder. The
   checked JSON report is generated evidence and is never a runtime capability
   table.
 - The internal `advect.autodiff` module attaches canonical array-family rules
@@ -310,8 +327,9 @@ There is no `holomorphic=True` promise in the initial API.
   configurable backend adapter. It and the provider-neutral Array API frontend
   converge only at canonical operation emission and the complete `OpDef`
   authorities below it.
-- Python weak-scalar behavior is pinned; common operations must not
-  accidentally promote float32/complex64 workloads to float64/complex128.
+- Python weak-scalar behavior is pinned to NEP 50 in every lifetime; common
+  operations must not accidentally promote float32/complex64 workloads to
+  float64/complex128, nor keep a strong NumPy result weak.
 - Ordinary NumPy is the default user namespace. Creation from direct tracers
   or rectangular nested tracer sequences uses NumPy's standard `like=`
   dispatch, for example `numpy.array(values, like=x)`. Advect handles
@@ -401,14 +419,18 @@ There is no `holomorphic=True` promise in the initial API.
 
 ## R15: Durable programs
 
-- The Python envelope has identity `advect.ssa-program`, envelope version 2, and
+- The Python envelope has identity `advect.ssa-program`, envelope version 3, and
   contains exactly one program. Its nested native graph header is the sole
   source for graph-format, core-opset, semantic-profile, compiler, and optimizer
   versions. Operation schema revisions live on graph nodes and are owned by
   Advect.
 - The envelope serializes the one exact positional/keyword input signature and
   exact output `ArraySpec` leaves. Output specifications are authoritative when
-  another staged transform introduces a cotangent input.
+  another staged transform introduces a cotangent input. Since version 3 an
+  output's `weak` flag is its NEP 50 category; version 2 flags recorded weak
+  input lineage, so loaders reject those envelopes. A node that computes as
+  Python on weak operands carries the internal `_advect_python_operator`
+  attribute, and replay applies Python's operator to exactly those nodes.
 - Compiler and optimizer versions participate in artifact provenance.
 - Loaders reject unknown versions before execution.
 - The Python-independent `advect-runtime::GraphStore` is the sole durable

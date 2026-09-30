@@ -5,12 +5,10 @@ from __future__ import annotations
 import numpy as np
 
 _SUPPORTED_UFUNC_NAMES = (
-    "ufunc",
     "add",
     "subtract",
     "multiply",
     "divide",
-    "true_divide",
     "floor_divide",
     "remainder",
     "fmod",
@@ -79,6 +77,8 @@ _SUPPORTED_UFUNC_NAMES = (
     "bitwise_and",
     "bitwise_or",
     "bitwise_xor",
+    "left_shift",
+    "right_shift",
     "maximum",
     "minimum",
     "fmax",

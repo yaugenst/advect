@@ -19,13 +19,15 @@ from typing import Any, Literal, cast
 
 import numpy as np
 
+from advect.core._abstract_helpers import PYTHON_SCALAR_TYPES
+from advect.numpy._abstract_calls import _CASTING_RULES
 from advect.numpy._abstract_protocol import as_numpy_nested
+from advect.numpy._constructors import _normalize_order
 from advect.numpy._protocol_eval import NUMPY_EVAL_RUNTIME
 
 __all__ = ["bind_evaluator", "evaluate_op", "has_evaluator"]
 
 Evaluator = Callable[[tuple[np.ndarray, ...], dict[str, Any]], Any]
-type _ArrayOrder = Literal["A", "C", "F", "K"]
 type _CastingRule = Literal["equiv", "no", "safe", "same_kind", "unsafe"]
 
 _RUNTIME = NUMPY_EVAL_RUNTIME
@@ -67,14 +69,11 @@ def has_evaluator(op: str) -> bool:
 
 @_evaluator("numpy.reshape")
 def _eval_reshape(inputs: tuple[np.ndarray, ...], attrs: dict[str, Any]) -> np.ndarray:
-    """Evaluate reshape with shape/newshape compatibility."""
-    if "shape" in attrs:
-        shape = attrs["shape"]
-    elif "newshape" in attrs:
-        shape = attrs["newshape"]
-    else:
+    """Evaluate reshape from its normalized shape attribute."""
+    if "shape" not in attrs:
         msg = "reshape requires shape attribute"
         raise ValueError(msg)
+    shape = attrs["shape"]
     order = attrs.get("order", "C")
     kwargs: dict[str, Any] = {"order": order}
     if attrs.get("copy") is not None:
@@ -144,9 +143,13 @@ def _eval_arange(_inputs: tuple[np.ndarray, ...], attrs: dict[str, Any]) -> np.n
 @_evaluator("advect.copy")
 def _eval_copy(inputs: tuple[np.ndarray, ...], attrs: dict[str, Any]) -> np.ndarray:
     """Evaluate copy."""
-    order = cast("_ArrayOrder", str(attrs.get("order", "K")))
-    value = as_numpy_nested(inputs[0])
-    return cast("Any", inputs[0] if value is NotImplemented else value).copy(order=order)
+    order = _normalize_order(attrs.get("order"), default="K")
+    value = inputs[0]
+    if type(value) in PYTHON_SCALAR_TYPES:
+        # A weak input replays as a Python scalar; NumPy copies it to a new array.
+        return np.array(value)
+    nested_value = as_numpy_nested(value)
+    return cast("Any", value if nested_value is NotImplemented else nested_value).copy(order=order)
 
 
 @_evaluator("numpy.linalg.qr_r")
@@ -238,25 +241,15 @@ def _eval_astype(inputs: tuple[np.ndarray, ...], attrs: dict[str, Any]) -> np.nd
         msg = "numpy.astype requires dtype attr"
         raise ValueError(msg)
     copy = bool(attrs.get("copy", True))
-    order_value = attrs.get("order", "K")
-    if not isinstance(order_value, str) or order_value not in {"A", "C", "F", "K"}:
-        msg = f"numpy.astype received invalid order {order_value!r}"
-        raise ValueError(msg)
-    order = cast("_ArrayOrder", order_value)
+    order = _normalize_order(attrs.get("order"), default="K")
     casting_value = attrs.get("casting", "unsafe")
-    if not isinstance(casting_value, str) or casting_value not in {
-        "equiv",
-        "no",
-        "safe",
-        "same_kind",
-        "unsafe",
-    }:
+    if not isinstance(casting_value, str) or casting_value not in _CASTING_RULES:
         msg = f"numpy.astype received invalid casting rule {casting_value!r}"
         raise ValueError(msg)
     casting = cast("_CastingRule", casting_value)
     subok = bool(attrs.get("subok", False))
     value = inputs[0]
-    if type(value) in {bool, complex, float, int}:
+    if type(value) in PYTHON_SCALAR_TYPES:
         return np.asarray(value, dtype=np.dtype(dtype))
     nested_value = as_numpy_nested(value)
     if nested_value is not NotImplemented:
@@ -280,17 +273,15 @@ def _eval_full(inputs: tuple[np.ndarray, ...], attrs: dict[str, Any]) -> np.ndar
     dtype = attrs.get("dtype")
     order = attrs.get("order", "C")
     fill_value: object = inputs[0]
-    nested = as_numpy_nested(fill_value)
-    if nested is not NotImplemented:
-        fill_value = nested
-        like: object | None = nested
-    else:
-        like = attrs.get("like")
     call_kwargs: dict[str, Any] = {"dtype": dtype, "order": order}
     if attrs.get("device") is not None:
         call_kwargs["device"] = attrs["device"]
-    if like is not None:
-        call_kwargs["like"] = like
+    nested = as_numpy_nested(fill_value)
+    if nested is not NotImplemented:
+        fill_value = nested
+    if callable(getattr(fill_value, "_advect_snapshot", None)):
+        # NumPy dispatches full on a traced fill value only through like=.
+        call_kwargs["like"] = fill_value
     return np.full(shape, fill_value, **call_kwargs)
 
 

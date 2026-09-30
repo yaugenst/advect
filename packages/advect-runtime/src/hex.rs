@@ -22,7 +22,7 @@ pub(crate) fn decode(encoded: &str) -> Result<Vec<u8>, &'static str> {
         .collect()
 }
 
-pub(crate) const fn digit(value: u8) -> u8 {
+const fn digit(value: u8) -> u8 {
     if value < 10 {
         b'0' + value
     } else {

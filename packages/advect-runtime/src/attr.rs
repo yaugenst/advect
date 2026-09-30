@@ -4,6 +4,8 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
+use crate::hex;
+
 /// Deterministically ordered attribute mapping.
 pub type AttrMap = BTreeMap<String, AttrValue>;
 
@@ -65,7 +67,7 @@ impl Serialize for ExactFloat {
     where
         S: Serializer,
     {
-        serializer.serialize_str(&format!("{:016x}", self.0))
+        serializer.serialize_str(&hex::encode(&self.0.to_be_bytes()))
     }
 }
 
@@ -75,25 +77,22 @@ impl<'de> Deserialize<'de> for ExactFloat {
         D: Deserializer<'de>,
     {
         let encoded = String::deserialize(deserializer)?;
-        if encoded.len() != 16
-            || !encoded
-                .bytes()
-                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-        {
-            return Err(serde::de::Error::custom(
-                "exact float bits must be 16 lowercase hexadecimal characters",
-            ));
-        }
-        u64::from_str_radix(&encoded, 16)
-            .map(Self)
-            .map_err(serde::de::Error::custom)
+        hex::decode(&encoded)
+            .ok()
+            .and_then(|bytes| <[u8; 8]>::try_from(bytes).ok())
+            .map(|bytes| Self(u64::from_be_bytes(bytes)))
+            .ok_or_else(|| {
+                serde::de::Error::custom(
+                    "exact float bits must be 16 lowercase hexadecimal characters",
+                )
+            })
     }
 }
 
 mod hex_bytes {
     use serde::{Deserialize, Deserializer, Serializer};
 
-    use crate::hex;
+    use super::hex;
 
     pub(super) fn serialize<S>(bytes: &[u8], serializer: S) -> Result<S::Ok, S::Error>
     where

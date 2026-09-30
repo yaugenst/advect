@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import gc
+import weakref
+
 import autograd
+import autograd.core
 import autograd.numpy as anp
 import numpy as np
 import pytest
@@ -43,6 +47,47 @@ def test_autograd_bridge_preserves_pytree_outputs_and_multi_argument_gradients()
         scale_gradient,
         2 * scale * np.sum(parameters["field"] * parameters["field"]),
     )
+
+
+@pytest.mark.parametrize(
+    ("pack", "combine"),
+    [
+        (lambda value: {"left": value, "right": 3.0 * value}, lambda p: p["left"] * p["right"]),
+        (lambda value: [value, 3.0 * value], lambda p: p[0] * p[1]),
+        (lambda value: (value, 3.0 * value), lambda p: p[0] * p[1]),
+        (
+            lambda value: {"left": [value], "right": (np.asarray([5.0, 7.0]),)},
+            lambda p: p["left"][0] * p["right"][0],
+        ),
+    ],
+    ids=["dict", "list", "tuple", "nested-with-constant"],
+)
+def test_autograd_bridge_differentiates_containers_built_in_the_trace(pack, combine) -> None:
+    """Autograd boxes the items of a container built while tracing, not the container.
+
+    These gradients were silently zero, or half of the keyword case.
+    """
+    bridged = wrap(lambda packed, *, scale: combine(packed) * scale)
+    sample = anp.asarray([1.0, -2.0])
+
+    gradient = autograd.grad(lambda value: anp.sum(bridged(pack(value), scale=value)))(sample)
+    expected = autograd.grad(lambda value: anp.sum(combine(pack(value)) * value))(sample)
+
+    assert_allclose(gradient, expected)
+    assert np.all(expected != 0.0)
+
+
+def test_autograd_bridge_returns_container_box_gradients_in_their_structure() -> None:
+    bridged = wrap(lambda packed: np.sum(packed[0]["field"] * packed[1]))
+    parameters = {"field": anp.asarray([1.0, -2.0]), "offset": anp.asarray(0.5)}
+
+    gradient = autograd.grad(lambda params, scale: bridged([params, scale]))(
+        parameters, anp.asarray(3.0)
+    )
+
+    assert gradient.keys() == parameters.keys()
+    assert_allclose(gradient["field"], [3.0, 3.0])
+    assert_allclose(gradient["offset"], 0.0)
 
 
 def test_autograd_bridge_translates_the_complex_adjoint_convention() -> None:
@@ -104,6 +149,38 @@ def test_autograd_bridge_rejects_higher_order_differentiation() -> None:
         match=r"first-order VJPs only.*higher-order differentiation",
     ):
         second(anp.asarray(2.0))
+
+
+def test_autograd_bridge_rejects_a_derivative_recorded_by_two_traces() -> None:
+    released: list[object] = []
+
+    @ad.primitive(name="tests.interop.autograd.inner_product", residual=True)
+    def inner_product(left: np.ndarray, right: np.ndarray) -> ad.PrimitiveResult[np.ndarray]:
+        residual = (left.copy(), right.copy())
+        return ad.PrimitiveResult(np.sum(left * right), residual, release=released.append)
+
+    @inner_product.def_jvp
+    def inner_product_jvp(output, primals, tangents):
+        del output
+        return np.sum(tangents[0] * primals[1]) + np.sum(primals[0] * tangents[1])
+
+    @inner_product.def_transpose
+    def inner_product_transpose(cotangent, primals, output, residual):
+        del primals, output
+        return (cotangent * residual[1], cotangent * residual[0])
+
+    bridged = wrap(inner_product)
+    left, right = anp.asarray([1.0, 2.0]), anp.asarray([3.0, 4.0])
+
+    # Each argument is boxed by a different trace, so neither box is nested.
+    with pytest.raises(
+        NotImplementedError,
+        match=r"first-order VJPs only.*higher-order differentiation",
+    ):
+        autograd.grad(lambda x: anp.sum(autograd.grad(lambda y: bridged(x, y))(right)))(left)
+
+    gc.collect()
+    assert len(released) == 1
 
 
 def test_autograd_bridge_rejects_differentiating_the_host_vjp() -> None:
@@ -191,3 +268,19 @@ def test_autograd_bridge_rejects_integer_input_leaves() -> None:
 def test_autograd_bridge_accepts_python_scalars() -> None:
     gradient = autograd.grad(wrap(lambda value: value * value))(2.0)
     assert gradient == 4.0
+
+
+def test_autograd_bridge_retains_no_registration_or_input_after_a_call() -> None:
+    gradient = autograd.grad(wrap(lambda value: np.sum(value * value)))
+    gradient(np.ones(3))
+    registrations = len(autograd.core.primitive_vjps)
+    inputs = [np.full(4, float(index)) for index in range(3)]
+    references = [weakref.ref(value) for value in inputs]
+
+    for value in inputs:
+        assert_allclose(gradient(value), 2 * value)
+    del inputs, value
+    gc.collect()
+
+    assert len(autograd.core.primitive_vjps) == registrations
+    assert all(reference() is None for reference in references)

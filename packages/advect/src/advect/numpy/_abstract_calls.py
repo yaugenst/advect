@@ -4,21 +4,35 @@
 from __future__ import annotations
 
 import math
+import operator
 from typing import TYPE_CHECKING, Any, cast
 
-from advect.core._abstract import AbstractArray, _lift, _new_abstract_array, _record_abstract_op
-from advect.core._abstract_helpers import (
-    dtype_name,
-    normalize_axes,
-    normalize_axis,
-    shape_tuple,
-)
-from advect.core._abstract_model import ArraySpec
+import numpy as np
+
+from advect.core._abstract import AbstractArray, _lift, _record_abstract_op
+from advect.core._abstract_helpers import dtype_name, normalize_axis, shape_tuple
 from advect.core._array_api.results import restore_array_api_result
 from advect.core._errors import MutationError, TracingError
 from advect.core._registry import get_registry
-from advect.numpy._gradient_lowering import lower_gradient_axis, operand_ndim
+from advect.numpy._composite_lowering import (
+    NON_SCALAR_INITIAL,
+    REDUCTIONS,
+    lower_average,
+    lower_compress,
+    lower_controlled_reduction,
+    lower_cumulative_initial,
+    lower_gradient,
+    lower_matrix_power,
+    operand_dtype,
+)
+from advect.numpy._constructors import _normalize_order
 from advect.numpy._op_bindings import staged_numpy_op
+from advect.numpy._signature import (
+    CLIP_KEYWORDS,
+    ascending_sort_kwargs,
+    bind_clip_bounds,
+    take_mode,
+)
 from advect.numpy._staged_out import validate_staged_out
 
 if TYPE_CHECKING:
@@ -37,8 +51,6 @@ def can_cast_dtype(source: object, target: object, *, casting: str) -> bool:
     """Apply NumPy's casting relation at the frontend boundary."""
     if casting not in _CASTING_RULES:
         raise ValueError(f"Unknown NumPy casting rule {casting!r}")
-    import numpy as np  # noqa: PLC0415 - frontend-local provider policy
-
     return np.can_cast(cast("Any", source), cast("Any", target), casting=cast("Any", casting))
 
 
@@ -70,31 +82,6 @@ def _numpy_array(
     return result
 
 
-def _cast_abstract(
-    trace: AbstractTrace,
-    value: AbstractArray,
-    dtype: object,
-    *,
-    casting: str = "unsafe",
-) -> AbstractArray:
-    target_dtype = dtype_name(dtype)
-    if not can_cast_dtype(value.dtype, target_dtype, casting=casting):
-        raise MutationError(
-            f"Cannot cast NumPy out= result from {dtype_name(value.dtype)!r} to "
-            f"{target_dtype!r} according to the {casting!r} casting rule"
-        )
-    return cast(
-        "AbstractArray",
-        _record_abstract_op(
-            trace,
-            "array.astype",
-            (value,),
-            {"casting": casting, "copy": False, "dtype": target_dtype},
-            graph_attrs={"_advect_backend": "numpy"},
-        ),
-    )
-
-
 def _functionalize_out(
     trace: AbstractTrace,
     raw_name: str,
@@ -104,11 +91,7 @@ def _functionalize_out(
 ) -> AbstractArray:
     destinations = out if isinstance(out, tuple) else (out,)
     tuple_out = isinstance(out, tuple)
-    tuple_allowed = (
-        bool(kwargs.get("_advect_ufunc_out_tuple"))
-        or bool(kwargs.get("_advect_ufunc_call"))
-        or raw_name == "clip"
-    )
+    tuple_allowed = bool(kwargs.get("_advect_ufunc_call")) or raw_name == "clip"
     if tuple_out and not tuple_allowed:
         raise MutationError(f"numpy.{raw_name} does not accept a tuple destination for staged out=")
     if len(destinations) != 1 or not isinstance(destinations[0], AbstractArray):
@@ -125,7 +108,6 @@ def _functionalize_out(
         destination,
         tuple_out=tuple_out and (bool(kwargs.get("_advect_ufunc_call")) or raw_name == "clip"),
     )
-    kwargs.pop("_advect_ufunc_out_tuple", None)
     ufunc_call = bool(kwargs.pop("_advect_ufunc_call", False))
     result_mask = ufunc_call or raw_name == "clip"
     where = kwargs.pop("where", None) if result_mask else None
@@ -150,58 +132,19 @@ def _functionalize_out(
             f"NumPy out= result shape {replacement.shape!r} does not match "
             f"destination shape {destination.shape!r}"
         )
-    if dtype_name(replacement.dtype) != dtype_name(destination.dtype):
-        replacement = _cast_abstract(trace, replacement, destination.dtype)
+    if replacement.spec.dtype != destination.spec.dtype:
+        # validate_staged_out applied NumPy's casting rule, so the cast back is
+        # a neutral astype that any provider replays.
+        replacement = replacement.astype(destination.spec.dtype)
     destination._commit(replacement)  # noqa: SLF001 - frontend owns staged mutation
     return destination
-
-
-def _reduction(
-    trace: AbstractTrace,
-    name: str,
-    source: object,
-    *,
-    axis: object,
-    dtype: object,
-    keepdims: bool,
-    initial: object | None = None,
-) -> AbstractArray:
-    attrs: dict[str, object] = {"axis": axis, "keepdims": keepdims}
-    if dtype is not None:
-        attrs["dtype"] = dtype
-    if initial is not None:
-        item = getattr(initial, "item", None)
-        attrs["initial"] = item() if callable(item) else initial
-    return _numpy_array(trace, name, (source,), attrs)
-
-
-class _GradientNamespace:
-    __slots__ = ("trace",)
-
-    def __init__(self, trace: AbstractTrace) -> None:
-        self.trace = trace
-
-    def concatenate(self, arrays: tuple[Any, ...], *, axis: int) -> AbstractArray:
-        return _numpy_array(self.trace, "concatenate", (arrays,), {"axis": axis})
-
-    def diff(self, value: object) -> AbstractArray:
-        return _numpy_array(self.trace, "diff", (value,), {})
-
-    def reshape(self, value: object, shape: tuple[int, ...]) -> AbstractArray:
-        return _numpy_array(self.trace, "reshape", (value, shape), {})
 
 
 def _gradient(
     trace: AbstractTrace,
     raw_args: tuple[Any, ...],
-    raw_kwargs: dict[str, Any],
+    kwargs: dict[str, Any],
 ) -> AbstractArray | tuple[AbstractArray, ...]:
-    if not raw_args:
-        raise TypeError("gradient() requires an input array")
-    kwargs = dict(raw_kwargs)
-    unexpected = set(kwargs) - {"axis", "edge_order"}
-    if unexpected:
-        raise TypeError(f"Cannot stage gradient() attributes {tuple(sorted(unexpected))!r}")
     source = _lift(trace, raw_args[0])
     axis_value = kwargs.get("axis")
     if axis_value is None:
@@ -216,424 +159,52 @@ def _gradient(
     edge_order = int(kwargs.get("edge_order", 1))
     if edge_order not in {1, 2}:
         raise ValueError("gradient() edge_order must be 1 or 2")
-    spacings = raw_args[1:]
-    if not spacings:
-        normalized_spacings: tuple[object, ...] = (1.0,) * len(axes)
-    elif len(spacings) == 1 and operand_ndim(spacings[0]) == 0:
-        normalized_spacings = spacings * len(axes)
-    elif len(spacings) == len(axes):
-        normalized_spacings = spacings
-    else:
-        raise TypeError("gradient() requires one scalar spacing or one spacing per gradient axis")
-    namespace = _GradientNamespace(trace)
-    outputs = tuple(
-        cast(
-            "AbstractArray",
-            lower_gradient_axis(
-                namespace,
-                source,
-                spacing,
-                axis=axis,
-                edge_order=edge_order,
-            ),
-        )
-        for axis, spacing in zip(axes, normalized_spacings, strict=True)
+    return lower_gradient(
+        source,
+        raw_args[1:] or (1.0,),
+        axes=axes,
+        edge_order=edge_order,
+        error=TypeError,
     )
-    return outputs[0] if len(outputs) == 1 else outputs
 
 
-def _controlled_reduction(
-    trace: AbstractTrace,
-    raw_name: str,
-    source: AbstractArray,
-    kwargs: dict[str, Any],
-) -> AbstractArray | None:
-    additive = {"sum", "nansum"}
-    multiplicative = {"prod", "nanprod"}
-    means = {"mean", "nanmean"}
-    extrema = {"amax", "amin", "max", "min", "nanmax", "nanmin"}
-    variances = {"nanstd", "nanvar", "std", "var"}
-    initial = kwargs.get("initial")
-    has_dynamic_initial = isinstance(initial, AbstractArray)
-    correction = kwargs.get("correction", kwargs.get("ddof", 0))
-
-    if raw_name in additive | multiplicative | means:
-        if "where" not in kwargs and not has_dynamic_initial:
-            return None
-        axis = kwargs.get("axis")
-        dtype = kwargs.get("dtype")
-        keepdims = bool(kwargs.get("keepdims", False))
-        where = kwargs.get("where")
-        selected: object = source
-        if where is not None:
-            valid = _numpy_array(trace, "broadcast_to", (where, source.shape), {})
-            if raw_name == "nanmean":
-                isnan = _numpy_array(trace, "isnan", (source,), {})
-                valid = _numpy_array(trace, "where", (isnan, False, valid), {})
-            if raw_name in means:
-                zero = _numpy_array(trace, "zeros_like", (source,), {})
-                numerator_source = _numpy_array(
-                    trace,
-                    "where",
-                    (valid, source, zero),
-                    {},
-                )
-                numerator = _reduction(
-                    trace,
-                    "sum",
-                    numerator_source,
-                    axis=axis,
-                    dtype=dtype,
-                    keepdims=keepdims,
-                )
-                count = _reduction(
-                    trace,
-                    "sum",
-                    _numpy_array(trace, "astype", (valid, "int64"), {}),
-                    axis=axis,
-                    dtype=None,
-                    keepdims=keepdims,
-                )
-                count = _numpy_array(trace, "astype", (count, source.dtype), {})
-                return _numpy_array(trace, "divide", (numerator, count), {})
-            identity = _numpy_array(
-                trace,
-                "ones_like" if raw_name in multiplicative else "zeros_like",
-                (source,),
-                {},
-            )
-            selected = _numpy_array(trace, "where", (valid, source, identity), {})
-        result = _reduction(
-            trace,
-            raw_name,
-            selected,
-            axis=axis,
-            dtype=dtype,
-            keepdims=keepdims,
-            initial=None if has_dynamic_initial else initial,
-        )
-        if not has_dynamic_initial:
-            return result
-        combine = "multiply" if raw_name in multiplicative else "add"
-        return _numpy_array(trace, combine, (result, initial), {})
-
-    if raw_name in extrema:
-        if "where" not in kwargs and not has_dynamic_initial:
-            return None
-        axis = kwargs.get("axis")
-        keepdims = bool(kwargs.get("keepdims", False))
-        where = kwargs.get("where")
-        if initial is None:
-            raise TypeError(f"{raw_name}() with where= requires initial=")
-        if where is not None:
-            selected = _numpy_array(trace, "where", (where, source, initial), {})
-        elif raw_name in {"nanmax", "nanmin"}:
-            isnan = _numpy_array(trace, "isnan", (source,), {})
-            selected = _numpy_array(trace, "where", (isnan, initial, source), {})
-        else:
-            selected = source
-        base = _reduction(
-            trace,
-            raw_name,
-            selected,
-            axis=axis,
-            dtype=None,
-            keepdims=keepdims,
-        )
-        combine = "maximum" if raw_name in {"amax", "max", "nanmax"} else "minimum"
-        return _numpy_array(trace, combine, (base, initial), {})
-
-    if raw_name not in variances or (
-        "where" not in kwargs
-        and kwargs.get("mean") is None
-        and not isinstance(correction, AbstractArray)
-    ):
-        return None
-
-    dtype = kwargs.get("dtype")
-    if dtype is not None:
-        source = _numpy_array(trace, "astype", (source, dtype), {})
-    axis = kwargs.get("axis")
-    keepdims = bool(kwargs.get("keepdims", False))
-    where = kwargs.get("where")
-    valid = (
-        _numpy_array(trace, "ones_like", (source,), {"dtype": "bool"})
-        if where is None
-        else _numpy_array(trace, "broadcast_to", (where, source.shape), {})
-    )
-    if raw_name in {"nanstd", "nanvar"}:
-        isnan = _numpy_array(trace, "isnan", (source,), {})
-        valid = _numpy_array(trace, "where", (isnan, False, valid), {})
-    valid_int = _numpy_array(trace, "astype", (valid, "int64"), {})
-    count_with_dims = _reduction(
-        trace,
-        "sum",
-        valid_int,
-        axis=axis,
-        dtype=None,
-        keepdims=True,
-    )
-    count_with_dims = _numpy_array(trace, "astype", (count_with_dims, source.dtype), {})
-    supplied_mean = kwargs.get("mean")
-    if supplied_mean is None:
-        zero = _numpy_array(trace, "zeros_like", (source,), {})
-        selected = _numpy_array(trace, "where", (valid, source, zero), {})
-        numerator = _reduction(
-            trace,
-            "sum",
-            selected,
-            axis=axis,
-            dtype=None,
-            keepdims=True,
-        )
-        supplied_mean = _numpy_array(trace, "divide", (numerator, count_with_dims), {})
-    safe_source = _numpy_array(trace, "where", (valid, source, supplied_mean), {})
-    centered = _numpy_array(trace, "subtract", (safe_source, supplied_mean), {})
-    conjugate = _numpy_array(trace, "conjugate", (centered,), {})
-    magnitude_squared = _numpy_array(trace, "multiply", (conjugate, centered), {})
-    squared = _numpy_array(trace, "real", (magnitude_squared,), {})
-    squared_zero = _numpy_array(trace, "zeros_like", (squared,), {})
-    selected_squared = _numpy_array(trace, "where", (valid, squared, squared_zero), {})
-    numerator = _reduction(
-        trace,
-        "sum",
-        selected_squared,
-        axis=axis,
-        dtype=None,
-        keepdims=keepdims,
-    )
-    count = _reduction(
-        trace,
-        "sum",
-        valid_int,
-        axis=axis,
-        dtype=None,
-        keepdims=keepdims,
-    )
-    count = _numpy_array(trace, "astype", (count, squared.dtype), {})
-    typed_correction = _numpy_array(trace, "astype", (_lift(trace, correction), squared.dtype), {})
-    denominator = _numpy_array(trace, "subtract", (count, typed_correction), {})
-    denominator = _numpy_array(
-        trace,
-        "maximum",
-        (denominator, _numpy_array(trace, "zeros_like", (denominator,), {})),
-        {},
-    )
-    result = _numpy_array(trace, "divide", (numerator, denominator), {})
-    return _numpy_array(trace, "sqrt", (result,), {}) if raw_name in {"nanstd", "std"} else result
-
-
-def _average(
-    trace: AbstractTrace,
-    raw_args: tuple[Any, ...],
-    raw_kwargs: dict[str, Any],
-) -> AbstractArray | tuple[AbstractArray, AbstractArray]:
-    if not raw_args or len(raw_args) > 4:
-        raise TypeError("average() expects (a, axis, weights, returned)")
-    values = dict(raw_kwargs)
-    unexpected = set(values) - {"axis", "keepdims", "returned", "weights"}
-    if unexpected:
-        raise TypeError(f"Abstract staging of average() does not support {tuple(unexpected)!r}")
-    for name, value in zip(("axis", "weights", "returned"), raw_args[1:], strict=False):
-        if name in values:
-            raise TypeError(f"average() received {name!r} twice")
-        values[name] = value
-    array = _lift(trace, raw_args[0])
-    axis = values.get("axis")
-    keepdims = bool(values.get("keepdims", False))
-    returned = bool(values.get("returned", False))
-    weights_raw = values.get("weights")
-    if weights_raw is None:
-        result = _numpy_array(
-            trace,
-            "mean",
-            (array,),
-            {"axis": axis, "keepdims": keepdims},
-        )
-        if not returned:
-            return result
-        count = (
-            math.prod(array.shape)
-            if axis is None
-            else math.prod(array.shape[item] for item in normalize_axes(axis, array.ndim))
-        )
-        weight_sum = _numpy_array(
-            trace,
-            "multiply",
-            (_numpy_array(trace, "ones_like", (result,), {}), count),
-            {},
-        )
-        return result, weight_sum
-    weights = _lift(trace, weights_raw)
-    if weights.shape != array.shape:
-        if axis is None:
-            raise TypeError("Axis must be specified when shapes of a and weights differ.")
-        axes = normalize_axes(axis, array.ndim)
-        expected_shape = tuple(array.shape[item] for item in axes)
-        if weights.shape != expected_shape:
-            raise ValueError(
-                "Shape of weights must be consistent with shape of a along specified axis."
-            )
-        expanded_shape = [1] * array.ndim
-        for weight_axis, array_axis in enumerate(axes):
-            expanded_shape[array_axis] = weights.shape[weight_axis]
-        weights = _numpy_array(trace, "reshape", (weights, tuple(expanded_shape)), {})
-    weighted = _numpy_array(trace, "multiply", (array, weights), {})
-    reduction_attrs = {"axis": axis, "keepdims": keepdims}
-    numerator = _numpy_array(trace, "sum", (weighted,), reduction_attrs)
-    denominator = _numpy_array(trace, "sum", (weights,), reduction_attrs)
-    result = _numpy_array(trace, "divide", (numerator, denominator), {})
-    if not returned:
-        return result
-    weight_sum = _numpy_array(
-        trace,
-        "multiply",
-        (_numpy_array(trace, "ones_like", (result,), {}), denominator),
-        {},
-    )
-    return result, weight_sum
-
-
-def _matrix_power(
-    trace: AbstractTrace,
-    raw_args: tuple[Any, ...],
-    raw_kwargs: dict[str, Any],
-) -> AbstractArray:
-    if len(raw_args) != 2 or raw_kwargs:
-        raise TypeError("matrix_power() expects a matrix and a static integer exponent")
+def _matrix_power(trace: AbstractTrace, raw_args: tuple[Any, ...]) -> AbstractArray:
     matrix = _lift(trace, raw_args[0])
-    exponent = raw_args[1]
-    if isinstance(exponent, bool) or not isinstance(exponent, int):
-        raise TypeError("matrix_power exponent must be a static integer")
+    try:
+        # NumPy reads the exponent with operator.index, so bools and NumPy integers count.
+        exponent = operator.index(raw_args[1])
+    except TypeError as error:
+        raise TypeError("matrix_power exponent must be a static integer") from error
     if matrix.ndim < 2 or matrix.shape[-2] != matrix.shape[-1]:
         raise ValueError("matrix_power requires square matrices")
-    if exponent == 0:
-        identity = _numpy_array(
-            trace,
-            "eye",
-            (matrix.shape[-1],),
-            {"dtype": matrix.dtype},
-        )
-        zeros = _numpy_array(trace, "zeros_like", (matrix,), {})
-        return _numpy_array(trace, "add", (zeros, identity), {})
-    base = _numpy_array(trace, "linalg.inv", (matrix,), {}) if exponent < 0 else matrix
-    remaining = abs(exponent)
-    result: AbstractArray | None = None
-    while remaining:
-        if remaining & 1:
-            result = base if result is None else _numpy_array(trace, "matmul", (result, base), {})
-        remaining >>= 1
-        if remaining:
-            base = _numpy_array(trace, "matmul", (base, base), {})
-    if result is None:
-        raise AssertionError("matrix_power failed to produce a result")
-    return result
-
-
-def _cumulative_with_initial(
-    trace: AbstractTrace,
-    raw_name: str,
-    raw_args: tuple[Any, ...],
-    raw_kwargs: dict[str, Any],
-) -> AbstractArray:
-    if not raw_args or len(raw_args) > 2:
-        raise TypeError(f"{raw_name}() expects an array and optional axis")
-    if len(raw_args) == 2 and "axis" in raw_kwargs:
-        raise TypeError(f"{raw_name}() received 'axis' twice")
-    source = _lift(trace, raw_args[0])
-    axis_value = raw_args[1] if len(raw_args) == 2 else raw_kwargs.get("axis")
-    if axis_value is None:
-        if source.ndim != 1:
-            raise ValueError(
-                "cumulative operations require axis= for inputs with more than one dimension"
-            )
-        axis = 0
-    else:
-        axis = normalize_axis(axis_value, source.ndim)
-    options = dict(raw_kwargs)
-    options["axis"] = axis
-    options.pop("include_initial", None)
-    base = _numpy_array(trace, raw_name, (source,), options)
-    seed_shape = list(base.shape)
-    seed_shape[axis] = 1
-    fill_value = 1 if raw_name in {"cumprod", "cumulative_prod"} else 0
-    seed = _numpy_array(
-        trace,
-        "full",
-        (tuple(seed_shape), fill_value),
-        {"dtype": base.dtype},
-    )
-    return _numpy_array(trace, "concatenate", ((seed, base),), {"axis": axis})
+    return lower_matrix_power(matrix, exponent)
 
 
 def _compress(
     trace: AbstractTrace,
     raw_args: tuple[Any, ...],
-    raw_kwargs: dict[str, Any],
+    kwargs: dict[str, Any],
 ) -> AbstractArray:
-    if len(raw_args) not in {2, 3} or set(raw_kwargs) - {"axis"}:
-        raise TypeError("compress() expects (condition, a, axis=None)")
-    if len(raw_args) == 3 and "axis" in raw_kwargs:
-        raise TypeError("compress() received 'axis' twice")
-    condition, source_raw = raw_args[:2]
-
-    def condition_values(value: object) -> tuple[bool, ...]:
-        if isinstance(value, AbstractArray):
-            raise TracingError(
-                "Staged numpy.compress requires a captured concrete condition; "
-                "a live traced condition has a data-dependent output shape"
-            )
-        import numpy as np  # noqa: PLC0415 - static NumPy frontend metadata
-
-        condition = np.asarray(value)
-        if condition.ndim != 1:
-            raise ValueError("condition must be a 1-d array")
-        return tuple(bool(item) for item in condition)
-
-    source = _lift(trace, source_raw)
-    axis_raw = raw_args[2] if len(raw_args) == 3 else raw_kwargs.get("axis")
-    if axis_raw is None:
-        source = _numpy_array(trace, "reshape", (source, (math.prod(source.shape),)), {})
-        axis = 0
-    else:
-        axis = normalize_axis(axis_raw, source.ndim)
-    limit = source.shape[axis]
-    positions = tuple(
-        index for index, selected in enumerate(condition_values(condition)[:limit]) if selected
-    )
-    position_spec = ArraySpec((len(positions),), "int64")
-    position_array = _new_abstract_array(
-        trace,
-        trace.add_constant(positions, position_spec),
-        position_spec,
-        owned=False,
-    )
-    return _numpy_array(trace, "take", (source, position_array), {"axis": axis})
+    condition, source = raw_args[:2]
+    if isinstance(condition, AbstractArray):
+        raise TracingError(
+            "Staged numpy.compress requires a captured concrete condition; "
+            "a live traced condition has a data-dependent output shape"
+        )
+    return lower_compress(condition, _lift(trace, source), kwargs.get("axis"))
 
 
 def _diff(
     trace: AbstractTrace,
     raw_args: tuple[Any, ...],
-    raw_kwargs: dict[str, Any],
+    kwargs: dict[str, Any],
 ) -> AbstractArray:
-    if not raw_args or len(raw_args) > 5:
-        raise TypeError("diff() expects (a, n, axis, prepend, append)")
-    values = dict(raw_kwargs)
-    unexpected = set(values) - {"append", "axis", "n", "prepend"}
-    if unexpected:
-        raise TypeError(
-            f"Abstract staging of diff() does not support {tuple(sorted(unexpected))!r}"
-        )
     source_raw = raw_args[0]
-    for name, value in zip(("n", "axis", "prepend", "append"), raw_args[1:], strict=False):
-        if name in values:
-            raise TypeError(f"diff() received {name!r} twice")
-        values[name] = value
-    n = values.get("n", 1)
+    n = kwargs.get("n", 1)
     if isinstance(n, bool) or not isinstance(n, int) or n < 0:
         raise ValueError("diff n must be a non-negative integer")
     source = _lift(trace, source_raw)
-    axis = normalize_axis(values.get("axis", -1), source.ndim)
+    axis = normalize_axis(kwargs.get("axis", -1), source.ndim)
 
     def emit_diff(value: AbstractArray) -> AbstractArray:
         return cast(
@@ -641,7 +212,7 @@ def _diff(
             _record_numpy(trace, "diff", (value,), {"axis": axis, "n": n}),
         )
 
-    if n == 0 or (values.get("prepend") is None and values.get("append") is None):
+    if n == 0 or (kwargs.get("prepend") is None and kwargs.get("append") is None):
         return emit_diff(source)
     boundary_shape = list(source.shape)
     boundary_shape[axis] = 1
@@ -657,10 +228,10 @@ def _diff(
             )
         return boundary
 
-    parts = [lift_boundary(values["prepend"])] if values.get("prepend") is not None else []
+    parts = [lift_boundary(kwargs["prepend"])] if kwargs.get("prepend") is not None else []
     parts.append(source)
-    if values.get("append") is not None:
-        parts.append(lift_boundary(values["append"]))
+    if kwargs.get("append") is not None:
+        parts.append(lift_boundary(kwargs["append"]))
     return emit_diff(_numpy_array(trace, "concatenate", (tuple(parts),), {"axis": axis}))
 
 
@@ -669,22 +240,8 @@ def _pinv(
     raw_args: tuple[Any, ...],
     raw_kwargs: dict[str, Any],
 ) -> AbstractArray:
-    args = list(raw_args)
+    value = _lift(trace, raw_args[0])
     kwargs = dict(raw_kwargs)
-    if not args:
-        raise TypeError("pinv() requires an input")
-    value = _lift(trace, args.pop(0))
-    if len(args) > 1:
-        raise TypeError("pinv() accepts at most one positional tolerance")
-    unexpected = set(kwargs) - {"hermitian", "rcond", "rtol"}
-    if unexpected:
-        raise TypeError(
-            f"Abstract staging of pinv() does not support attributes {tuple(sorted(unexpected))!r}"
-        )
-    if args:
-        if "rcond" in kwargs or "rtol" in kwargs:
-            raise TypeError("pinv() received its tolerance twice")
-        kwargs["rcond"] = args.pop()
     tolerance_names = tuple(name for name in ("rcond", "rtol") if kwargs.get(name) is not None)
     if len(tolerance_names) > 1:
         raise TypeError("pinv() accepts only one of rcond= and rtol=")
@@ -713,25 +270,8 @@ def _full(
     raw_args: tuple[Any, ...],
     raw_kwargs: dict[str, Any],
 ) -> AbstractArray:
-    args = list(raw_args)
+    shape, fill_value = raw_args[:2]
     kwargs = dict(raw_kwargs)
-    if len(args) < 2:
-        raise TypeError("full() requires shape and fill_value")
-    shape = args.pop(0)
-    fill_value = args.pop(0)
-    for name in ("dtype", "order"):
-        if not args:
-            break
-        if name in kwargs:
-            raise TypeError(f"full() received {name!r} twice")
-        kwargs[name] = args.pop(0)
-    if args:
-        raise TypeError(f"Cannot stage positional metadata for full: {tuple(args)!r}")
-    unexpected = set(kwargs) - {"device", "dtype", "like", "order"}
-    if unexpected:
-        raise TypeError(
-            f"Abstract staging of full() does not support attributes {tuple(sorted(unexpected))!r}"
-        )
     # ``like=`` only selects the NumPy frontend.  Once this binder is active it
     # has no graph semantics and, in particular, must not become a data
     # dependency of the fill operation.
@@ -755,22 +295,16 @@ def apply_numpy(
     raw_args: tuple[Any, ...],
     raw_kwargs: dict[str, Any],
 ) -> AbstractArray | tuple[AbstractArray, ...] | int:
-    """Bind one staged NumPy call and emit canonical operations."""
+    """Bind one staged NumPy call and emit canonical operations.
+
+    The array-function protocol passes optional metadata by name, so only
+    operands and required metadata arrive positionally.
+    """
     trace.require_open()
-    if raw_name in {"concatenate", "dot"} and len(raw_args) > 2:
-        if len(raw_args) > 3:
-            raise TypeError(f"{raw_name}() accepts at most three positional arguments")
-        if "out" in raw_kwargs:
-            raise TypeError(f"{raw_name}() received 'out' twice")
-        raw_kwargs = {**raw_kwargs, "out": raw_args[2]}
-        raw_args = raw_args[:2]
     args = list(raw_args)
-    kwargs = dict(raw_kwargs)
-    if raw_name == "linalg.qr":
-        positional_mode = args[1] if len(args) > 1 else None
-        mode = kwargs.get("mode", positional_mode if positional_mode is not None else "reduced")
-        if mode == "r":
-            raw_name = "linalg.qr_r"
+    kwargs: dict[str, Any] = dict(raw_kwargs)
+    if raw_name == "linalg.qr" and kwargs.get("mode") == "r":
+        raw_name = "linalg.qr_r"
     if "out" in kwargs:
         out = kwargs.pop("out")
         if not _empty_out(out):
@@ -779,27 +313,44 @@ def apply_numpy(
     if raw_name == "gradient":
         return _gradient(trace, raw_args, kwargs)
     if raw_name == "size":
-        if not args or len(args) > 2 or set(kwargs) - {"axis"}:
-            raise TypeError("size() expects an array and optional axis")
-        if len(args) == 2 and "axis" in kwargs:
-            raise TypeError("size() received 'axis' twice")
         value = _lift(trace, args[0])
-        axis_value = args[1] if len(args) == 2 else kwargs.get("axis")
+        axis_value = kwargs.get("axis")
         return (
             math.prod(value.shape)
             if axis_value is None
             else value.shape[normalize_axis(axis_value, value.ndim)]
         )
     if raw_name == "average":
-        return _average(trace, raw_args, raw_kwargs)
+        return lower_average(
+            _lift(trace, raw_args[0]),
+            kwargs.get("weights"),
+            axis=kwargs.get("axis"),
+            keepdims=bool(kwargs.get("keepdims", False)),
+            returned=bool(kwargs.get("returned", False)),
+        )
     if raw_name == "compress":
-        return _compress(trace, raw_args, raw_kwargs)
+        return _compress(trace, raw_args, kwargs)
     if raw_name == "linalg.matrix_power":
-        return _matrix_power(trace, raw_args, raw_kwargs)
-    if raw_name in {"cumulative_prod", "cumulative_sum"} and bool(
-        kwargs.get("include_initial", False)
-    ):
-        return _cumulative_with_initial(trace, raw_name, raw_args, raw_kwargs)
+        return _matrix_power(trace, raw_args)
+    if raw_name in {"cumulative_prod", "cumulative_sum"} and kwargs.get("include_initial", False):
+        return lower_cumulative_initial(
+            raw_name,
+            _lift(trace, raw_args[0]),
+            axis=kwargs.get("axis"),
+            dtype=kwargs.get("dtype"),
+        )
+    if raw_name in {"cumprod", "cumsum", "cumulative_prod", "cumulative_sum"}:
+        # NumPy scans a 0-d input as a one-element vector, and cumsum and
+        # cumprod scan the flattened array when axis is None.
+        source = _lift(trace, args[0])
+        flattens = kwargs.get("axis") is None and raw_name in {"cumprod", "cumsum"}
+        if source.ndim == 0 or (flattens and source.ndim != 1):
+            args[0] = _numpy_array(trace, "reshape", (source, (math.prod(source.shape),)), {})
+    if raw_name == "round":
+        # np.round returns integers unchanged; only other data rounds with rint.
+        source = _lift(trace, args[0])
+        if kwargs.get("decimals", 0) == 0 and np.dtype(source.spec.dtype).kind in "iu":
+            return source.copy()
     if raw_name in {"empty", "ones", "zeros"} and kwargs.get("dtype") is None:
         kwargs["dtype"] = "float64"
     if raw_name == "eye":
@@ -815,15 +366,12 @@ def apply_numpy(
         if kwargs.get("dtype") is float:
             kwargs["dtype"] = "float64"
     if raw_name == "clip":
-        if not args:
-            raise TypeError("clip() requires an input")
-        value = args.pop(0)
-        lower = args.pop(0) if args else kwargs.pop("a_min", None)
-        upper = args.pop(0) if args else kwargs.pop("a_max", None)
-        if args or kwargs:
+        unsupported = tuple(sorted(set(kwargs) - CLIP_KEYWORDS))
+        if unsupported:
             raise TypeError(
-                f"Abstract staging of clip() does not support attributes {tuple(sorted(kwargs))!r}"
+                f"Abstract staging of clip() does not support attributes {unsupported!r}"
             )
+        value, lower, upper = bind_clip_bounds(tuple(args), kwargs)
         operands = [value]
         attrs = {
             "_advect_clip_min_is_input": lower is not None,
@@ -844,20 +392,21 @@ def apply_numpy(
             ),
         )
     if raw_name == "diff":
-        return _diff(trace, raw_args, raw_kwargs)
-    if raw_name == "linalg.svd" and kwargs.get("compute_uv", True) is False:
-        if len(args) != 1:
-            raise TypeError("linalg.svd() expects one input array")
-        unexpected = set(kwargs) - {"compute_uv", "full_matrices", "hermitian"}
-        if unexpected:
-            raise TypeError(
-                f"Abstract staging of linalg.svd() does not support {tuple(sorted(unexpected))!r}"
-            )
+        return _diff(trace, raw_args, kwargs)
+    if raw_name in {"argsort", "sort"}:
+        kwargs = ascending_sort_kwargs(raw_name, kwargs)
+        # axis=None sorts the flattened array.
+        if kwargs.get("axis", -1) is None:
+            source = _lift(trace, args[0])
+            args = [_numpy_array(trace, "reshape", (source, (math.prod(source.shape),)), {})]
+            kwargs["axis"] = -1
+    # NumPy reads svd's compute_uv by truthiness.
+    if raw_name == "linalg.svd" and not kwargs.pop("compute_uv", True):
         return _numpy_array(trace, "linalg.svdvals", (args[0],), {})
     if raw_name in {"linalg.pinv", "pinv"}:
-        return _pinv(trace, raw_args, raw_kwargs)
+        return _pinv(trace, raw_args, kwargs)
     if raw_name == "full":
-        return _full(trace, raw_args, raw_kwargs)
+        return _full(trace, raw_args, kwargs)
 
     op = staged_numpy_op(raw_name)
     rule = get_registry().get(op).abstract_schema
@@ -881,10 +430,8 @@ def apply_numpy(
     if raw_name in {"linalg.diagonal", "linalg.trace"}:
         kwargs["axis1"] = -2
         kwargs["axis2"] = -1
-    if raw_name == "convolve" and not args and "mode" not in kwargs:
-        kwargs["mode"] = "full"
-    if raw_name == "correlate" and not args and "mode" not in kwargs:
-        kwargs["mode"] = "valid"
+    if raw_name in {"convolve", "correlate"}:
+        kwargs.setdefault("mode", "full" if raw_name == "convolve" else "valid")
     if raw_name == "take_along_axis" and args:
         if "axis" in kwargs:
             raise TypeError("take_along_axis() received 'axis' twice")
@@ -897,35 +444,25 @@ def apply_numpy(
         kwargs[name] = args.pop(0)
     if args:
         raise TypeError(f"Cannot stage positional metadata for {raw_name}: {tuple(args)!r}")
-    if raw_name in {
-        "amax",
-        "amin",
-        "max",
-        "mean",
-        "min",
-        "nanmax",
-        "nanmean",
-        "nanmin",
-        "nanprod",
-        "nanstd",
-        "nansum",
-        "nanvar",
-        "prod",
-        "std",
-        "sum",
-        "var",
-    }:
+    if raw_name == "take" and "mode" in kwargs:
+        kwargs["mode"] = take_mode(kwargs["mode"])
+    if raw_name in REDUCTIONS:
         source = _lift(trace, operands[0])
-        controlled = _controlled_reduction(trace, raw_name, source, kwargs)
+        controlled = lower_controlled_reduction(raw_name, source, kwargs, error=TypeError)
         if controlled is not None:
             return controlled
+        initial = kwargs.get("initial")
+        if isinstance(initial, (list, tuple)) or getattr(initial, "ndim", 0) != 0:
+            raise ValueError(NON_SCALAR_INITIAL)
+        if callable(getattr(initial, "item", None)):
+            # A static NumPy scalar or 0-d array initial= is an ordinary graph attribute.
+            kwargs["initial"] = cast("Any", initial).item()
     if raw_name == "astype":
-        order = kwargs.get("order", "K")
+        if "order" in kwargs:
+            kwargs["order"] = _normalize_order(kwargs["order"], default="K")
         casting = kwargs.get("casting", "unsafe")
         subok = kwargs.get("subok", False)
         copy = kwargs.get("copy", True)
-        if not isinstance(order, str) or order not in {"A", "C", "F", "K"}:
-            raise ValueError(f"astype() received invalid order {order!r}")
         if not isinstance(casting, str) or casting not in _CASTING_RULES:
             raise ValueError(f"astype() received invalid casting rule {casting!r}")
         if type(subok) is not bool:
@@ -933,7 +470,7 @@ def apply_numpy(
         if type(copy) is not bool:
             raise TypeError("astype() copy must be a bool")
         target_dtype = kwargs.get("dtype")
-        source_dtype = getattr(operands[0], "dtype", None)
+        source_dtype = operand_dtype(operands[0])
         if target_dtype is not None and not can_cast_dtype(
             source_dtype,
             target_dtype,
@@ -950,9 +487,7 @@ def apply_numpy(
         kwargs,
         graph_attrs={"_advect_backend": "numpy"},
     )
-    if isinstance(result, tuple) and raw_name == "linalg.slogdet":
-        return restore_array_api_result(raw_name, result)
-    return result
+    return restore_array_api_result(raw_name, result) if isinstance(result, tuple) else result
 
 
 __all__ = ["apply_numpy", "can_cast_dtype"]

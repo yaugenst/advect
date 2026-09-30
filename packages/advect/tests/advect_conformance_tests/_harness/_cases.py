@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 from dataclasses import dataclass, field, replace
 from enum import Enum
 from typing import TYPE_CHECKING, Any
@@ -107,6 +108,10 @@ class InputVariant:
     dtypes: Mapping[str, str] = field(default_factory=dict)
     tolerance: Tolerance | None = None
     numerical_reference: NumericalReference | None = None
+    # Zero-dimensional arguments passed as weak Python numbers.
+    python_scalars: frozenset[str] = frozenset()
+    # Differentiable arguments held constant, so no transform selects them.
+    constants: frozenset[str] = frozenset()
 
     def __post_init__(self) -> None:
         if not self.name:
@@ -123,6 +128,7 @@ class Argument:
     shape: tuple[int, ...] = ()
     dtype: str = "float64"
     differentiable: bool = True
+    python_scalar: bool = False
 
     def strategy(
         self,
@@ -130,16 +136,38 @@ class Argument:
     ) -> SearchStrategy[Any]:
         """Build the concrete value strategy after dependencies are known."""
         dtype = np.dtype(self.dtype)
-        return self.domain.strategy(self.shape, dtype, drawn)
+        if self.domain.depends_on:
+            return _as_python(self.domain.strategy(self.shape, dtype, drawn), self.python_scalar)
+        return _independent_strategy(
+            self.domain, self.shape, dtype, python_scalar=self.python_scalar
+        )
 
 
-@dataclass(frozen=True, slots=True)
+def _as_python(values: SearchStrategy[Any], python_scalar: bool) -> SearchStrategy[Any]:  # noqa: FBT001
+    return values.map(lambda value: value.item()) if python_scalar else values
+
+
+@functools.cache
+def _independent_strategy(
+    domain: Domain,
+    shape: tuple[int, ...],
+    dtype: np.dtype[Any],
+    *,
+    python_scalar: bool,
+) -> SearchStrategy[Any]:
+    """Share one validated strategy per domain signature across examples."""
+    return _as_python(domain.strategy(shape, dtype, {}), python_scalar)
+
+
+@dataclass(frozen=True, slots=True, eq=False)
 class InvocationCase:
     """One supported way of reaching a canonical registry operation.
 
     Several invocations may name the same ``op``: NumPy and Array API
     frontends, positional and keyword signatures, or materially different
     static attributes are distinct contracts even when they share one rule.
+    Declarations compare by identity, so argument strategies and resolved
+    variants are built once per declaration and variant.
     """
 
     op: str
@@ -155,6 +183,9 @@ class InvocationCase:
     # declared domain.  Merely being differentiable does not imply this.
     dependence_indices: frozenset[int] = frozenset()
     reason: str = ""
+    # The documented refusal, quoted from its message, that nested transforms
+    # raise over this invocation's pullback. The adjoint law requires it.
+    first_order: str = ""
 
     def __post_init__(self) -> None:
         differentiable = set(self.differentiable_indices)
@@ -173,19 +204,40 @@ class InvocationCase:
         ):
             msg = f"{self.op}: complex-step is only valid for real primal domains"
             raise ValueError(msg)
-        argument_names = {argument.name for argument in self.arguments}
+        shapes = {argument.name: argument.shape for argument in self.arguments}
         variant_names: set[str] = set()
         for variant in self.variants:
             if variant.name in variant_names:
                 msg = f"{self.op}: duplicate input variant name {variant.name!r}"
                 raise ValueError(msg)
             variant_names.add(variant.name)
-            unknown = (set(variant.shapes) | set(variant.dtypes)) - argument_names
+            unknown = (
+                set(variant.shapes)
+                | set(variant.dtypes)
+                | variant.python_scalars
+                | variant.constants
+            ) - set(shapes)
             if unknown:
                 msg = f"{self.op}: input variant names unknown arguments {sorted(unknown)!r}"
                 raise ValueError(msg)
             for dtype in variant.dtypes.values():
                 np.dtype(dtype)
+            if any(variant.shapes.get(name, shapes[name]) != () for name in variant.python_scalars):
+                msg = f"{self.op}: variant {variant.name!r} passes a non-scalar as a number"
+                raise ValueError(msg)
+            held = {
+                index
+                for index, argument in enumerate(self.arguments)
+                if argument.name in variant.constants
+            }
+            if not held <= differentiable - set(self.dependence_indices) or (
+                held and held == differentiable
+            ):
+                msg = (
+                    f"{self.op}: variant {variant.name!r} must hold constant only "
+                    "differentiable arguments without a dependence promise, and not all"
+                )
+                raise ValueError(msg)
 
     @property
     def differentiable_indices(self) -> tuple[int, ...]:
@@ -204,48 +256,58 @@ class InvocationCase:
         return max(len(self.variants), 1)
 
     def resolve_variant(self, index: int) -> InvocationCase:
-        """Return a declaration with one input specialization applied."""
-        if not self.variants:
-            if index != 0:
-                raise IndexError(index)
-            return self
-        variant = self.variants[index]
-        arguments = tuple(
-            replace(
-                argument,
-                shape=variant.shapes.get(argument.name, argument.shape),
-                dtype=variant.dtypes.get(argument.name, argument.dtype),
-            )
-            for argument in self.arguments
-        )
-        return replace(
-            self,
-            arguments=arguments,
-            tolerance=self.tolerance if variant.tolerance is None else variant.tolerance,
-            numerical_reference=(
-                self.numerical_reference
-                if variant.numerical_reference is None
-                else variant.numerical_reference
-            ),
-            variants=(),
-        )
+        """Return the declaration with one input specialization applied.
+
+        The result is shared, so value-independent work keyed on it, such as
+        staging one signature, is done once per variant.
+        """
+        return _resolved_variant(self, index)
 
 
-@st.composite
-def argument_tuples(
-    draw: DrawFn,
-    case: InvocationCase,
-    variant: int = 0,
-) -> tuple[Any, ...]:
+@functools.cache
+def _resolved_variant(case: InvocationCase, index: int) -> InvocationCase:
+    if not case.variants:
+        if index != 0:
+            raise IndexError(index)
+        return case
+    variant = case.variants[index]
+    arguments = tuple(
+        replace(
+            argument,
+            shape=variant.shapes.get(argument.name, argument.shape),
+            dtype=variant.dtypes.get(argument.name, argument.dtype),
+            python_scalar=argument.name in variant.python_scalars,
+            differentiable=argument.differentiable and argument.name not in variant.constants,
+        )
+        for argument in case.arguments
+    )
+    return replace(
+        case,
+        arguments=arguments,
+        tolerance=case.tolerance if variant.tolerance is None else variant.tolerance,
+        numerical_reference=(
+            case.numerical_reference
+            if variant.numerical_reference is None
+            else variant.numerical_reference
+        ),
+        variants=(),
+    )
+
+
+@functools.cache
+def argument_tuples(case: InvocationCase, variant: int = 0) -> SearchStrategy[tuple[Any, ...]]:
     """Draw a full argument tuple in cross-domain dependency order."""
     resolved = case.resolve_variant(variant)
-    drawn: dict[str, Any] = {}
-    values: dict[str, Any] = {}
-    for argument in _dependency_order(resolved):
-        value = draw(argument.strategy(drawn))
-        drawn[argument.name] = value
-        values[argument.name] = value
-    return tuple(values[argument.name] for argument in resolved.arguments)
+    order = _dependency_order(resolved)
+
+    @st.composite
+    def draw_arguments(draw: DrawFn) -> tuple[Any, ...]:
+        drawn: dict[str, Any] = {}
+        for argument in order:
+            drawn[argument.name] = draw(argument.strategy(drawn))
+        return tuple(drawn[argument.name] for argument in resolved.arguments)
+
+    return draw_arguments()
 
 
 def _dependency_order(case: InvocationCase) -> tuple[Argument, ...]:

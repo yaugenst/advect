@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from advect.autodiff.api._scalar_boundary import _coerce_scalar_tangent_like
+from advect.autodiff.api._scalar_boundary import _coerce_scalar_tangent_like, _is_complex_numeric
 from advect.core._array_api.providers import _get_array_namespace
 from advect.core._pytree import tree_flatten
 
@@ -44,6 +44,9 @@ def _coerce_tangent_like(
 
     if restore_python_scalar:
         return _coerce_scalar_tangent_like(tangent, primal)
+    if _is_complex_numeric(tangent) and not _is_complex_numeric(primal):
+        msg = "JVP tangent for a real input cannot have complex dtype"
+        raise TypeError(msg)
 
     if hasattr(primal, "shape"):
         if hasattr(tangent, "shape"):
@@ -54,7 +57,8 @@ def _coerce_tangent_like(
                 raise ValueError(msg)
             return tangent
 
-        xp = _get_array_namespace(primal)
+        # Coercion needs only asarray, which every Array API revision has.
+        xp = _get_array_namespace(primal, api_version=None)
         if xp is not None and hasattr(xp, "asarray"):
             coerced = xp.asarray(tangent)
             coerced_shape = tuple(int(d) for d in coerced.shape)

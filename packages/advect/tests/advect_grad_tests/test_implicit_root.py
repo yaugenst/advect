@@ -452,22 +452,78 @@ def test_solver_failure_is_an_explicit_public_error() -> None:
         root(np.ones(2), initial=np.zeros(2))
 
 
-def test_root_rejects_solution_or_residual_spec_changes() -> None:
-    bad_solution = implicit_root(
-        lambda solution, params: solution - params,
-        solve=lambda _residual, _initial: np.ones(3),
-        linear_solve=lambda _operator, rhs: rhs,
+def _root(
+    residual: Any = lambda solution, params: solution - params,
+    solve: Any = lambda residual, initial: initial - residual(initial),
+    linear_solve: Any = lambda _operator, rhs: rhs,
+    transpose_solve: Any = None,
+) -> Any:
+    return implicit_root(
+        residual,
+        solve=solve,
+        linear_solve=linear_solve,
+        transpose_solve=transpose_solve,
     )
-    with pytest.raises(TypeError, match="solution leaf 0"):
-        bad_solution(np.ones(2), initial=np.zeros(2))
 
-    bad_residual = implicit_root(
-        lambda solution, params: np.sum(solution - params),
-        solve=lambda _residual, initial: initial,
-        linear_solve=lambda _operator, rhs: rhs,
-    )
+
+def _residual_tree_only_when_traced(solution: Any, params: Any) -> Any:
+    value = solution - params
+    return value if isinstance(solution, np.ndarray) else {"value": value}
+
+
+@pytest.mark.parametrize(
+    ("name", "message"),
+    [
+        ("residual", "residual must be callable"),
+        ("solve", "solve must be callable"),
+        ("linear_solve", "linear_solve must be callable"),
+        ("transpose_solve", "transpose_solve must be callable or None"),
+    ],
+)
+def test_root_rejects_noncallable_callbacks(name: str, message: str) -> None:
+    with pytest.raises(TypeError, match=message):
+        _root(**{name: 3})
+
+
+def test_root_rejects_solution_and_residual_spec_changes() -> None:
+    params, initial = np.ones(2), np.zeros(2)
+
+    def keep(_residual: Any, guess: Any) -> Any:
+        return guess
+
+    with pytest.raises(TypeError, match="solution leaf 0"):
+        _root(solve=lambda _residual, _guess: np.ones(3))(params, initial=initial)
+    with pytest.raises(TypeError, match="solution pytree structure"):
+        _root(solve=lambda _residual, guess: {"value": guess})(params, initial=initial)
     with pytest.raises(TypeError, match="residual leaf 0"):
-        bad_residual(np.ones(2), initial=np.zeros(2))
+        _root(lambda solution, p: np.sum(solution - p), solve=keep)(params, initial=initial)
+    with pytest.raises(TypeError, match="residual pytree structure"):
+        _root(lambda solution, p: {"value": solution - p}, solve=keep)(params, initial=initial)
+    with pytest.raises(TypeError, match="implicit residual pytree structure"):
+        jvp(_root(_residual_tree_only_when_traced))(params, initial=initial, tangents=params)
+
+
+@pytest.mark.parametrize("initial", [False, 1, 1.0 + 2.0j])
+def test_root_accepts_python_scalar_solution_specs(initial: object) -> None:
+    root = _root(lambda solution, _params: solution, solve=lambda _residual, guess: guess)
+
+    result = root(None, initial=initial)
+    assert type(result) is type(initial)
+    assert result == initial
+
+
+def test_root_jvp_supports_a_partially_seeded_parameter_pytree() -> None:
+    root = _root(lambda solution, params: solution - params["target"], linear_solve=_diagonal_solve)
+    params = {"target": np.array([1.0, 2.0]), "unused": np.array([3.0, 4.0])}
+
+    value, tangent = jvp(root)(
+        params,
+        initial=np.zeros(2),
+        tangents={"target": np.ones(2), "unused": None},
+    )
+
+    assert_allclose(value, params["target"])
+    assert_allclose(tangent, np.ones(2))
 
 
 def test_root_rejects_abstract_staging_without_tracing_solver_iterations() -> None:

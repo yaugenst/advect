@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from advect.autodiff.api._pullback_values import _ones_like
+from advect.autodiff.api._pullback_values import _ones_like, _provider_scalar_like
 from advect.autodiff.api._scalar_boundary import _is_real_python_scalar
 from advect.core._pytree import tree_flatten, tree_unflatten
 
@@ -36,11 +36,9 @@ def _scalar_cotangent_leaf(out_leaf: object) -> object:
         staged_seed = getattr(out_leaf, "_advect_scalar_cotangent", None)
         if callable(staged_seed):
             return staged_seed()
-        scalar_type = getattr(getattr(out_leaf, "dtype", None), "type", None)
-        output_provider = type(out_leaf).__module__.partition(".")[0]
-        scalar_provider = str(getattr(scalar_type, "__module__", "")).partition(".")[0]
-        if callable(scalar_type) and output_provider == scalar_provider:
-            return scalar_type(1)
+        seed = _provider_scalar_like(out_leaf, 1)
+        if seed is not None:
+            return seed
     return _ones_like(out_leaf)
 
 

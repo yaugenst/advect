@@ -6,9 +6,13 @@ operation IDs to canonical IR operation IDs.
 
 from __future__ import annotations
 
+import functools
 from typing import TYPE_CHECKING, Any, cast
 
-from advect.core._array_family_ops import _canonical_array_family_op_name
+from advect.core._array_family_ops import (
+    ARRAY_API_TO_CANONICAL,
+    _canonical_array_family_op_name,
+)
 from advect.core._registry import get_registry
 
 if TYPE_CHECKING:
@@ -21,38 +25,10 @@ __all__ = [
     "staged_numpy_op",
 ]
 
-_NUMPY_ALIASES = {
-    "abs": "absolute",
-    "acos": "arccos",
-    "acosh": "arccosh",
-    "asin": "arcsin",
-    "asinh": "arcsinh",
-    "atan": "arctan",
-    "atan2": "arctan2",
-    "atanh": "arctanh",
-    "bitwise_invert": "invert",
-    "bitwise_left_shift": "left_shift",
-    "bitwise_right_shift": "right_shift",
-    "concat": "concatenate",
-    "conj": "conjugate",
-    "cumulative_prod": "cumprod",
-    "cumulative_sum": "cumsum",
-    "linalg.cross": "cross",
-    "linalg.diagonal": "diagonal",
-    "linalg.matmul": "matmul",
-    "linalg.matrix_transpose": "transpose",
-    "linalg.outer": "outer",
-    "linalg.tensordot": "tensordot",
-    "linalg.trace": "trace",
-    "linalg.vecdot": "vecdot",
-    "matrix_transpose": "transpose",
-    "permute_dims": "transpose",
-    "pow": "power",
-    "round": "rint",
-}
 _GENERIC_STAGED_NUMPY = frozenset({"linalg.eigh", "linalg.qr", "linalg.slogdet", "linalg.svd"})
 
 
+@functools.cache
 def canonicalize_numpy_op(op_name: str) -> str:
     """Map a fully-qualified ``numpy.*`` op name to canonical op id."""
     if op_name.startswith("numpy."):
@@ -62,7 +38,7 @@ def canonicalize_numpy_op(op_name: str) -> str:
 
 def staged_numpy_op(name: str) -> str:
     """Resolve a NumPy spelling to a registered staged canonical operation."""
-    leaf = _NUMPY_ALIASES.get(name, name)
+    leaf = ARRAY_API_TO_CANONICAL.get(name, name)
     op = _canonical_array_family_op_name(leaf)
     definition = get_registry().get_optional(op)
     rule = None if definition is None else definition.abstract_schema

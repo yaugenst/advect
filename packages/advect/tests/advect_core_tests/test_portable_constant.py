@@ -2,84 +2,135 @@
 
 from __future__ import annotations
 
-import copy
+import hashlib
 import json
 import struct
-from typing import cast
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import pytest
+from hypothesis import example, given, strategies as st
+from hypothesis.extra import numpy as hnp
 
 from advect import _native_core as advect_native
 from advect.core._portable_constant import (
-    _constant_payload,
     iter_constant_values,
-    portable_constant_from_payload,
+    portable_constant_from_native,
     snapshot_constant_parts,
-    validate_constant,
 )
 from advect.core._stage import _coerce_constant
 
+if TYPE_CHECKING:
+    from advect.core._portable_constant import _PortableConstant
 
-def _snapshot_payload(value: object, *, shape: tuple[int, ...], dtype: str) -> dict[str, object]:
+
+def _snapshot_graph(value: object, *, shape: tuple[int, ...], dtype: str) -> dict[str, Any]:
     constant = snapshot_constant_parts(value, shape=shape, dtype=dtype)
     builder = advect_native.GraphBuilder()
-    node_id, digest = builder.append_constant(
+    node_id, _digest = builder.append_constant(
         constant.data,
         list(constant.shape),
         constant.dtype,
         kind=constant.kind,
     )
-    assert digest == constant.digest
     builder.append_output(node_id)
-    store, old_to_new, _report, _trace = builder.finish()
-    mapped_id = old_to_new[node_id]
-    assert mapped_id is not None
-    payload = json.loads(store._to_json())["constants"][str(mapped_id)]
-    return cast("dict[str, object]", payload)
+    store, _old_to_new, _report, _trace = builder.finish()
+    return json.loads(store._to_json())
 
 
-@pytest.mark.parametrize(
-    ("dtype", "values"),
-    [
-        ("bool", [False, True]),
-        ("int8", [-2, 7]),
-        ("int16", [-300, 400]),
-        ("int32", [-70_000, 80_000]),
-        ("int64", [-5_000_000_000, 6_000_000_000]),
-        ("uint8", [2, 7]),
-        ("uint16", [300, 400]),
-        ("uint32", [70_000, 80_000]),
-        ("uint64", [5_000_000_000, 6_000_000_000]),
-        ("float16", [1.25, -2.5]),
-        ("float32", [1.25, -2.5]),
-        ("float64", [1.25, -2.5]),
-        ("complex64", [1 + 2j, -3 + 0.5j]),
-        ("complex128", [1 + 2j, -3 + 0.5j]),
-    ],
+def _load_constant(graph: dict[str, Any]) -> _PortableConstant:
+    """Round-trip the durable graph and decode its only constant."""
+    store = advect_native.deserialize_graph_json(json.dumps(graph))
+    (constant_id,) = store.constant_ids()
+    return portable_constant_from_native(store._constant_parts(constant_id))
+
+
+_DTYPES = (
+    "bool",
+    "int8",
+    "int16",
+    "int32",
+    "int64",
+    "uint8",
+    "uint16",
+    "uint32",
+    "uint64",
+    "float16",
+    "float32",
+    "float64",
+    "complex64",
+    "complex128",
 )
-def test_portable_constants_round_trip_standard_dtypes(
-    dtype: str,
-    values: list[object],
-) -> None:
-    source = np.asarray(values, dtype=dtype)
 
-    payload = _snapshot_payload(source, shape=(2,), dtype=dtype)
-    constant = portable_constant_from_payload(payload)
-    decoded = tuple(iter_constant_values(constant))
 
-    assert constant.kind == "array"
-    assert constant.dtype == dtype
-    assert constant.shape == (2,)
-    np.testing.assert_array_equal(np.asarray(decoded, dtype=dtype), source)
+def _assert_durable_record(constant: _PortableConstant, value: object) -> None:
+    """Check the runtime record digests its canonical JSON body and loads back unchanged."""
+    graph = _snapshot_graph(value, shape=constant.shape, dtype=constant.dtype)
+    record = graph["constants"]["0"]
+    body = json.dumps(
+        {key: item for key, item in record.items() if key != "digest"},
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    assert record["data"] == constant.data.hex()
+    assert record["digest"] == hashlib.sha256(body.encode()).hexdigest()
+    assert _load_constant(graph) == constant
+
+
+@st.composite
+def _provider_arrays(draw: st.DrawFn) -> np.ndarray[Any, Any]:
+    dtype = np.dtype(draw(st.sampled_from(_DTYPES))).newbyteorder(draw(st.sampled_from("<>")))
+    shape = draw(hnp.array_shapes(min_dims=0, max_dims=3, min_side=0, max_side=3))
+    source = draw(hnp.arrays(dtype, shape))
+    return source.T if draw(st.booleans()) else source
+
+
+@given(_provider_arrays())
+@example(np.array([0x7C01, 0xFE01], dtype=">u2").view(">f2")).via(
+    "discovered failure: big-endian NaN payloads were quieted"
+)
+@example(np.array([0x7F800001, 0x7FA00000], dtype=">u4").view(">c8")).via(
+    "discovered failure: big-endian NaN payloads were quieted"
+)
+def test_portable_array_constants_round_trip_bit_exactly(source: np.ndarray[Any, Any]) -> None:
+    dtype = source.dtype.name
+
+    constant = snapshot_constant_parts(source, shape=source.shape, dtype=dtype)
+
+    little_endian = np.ascontiguousarray(source, dtype=source.dtype.newbyteorder("<"))
+    assert (constant.kind, constant.dtype, constant.shape) == ("array", dtype, source.shape)
+    assert constant.data == little_endian.tobytes()
+    _assert_durable_record(constant, source)
+    decoded = np.asarray(list(iter_constant_values(constant)), dtype=dtype)
+    np.testing.assert_array_equal(decoded.reshape(source.shape), source)
+
+
+@given(
+    st.one_of(
+        st.booleans(),
+        st.integers(min_value=-(2**63), max_value=2**63 - 1),
+        st.floats(),
+        st.complex_numbers(),
+    )
+)
+def test_portable_python_scalars_round_trip_in_their_own_type(value: complex) -> None:
+    dtype = {bool: "bool", int: "int64", float: "float64", complex: "complex128"}[type(value)]
+
+    constant = snapshot_constant_parts(value, shape=(), dtype=dtype)
+
+    assert (constant.kind, constant.dtype, constant.shape) == ("scalar", dtype, ())
+    _assert_durable_record(constant, value)
+    (decoded,) = iter_constant_values(constant)
+    assert type(decoded) is type(value)
+    assert repr(decoded) == repr(value)
 
 
 def test_portable_constant_wire_format_is_fixed_little_endian_bytes() -> None:
     source = np.asarray([1.0, -2.0], dtype=np.float32)
 
-    payload = _snapshot_payload(source, shape=(2,), dtype="float32")
+    graph = _snapshot_graph(source, shape=(2,), dtype="float32")
 
-    assert payload == {
+    assert graph["constants"]["0"] == {
         "format": "advect.numeric-constant",
         "version": 2,
         "kind": "array",
@@ -115,37 +166,28 @@ def test_array_constant_uses_bulk_c_order_bytes_when_available() -> None:
     assert value.calls == ["C"]
 
 
-def test_portable_scalar_preserves_scalar_materialization() -> None:
-    payload = _snapshot_payload(1 + 2j, shape=(), dtype="complex64")
-    constant = portable_constant_from_payload(payload)
-    values = tuple(iter_constant_values(constant))
+@pytest.mark.parametrize(
+    ("value", "dtype", "corruption", "message"),
+    [
+        (np.asarray([1, 2], dtype=np.int32), "int32", {"data": "00000000"}, "require 8 bytes"),
+        (1, "int64", {"shape": [1]}, "scalar constant must have rank zero"),
+        (np.asarray([True]), "bool", {"data": "02"}, "bytes must be exactly 0 or 1"),
+        (np.asarray([7], dtype=np.int8), "int8", {"data": "08"}, "digest does not match"),
+    ],
+    ids=["byte-count", "scalar-rank", "bool-byte", "digest"],
+)
+def test_runtime_rejects_corrupt_constant_payloads(
+    value: object,
+    dtype: str,
+    corruption: dict[str, object],
+    message: str,
+) -> None:
+    shape = tuple(np.shape(value))
+    graph = _snapshot_graph(value, shape=shape, dtype=dtype)
+    graph["constants"]["0"].update(corruption)
 
-    assert (constant.kind, constant.dtype, constant.shape) == ("scalar", "complex64", ())
-    assert values == (1 + 2j,)
-
-
-def test_portable_constant_validation_is_transactional() -> None:
-    payload = _snapshot_payload(
-        np.asarray([1, 2], dtype=np.int32),
-        shape=(2,),
-        dtype="int32",
-    )
-    corrupt = copy.deepcopy(payload)
-    corrupt["data"] = "00000000"
-
-    with pytest.raises(ValueError, match="require 8 bytes"):
-        validate_constant(corrupt)
-    assert validate_constant(payload) == payload
-
-
-def test_portable_constant_rejects_invalid_scalar_and_boolean_encodings() -> None:
-    scalar = snapshot_constant_parts(1, shape=(), dtype="int64")
-    with pytest.raises(ValueError, match="scalar constant must have rank zero"):
-        validate_constant({**_constant_payload(scalar), "shape": [1]})
-
-    boolean = snapshot_constant_parts([True], shape=(1,), dtype="bool")
-    with pytest.raises(ValueError, match="bytes must be zero or one"):
-        validate_constant({**_constant_payload(boolean), "data": "02"})
+    with pytest.raises(ValueError, match=message):
+        _load_constant(graph)
 
 
 def test_portable_constant_rejects_nonstandard_dtype() -> None:
@@ -165,18 +207,16 @@ def test_byte_materialization_moves_to_the_selected_device() -> None:
         def __init__(self, device: str) -> None:
             self.device = device
 
-    class FakeRawNamespace:
-        @staticmethod
-        def frombuffer(_data: bytes, *, dtype: object) -> FakeArray:
-            assert dtype == "float32"
-            return FakeArray("cuda:0")
-
     class FakeNamespace:
-        raw_namespace = FakeRawNamespace()
         float32 = "float32"
 
         def __init__(self) -> None:
             self.requests: list[str] = []
+
+        @staticmethod
+        def frombuffer(_data: bytes, *, dtype: object) -> FakeArray:
+            assert dtype == "float32"
+            return FakeArray("cuda:0")
 
         def asarray(
             self,

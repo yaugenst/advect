@@ -4,30 +4,20 @@ from __future__ import annotations
 
 from typing import Any, cast
 
-from advect.autodiff.rules.array_family._backend_runtime import _scalar_like, xp
+from advect.autodiff.rules.array_family._backend_runtime import (
+    _array_constructor_like,
+    _scalar_like,
+    xp,
+)
 from advect.autodiff.rules.array_family._transpose_utils import (
     _conjugate_transpose as _h,
+    _dtype_of,
+    _normalize_axis,
 )
 
 _MIN_MATRIX_NDIM = 2
 
 _TENSORDOT_AXES_ARITY = 2
-
-_EINSUM_FALLBACK_SUBSTRING = "->"
-
-_EINSUM_ELLIPSIS = "..."
-
-
-def _dtype_of(value: Any) -> xp.dtype[Any]:
-    if hasattr(value, "dtype"):
-        return cast("xp.dtype[Any]", xp.dtype(cast("Any", value).dtype))
-    return xp.asarray(value).dtype
-
-
-def _shape_of(value: Any) -> tuple[int, ...]:
-    if hasattr(value, "shape"):
-        return tuple(int(dim) for dim in cast("Any", value).shape)
-    return tuple(int(dim) for dim in xp.asarray(value).shape)
 
 
 def _merge_multioutput_cotangent(
@@ -54,7 +44,7 @@ def _merge_multioutput_cotangent(
 def _hermitian_triangle_adjoint(x: xp.ndarray, *, uplo: str) -> xp.ndarray:
     """Transpose the map from one stored triangle to a Hermitian matrix."""
     n = int(x.shape[-1])
-    eye = xp.eye(n, dtype=_dtype_of(x))
+    eye = _array_constructor_like(x, "eye", n, dtype=_dtype_of(x))
     symmetrized = x + _h(x)
     if uplo == "L":
         off_diagonal = xp.tril(symmetrized, k=-1)
@@ -67,8 +57,15 @@ def _hermitian_triangle_adjoint(x: xp.ndarray, *, uplo: str) -> xp.ndarray:
     return cast("xp.ndarray", off_diagonal + eye * diagonal[..., None, :])
 
 
-def _broadcast_eye(*, n: int, batch_ndim: int, dtype: xp.dtype[Any]) -> xp.ndarray:
-    eye = xp.eye(n, dtype=dtype)
+def _broadcast_eye(
+    like: object,
+    *,
+    n: int,
+    batch_ndim: int,
+    dtype: xp.dtype[Any],
+) -> xp.ndarray:
+    """Return a batch-broadcastable identity in the trace of ``like``."""
+    eye = _array_constructor_like(like, "eye", n, dtype=dtype)
     return xp.reshape(eye, (1,) * batch_ndim + (n, n))
 
 
@@ -78,23 +75,18 @@ def _qr_skew_pullback(
     batch_dims: tuple[int, ...],
     n: int,
 ) -> xp.ndarray:
-    eye_n = _broadcast_eye(n=n, batch_ndim=len(batch_dims), dtype=xp.dtype(bar_omega.dtype))
+    eye_n = _broadcast_eye(
+        bar_omega,
+        n=n,
+        batch_ndim=len(batch_dims),
+        dtype=xp.dtype(bar_omega.dtype),
+    )
     bar_c = bar_omega * eye_n
     return cast(
         "xp.ndarray",
         xp.tril(bar_omega - _h(bar_omega), k=-1)
         + (bar_c - xp.conj(bar_c)) / _scalar_like(2.0, bar_c),
     )
-
-
-def _normalize_axis(axis: int, *, ndim: int, op_name: str) -> int:
-    normalized = axis
-    if normalized < 0:
-        normalized += ndim
-    if normalized < 0 or normalized >= ndim:
-        msg = f"{op_name} received axis {axis} for ndim={ndim}"
-        raise ValueError(msg)
-    return normalized
 
 
 def _normalize_axis_sequence(axes: Any, *, ndim: int, op_name: str) -> tuple[int, ...]:

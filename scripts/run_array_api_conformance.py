@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import importlib
-import inspect
 import json
 import os
 import shutil
@@ -29,6 +28,8 @@ from advect.core._array_api.profiles import (
 )
 from advect.core._array_api.signatures import official_signatures
 from advect.core._array_api.support import build_support_profile
+from scripts._support.array_api import normalized_signature
+from scripts._support.cli import nonnegative_int, positive_int
 from scripts._support.evidence import evidence_report_header
 
 _PINNED_SUITE_REVISION = "5d0b701b0c4ab6ec98794068cf7af393a8a51c61"
@@ -41,22 +42,6 @@ _COLLECTION_EXCLUSIONS = {
     # it for a 2022.12 run.
     "2022.12": ("array_api_tests/test_inspection_functions.py",),
 }
-
-
-def _positive_int(value: str) -> int:
-    parsed = int(value)
-    if parsed < 1:
-        msg = f"expected a positive integer, got {value!r}"
-        raise argparse.ArgumentTypeError(msg)
-    return parsed
-
-
-def _nonnegative_int(value: str) -> int:
-    parsed = int(value)
-    if parsed < 0:
-        msg = f"expected a non-negative integer, got {value!r}"
-        raise argparse.ArgumentTypeError(msg)
-    return parsed
 
 
 def _arguments() -> argparse.Namespace:
@@ -72,9 +57,9 @@ def _arguments() -> argparse.Namespace:
         choices=("dynamic", "stage", "serialized", "all"),
         default="all",
     )
-    parser.add_argument("--max-examples", type=_positive_int, default=10)
-    parser.add_argument("--shard-count", type=_positive_int, default=1)
-    parser.add_argument("--shard-index", type=_nonnegative_int, default=0)
+    parser.add_argument("--max-examples", type=positive_int, default=10)
+    parser.add_argument("--shard-count", type=positive_int, default=1)
+    parser.add_argument("--shard-index", type=nonnegative_int, default=0)
     parser.add_argument("--output", type=Path)
     return parser.parse_args()
 
@@ -91,20 +76,6 @@ def _revision(suite_path: Path) -> str:
         text=True,
     )
     return completed.stdout.strip()
-
-
-def _normalized_signature(function: object) -> str:
-    signature = inspect.signature(function)
-    parameters = tuple(
-        parameter.replace(annotation=inspect.Parameter.empty)
-        for parameter in signature.parameters.values()
-    )
-    return str(
-        signature.replace(
-            parameters=parameters,
-            return_annotation=inspect.Signature.empty,
-        )
-    )
 
 
 def _verify_official_signature_snapshot(
@@ -131,7 +102,7 @@ def _verify_official_signature_snapshot(
         if not callable(function):
             message = f"Official Array API stub {path!r} is not callable"
             raise TypeError(message)
-        observed[path] = _normalized_signature(function)
+        observed[path] = normalized_signature(function)
     if observed != signatures:
         drift = {
             path: {
@@ -199,59 +170,27 @@ def _metadata_qualification() -> dict[str, object]:
     }
 
 
-def _qualification_environment(
+def _suite_environment(
     *,
-    mode: str,
-    operations: tuple[str, ...],
-    log_path: Path,
     array_api_version: str,
+    module: str,
+    **variables: str,
 ) -> dict[str, str]:
-    scripts_path = Path(__file__).resolve().parent
-    environment = os.environ.copy()
-    current_pythonpath = environment.get("PYTHONPATH")
-    environment.update(
-        {
-            "ARRAY_API_TESTS_MODULE": "array_api_trace_namespace",
-            "ARRAY_API_TESTS_VERSION": array_api_version,
-            "ARRAY_API_STRICT_API_VERSION": array_api_version,
-            "ADVECT_ARRAY_API_QUALIFICATION_MODE": mode,
-            "ADVECT_ARRAY_API_QUALIFICATION_OPS": ",".join(operations),
-            "ADVECT_ARRAY_API_TRACE_LOG": str(log_path),
-            "PYTHONPATH": (
-                str(scripts_path)
-                if not current_pythonpath
-                else f"{scripts_path}{os.pathsep}{current_pythonpath}"
-            ),
-        }
-    )
-    return environment
-
-
-def _baseline_environment(
-    *,
-    result_path: Path,
-    array_api_version: str,
-) -> dict[str, str]:
-    scripts_path = Path(__file__).resolve().parent
-    environment = os.environ.copy()
-    current_pythonpath = environment.get("PYTHONPATH")
-    for name in tuple(environment):
-        if name.startswith("ADVECT_ARRAY_API_"):
-            environment.pop(name)
-    environment.update(
-        {
-            "ARRAY_API_TESTS_MODULE": "array_api_strict",
-            "ARRAY_API_TESTS_VERSION": array_api_version,
-            "ARRAY_API_STRICT_API_VERSION": array_api_version,
-            _RESULT_ENV: str(result_path),
-            "PYTHONPATH": (
-                str(scripts_path)
-                if not current_pythonpath
-                else f"{scripts_path}{os.pathsep}{current_pythonpath}"
-            ),
-        }
-    )
-    return environment
+    """Return a suite environment importing *module* as the array namespace."""
+    environment = {
+        name: value
+        for name, value in os.environ.items()
+        if not name.startswith("ADVECT_ARRAY_API_")
+    }
+    pythonpath = (str(Path(__file__).resolve().parent), environment.get("PYTHONPATH"))
+    return {
+        **environment,
+        "ARRAY_API_TESTS_MODULE": module,
+        "ARRAY_API_TESTS_VERSION": array_api_version,
+        "ARRAY_API_STRICT_API_VERSION": array_api_version,
+        "PYTHONPATH": os.pathsep.join(filter(None, pythonpath)),
+        **variables,
+    }
 
 
 def _pytest_command(
@@ -283,9 +222,10 @@ def _run_baseline(
     test_nodes: tuple[str, ...],
     array_api_version: str,
 ) -> tuple[dict[str, object], tuple[str, ...]]:
-    environment = _baseline_environment(
-        result_path=result_path,
+    environment = _suite_environment(
         array_api_version=array_api_version,
+        module="array_api_strict",
+        **{_RESULT_ENV: str(result_path)},
     )
     started = time.perf_counter()
     completed = subprocess.run(  # noqa: S603
@@ -411,11 +351,12 @@ def _run_mode(
     array_api_version: str,
 ) -> dict[str, object]:
     operations = _operations_for_mode(mode, array_api_version)
-    environment = _qualification_environment(
-        mode=mode,
-        operations=operations,
-        log_path=log_path,
+    environment = _suite_environment(
         array_api_version=array_api_version,
+        module="array_api_trace_namespace",
+        ADVECT_ARRAY_API_QUALIFICATION_MODE=mode,
+        ADVECT_ARRAY_API_QUALIFICATION_OPS=",".join(operations),
+        ADVECT_ARRAY_API_TRACE_LOG=str(log_path),
     )
     command = _pytest_command(max_examples=max_examples, test_nodes=test_nodes)
     started = time.perf_counter()
@@ -510,9 +451,10 @@ def main() -> int:
     modes = ("dynamic", "stage", "serialized") if arguments.mode == "all" else (arguments.mode,)
     with tempfile.TemporaryDirectory(prefix="advect-array-api-") as temporary:
         temporary_path = Path(temporary)
-        collection_environment = _baseline_environment(
-            result_path=temporary_path / "collection-results.json",
+        collection_environment = _suite_environment(
             array_api_version=arguments.array_api_version,
+            module="array_api_strict",
+            **{_RESULT_ENV: str(temporary_path / "collection-results.json")},
         )
         all_test_nodes = _collect_test_nodes(
             suite_path,

@@ -3,15 +3,18 @@
 from __future__ import annotations
 
 import inspect
-from typing import TYPE_CHECKING, Any, cast
+import math
+import operator
+from typing import TYPE_CHECKING, Any, NamedTuple, cast
 
 import array_api_strict as strict
 import numpy as np
 import pytest
+from hypothesis import example, given, settings, strategies as st
 from numpy.testing import assert_allclose
 
 import advect as ad
-from advect.core import ArraySpec, TracingError
+from advect.core import ArraySpec, TracingError, _pytree
 from advect.core._primitive import MissingPrimitiveRuleError
 from advect.core._registry import get_registry
 from advect.testing import check_primitive
@@ -336,14 +339,211 @@ def test_declared_static_argument_rejects_a_tracer() -> None:
         ad.grad(lambda value: np.sum(primitive(value, value)))(x)
 
 
-def test_implementation_signature_and_declared_names_are_validated() -> None:
-    with pytest.raises(ValueError, match=r"declares unknown argument.*config"):
-        ad.primitive(
-            lambda x: x,
-            name="tests.unified.unknown_declared_name",
-            static_argnames=("config",),
-        )
+def test_primitive_trace_rejects_unsupported_dynamic_contracts() -> None:
+    @ad.primitive(name="tests.lifecycle.dynamic_config")
+    def dynamic_config(value: object, config: object) -> object:
+        del config
+        return value
 
+    with pytest.raises(TypeError, match="argument 'config' is not traceable"):
+        ad.grad(lambda value: np.sum(dynamic_config(value, object())))(np.ones(2))
+
+    @ad.primitive(name="tests.lifecycle.empty_output")
+    def empty_output(value: object) -> dict[str, object]:
+        del value
+        return {}
+
+    with pytest.raises(TypeError, match="at least one scalar/array leaf"):
+        ad.grad(empty_output)(np.ones(2))
+
+
+def test_primitive_names_argument_leaves_by_their_flattened_keys(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    @ad.primitive(name="tests.lifecycle.reordered_arguments", nondiff_argnames=("offset",))
+    def shifted(value: object, offset: object) -> object:
+        return cast("Any", value) + offset
+
+    masks: list[tuple[bool, ...]] = []
+
+    @shifted.def_jvp
+    def shifted_jvp(_output: object, _primals: object, tangents: tuple[object, ...]) -> object:
+        masks.append(tuple(tangent is None for tangent in tangents))
+        return next(tangent for tangent in tangents if tangent is not None)
+
+    def sorted_flatten(tree: dict[str, object]) -> tuple[tuple[object, ...], tuple[str, ...]]:
+        keys = tuple(sorted(tree))
+        return tuple(tree[key] for key in keys), keys
+
+    def sorted_unflatten(keys: tuple[str, ...], children: tuple[object, ...]) -> dict[str, object]:
+        return dict(zip(keys, children, strict=True))
+
+    # A re-registered dict flattens ("offset", "value"), not in call order.
+    monkeypatch.setitem(_pytree._REGISTRY, dict, (sorted_flatten, sorted_unflatten))
+    offset = np.array([3.0, 4.0])
+    _, tangent = ad.jvp(lambda value: shifted(value, offset))(
+        np.array([1.0, 2.0]), tangents=np.array([1.0, -1.0])
+    )
+    assert masks == [(True, False)]
+    np.testing.assert_array_equal(tangent, [1.0, -1.0])
+
+    with pytest.raises(TypeError, match="argument 'offset' is not traceable"):
+        ad.grad(lambda value: np.sum(shifted(value, object())))(np.ones(2))
+
+
+def _identity(x: object) -> object:
+    return x
+
+
+def _variadic(*values: object) -> tuple[object, ...]:
+    return values
+
+
+@pytest.mark.parametrize(
+    ("implementation", "options", "error", "match"),
+    [
+        (_identity, {"name": ""}, ValueError, "non-empty"),
+        (_identity, {"name": "advect.reserved"}, ValueError, "reserved"),
+        (
+            _identity,
+            {"name": "tests.lifecycle.empty_static", "static_argnames": ("",)},
+            TypeError,
+            "non-empty strings",
+        ),
+        (
+            _identity,
+            {"name": "tests.lifecycle.duplicate_static", "static_argnames": ("x", "x")},
+            ValueError,
+            "duplicates",
+        ),
+        (
+            _identity,
+            {
+                "name": "tests.lifecycle.overlap",
+                "static_argnames": ("x",),
+                "nondiff_argnames": ("x",),
+            },
+            ValueError,
+            "both static and nondifferentiable",
+        ),
+        (
+            _identity,
+            {"name": "tests.unified.unknown_declared_name", "static_argnames": ("config",)},
+            ValueError,
+            r"declares unknown argument.*config",
+        ),
+        (
+            _identity,
+            {"name": "tests.lifecycle.nonbool_residual", "residual": 1},
+            TypeError,
+            "boolean",
+        ),
+        (
+            _identity,
+            {"name": "tests.lifecycle.nonbool_variable_arity", "variable_output_arity": 1},
+            TypeError,
+            "boolean",
+        ),
+        (max, {"name": "tests.lifecycle.uninspectable"}, TypeError, "Cannot inspect"),
+        (_variadic, {"name": "tests.lifecycle.variadic"}, TypeError, "fixed parameters"),
+    ],
+    ids=[
+        "empty-name",
+        "reserved-name",
+        "empty-static-name",
+        "duplicate-static-name",
+        "static-and-nondiff",
+        "unknown-declared-name",
+        "nonbool-residual",
+        "nonbool-variable-arity",
+        "uninspectable",
+        "variadic",
+    ],
+)
+def test_primitive_rejects_invalid_declarations(
+    implementation: Callable[..., object],
+    options: dict[str, Any],
+    error: type[Exception],
+    match: str,
+) -> None:
+    with pytest.raises(error, match=match):
+        ad.primitive(implementation, **options)
+
+
+def test_primitive_validates_calls_and_rule_registration() -> None:
+    @ad.primitive(name="tests.lifecycle.rules")
+    def primitive(x: object, scale: int = 1) -> object:
+        return x * scale
+
+    with pytest.raises(ValueError, match="already registered"):
+        ad.primitive(lambda x: x, name=primitive.name)
+    with pytest.raises(TypeError, match="Invalid call"):
+        primitive()
+
+    def invalid_abstract() -> ad.ArraySpec:
+        return ad.ArraySpec((), "float64")
+
+    with pytest.raises(TypeError, match="abstract rule must accept"):
+        primitive.def_abstract(invalid_abstract)
+
+    def abstract(x: ad.AbstractValue, scale: int = 1) -> ad.ArraySpec:
+        del scale
+        return x.spec
+
+    assert primitive.def_abstract(abstract) is abstract
+    with pytest.raises(ValueError, match="already has abstract"):
+        primitive.def_abstract(abstract)
+
+    def invalid_jvp(output: object, primals: tuple[object, ...]) -> object:
+        return output, primals
+
+    with pytest.raises(TypeError, match="JVP rule must accept"):
+        primitive.def_jvp(invalid_jvp)
+
+    def jvp(
+        output: object,
+        primals: tuple[object, ...],
+        tangents: tuple[object | None, ...],
+    ) -> object:
+        del primals, tangents
+        return output
+
+    assert primitive.def_jvp(jvp) is jvp
+    with pytest.raises(ValueError, match="already has a JVP"):
+        primitive.def_jvp(jvp)
+
+    def invalid_transpose(cotangent: object, primals: tuple[object, ...]) -> object:
+        return cotangent, primals
+
+    with pytest.raises(TypeError, match="transpose rule must accept"):
+        primitive.def_transpose(invalid_transpose)
+
+    def positional_selection(
+        cotangent: object,
+        primals: tuple[object, ...],
+        output: object,
+        active_input_indices: tuple[int, ...] | None = None,
+    ) -> tuple[object]:
+        del primals, output, active_input_indices
+        return (cotangent,)
+
+    with pytest.raises(TypeError, match="active_input_indices must be keyword-only"):
+        primitive.def_transpose(positional_selection)
+
+    def transpose(
+        cotangent: object,
+        primals: tuple[object, ...],
+        output: object,
+    ) -> tuple[object]:
+        del primals, output
+        return (cotangent,)
+
+    assert primitive.def_transpose(transpose) is transpose
+    with pytest.raises(ValueError, match="already has a transpose"):
+        primitive.def_transpose(transpose)
+
+
+def test_primitive_accepts_implementation_defaults_with_repr_only_identity() -> None:
     class ReprOnlyDefault:
         def __repr__(self) -> str:
             return "same-default"
@@ -394,6 +594,56 @@ def test_jvp_only_primitive_transposes_structurally_and_nests() -> None:
         ad.grad(lambda value: np.sum(gradient(value)))(x),
         np.full_like(x, 2.0),
     )
+
+
+def test_forward_mode_rejects_a_public_primitive_before_running_its_primal() -> None:
+    calls = 0
+
+    @ad.primitive(name="tests.additional_contracts.transpose_only")
+    def transpose_only(value: np.ndarray) -> np.ndarray:
+        nonlocal calls
+        calls += 1
+        return value * value
+
+    @transpose_only.def_transpose
+    def transpose(
+        cotangent: np.ndarray,
+        primals: tuple[np.ndarray, ...],
+        output: np.ndarray,
+    ) -> tuple[np.ndarray]:
+        del output
+        return (2.0 * primals[0] * cotangent,)
+
+    with pytest.raises(ad.NoJVPError, match="no JVP rule is installed"):
+        ad.jvp(transpose_only)(np.ones(2), tangents=np.ones(2))
+    with pytest.raises(ad.NoJVPError, match="no JVP rule is installed"):
+        ad.linearize(transpose_only, np.ones(2))
+
+    assert calls == 0
+
+
+def test_forward_mode_allows_a_transpose_only_primitive_on_an_enclosing_value() -> None:
+    @ad.primitive(name="tests.additional_contracts.passive_transpose_only")
+    def transpose_only(value: np.ndarray) -> np.ndarray:
+        return value * value
+
+    @transpose_only.def_transpose
+    def transpose(
+        cotangent: np.ndarray,
+        primals: tuple[np.ndarray, ...],
+        output: np.ndarray,
+    ) -> tuple[np.ndarray]:
+        del output
+        return (2 * primals[0] * cotangent,)
+
+    def outer(value: np.ndarray) -> np.ndarray:
+        primal, _tangent = ad.jvp(lambda active: active + transpose_only(value))(
+            np.array(1.0),
+            tangents=np.array(1.0),
+        )
+        return primal
+
+    assert_allclose(ad.grad(outer)(np.array(2.0)), np.array(4.0))
 
 
 def test_check_primitive_accepts_a_transpose_only_residual_boundary() -> None:
@@ -618,126 +868,38 @@ def test_static_pytree_metadata_cannot_hide_a_captured_tracer() -> None:
         ad.vjp(function)(np.ones(2))
 
 
-def test_python_float_primitive_outputs_normalize_for_transforms() -> None:
-    seen_rule_types: list[type[object]] = []
-
-    @ad.primitive(name="tests.unified.python_float_output")
-    def primitive(x: np.ndarray) -> float:
-        return float(np.sum(x * x))
-
-    @primitive.def_abstract
-    def abstract(x: object) -> ArraySpec:
-        del x
-        return ArraySpec((), "float64")
-
-    @primitive.def_jvp
-    def jvp_rule(
-        output: np.ndarray,
-        primals: tuple[np.ndarray, ...],
-        tangents: tuple[np.ndarray | None, ...],
-    ) -> float:
-        seen_rule_types.append(type(output))
-        tangent = tangents[0]
-        assert tangent is not None
-        return float(2 * np.sum(primals[0] * tangent))
-
-    @primitive.def_transpose
-    def transpose_rule(
-        cotangent: np.ndarray,
-        primals: tuple[np.ndarray, ...],
-        output: np.ndarray,
-    ) -> tuple[np.ndarray]:
-        seen_rule_types.append(type(output))
-        return (2 * primals[0] * cotangent,)
-
-    x = np.array([1.0, -2.0, 3.0])
-    assert type(primitive(x)) is float
-    check_primitive(
-        primitive,
-        primals=(x,),
-        check=("abstract", "jvp", "transpose", "stage"),
-    )
-
-    value, tangent = ad.jvp(primitive)(x, tangents=np.ones_like(x))
-    gradient = ad.grad(primitive)(x)
-    staged = ad.stage(primitive, specs=(ArraySpec(x.shape, x.dtype),))
-
-    assert type(value) is np.ndarray
-    assert type(tangent) is np.ndarray
-    assert type(staged(x)) is np.ndarray
-    assert value.shape == tangent.shape == staged(x).shape == ()
-    assert_allclose(value, np.sum(x * x))
-    assert_allclose(tangent, 2 * np.sum(x))
-    assert_allclose(gradient, 2 * x)
-    assert seen_rule_types
-    assert all(rule_type is np.ndarray for rule_type in seen_rule_types)
-
-
-def test_python_complex_primitive_outputs_normalize_for_transforms() -> None:
-    seen_rule_types: list[type[object]] = []
-
-    @ad.primitive(name="tests.unified.python_complex_output")
-    def primitive(x: np.ndarray) -> complex:
-        return complex(np.sum(x), np.sum(2 * x))
-
-    @primitive.def_abstract
-    def abstract(x: object) -> ArraySpec:
-        del x
-        return ArraySpec((), "complex128")
-
-    @primitive.def_jvp
-    def jvp_rule(
-        output: np.ndarray,
-        primals: tuple[np.ndarray, ...],
-        tangents: tuple[np.ndarray | None, ...],
-    ) -> complex:
-        del primals
-        seen_rule_types.append(type(output))
-        tangent = tangents[0]
-        assert tangent is not None
-        return complex(np.sum(tangent), np.sum(2 * tangent))
-
-    x = np.array([1.0, -2.0, 3.0])
-    tangent_seed = np.array([0.2, -0.3, 0.5])
-    check_primitive(
-        primitive,
-        primals=(x,),
-        tangents=(tangent_seed,),
-        check=("abstract", "jvp", "stage"),
-    )
-
-    value, tangent = ad.jvp(primitive)(x, tangents=tangent_seed)
-    staged = ad.stage(primitive, specs=(ArraySpec(x.shape, x.dtype),))
-
-    assert type(primitive(x)) is complex
-    assert type(value) is np.ndarray
-    assert type(tangent) is np.ndarray
-    assert type(staged(x)) is np.ndarray
-    assert value.shape == tangent.shape == staged(x).shape == ()
-    assert_allclose(value, complex(np.sum(x), np.sum(2 * x)))
-    assert_allclose(tangent, complex(np.sum(tangent_seed), np.sum(2 * tangent_seed)))
-    assert seen_rule_types
-    assert all(rule_type is np.ndarray for rule_type in seen_rule_types)
-
-
 @pytest.mark.parametrize(
-    ("scalar_type", "value", "dtype"),
+    ("implementation", "jvp", "transpose", "dtype"),
     [
-        (bool, True, "bool"),
-        (int, 3, "int64"),
+        pytest.param(
+            lambda x: float(np.sum(x * x)),
+            lambda x, t: float(2 * np.sum(x * t)),
+            lambda x, ct: 2 * x * ct,
+            "float64",
+            id="float",
+        ),
+        pytest.param(
+            lambda x: complex(np.sum(x), np.sum(2 * x)),
+            lambda _x, t: complex(np.sum(t), np.sum(2 * t)),
+            None,
+            "complex128",
+            id="complex",
+        ),
+        pytest.param(lambda _x: True, lambda _x, _t: 0.0, None, "bool", id="bool"),
+        pytest.param(lambda _x: 3, lambda _x, _t: 0.0, None, "int64", id="int"),
     ],
 )
-def test_discrete_python_primitive_outputs_normalize_for_transforms(
-    scalar_type: type[object],
-    value: object,
+def test_python_scalar_primitive_outputs_normalize_for_transforms(
+    implementation: Callable[[np.ndarray], object],
+    jvp: Callable[[np.ndarray, np.ndarray], object],
+    transpose: Callable[[np.ndarray, np.ndarray], np.ndarray] | None,
     dtype: str,
 ) -> None:
     seen_rule_types: list[type[object]] = []
 
-    @ad.primitive(name=f"tests.unified.python_{scalar_type.__name__}_output")
+    @ad.primitive(name=f"tests.unified.python_{dtype}_output")
     def primitive(x: np.ndarray) -> object:
-        del x
-        return value
+        return implementation(x)
 
     @primitive.def_abstract
     def abstract(x: object) -> ArraySpec:
@@ -745,28 +907,39 @@ def test_discrete_python_primitive_outputs_normalize_for_transforms(
         return ArraySpec((), dtype)
 
     @primitive.def_jvp
-    def jvp_rule(
-        output: object,
-        primals: tuple[np.ndarray, ...],
-        tangents: tuple[np.ndarray | None, ...],
-    ) -> float:
-        del primals, tangents
+    def jvp_rule(output: object, primals: tuple[Any, ...], tangents: tuple[Any, ...]) -> object:
         seen_rule_types.append(type(output))
-        return 0.0
+        return jvp(primals[0], tangents[0])
 
-    x = np.array([1.0, -2.0])
-    direct = primitive(x)
-    traced, tangent = ad.jvp(primitive)(x, tangents=np.ones_like(x))
-    staged = ad.stage(primitive, specs=(ArraySpec(x.shape, x.dtype),))
+    if transpose is not None:
 
-    assert type(direct) is scalar_type
-    assert type(traced) is np.ndarray
-    assert type(staged(x)) is np.ndarray
-    assert type(tangent) is np.ndarray
-    assert traced.shape == tangent.shape == staged(x).shape == ()
-    assert traced.dtype == staged(x).dtype == np.dtype(dtype)
-    assert tangent == 0.0
-    assert seen_rule_types == [np.ndarray]
+        @primitive.def_transpose
+        def transpose_rule(cotangent: Any, primals: tuple[Any, ...], output: object) -> tuple[Any]:
+            seen_rule_types.append(type(output))
+            return (transpose(primals[0], cotangent),)
+
+    x = np.array([1.0, -2.0, 3.0])
+    seed = np.array([0.2, -0.3, 0.5])
+    check = ("abstract", "jvp", "stage", *(("transpose",) if transpose else ()))
+    check_primitive(primitive, primals=(x,), tangents=(seed,), check=check)
+    checked_rule_types = set(seen_rule_types)
+    seen_rule_types.clear()
+
+    value, tangent = ad.jvp(primitive)(x, tangents=seed)
+    staged = ad.stage(primitive, specs=(ArraySpec(x.shape, x.dtype),))(x)
+
+    assert type(primitive(x)) is type(implementation(x))
+    # Rules, traced results and staged results see rank-zero arrays.
+    assert type(value) is type(tangent) is type(staged) is np.ndarray
+    assert value.shape == tangent.shape == staged.shape == ()
+    assert value.dtype == staged.dtype == np.dtype(dtype)
+    assert_allclose(value, implementation(x))
+    assert_allclose(tangent, jvp(x, seed))
+    if transpose is not None:
+        assert_allclose(ad.grad(primitive)(x), transpose(x, np.ones(())))
+    assert checked_rule_types == {np.ndarray}
+    # jvp and grad each call their rule exactly once; staging calls neither.
+    assert seen_rule_types == [np.ndarray] * (1 if transpose is None else 2)
 
 
 def test_structured_primitive_rules_receive_public_output_pytrees() -> None:
@@ -978,6 +1151,146 @@ def test_structural_transpose_ignores_primal_only_jvp_work() -> None:
     assert_allclose(ad.grad(lambda value: np.sum(primitive(value)))(x), x)
 
 
+type _Matrix = tuple[tuple[complex, ...], ...]
+_PROVIDERS = {"numpy": np, "array_api_strict": strict}
+
+
+def _matmul(matrix: _Matrix, vector: Any) -> Any:
+    namespace = vector.__array_namespace__()
+    return namespace.asarray(matrix, dtype=vector.dtype) @ vector
+
+
+@ad.primitive(name="tests.testing.linear_map", static_argnames=("matrix", "shift"))
+def _linear_map(x: Any, matrix: _Matrix, shift: tuple[complex, ...] | None) -> Any:
+    del shift
+    return _matmul(matrix, x)
+
+
+@_linear_map.def_abstract
+def _linear_map_abstract(
+    x: ad.AbstractValue,
+    matrix: _Matrix,
+    shift: tuple[complex, ...] | None,
+) -> ad.ArraySpec:
+    del shift
+    return ad.ArraySpec((len(matrix),), x.spec.dtype)
+
+
+@_linear_map.def_jvp
+def _linear_map_jvp(
+    output: Any,
+    primals: tuple[Any, ...],
+    tangents: tuple[Any, ...],
+    matrix: _Matrix,
+    shift: tuple[complex, ...] | None,
+) -> Any:
+    del output, primals, shift
+    return _matmul(matrix, tangents[0])
+
+
+@_linear_map.def_transpose
+def _linear_map_transpose(
+    cotangent: Any,
+    primals: tuple[Any, ...],
+    output: Any,
+    matrix: _Matrix,
+    shift: tuple[complex, ...] | None,
+) -> tuple[Any]:
+    """Return the real adjoint A^H c, displaced by ``shift`` when given."""
+    del primals, output
+    adjoint = tuple(zip(*((value.conjugate() for value in row) for row in matrix), strict=True))
+    contribution = _matmul(adjoint, cotangent)
+    if shift is not None:
+        namespace = contribution.__array_namespace__()
+        contribution = contribution + namespace.asarray(shift, dtype=contribution.dtype)
+    return (contribution,)
+
+
+class _LinearCase(NamedTuple):
+    provider: str
+    dtype: str
+    matrix: _Matrix
+    primal: tuple[complex, ...]
+    tangent: tuple[complex, ...]
+    cotangent: tuple[complex, ...]
+
+
+@st.composite
+def _linear_cases(draw: st.DrawFn) -> _LinearCase:
+    """Draw ``A @ x`` with every real and imaginary part of magnitude in [0.5, 2]."""
+    dtype = draw(st.sampled_from(("float64", "complex128")))
+    part = st.builds(operator.mul, st.sampled_from((-1.0, 1.0)), st.floats(0.5, 2.0))
+    entry = part if dtype == "float64" else st.builds(complex, part, part)
+    rows, columns = draw(st.integers(1, 4)), draw(st.integers(1, 4))
+
+    def vector(size: int) -> tuple[complex, ...]:
+        return tuple(draw(entry) for _ in range(size))
+
+    return _LinearCase(
+        provider=draw(st.sampled_from(tuple(_PROVIDERS))),
+        dtype=dtype,
+        matrix=tuple(vector(columns) for _ in range(rows)),
+        primal=vector(columns),
+        tangent=vector(columns),
+        cotangent=vector(rows),
+    )
+
+
+def _norm(values: tuple[complex, ...]) -> float:
+    return math.sqrt(sum(abs(value) ** 2 for value in values))
+
+
+@given(case=_linear_cases())
+@example(
+    case=_LinearCase(
+        provider="array_api_strict",
+        dtype="complex128",
+        matrix=((1.0 + 2.0j, -0.5 + 1.0j),),
+        primal=(1.0 - 1.0j, 2.0 + 0.5j),
+        tangent=(0.5 + 0.5j, -1.0 + 2.0j),
+        cotangent=(2.0 - 1.0j,),
+    ),
+)
+@settings(deadline=None)
+def test_check_primitive_accepts_exact_linear_rules_and_rejects_a_displaced_adjoint(
+    case: _LinearCase,
+) -> None:
+    """A correct linear map passes; a transpose displaced by 0.1|c|/|t| t fails.
+
+    Central differences of a linear map are exact up to rounding. The
+    displacement changes Re<A^H c, t> by 0.1|c||t| >= 0.025, while the
+    adjoint threshold is at most atol + rtol |A|_F |c||t| (about 1.2e-3 |c||t|
+    for these bounded entries), so neither outcome depends on rounding.
+    """
+    namespace = _PROVIDERS[case.provider]
+    dtype = getattr(namespace, case.dtype)
+    primal, tangent, cotangent = (
+        namespace.asarray(values, dtype=dtype)
+        for values in (case.primal, case.tangent, case.cotangent)
+    )
+    complex_check = ("complex",) if case.dtype == "complex128" else ()
+    check_primitive(
+        _linear_map,
+        primals=(primal,),
+        static={"matrix": case.matrix, "shift": None},
+        tangents=(tangent,),
+        cotangent=cotangent,
+        check=("abstract", "jvp", "transpose", *complex_check),
+    )
+
+    scale = 0.1 * _norm(case.cotangent) / _norm(case.tangent)
+    shift = tuple(scale * value for value in case.tangent)
+    with pytest.raises(AssertionError, match="violates the real-adjoint identity"):
+        check_primitive(
+            _linear_map,
+            primals=(primal,),
+            static={"matrix": case.matrix, "shift": shift},
+            tangents=(tangent,),
+            cotangent=cotangent,
+            check=("transpose",),
+        )
+
+
 def test_check_primitive_uses_the_real_adjoint_for_complex_values() -> None:
     @ad.primitive(
         name="tests.unified.complex_check",
@@ -1018,11 +1331,13 @@ def test_check_primitive_names_missing_and_inconsistent_rules() -> None:
     def missing(x: np.ndarray) -> np.ndarray:
         return x
 
-    with pytest.raises(
-        MissingPrimitiveRuleError,
-        match=r"tests.unified.missing_jvp.*'jvp'.*@primitive.def_jvp",
+    for checks, message in (
+        (("jvp",), r"tests.unified.missing_jvp.*'jvp'.*@primitive.def_jvp"),
+        (("abstract",), "abstract.*@primitive.def_abstract"),
+        (("transpose",), "transpose.*@primitive.def_transpose"),
     ):
-        check_primitive(missing, primals=(np.array([1.0]),), check=("jvp",))
+        with pytest.raises(MissingPrimitiveRuleError, match=message):
+            check_primitive(missing, primals=(np.array([1.0]),), check=checks)
 
     @ad.primitive(name="tests.unified.abstract_mismatch")
     def mismatch(x: np.ndarray) -> np.ndarray:
@@ -1038,6 +1353,234 @@ def test_check_primitive_names_missing_and_inconsistent_rules() -> None:
             primals=(np.array([1.0], dtype=np.float64),),
             check=("abstract",),
         )
+
+
+def test_a_python_scalar_primitive_result_stays_weak_in_every_lifetime() -> None:
+    # Staged execution normalized the declared weak result to a strong array:
+    # "declared dtype=float32; produced dtype=float64".
+    python_double = ad.primitive(name="tests.testing.weak_python_double")(lambda x: 2.0 * x)
+    python_double.def_abstract(lambda x: x.spec)
+    python_double.def_jvp(lambda _output, _primals, tangents: 2.0 * tangents[0])
+    x = np.array([0.5, -1.0], np.float32)
+
+    def scale(s: float, x: np.ndarray) -> np.ndarray:
+        return python_double(s) * x
+
+    program = ad.stage(scale, 3.0, x)
+    results = (
+        ad.jvp(scale, argnums=(0, 1))(3.0, x, tangents=(1.0, x))[0],
+        program(3.0, x),
+        ad.jvp(program, argnums=(0, 1))(3.0, x, tangents=(1.0, x))[0],
+    )
+    for result in results:
+        assert result.dtype == scale(3.0, x).dtype == np.float32
+        assert_allclose(result, scale(3.0, x))
+
+
+_doubling_root = ad.implicit_root(
+    lambda solution, params: solution - 2.0 * params,
+    solve=lambda residual, initial: initial - residual(initial),
+    linear_solve=lambda _operator, rhs: rhs,
+)
+_CONSTANT_DOUBLINGS: dict[str, Callable[[Any], Any]] = {
+    "primitive": ad.primitive(name="tests.unified.constant_double")(lambda value: value + value),
+    "checkpoint": ad.checkpoint(lambda value: value * 2.0),
+    "implicit_root": lambda value: _doubling_root(value, initial=value),
+}
+
+
+@pytest.mark.parametrize("call", sorted(_CONSTANT_DOUBLINGS))
+def test_a_primitive_call_on_constants_returns_a_traced_constant(call: str) -> None:
+    # Returning the raw array lost the tracer: assigning a traced element into
+    # it raised "setting an array element with a sequence", and
+    # array_api_strict raised instead of deferring to the tracer it multiplies.
+    double = _CONSTANT_DOUBLINGS[call]
+    constant = np.array([1.0, 2.0, 3.0])
+    x = np.array([0.5, -1.0, 2.0])
+
+    def assign(x: np.ndarray) -> Any:
+        doubled = double(constant)
+        doubled[0] = x[1]
+        return np.sum(doubled * x)
+
+    assert_allclose(ad.grad(assign)(x), [x[1], x[0] + 4.0, 6.0])
+
+    strict_x = strict.asarray(x)
+    gradient = ad.grad(
+        lambda x: x.__array_namespace__().sum(double(strict.asarray(constant)) * x),
+    )(strict_x)
+    assert type(gradient) is type(strict_x)
+    assert_allclose(np.asarray(gradient), 2.0 * constant)
+
+
+def test_a_python_scalar_primitive_result_of_a_held_array_stays_strong() -> None:
+    # Holding the array operand made the result weak (float32), although
+    # selecting it gives a strong result (float64).
+    total = ad.primitive(name="tests.unified.python_total")(lambda value: float(np.sum(value)))
+    total.def_jvp(lambda _output, _primals, tangents: np.sum(tangents[0]))
+    constant = np.array([1.0, 2.0])
+    x = np.array([0.5, -1.0], np.float32)
+
+    def scale(constant: np.ndarray, x: np.ndarray) -> Any:
+        return total(constant) * x
+
+    held = ad.jvp(scale, argnums=1)(constant, x, tangents=x)[0]
+    selected = ad.jvp(scale, argnums=(0, 1))(constant, x, tangents=(constant, x))[0]
+    assert held.dtype == selected.dtype == np.float64
+    assert_allclose(held, 3.0 * x)
+    assert_allclose(selected, 3.0 * x)
+
+
+def test_check_primitive_requires_the_weak_scalar_category_a_trace_records() -> None:
+    # Like a Python operator's, a Python scalar returned from weak operands is
+    # weak; a NumPy function of a Python scalar is strong (NEP 50).
+    python_double = ad.primitive(name="tests.testing.python_double")(lambda x: 2.0 * x)
+    python_double.def_abstract(lambda x: x.spec)
+    python_double.def_jvp(lambda _output, _primals, tangents: 2.0 * tangents[0])
+    check_primitive(python_double, primals=(3.0,), check=("abstract", "jvp", "stage"))
+
+    numpy_double = ad.primitive(name="tests.testing.numpy_double")(lambda x: np.multiply(2.0, x))
+    numpy_double.def_abstract(lambda x: x.spec)
+    with pytest.raises(AssertionError, match="declares weak=True, but a dynamic trace records"):
+        check_primitive(numpy_double, primals=(3.0,), check=("abstract",))
+
+    python_strong = ad.primitive(name="tests.testing.python_strong")(lambda x: 2.0 * x)
+    python_strong.def_abstract(lambda x: ArraySpec((), x.spec.dtype))
+    with pytest.raises(AssertionError, match="declares weak=False, but a dynamic trace records"):
+        check_primitive(python_strong, primals=(3.0,), check=("abstract",))
+
+
+def test_check_primitive_handles_scalar_and_complex_defaults() -> None:
+    scale = ad.primitive(name="tests.testing.default_scale")(lambda x: 2 * x)
+    scale.def_abstract(lambda x: x.spec)
+    scale.def_jvp(lambda _output, _primals, tangents: 2 * tangents[0])
+
+    check_primitive(scale, primals=(2.0,), check=("transpose", "stage"))
+    check_primitive(scale, primals=(np.array(1 + 2j),), check=("complex",))
+
+
+def test_check_primitive_rejects_invalid_requests_and_trees() -> None:
+    identity = ad.primitive(name="tests.testing.validated_identity")(lambda x: x)
+    identity.def_abstract(lambda x: x.spec)
+    identity.def_jvp(lambda _output, _primals, tangents: tangents[0])
+    value = np.array([1.0, 2.0])
+
+    cases = (
+        (
+            r"Unknown primitive check\(s\): later, mystery",
+            {"primals": (value,), "check": ("mystery", "later")},
+        ),
+        ("epsilon must be positive", {"primals": (value,), "epsilon": 0}),
+        (r"expected 1 dynamic primals.*got 0", {"primals": ()}),
+        (
+            "complex check requires at least one complex primal",
+            {"primals": (value,), "check": ("complex",)},
+        ),
+        (
+            "tangents must match the primals pytree",
+            {"primals": (value,), "tangents": ({"value": value},), "check": ("jvp",)},
+        ),
+        (
+            "cotangent must match the output pytree",
+            {"primals": (value,), "cotangent": {"value": value}, "check": ("transpose",)},
+        ),
+    )
+    for message, request in cases:
+        with pytest.raises(ValueError, match=message):
+            check_primitive(identity, **request)
+
+
+def test_check_primitive_reports_malformed_rules() -> None:
+    value = np.array([1.0, 2.0])
+
+    invalid_abstract = ad.primitive(name="tests.testing.invalid_abstract")(lambda x: {"value": x})
+    invalid_abstract.def_abstract(lambda x: x.spec)
+    with pytest.raises(AssertionError, match="abstract output structure differs"):
+        check_primitive(invalid_abstract, primals=(value,), check=("abstract",))
+
+    invalid_leaf = ad.primitive(name="tests.testing.invalid_abstract_leaf")(lambda x: x)
+
+    @invalid_leaf.def_abstract
+    def invalid_leaf_abstract(x):
+        del x
+        return "not an array specification"
+
+    with pytest.raises(AssertionError, match="abstract output leaf 0 is not an ArraySpec"):
+        check_primitive(invalid_leaf, primals=(value,), check=("abstract",))
+
+    wrong_jvp = ad.primitive(name="tests.testing.wrong_jvp")(lambda x: x * x)
+    wrong_jvp.def_jvp(lambda output, _primals, _tangents: np.zeros_like(output))
+    with pytest.raises(AssertionError, match="JVP disagrees with directional finite differences"):
+        check_primitive(wrong_jvp, primals=(value,), check=("jvp",))
+
+    wrong_structure = ad.primitive(name="tests.testing.wrong_jvp_structure")(lambda x: x * x)
+    wrong_structure.def_jvp(lambda _output, _primals, tangents: {"value": tangents[0]})
+    wrong_structure.def_transpose(lambda cotangent, primals, _output: (2 * primals[0] * cotangent,))
+    with pytest.raises(AssertionError, match="JVP output structure differs"):
+        check_primitive(wrong_structure, primals=(value,), check=("transpose",))
+
+
+def test_check_primitive_accepts_an_omitted_nondiff_transpose_contribution() -> None:
+    @ad.primitive(name="tests.testing.omitted_nondiff", nondiff_argnames=("offset",))
+    def shift(value: np.ndarray, offset: np.ndarray) -> np.ndarray:
+        return value + offset
+
+    @shift.def_transpose
+    def transpose(
+        cotangent: np.ndarray,
+        primals: tuple[np.ndarray, ...],
+        output: np.ndarray,
+    ) -> tuple[np.ndarray, None]:
+        del primals, output
+        return cotangent, None
+
+    check_primitive(
+        shift,
+        primals=(np.array([1.0]), np.array([2.0])),
+        check=("transpose",),
+    )
+
+
+def test_check_primitive_enforces_residual_boundaries() -> None:
+    square = ad.primitive(name="tests.testing.residual_square", residual=True)(
+        lambda x: ad.PrimitiveResult(x * x, 2 * x)
+    )
+    square.def_jvp(lambda _output, primals, tangents: 2 * primals[0] * tangents[0])
+    value = np.array([1.0, 2.0])
+
+    for checks, message in (
+        (("nested",), "first-order differentiation only"),
+        (("transpose",), r"requires an explicit.*def_transpose"),
+    ):
+        with pytest.raises(MissingPrimitiveRuleError, match=message):
+            check_primitive(square, primals=(value,), check=checks)
+
+
+def test_check_primitive_attributes_nested_rule_failures() -> None:
+    non_nested_jvp = ad.primitive(name="tests.testing.non_nested_jvp")(lambda x: x * x)
+
+    @non_nested_jvp.def_jvp
+    def jvp_rule(_output, primals, tangents):
+        if not isinstance(primals[0], np.ndarray):
+            raise TypeError("nested JVP unsupported")
+        return 2 * primals[0] * tangents[0]
+
+    non_nested_jvp.def_transpose(lambda cotangent, primals, _output: (2 * primals[0] * cotangent,))
+    value = np.array([1.0, 2.0])
+    with pytest.raises(AssertionError, match="JVP rule failed nested differentiation"):
+        check_primitive(non_nested_jvp, primals=(value,), check=("nested",))
+
+    non_nested_transpose = ad.primitive(name="tests.testing.non_nested_transpose")(lambda x: x * x)
+    non_nested_transpose.def_jvp(lambda _output, primals, tangents: 2 * primals[0] * tangents[0])
+
+    @non_nested_transpose.def_transpose
+    def transpose_rule(cotangent, primals, _output):
+        if not isinstance(primals[0], np.ndarray):
+            raise TypeError("nested transpose unsupported")
+        return (2 * primals[0] * cotangent,)
+
+    with pytest.raises(AssertionError, match="transpose rule failed nested tracing"):
+        check_primitive(non_nested_transpose, primals=(value,), check=("nested",))
 
 
 def test_check_primitive_stage_rejects_input_mutation() -> None:
@@ -1056,3 +1599,31 @@ def test_check_primitive_stage_rejects_input_mutation() -> None:
             primals=(np.array([1.0, 2.0]),),
             check=("stage",),
         )
+
+
+def test_check_primitive_stage_rejects_state_dependent_execution() -> None:
+    call_count = 0
+
+    @ad.primitive(name="tests.testing.state_dependent")
+    def state_dependent(x):
+        nonlocal call_count
+        call_count += 1
+        return x + call_count
+
+    state_dependent.def_abstract(lambda x: x.spec)
+    with pytest.raises(AssertionError, match="compiled stage disagrees with concrete execution"):
+        check_primitive(state_dependent, primals=(np.array([1.0]),), check=("stage",))
+
+
+def test_check_primitive_stage_compares_boolean_leaves_exactly() -> None:
+    # Regression: the stage check subtracted boolean inputs and outputs to
+    # compare them, which NumPy rejects with a TypeError.
+    @ad.primitive(name="tests.unified.boolean_stage_check")
+    def negate(mask: np.ndarray) -> np.ndarray:
+        return np.logical_not(mask)
+
+    @negate.def_abstract
+    def abstract(mask: object) -> ArraySpec:
+        return mask.spec  # type: ignore[attr-defined]
+
+    check_primitive(negate, primals=(np.array([True, False]),), check=("abstract", "stage"))

@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 
 import pytest
+from hypothesis import example, given, strategies as st
 
+from advect.core._array_api.results import _SERIALIZED_RESULT_TYPES
 from advect.core._pytree import TreeDef, static, tree_flatten
+from advect.core._stage import _same_static_value
 from advect.core._stage_serialization import (
     _decode_scalar,
     _decode_treedef,
@@ -29,22 +33,52 @@ def _leaf_payload() -> dict[str, object]:
     }
 
 
-@pytest.mark.parametrize(
-    "value",
-    [
-        pytest.param(1.25, id="finite-float"),
-        pytest.param(b"\x00\xff", id="bytes"),
-        pytest.param([1, "two"], id="list"),
-        pytest.param((True, 3), id="tuple"),
-        pytest.param({"name": [1, 2], ("key", 1): b"value"}, id="dict"),
-    ],
+_STATIC_SCALARS = st.one_of(
+    st.sampled_from([None, False, True, 0, 1, 0.0, -0.0, 1.0, "1", b"1"]),
+    st.integers(),
+    st.floats(allow_nan=False, allow_infinity=False),
+    st.text(max_size=3),
+    st.binary(max_size=3),
 )
-def test_static_value_codec_round_trips_supported_values(value: object) -> None:
-    assert _decode_value(_encode_value(value)) == value
+_STATIC_VALUES = st.recursive(
+    _STATIC_SCALARS,
+    lambda children: st.one_of(
+        st.lists(children, max_size=3),
+        st.lists(children, max_size=3).map(tuple),
+        st.dictionaries(
+            st.one_of(_STATIC_SCALARS, st.tuples(_STATIC_SCALARS)), children, max_size=3
+        ),
+    ),
+    max_leaves=8,
+)
 
 
-def test_static_value_codec_canonicalizes_dict_order() -> None:
-    assert _encode_value({"left": 1, "right": 2}) == _encode_value({"right": 2, "left": 1})
+def _codec_identity(value: object) -> str:
+    return json.dumps(_encode_value(value))
+
+
+def _reversed_dicts(value: object) -> object:
+    """Rebuild ``value`` with every dict's insertion order reversed."""
+    if type(value) is dict:
+        return {key: _reversed_dicts(item) for key, item in reversed(value.items())}
+    if type(value) in (list, tuple):
+        return type(value)(map(_reversed_dicts, value))
+    return value
+
+
+@given(_STATIC_VALUES, _STATIC_VALUES)
+@example(1, 1.0)
+@example(left=1, right=True)
+@example(0.0, -0.0)
+@example((1,), [1])
+@example({1: "one"}, {1.0: "one"})
+@example({(1,): 0}, {(True,): 0})
+@example({"a": 1, "b": [2.0]}, {"b": [2.0], "a": 1})
+def test_static_value_comparison_matches_codec_identity(left: object, right: object) -> None:
+    """Static identity is codec identity, which JSON and dict order preserve."""
+    assert _same_static_value(left, right) == (_codec_identity(left) == _codec_identity(right))
+    assert _same_static_value(_decode_value(json.loads(_codec_identity(left))), left)
+    assert _codec_identity(_reversed_dicts(left)) == _codec_identity(left)
 
 
 @pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
@@ -58,11 +92,8 @@ def test_static_value_encoder_rejects_arbitrary_objects() -> None:
         _encode_value(object())
 
 
-@pytest.mark.parametrize("value", [1.5, float("nan"), object()])
+@pytest.mark.parametrize("value", [float("nan"), object()])
 def test_scalar_decoder_accepts_only_finite_scalar_metadata(value: object) -> None:
-    if value == 1.5:
-        assert _decode_scalar(value) == value
-        return
     with pytest.raises(TypeError, match="scalar metadata is invalid"):
         _decode_scalar(value)
 
@@ -143,19 +174,34 @@ class _UnsupportedPytreeNode:
     value: object
 
 
-@pytest.mark.parametrize(
-    "tree",
-    [
-        pytest.param(1.0, id="leaf"),
-        pytest.param({"x": 1.0}, id="dict"),
-        pytest.param([1.0, 2.0], id="list"),
-        pytest.param((1.0, 2.0), id="tuple"),
-        pytest.param(static({"solver": "native"}), id="static"),
-    ],
+def _result_nodes(children: st.SearchStrategy[object]) -> st.SearchStrategy[object]:
+    return st.sampled_from(list(_SERIALIZED_RESULT_TYPES.values())).flatmap(
+        lambda result: st.tuples(*[children] * len(result._fields)).map(
+            lambda fields: result(*fields)
+        )
+    )
+
+
+_SERIALIZABLE_TREES = st.recursive(
+    st.one_of(st.just(0.0), st.builds(static, _STATIC_VALUES)),
+    lambda children: st.one_of(
+        st.lists(children, max_size=3),
+        st.lists(children, max_size=3).map(tuple),
+        st.dictionaries(_STATIC_SCALARS, children, max_size=3),
+        _result_nodes(children),
+    ),
+    max_leaves=8,
 )
-def test_treedef_codec_round_trips_supported_nodes(tree: object) -> None:
+
+
+@given(_SERIALIZABLE_TREES)
+def test_treedef_codec_round_trips_serializable_trees(tree: object) -> None:
     _leaves, treedef = tree_flatten(tree)
-    assert _decode_treedef(_encode_treedef(treedef)) == treedef
+    encoded = _encode_treedef(treedef)
+    decoded = _decode_treedef(json.loads(json.dumps(encoded)))
+    assert decoded == treedef
+    # TreeDef equality conflates 1 and 1.0 keys or aux; the encoding does not.
+    assert _encode_treedef(decoded) == encoded
 
 
 def test_treedef_encoder_rejects_unregistered_node_types() -> None:

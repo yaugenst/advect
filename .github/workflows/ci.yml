@@ -166,10 +166,17 @@ jobs:
           packages/advect/tests/advect_numpy_tests/test_registration.py
           packages/advect/tests/advect_numpy_tests/test_stage_rng.py
           packages/advect/tests/advect_numpy_tests/test_op_bindings.py
-          packages/advect/tests/advect_numpy_tests/dispatch/array_functions/test_out_param.py::test_staged_take_out_matches_numpy_casting_policy
-          packages/advect/tests/advect_numpy_tests/dispatch/array_functions/test_out_param.py::test_compress_out_matches_numpy_casting_policy
+          packages/advect/tests/advect_numpy_tests/test_lifetime_parity_properties.py
+          packages/advect/tests/advect_numpy_tests/dispatch/array_functions/test_out_param.py::test_selection_out_matches_numpy_casting_policy
+          packages/advect/tests/advect_numpy_tests/dispatch/array_functions/test_out_param.py::test_array_function_out_differentiates_under_an_enclosing_transform
+          packages/advect/tests/advect_numpy_tests/dispatch/ufuncs/test_out_param.py
+          packages/advect/tests/advect_core_tests/test_abstract_numpy_dtype_parity.py::test_staged_numpy_code_sees_the_dtype_objects_eager_code_sees
+          packages/advect/tests/advect_core_tests/test_abstract_numpy_dtype_parity.py::test_the_public_program_constructor_stages_against_numpy_dtypes
+          packages/advect/tests/advect_core_tests/test_abstract_numpy_dtype_parity.py::test_every_dtype_spelling_declares_the_canonical_call_contract
           packages/advect/tests/advect_grad_tests/test_numpy_autodiff.py
           packages/advect/tests/advect_grad_tests/test_jvp_api.py
+          packages/advect/tests/advect_grad_tests/test_implicit_root.py
+          packages/advect/tests/advect_grad_tests/test_weak_scalar_lifetimes.py
 
   array-api-compatibility:
     name: array-api-compat ${{ matrix.label }}

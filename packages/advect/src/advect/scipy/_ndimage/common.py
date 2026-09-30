@@ -20,13 +20,14 @@ from advect.core import ArraySpec
 from advect.scipy._frontend import (
     _array_operand,
     _is_traced_value,
+    _numpy_dtype,
+    _operand_dtype,
     _replace_out as _replace_traced_out,
     _require_numpy_values as _require_scipy_numpy_values,
+    _traceable_astype,
 )
 
 if TYPE_CHECKING:
-    from numpy.typing import DTypeLike
-
     from advect.core import AbstractValue
     from advect.core._primitive import Primitive
 
@@ -39,29 +40,6 @@ _MODE_ALIASES = {
 
 def _require_numpy_values(name: str, *values: object) -> None:
     _require_scipy_numpy_values("ndimage", name, *values)
-
-
-def _numpy_dtype(dtype: object) -> np.dtype[Any]:
-    try:
-        return np.dtype(cast("DTypeLike", dtype))
-    except (TypeError, ValueError) as error:
-        msg = f"advect.scipy.ndimage requires a NumPy dtype; got {dtype!r}"
-        raise TypeError(msg) from error
-
-
-def _operand_dtype(value: Any) -> np.dtype[Any]:
-    dtype = getattr(value, "dtype", None)
-    return np.asarray(value).dtype if dtype is None else _numpy_dtype(dtype)
-
-
-def _traceable_astype(value: Any, dtype: object) -> Any:
-    normalized = _numpy_dtype(dtype)
-    if _operand_dtype(value) == normalized:
-        return value
-    astype = getattr(value, "astype", None)
-    if callable(astype):
-        return astype(normalized)
-    return np.asarray(value, dtype=normalized)
 
 
 def _replace_out(destination: object, replacement: object, *, operation: str) -> object:
@@ -158,7 +136,6 @@ def _normalize_output(input: object, output: object) -> _OutputChoice:
     if output is None:
         return _OutputChoice(None, None)
     if _is_traced_value(output) or isinstance(output, np.ndarray):
-        _require_numpy_values("output", output)
         if _shape_of(output) != _shape_of(input):
             raise RuntimeError("output shape not correct")
         return _OutputChoice(output, _operand_dtype(output).str)
@@ -168,6 +145,11 @@ def _normalize_output(input: object, output: object) -> _OutputChoice:
 def _output_dtype(input: object, output: object) -> np.dtype[Any]:
     choice = _normalize_output(input, output)
     return _operand_dtype(input) if choice.dtype is None else _numpy_dtype(choice.dtype)
+
+
+def _runtime_mode(modes: tuple[str, ...], *, mode_sequence: bool) -> object:
+    """Return the ``mode`` argument SciPy originally received."""
+    return modes if mode_sequence else (modes[0] if modes else "reflect")
 
 
 def _runtime_output(output_dtype: str | None) -> object:
@@ -236,17 +218,11 @@ def _mode_name(mode: str) -> str:
 
 def _project_cotangent(value: Any, primal: Any, output: Any) -> Any:
     primal_dtype = _operand_dtype(primal)
-    output_dtype = _operand_dtype(output)
     if not np.issubdtype(primal_dtype, np.inexact) or not np.issubdtype(
-        output_dtype,
+        _operand_dtype(output),
         np.inexact,
     ):
         return np.zeros_like(primal)
-    if not np.issubdtype(primal_dtype, np.complexfloating) and np.issubdtype(
-        _operand_dtype(value),
-        np.complexfloating,
-    ):
-        value = np.real(value)
     return _traceable_astype(value, primal_dtype)
 
 

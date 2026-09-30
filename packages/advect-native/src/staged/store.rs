@@ -45,7 +45,7 @@ impl GraphStore {
     fn get_node(&self, node_id: NodeId) -> PyResult<GraphNode> {
         self.inner
             .get_node(node_id)
-            .map(GraphNode::from_record)
+            .map(GraphNode)
             .map_err(|error| PyKeyError::new_err(error.to_string()))
     }
 

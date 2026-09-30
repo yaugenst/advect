@@ -170,11 +170,17 @@ serialized VJP execution and checks the JVP/VJP adjoint identity. Primitive
 conformance independently anchors the underlying numerical rule to finite
 differences.
 
-The older generated registry report remains useful as a structural diagnostic:
-it joins the reference namespace to binder, abstract-rule, and derivative
-registries. Its labels such as `staged` mean that one registered invocation can
-stage, not that the whole upstream callable contract is complete. It therefore
-does not independently define support.
+The generated support report remains useful as a structural diagnostic: it
+joins the reference namespace to the public catalog's lowering, abstract-rule,
+and derivative columns and to the revision's support profile. Its `staged`
+classification means that one registered invocation can stage; the joined
+profile `modes` say whether the whole upstream callable contract is claimed. Its
+derivative columns keep the catalog's vocabulary, where `no` also covers
+structural creation and integer-bit operations with no differentiable input.
+The report flags every row whose lowering is in `STRUCTURAL_OPS` as
+`structural`, including `*_like` creation that has derivative rules; only those
+rows may read `no` for that reason. It therefore does not independently define
+support.
 
 Deterministic execution cases back every advertised staged invocation on
 `array-api-strict`; a portable scientific subset also runs on NumPy. These

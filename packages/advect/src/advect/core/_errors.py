@@ -18,11 +18,17 @@ def _array_conversion_error() -> str:
     )
 
 
-def _debug_retry_hint() -> str:
-    return (
-        "\n  Debug: rerun the transform call inside `with advect.debug():` "
-        "to capture the user operation."
-    )
+def _operation_context(op: str | None, source_location: str | None) -> str:
+    """Name the operation and its location, or how to capture that location."""
+    parts = [f"\n  Operation: {op}"] if op else []
+    if source_location:
+        parts.append(f"\n  Location: {source_location}")
+    elif op:
+        parts.append(
+            "\n  Debug: rerun the transform call inside `with advect.debug():` "
+            "to capture the user operation."
+        )
+    return "".join(parts)
 
 
 class AdvectError(Exception):
@@ -97,35 +103,7 @@ class HigherOrderNotSupportedError(AdvectError):
         self.op = op
         self.source_location = source_location
 
-        parts = [message]
-        if op:
-            parts.append(f"\n  Operation: {op}")
-        if source_location:
-            parts.append(f"\n  Location: {source_location}")
-        elif op:
-            parts.append(_debug_retry_hint())
-        super().__init__("".join(parts))
-
-
-class TraceLevelError(AdvectError):
-    """Error raised when traced values are used across incompatible trace levels."""
-
-    def __init__(
-        self,
-        message: str,
-        *,
-        value_level: int | None = None,
-        active_level: int | None = None,
-    ) -> None:
-        self.value_level = value_level
-        self.active_level = active_level
-
-        parts = [message]
-        if value_level is not None:
-            parts.append(f"\n  Value trace level: {value_level}")
-        if active_level is not None:
-            parts.append(f"\n  Active trace level: {active_level}")
-        super().__init__("".join(parts))
+        super().__init__(message + _operation_context(op, source_location))
 
 
 class NoVJPError(AdvectError):
@@ -175,13 +153,7 @@ class NoVJPError(AdvectError):
         self.non_differentiable = non_differentiable
         self.grad_reason = grad_reason
 
-        parts = [message]
-        if op:
-            parts.append(f"\n  Operation: {op}")
-        if source_location:
-            parts.append(f"\n  Location: {source_location}")
-        elif op:
-            parts.append(_debug_retry_hint())
+        parts = [message, _operation_context(op, source_location)]
         if grad_reason:
             parts.append(f"\n  Reason: {grad_reason}")
 
@@ -231,13 +203,7 @@ class NoJVPError(AdvectError):
         self.op = op
         self.source_location = source_location
 
-        parts = [message]
-        if op:
-            parts.append(f"\n  Operation: {op}")
-        if source_location:
-            parts.append(f"\n  Location: {source_location}")
-        elif op:
-            parts.append(_debug_retry_hint())
+        parts = [message, _operation_context(op, source_location)]
 
         if op is not None and op.startswith("custom."):
             parts.append("""

@@ -7,6 +7,7 @@ import functools
 import inspect
 from typing import TYPE_CHECKING, Any, cast, overload
 
+from advect.core._abstract_helpers import PYTHON_SCALAR_TYPES
 from advect.core._context import (
     _active_trace_requires_jvp,
     _get_active_recorder,
@@ -104,10 +105,6 @@ def _implementation_signature(
     return signature
 
 
-def _contains_tracer(value: Any) -> bool:
-    return _tree_contains_tracer(value)
-
-
 def _contains_active_tracer(value: Any) -> bool:
     recorder = _get_active_recorder()
     if recorder is None:
@@ -160,11 +157,7 @@ class Primitive[**P, R]:
             declared_argnames=frozenset((*static_names, *nondiff_names)),
         )
 
-        registry = get_registry()
-        if registry.has(op_name):
-            msg = f"Operation identity '{op_name}' is already registered"
-            raise ValueError(msg)
-        registry.register(
+        get_registry().register(
             OpDef(
                 name=op_name,
                 output_arity_known=False,
@@ -298,25 +291,25 @@ class Primitive[**P, R]:
         bound.apply_defaults()
         return dict(bound.arguments)
 
-    def _dispatch_exact(self, *args: Any, **kwargs: Any) -> _PrimitiveExecution:
-        arguments = self._bind_call(args, kwargs)
-        return self._dispatch_normalized(arguments)
-
     def _dispatch_normalized(
         self,
         arguments: Mapping[str, Any],
     ) -> _PrimitiveExecution:
-        """Execute one normalized primitive call."""
-        implementation = cast("Callable[..., Any]", self._definition.implementation)
+        """Execute one call whose arguments already bind every parameter by name."""
+        definition = self._definition
+        implementation = cast("Callable[..., Any]", definition.implementation)
         return _normalize_primitive_execution(
             implementation(**arguments),
             primitive_name=self.name,
-            has_residual=self.has_residual,
+            has_residual=definition.has_residual,
         )
 
-    def _dispatch_impl(self, *args: Any, **kwargs: Any) -> Any:
-        with self._dispatch_exact(*args, **kwargs) as execution:
+    def _dispatch_output(self, arguments: Mapping[str, Any]) -> Any:
+        with self._dispatch_normalized(arguments) as execution:
             return execution.output
+
+    def _dispatch_impl(self, *args: Any, **kwargs: Any) -> Any:
+        return self._dispatch_output(self._bind_call(args, kwargs))
 
     def _partition_arguments(
         self,
@@ -324,7 +317,7 @@ class Primitive[**P, R]:
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         static_arguments = {name: arguments[name] for name in self.static_argnames}
         for name, value in static_arguments.items():
-            if _contains_tracer(value):
+            if _tree_contains_tracer(value):
                 msg = (
                     f"Primitive '{self.name}' argument '{name}' is declared static but "
                     "received a traced value. Pass concrete configuration data or remove "
@@ -342,10 +335,11 @@ class Primitive[**P, R]:
         track_output_arity: bool,
     ) -> Any:
         """Record one concrete-only call, optionally allowing per-node output arity."""
-        if _active_trace_requires_jvp() and self._jvp_rule is None:
+        definition = self._definition
+        if _active_trace_requires_jvp() and definition.jvp is None:
             differentiable = set(arguments).difference(
-                self.static_argnames,
-                self.nondiff_argnames,
+                definition.static_argnames,
+                definition.nondiff_argnames,
             )
             if any(_contains_active_tracer(arguments[name]) for name in differentiable):
                 msg = f"Cannot linearize primitive '{self.op_name}': no JVP rule is installed"
@@ -357,32 +351,23 @@ class Primitive[**P, R]:
             raise RuntimeError(msg)
         from advect.core._stage import call_primitive_abstract  # noqa: PLC0415
 
-        def forward(*inner_args: Any, **inner_kwargs: Any) -> _PrimitiveExecution:
-            normalized = self._bind_call(
-                inner_args,
-                {**inner_kwargs, **static_arguments},
-            )
-            return self._dispatch_normalized(normalized)
+        # Tracing substitutes dynamic leaves only; the bound names are unchanged.
+        def forward(**inner_kwargs: Any) -> _PrimitiveExecution:
+            return self._dispatch_normalized({**inner_kwargs, **static_arguments})
 
-        def abstract_forward(*inner_args: Any, **inner_kwargs: Any) -> Any:
-            return call_primitive_abstract(
-                self,
-                inner_args,
-                {**inner_kwargs, **static_arguments},
-            )
+        def abstract_forward(**inner_kwargs: Any) -> Any:
+            return call_primitive_abstract(self, (), {**inner_kwargs, **static_arguments})
 
         return trace_primitive_call(
             forward,
             abstract_function=abstract_forward,
             op_name=self.op_name,
-            schema_version=self._definition.schema_version,
+            schema_version=definition.schema_version,
             recorder=recorder,
-            args=(),
             kwargs=dynamic_arguments,
             node_attrs=static_arguments,
-            nondiff_argnames=frozenset(self.nondiff_argnames),
-            dynamic_argnames=frozenset(self._dynamic_argnames),
-            has_residual=self.has_residual,
+            nondiff_argnames=frozenset(definition.nondiff_argnames),
+            has_residual=definition.has_residual,
             track_output_arity=track_output_arity,
         )
 
@@ -395,7 +380,8 @@ class Primitive[**P, R]:
         return self._trace_dynamic_call(normalized, track_output_arity=False)
 
     def __call__(self, *args: P.args, **kwargs: P.kwargs) -> R:
-        if self.has_residual and _is_rematerializing():
+        definition = self._definition
+        if definition.has_residual and _is_rematerializing():
             msg = (
                 f"Checkpointed regions cannot call residual primitive '{self.name}'. "
                 "Move the primitive outside ad.checkpoint()."
@@ -404,10 +390,10 @@ class Primitive[**P, R]:
         arguments = self._bind_call(cast("tuple[Any, ...]", args), kwargs)
 
         if not is_tracing():
-            return cast("R", self._dispatch_impl(**arguments))
+            return cast("R", self._dispatch_output(arguments))
 
         if _get_active_trace_kind() == "stage_abstract":
-            if self._definition.variable_output_arity:
+            if definition.variable_output_arity:
                 msg = (
                     f"Primitive '{self.name}' has variable output arity and supports "
                     "concrete dynamic transforms only"
@@ -429,7 +415,7 @@ class Primitive[**P, R]:
             "R",
             self._trace_dynamic_call(
                 arguments,
-                track_output_arity=not self._definition.variable_output_arity,
+                track_output_arity=not definition.variable_output_arity,
             ),
         )
 
@@ -441,6 +427,12 @@ class Primitive[**P, R]:
         array/scalar leaves with ``advect.AbstractValue``; declared static
         arguments arrive unchanged. Return the concrete output pytree with
         ``advect.ArraySpec`` or ``AbstractValue`` leaves.
+
+        A leaf that the implementation returns as a Python scalar computed from
+        Python-scalar inputs promotes weakly, so declare it weak, for example
+        with the ``spec`` of a weak input or ``ArraySpec((), dtype, weak=True)``;
+        declare every other leaf strong. ``advect.testing.check_primitive``
+        checks the declaration.
 
         The function is returned unchanged so this method can be used as a
         decorator.
@@ -790,14 +782,18 @@ def evaluate_primitive(
         # enclosing dynamic tape.
         result = primitive(*args, **kwargs)
     else:
-        normalized = primitive._bind_call(args, kwargs)  # noqa: SLF001
-        with primitive._dispatch_normalized(normalized) as execution:  # noqa: SLF001
-            result = execution.output
+        result = primitive._dispatch_impl(*args, **kwargs)  # noqa: SLF001
     leaves, treedef = _normalize_output_pytree(
         result,
         namespace=namespace or _infer_namespace(input_values),
     )
     _validate_output_treedef(meta, treedef, op=op)
+    if all(type(value) in PYTHON_SCALAR_TYPES for value in input_values):
+        # As in a dynamic trace, a Python scalar returned from weak operands stays weak.
+        leaves = [
+            raw if type(raw) in PYTHON_SCALAR_TYPES else leaf
+            for raw, leaf in zip(tree_flatten(result)[0], leaves, strict=True)
+        ]
     return leaves[0] if len(leaves) == 1 else tuple(leaves)
 
 

@@ -2,7 +2,7 @@
 
 use advect_runtime::{
     AttrMap, ConstantKind, GraphBuilder as RuntimeGraphBuilder, GraphError,
-    LATEST_ARRAY_API_VERSION, NodeFlags, NodeId, NodeMetadata, NumericDType, OptimizationReport,
+    LATEST_ARRAY_API_VERSION, NodeId, NodeMetadata, NumericDType, OptimizationReport,
     PortableConstant, optimize,
 };
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
@@ -10,7 +10,7 @@ use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict, PyList};
 
 use crate::staged::GraphStore;
-use crate::staged::conversion::attr::AttrMapCache;
+use crate::staged::conversion::attr::attr_map_from_python;
 use crate::staged::conversion::dtype::DTypeCache;
 
 /// Python construction handle around one runtime-owned builder.
@@ -19,7 +19,6 @@ use crate::staged::conversion::dtype::DTypeCache;
 pub(crate) struct GraphBuilder {
     inner: Option<RuntimeGraphBuilder>,
     dtype_cache: DTypeCache,
-    attr_cache: AttrMapCache,
 }
 
 impl GraphBuilder {
@@ -41,7 +40,6 @@ impl GraphBuilder {
                     .map_err(graph_error)?,
             ),
             dtype_cache: DTypeCache::default(),
-            attr_cache: AttrMapCache::default(),
         })
     }
 
@@ -75,7 +73,7 @@ impl GraphBuilder {
         if op.is_empty() {
             return Err(PyValueError::new_err("node op must not be empty"));
         }
-        let attrs = self.attr_cache.resolve(py, attrs)?;
+        let attrs = attr_map_from_python(attrs)?;
         let dtype = self.dtype_cache.resolve(py, dtype)?;
         let output_dtypes = output_dtypes
             .map(|values| self.dtype_cache.resolve_sequence(py, values))
@@ -92,7 +90,7 @@ impl GraphBuilder {
         )
         .map_err(|error| metadata_error(&op, &error))?;
         self.require_inner_mut()?
-            .append_operation(&op, schema_version, &inputs, NodeFlags::NONE, metadata)
+            .append_operation(&op, schema_version, &inputs, metadata)
             .map_err(graph_error)
     }
 
@@ -163,15 +161,14 @@ impl GraphBuilder {
             .ok_or_else(|| PyRuntimeError::new_err("GraphBuilder has already finished"))?;
         let unoptimized = builder.finish_unoptimized().map_err(graph_error)?;
         let trace = unoptimized
-            .topological_order()
-            .into_iter()
-            .map(|node_id| {
-                let record = unoptimized.get_node(node_id).map_err(graph_error)?;
+            .nodes()
+            .map(|node| {
+                let node = node.map_err(graph_error)?;
                 Ok((
-                    node_id,
-                    record.op.clone(),
-                    record.inputs.clone(),
-                    record.metadata.name().map(str::to_owned),
+                    node.id,
+                    node.schema.name().to_owned(),
+                    node.parents.to_vec(),
+                    node.metadata.name().map(str::to_owned),
                 ))
             })
             .collect::<PyResult<TraceSnapshot>>()?;
@@ -216,19 +213,8 @@ fn graph_error(error: GraphError) -> PyErr {
 }
 
 fn metadata_error(op: &str, error: &GraphError) -> PyErr {
-    let message = error.message();
-    if message == "node num_outputs must be at least 1" {
-        return PyValueError::new_err(format!("Op '{op}' must have num_outputs >= 1 (got 0)"));
-    }
-    if message == "single-output node must not declare output_shapes/output_dtypes" {
-        return PyValueError::new_err(format!(
-            "Op '{op}' is single-output; output_shapes/output_dtypes must be None"
-        ));
-    }
-    if message == "multi-output node is missing output_shapes/output_dtypes" {
-        return PyValueError::new_err(format!(
-            "Op '{op}' has multiple outputs but output_shapes/output_dtypes are missing"
-        ));
-    }
-    PyValueError::new_err(format!("Op '{op}' has invalid metadata: {message}"))
+    PyValueError::new_err(format!(
+        "Op '{op}' has invalid metadata: {}",
+        error.message()
+    ))
 }

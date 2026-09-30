@@ -34,6 +34,12 @@ __array_api_version__ = os.environ.get("ARRAY_API_TESTS_VERSION", _LATEST_ARRAY_
 _materialize_array_api_profile(__array_api_version__)
 _provider.set_array_api_strict_flags(api_version=__array_api_version__)
 __version__ = f"advect-bridge+{getattr(_provider, '__version__', 'unknown')}"
+# The runner fixes the selection in the suite process environment before import.
+_SELECTED_OPERATIONS = frozenset(
+    path
+    for item in os.environ.get("ADVECT_ARRAY_API_QUALIFICATION_OPS", "").split(",")
+    if (path := item.strip()) in _FUNCTION_SPECS or path in _ARRAY_API_COMPOSITES
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,11 +51,6 @@ class _ArraySlot:
 class _EncodedCall:
     args: tuple[object, ...]
     kwargs: dict[str, object]
-
-
-def _selected_operations() -> frozenset[str]:
-    raw = os.environ.get("ADVECT_ARRAY_API_QUALIFICATION_OPS", "")
-    return frozenset(item.strip() for item in raw.split(",") if item.strip())
 
 
 def _is_array(value: object) -> bool:
@@ -197,8 +198,12 @@ def _execute_selected(
     return output
 
 
-def _wrap(path: str, function: Callable[..., object]) -> Callable[..., object]:
-    @wraps(function)
+def _selected(path: str, value: object) -> object:
+    """Route a selected callable through Advect and pass everything else through."""
+    if path not in _SELECTED_OPERATIONS or not callable(value):
+        return value
+
+    @wraps(value)
     def wrapped(*args: object, **kwargs: object) -> object:
         return _execute_selected(path, args, kwargs)
 
@@ -217,15 +222,7 @@ class _ExtensionNamespace:
         return f"{__name__}.{self._name}"
 
     def __getattr__(self, name: str) -> object:
-        value = getattr(self._namespace, name)
-        path = f"{self._name}.{name}"
-        if (
-            path in _selected_operations()
-            and path in set(_FUNCTION_SPECS) | _ARRAY_API_COMPOSITES
-            and callable(value)
-        ):
-            return _wrap(path, value)
-        return value
+        return _selected(f"{self._name}.{name}", getattr(self._namespace, name))
 
     def __dir__(self) -> list[str]:
         return sorted(set(super().__dir__()).union(dir(self._namespace)))
@@ -236,14 +233,7 @@ linalg = _ExtensionNamespace("linalg", _provider.linalg)
 
 
 def __getattr__(name: str) -> object:
-    value = getattr(_provider, name)
-    if (
-        name in _selected_operations()
-        and name in set(_FUNCTION_SPECS) | _ARRAY_API_COMPOSITES
-        and callable(value)
-    ):
-        return _wrap(name, value)
-    return value
+    return _selected(name, getattr(_provider, name))
 
 
 def __dir__() -> list[str]:

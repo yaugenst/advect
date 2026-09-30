@@ -9,7 +9,7 @@ from advect.core._abstract_helpers import (
     broadcast_shape,
     matmul_shape,
     normalize_axis,
-    promote_dtype,
+    strong_result_dtype,
     tensordot_shape,
 )
 from advect.core._abstract_model import ArraySpec, rule
@@ -27,8 +27,8 @@ RULES: dict[str, AbstractRule] = {
     "array.outer": rule("outer", 2),
     "array.tensordot": rule("tensordot", 2, allowed=("axes",)),
     "array.vecdot": rule("vecdot", 2, allowed=("axis",)),
-    "array_ext.matvec": rule("matmul", 2),
-    "array_ext.vecmat": rule("matmul", 2),
+    "array_ext.matvec": rule("matvec", 2),
+    "array_ext.vecmat": rule("vecmat", 2),
     "array_ext.dot": rule("dot", 2),
 }
 
@@ -40,9 +40,32 @@ def _matmul(
     return (
         ArraySpec(
             matmul_shape(specs[0].shape, specs[1].shape),
-            promote_dtype(specs),
+            strong_result_dtype(specs),
         ),
     )
+
+
+def _matvec(
+    specs: Sequence[ArraySpec],
+    _attrs: Mapping[str, Any],
+) -> tuple[ArraySpec, ...]:
+    """Return the gufunc ``(..., m, n), (..., n) -> (..., m)`` result."""
+    matrix, vector = specs[0].shape, specs[1].shape
+    if len(matrix) < 2 or not vector:
+        raise ValueError("matvec takes a matrix and a vector")
+    return (ArraySpec(matmul_shape(matrix, (*vector, 1))[:-1], strong_result_dtype(specs)),)
+
+
+def _vecmat(
+    specs: Sequence[ArraySpec],
+    _attrs: Mapping[str, Any],
+) -> tuple[ArraySpec, ...]:
+    """Return the gufunc ``(..., n), (..., n, m) -> (..., m)`` result."""
+    vector, matrix = specs[0].shape, specs[1].shape
+    if len(matrix) < 2 or not vector:
+        raise ValueError("vecmat takes a vector and a matrix")
+    *batch, _row, column = matmul_shape((*vector[:-1], 1, vector[-1]), matrix)
+    return (ArraySpec((*batch, column), strong_result_dtype(specs)),)
 
 
 def _outer(
@@ -54,7 +77,7 @@ def _outer(
     return (
         ArraySpec(
             (specs[0].shape[0], specs[1].shape[0]),
-            promote_dtype(specs),
+            strong_result_dtype(specs),
         ),
     )
 
@@ -75,7 +98,7 @@ def _cross(
     output_axis = normalize_axis(axis_value, len(batch), insertion=True)
     shape = list(batch)
     shape.insert(output_axis, 3)
-    return (ArraySpec(tuple(shape), promote_dtype(specs)),)
+    return (ArraySpec(tuple(shape), strong_result_dtype(specs)),)
 
 
 def _tensordot(
@@ -89,7 +112,7 @@ def _tensordot(
                 specs[1].shape,
                 attrs.get("axes", 2),
             ),
-            promote_dtype(specs),
+            strong_result_dtype(specs),
         ),
     )
 
@@ -105,7 +128,7 @@ def _vecdot(
         raise ValueError("vecdot vector dimensions must have equal length")
     left_batch = tuple(size for axis, size in enumerate(specs[0].shape) if axis != left_axis)
     right_batch = tuple(size for axis, size in enumerate(specs[1].shape) if axis != right_axis)
-    return (ArraySpec(broadcast_shape(left_batch, right_batch), promote_dtype(specs)),)
+    return (ArraySpec(broadcast_shape(left_batch, right_batch), strong_result_dtype(specs)),)
 
 
 def _dot(
@@ -125,11 +148,13 @@ def _dot(
             *right[:contracted_right_axis],
             *right[contracted_right_axis + 1 :],
         )
-    return (ArraySpec(shape, promote_dtype(specs)),)
+    return (ArraySpec(shape, strong_result_dtype(specs)),)
 
 
 EVALUATORS: dict[str, ResultEvaluator] = {
     "matmul": _matmul,
+    "matvec": _matvec,
+    "vecmat": _vecmat,
     "outer": _outer,
     "cross": _cross,
     "tensordot": _tensordot,

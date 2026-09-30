@@ -28,7 +28,9 @@ print(f"shifted loss: {program(sample + 0.1):.6f}")
 The example fixes the positional pytree, shape, dtype, device, and Python
 scalar category. Calls that change that contract fail instead of compiling a
 hidden second program. The original Python function is not rerun during warm
-calls.
+calls. The optimizer merges repeated computations, so two outputs of one call
+may share storage even where eager NumPy would return separate arrays; copy an
+output before writing to it in place if another output must stay unchanged.
 
 ## Declare a signature without example data
 
@@ -65,6 +67,21 @@ print("staged transform:", result)
 The static value is part of the signature: calling this program with
 `center=False` is a contract mismatch. Data-dependent Python branches remain
 dynamic-only because an abstract staged value has no data to test.
+
+Dtypes are known while staging, so they can select a branch too. Inside a
+staged function, `x.dtype` is the dtype object that your array provider's
+arrays report, and a test such as `x.dtype == np.float32` takes the branch that
+eager and dynamic code take. The same holds for the dtypes of derived values
+and, with `xp = x.__array_namespace__()`, for `xp.float32`, `xp.result_type`,
+and `xp.finfo(x).dtype`. Staging from examples presents their provider's dtype
+objects, while `specs=` alone stages against NumPy, so pass examples to see
+another provider's dtypes. A program derived from a staged or restored program,
+such as `grad(program)` or `vjp_program(program)`, records no provider, so a
+custom primitive rule that its derivation runs sees NumPy dtypes. Staged
+values have `bool` or one of the numeric dtypes `int8` to `int64`, `uint8` to
+`uint64`, `float16` to `float64`, `complex64`, and `complex128`; staging
+rejects any other dtype, such as `object`, bytes, or `float128`, with a
+`TypeError` that names it.
 
 ## Differentiate the program once
 
@@ -109,14 +126,26 @@ print("serialized bytes:", len(payload.encode()))
 ```
 
 The artifact contains the graph and its exact call contract, not Python code.
-Captured arrays and static values are snapshotted at compile time. A custom
-[primitive](../api/primitives.md) referenced by the graph must be imported or
-registered under the same stable name before loading, with an implementation
-that matches the saved program.
+Captured arrays and static values are snapshotted at compile time. A captured
+array that the program returns is read-only on NumPy and a fresh copy on
+providers without read-only arrays, so writing to it cannot change later calls.
+A custom [primitive](../api/primitives.md) referenced by the graph must be
+imported or registered under the same stable name before loading, with an
+implementation that matches the saved program.
 
 Provider-neutral functions written through `x.__array_namespace__()` can be
 staged against an explicit
 [Array API revision](../compatibility/array-api.md) and replayed by a compatible
 provider. NumPy-authored functions retain the separate
-[NumPy frontend](../api/numpy.md) contract.
+[NumPy frontend](../api/numpy.md) contract. Staged from another provider's
+examples, they lower to the same graph as from NumPy examples unless they
+branch on `x.dtype`, which is that provider's dtype object; a NumPy call that
+receives such a dtype object raises NumPy's `TypeError` while staging.
 Save and load a program with the same Advect version.
+
+Advect 0.3.0 uses saved-program schema version 3. Programs saved with schema
+version 2 by earlier releases must be staged again from their original callable
+and signature, then saved with the new release. Changing the version number in
+the JSON is insufficient: version 3 changes the meaning of weak scalar metadata
+to preserve NumPy's scalar promotion rules. Schema versions describe the saved
+format and are independent of package release numbers.

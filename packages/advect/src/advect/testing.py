@@ -7,8 +7,9 @@ import math
 from functools import partial
 from typing import TYPE_CHECKING, Any, NoReturn, cast
 
-from advect.autodiff.api._scalar_boundary import _is_complex_numeric
-from advect.core._abstract import AbstractValue, ArraySpec, _scalar_spec
+from advect.autodiff.api._scalar_boundary import _is_boolean_numeric, _is_complex_numeric
+from advect.core._abstract import AbstractValue, ArraySpec
+from advect.core._abstract_helpers import value_spec
 from advect.core._array_api.providers import _get_array_namespace
 from advect.core._primitive import MissingPrimitiveRuleError
 from advect.core._primitive_call import _infer_namespace, _normalize_output_pytree
@@ -43,7 +44,7 @@ def _shift_leaf(value: Any, step: Any, *, scale: float) -> Any:
 
 
 def _as_abstract_value(value: Any) -> AbstractValue:
-    return AbstractValue(_scalar_spec(value))
+    return AbstractValue(value_spec(value))
 
 
 def _tree_allclose(actual: Any, expected: Any, *, atol: float, rtol: float) -> bool:
@@ -53,9 +54,11 @@ def _tree_allclose(actual: Any, expected: Any, *, atol: float, rtol: float) -> b
         return False
     for actual_leaf, expected_leaf in zip(actual_leaves, expected_leaves, strict=True):
         namespace = _get_array_namespace(expected_leaf) or _get_array_namespace(actual_leaf)
-        difference = abs(actual_leaf - expected_leaf)
-        tolerance = atol + rtol * abs(expected_leaf)
-        comparison = difference <= tolerance
+        if _is_boolean_numeric(expected_leaf):
+            # Booleans support no subtraction; they must match exactly.
+            comparison = actual_leaf == expected_leaf
+        else:
+            comparison = abs(actual_leaf - expected_leaf) <= atol + rtol * abs(expected_leaf)
         all_function = getattr(namespace, "all", None) if namespace is not None else None
         if callable(all_function):
             comparison = all_function(comparison)
@@ -75,70 +78,83 @@ def _copy_check_value(value: Any) -> Any:
     return value
 
 
-def _check_same_tree_specs(
+def _abstract_spec(value: Any) -> ArraySpec | None:
+    spec = value.spec if isinstance(value, AbstractValue) else value
+    return spec if isinstance(spec, ArraySpec) else None
+
+
+def _check_leaf_specs(
     primitive: Primitive[Any, Any],
     actual: Any,
     expected: Any,
     *,
-    phase: str,
+    subject: str,
+    reference: str = "concrete output",
+    spec_of: Callable[[Any], ArraySpec | None] = value_spec,
+    weak_operands: bool | None = None,
 ) -> None:
+    """Require ``actual`` to match the structure, shapes, and dtypes of ``expected``.
+
+    With ``weak_operands`` set, each declared weak-scalar category must also be
+    the one a dynamic trace records: a Python scalar returned from weak
+    operands is weak, and every other result is strong (NEP 50).
+    """
     actual_leaves, actual_treedef = tree_flatten(actual)
     expected_leaves, expected_treedef = tree_flatten(expected)
     if actual_treedef != expected_treedef:
-        msg = f"Primitive '{primitive.name}' {phase} output structure differs from concrete output"
+        msg = f"Primitive '{primitive.name}' {subject} structure differs from {reference}"
         raise AssertionError(msg)
     for index, (actual_leaf, expected_leaf) in enumerate(
         zip(actual_leaves, expected_leaves, strict=True),
     ):
-        actual_spec = _scalar_spec(actual_leaf)
-        expected_spec = _scalar_spec(expected_leaf)
+        actual_spec = spec_of(actual_leaf)
+        if actual_spec is None:
+            msg = f"Primitive '{primitive.name}' {subject} leaf {index} is not an ArraySpec"
+            raise AssertionError(msg)
+        expected_spec = value_spec(expected_leaf)
         if actual_spec.shape != expected_spec.shape or str(actual_spec.dtype) != str(
             expected_spec.dtype
         ):
             msg = (
-                f"Primitive '{primitive.name}' {phase} output leaf {index} disagrees "
-                f"with concrete metadata: expected shape={expected_spec.shape}, "
+                f"Primitive '{primitive.name}' {subject} leaf {index} disagrees with "
+                f"{reference}: expected shape={expected_spec.shape}, "
                 f"dtype={expected_spec.dtype}; got shape={actual_spec.shape}, "
                 f"dtype={actual_spec.dtype}"
             )
             raise AssertionError(msg)
+        if weak_operands is not None and actual_spec.weak != (weak_operands and expected_spec.weak):
+            msg = (
+                f"Primitive '{primitive.name}' {subject} leaf {index} declares "
+                f"weak={actual_spec.weak}, but a dynamic trace records "
+                f"weak={not actual_spec.weak}"
+            )
+            raise AssertionError(msg)
 
 
-def _check_tree_unchanged(
-    primitive: Primitive[Any, Any],
-    actual: Any,
-    snapshot: Any,
-    *,
-    phase: str,
-) -> None:
-    _check_same_tree_specs(primitive, actual, snapshot, phase=f"{phase} input")
-    if not _tree_allclose(actual, snapshot, atol=0.0, rtol=0.0):
-        msg = f"Primitive '{primitive.name}' {phase} mutated an input"
-        raise AssertionError(msg)
+def _conjugate(value: Any) -> Any:
+    if not _is_complex_numeric(value):
+        return value
+    namespace = _get_array_namespace(value, api_version=None)
+    return value.conjugate() if namespace is None else namespace.conj(value)
 
 
 def _real_inner_product(left: Sequence[Any], right: Sequence[Any]) -> float:
+    """Return ``Re(sum(conj(left) * right))`` over leaves, skipping ``None``.
+
+    ``conj``, ``sum`` and ``real`` exist in every Array API revision, so any
+    namespace the provider offers will do, also below Advect's default one.
+    """
     total = 0.0
     for left_leaf, right_leaf in zip(left, right, strict=True):
         if left_leaf is None or right_leaf is None:
             continue
-        namespace = _get_array_namespace(left_leaf) or _get_array_namespace(right_leaf)
-        conjugate = getattr(namespace, "conj", None) if namespace is not None else None
-        if callable(conjugate):
-            product = conjugate(left_leaf) * right_leaf
-        else:
-            conjugate_method = getattr(left_leaf, "conjugate", None)
-            product = (
-                conjugate_method() * right_leaf
-                if callable(conjugate_method)
-                else left_leaf * right_leaf
-            )
-        sum_function = getattr(namespace, "sum", None) if namespace is not None else None
-        value = sum_function(product) if callable(sum_function) else product
-        sum_method = getattr(value, "sum", None)
-        if not callable(sum_function) and callable(sum_method):
-            value = sum_method()
-        total += float(cast("Any", getattr(value, "real", value)))
+        product = _conjugate(left_leaf) * right_leaf
+        namespace = _get_array_namespace(product, api_version=None)
+        if namespace is None:
+            total += float(product.real)
+            continue
+        value = namespace.sum(product)
+        total += float(namespace.real(value) if _is_complex_numeric(value) else value)
     return total
 
 
@@ -148,29 +164,6 @@ def _real_inner_product_magnitude(left: Sequence[Any], right: Sequence[Any]) -> 
         [None if value is None else abs(value) for value in left],
         [None if value is None else abs(value) for value in right],
     )
-
-
-def _check_output_specs(primitive: Primitive[Any, Any], concrete: Any, abstract: Any) -> None:
-    concrete_leaves, concrete_treedef = tree_flatten(concrete)
-    abstract_leaves, abstract_treedef = tree_flatten(abstract)
-    if concrete_treedef != abstract_treedef:
-        msg = f"Primitive '{primitive.name}' abstract output structure differs from concrete output"
-        raise AssertionError(msg)
-    for index, (value, abstract_value) in enumerate(
-        zip(concrete_leaves, abstract_leaves, strict=True)
-    ):
-        spec = abstract_value.spec if isinstance(abstract_value, AbstractValue) else abstract_value
-        if not isinstance(spec, ArraySpec):
-            msg = f"Primitive '{primitive.name}' abstract output leaf {index} is not an ArraySpec"
-            raise AssertionError(msg)  # noqa: TRY004 - this is a failed author check.
-        concrete_spec = _scalar_spec(value)
-        if concrete_spec.shape != spec.shape or str(concrete_spec.dtype) != str(spec.dtype):
-            msg = (
-                f"Primitive '{primitive.name}' abstract output leaf {index} disagrees with "
-                f"concrete output: expected shape={concrete_spec.shape}, "
-                f"dtype={concrete_spec.dtype}; got shape={spec.shape}, dtype={spec.dtype}"
-            )
-            raise AssertionError(msg)
 
 
 def _default_check_tangent(value: Any, *, complex_direction: bool) -> Any:
@@ -239,7 +232,9 @@ def check_gradient(
         receives an all-ones direction.
     epsilons
         Non-empty sequence of finite positive central-difference steps. The
-        JVP comparison passes when at least one step agrees within tolerance.
+        JVP comparison passes when at least one step agrees within tolerance;
+        steps are tried in order, and later steps are not evaluated once one
+        agrees.
     atol
         Absolute tolerance for the finite-difference and real-adjoint checks.
     rtol
@@ -286,25 +281,15 @@ def check_gradient(
 
     _output, directional = jvp(function)(primal, tangents=direction)
 
-    finite_difference_passed = False
-    for epsilon in steps:
-        positive = tree_map(
-            partial(_shift_leaf, scale=epsilon),
-            primal,
-            direction,
-        )
-        negative = tree_map(
-            partial(_shift_leaf, scale=-epsilon),
-            primal,
-            direction,
-        )
-        finite_difference = _tree_difference(
-            function(positive),
-            function(negative),
-            2 * epsilon,
-        )
-        if _tree_allclose(directional, finite_difference, atol=atol, rtol=rtol):
-            finite_difference_passed = True
+    def central_difference(epsilon: float) -> Any:
+        positive = tree_map(partial(_shift_leaf, scale=epsilon), primal, direction)
+        negative = tree_map(partial(_shift_leaf, scale=-epsilon), primal, direction)
+        return _tree_difference(function(positive), function(negative), 2 * epsilon)
+
+    finite_difference_passed = any(
+        _tree_allclose(directional, central_difference(epsilon), atol=atol, rtol=rtol)
+        for epsilon in steps
+    )
 
     directional_leaves = tree_flatten(directional)[0]
     gradient_leaves = tree_flatten(grad(function)(primal))[0]
@@ -365,6 +350,11 @@ def check_primitive(  # noqa: C901, PLR0912, PLR0913, PLR0915
     request just ``"transpose"``; the check then compares its explicit rule
     with a central finite difference. The ``"jvp"``, ``"complex"``, and
     ``"nested"`` checks require a JVP.
+
+    The abstract check compares each declared output's shape, dtype, and
+    weak-scalar category with the concrete call. As for a Python operator, an
+    output is weak exactly when the implementation returns a Python scalar and
+    every primal is a Python scalar.
 
     The stage check executes both the compiled and serialized program, compares
     output structure, shape, and dtype exactly, and verifies that inputs remain
@@ -441,8 +431,8 @@ def check_primitive(  # noqa: C901, PLR0912, PLR0913, PLR0915
         return invoke(values)
 
     concrete = invoke(primals)
-    input_leaves, _input_treedef = tree_flatten(primals)
-    rule_namespace = _infer_namespace(input_leaves)
+    primal_leaves, primal_treedef = tree_flatten(primals)
+    rule_namespace = _infer_namespace(primal_leaves)
 
     def normalize_rule_output(value: Any) -> Any:
         leaves, treedef = _normalize_output_pytree(
@@ -462,9 +452,15 @@ def check_primitive(  # noqa: C901, PLR0912, PLR0913, PLR0915
         }
         abstract_arguments.update(static_arguments)
         abstract = abstract_rule(**abstract_arguments)
-        _check_output_specs(primitive, concrete, abstract)
+        _check_leaf_specs(
+            primitive,
+            abstract,
+            concrete,
+            subject="abstract output",
+            spec_of=_abstract_spec,
+            weak_operands=all(value_spec(leaf).weak for leaf in primal_leaves),
+        )
 
-    primal_leaves, primal_treedef = tree_flatten(primals)
     if "complex" in requested and not any(_is_complex_numeric(value) for value in primal_leaves):
         msg = f"Primitive '{primitive.name}' complex check requires at least one complex primal"
         raise ValueError(msg)
@@ -679,7 +675,7 @@ def _check_primitive_stage(
 ) -> None:
     from advect.core._stage import StagedProgram, stage  # noqa: PLC0415
 
-    specs = cast("tuple[Any, ...]", tree_map(_scalar_spec, primals))
+    specs = cast("tuple[Any, ...]", tree_map(value_spec, primals))
     program = cast("StagedProgram", stage(dynamic_call, specs=specs))
     restored = StagedProgram.from_dict(program.to_dict())
     snapshot = tree_map(_copy_check_value, primals)
@@ -688,11 +684,20 @@ def _check_primitive_stage(
         ("serialized stage", restored),
     ):
         staged_result = staged_program(*primals)
-        _check_same_tree_specs(primitive, staged_result, concrete, phase=phase)
+        _check_leaf_specs(primitive, staged_result, concrete, subject=f"{phase} output")
         if not _tree_allclose(staged_result, concrete, atol=atol, rtol=rtol):
             msg = f"Primitive '{primitive.name}' {phase} disagrees with concrete execution"
             raise AssertionError(msg)
-        _check_tree_unchanged(primitive, primals, snapshot, phase=phase)
+        _check_leaf_specs(
+            primitive,
+            primals,
+            snapshot,
+            subject=f"{phase} input",
+            reference="the input before execution",
+        )
+        if not _tree_allclose(primals, snapshot, atol=0.0, rtol=0.0):
+            msg = f"Primitive '{primitive.name}' {phase} mutated an input"
+            raise AssertionError(msg)
 
 
 __all__ = ["check_gradient", "check_primitive"]

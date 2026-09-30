@@ -87,25 +87,12 @@ class DynamicTape:
         shape: Sequence[int],
         dtype: object,
         *,
+        input_positions: Sequence[int] | None = None,
+        literals: Sequence[object] = (),
+        weak: bool = False,
         schema_version: int = 1,
         name: str | None = None,
         source_location: str | None = None,
-    ) -> int: ...
-    def record_operation_with_literals(
-        self,
-        op: str,
-        inputs: Sequence[int],
-        input_positions: Sequence[int],
-        literals: Sequence[object],
-        value: object,
-        attrs: dict[str, Any],
-        shape: Sequence[int],
-        dtype: object,
-        *,
-        schema_version: int = 1,
-        name: str | None = None,
-        source_location: str | None = None,
-        literal_weak: bool = False,
     ) -> int: ...
     def bind_trace_frame(self, trace_level: int, trace_frame_id: int) -> None: ...
     def runtime_trace_identity(self) -> tuple[int | None, int | None]: ...

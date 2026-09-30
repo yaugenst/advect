@@ -8,6 +8,7 @@ from typing import Any, Protocol, cast, runtime_checkable
 
 from advect.core._array_api.providers import (
     _get_backend_key_from_namespace,
+    _namespace_serves,
     _negotiate_array_namespace_for_call,
 )
 
@@ -190,6 +191,7 @@ class _StandardArrayAPIExtensions:
         offset: int = 0,
         axis1: int = 0,
         axis2: int = 1,
+        dtype: object | None = None,
     ) -> object:
         """Expose NumPy's spelling for the standard linalg operation."""
         namespace = self._namespace_for(value)
@@ -199,7 +201,7 @@ class _StandardArrayAPIExtensions:
             axis2=axis2,
             namespace=namespace,
         )
-        return cast("Any", namespace).linalg.trace(matrix, offset=offset)
+        return cast("Any", namespace).linalg.trace(matrix, offset=offset, dtype=dtype)
 
     def _matrix_axes_last(
         self,
@@ -273,12 +275,7 @@ def _is_standard_array_api_namespace(
 ) -> bool:
     """Recognize the standard protocol, not merely a similarly named module."""
     return (
-        isinstance(getattr(namespace, "__array_api_version__", None), str)
-        and (
-            array_api_version == "2022.12"
-            or callable(getattr(namespace, "__array_namespace_info__", None))
-        )
-        and callable(getattr(namespace, "asarray", None))
+        _namespace_serves(namespace, array_api_version)
         and callable(getattr(namespace, "zeros_like", None))
         and callable(getattr(namespace, "ones_like", None))
     )

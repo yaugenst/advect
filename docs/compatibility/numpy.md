@@ -5,7 +5,7 @@
 NumPy is Advect's first-class frontend, intercepted through NumPy's own protocols (`__array_ufunc__`, `__array_function__`, and constructor `like=` dispatch). The qualified range is NumPy 2.0-2.5. This build uses NumPy 2.5.2 against Advect's Array API 2024.12 target. Only the forms listed below are qualified.
 
 Every listed function works in dynamic transforms. **Stage/save** says whether the same call can appear in a staged and serialized program. **Differentiate** reports user-visible derivative support. **No** means no derivative rule is available; **n/a** marks a structural or mathematically nondifferentiable operation.
-The nine `numpy.lib.scimath` rows are dynamic-only because their result dtype can depend on values.
+All `numpy.lib.scimath` rows are dynamic-only because their result dtype can depend on values.
 
 ## Limits
 
@@ -266,10 +266,10 @@ Callable rows are conservative across their executable variants. `numpy.round` s
 | `numpy.triu` | yes | yes |
 | `numpy.triu_indices_from` | no | n/a |
 | `numpy.union1d` | no | yes |
-| `numpy.unique` | no | n/a |
+| `numpy.unique` | no | yes |
 | `numpy.unique_all` | no | yes |
-| `numpy.unique_counts` | no | n/a |
-| `numpy.unique_inverse` | no | n/a |
+| `numpy.unique_counts` | no | yes |
+| `numpy.unique_inverse` | no | yes |
 | `numpy.unique_values` | no | yes |
 | `numpy.unravel_index` | no | n/a |
 | `numpy.unstack` | no | yes |
@@ -330,6 +330,7 @@ Callable rows are conservative across their executable variants. `numpy.round` s
 | `numpy.isinf` | yes | n/a |
 | `numpy.isnan` | yes | n/a |
 | `numpy.ldexp` | yes | yes |
+| `numpy.left_shift` | yes | n/a |
 | `numpy.less` | yes | n/a |
 | `numpy.less_equal` | yes | n/a |
 | `numpy.log` | yes | yes |
@@ -357,6 +358,7 @@ Callable rows are conservative across their executable variants. `numpy.round` s
 | `numpy.radians` | no | yes |
 | `numpy.reciprocal` | yes | yes |
 | `numpy.remainder` | yes | yes |
+| `numpy.right_shift` | yes | n/a |
 | `numpy.rint` | yes | yes |
 | `numpy.sign` | yes | yes |
 | `numpy.signbit` | yes | n/a |

@@ -1,4 +1,4 @@
-"""Indexing and slicing support for TracedArray."""
+"""Indexing, item assignment, and augmented assignment for TracedArray."""
 
 from __future__ import annotations
 
@@ -6,10 +6,12 @@ from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 
-from advect.core._array_protocol_helpers import literal_is_weak
-from advect.core._basic_index import encode_basic_index
+from advect.core._array_protocol_helpers import literal_is_weak, weak_scalar_runtime_value
+from advect.core._basic_index import encode_basic_index, normalize_basic_index
+from advect.core._context import _set_pending_update
 from advect.core._errors import MutationError, TracingError
-from advect.core._protocols import _snapshot_traced
+from advect.core._protocols import _innermost, _is_traced
+from advect.numpy._op_bindings import canonicalize_numpy_op
 from advect.numpy._traced_array_checks import require_active_trace
 from advect.numpy._traced_array_state import PendingIndexUpdate, ViewState, user_location
 
@@ -18,23 +20,9 @@ if TYPE_CHECKING:
     from advect.numpy._traced_array_state import SourceLocation
 
 
-def _is_traced_leaf(value: object) -> bool:
-    return callable(getattr(value, "_advect_snapshot", None))
-
-
-def _unwrap_traced_leaf(value: object) -> object:
-    current = value
-    while _is_traced_leaf(current):
-        _node_id, next_value = _snapshot_traced(current)
-        if next_value is current:
-            break
-        current = next_value
-    return current
-
-
 def _concretize_index_key(key: object) -> object:
-    if _is_traced_leaf(key):
-        concrete = np.asarray(_unwrap_traced_leaf(key))
+    if _is_traced(key):
+        concrete = np.asarray(_innermost(key))
         if concrete.dtype.kind not in {"b", "i", "u"}:
             msg = (
                 "Traced advanced indices must have integer or boolean dtype; "
@@ -44,44 +32,48 @@ def _concretize_index_key(key: object) -> object:
         return concrete
     if isinstance(key, tuple):
         return tuple(_concretize_index_key(item) for item in key)
+    return normalize_integer_scalars(key)
+
+
+def normalize_integer_scalars(key: object) -> object:
+    """Read NumPy integer scalars and slice bounds as the Python ints they index with.
+
+    Zero-dimensional integer arrays stay arrays: NumPy indexes with them as
+    advanced indices, which copy instead of returning a view.
+    """
+    if isinstance(key, tuple):
+        return tuple(normalize_integer_scalars(item) for item in key)
+    if isinstance(key, np.integer):
+        return int(key)
+    if isinstance(key, slice):
+        (key,) = normalize_basic_index(key)
     return key
 
 
 def _is_basic_index(key: object) -> bool:
-    if isinstance(key, tuple):
-        return all(_is_basic_index(item) for item in key)
-    return isinstance(key, (int, slice)) or key is None or key is Ellipsis
+    # Only the outer tuple is a multi-index; NumPy reads a nested one as a sequence.
+    items = key if isinstance(key, tuple) else (key,)
+    return all(isinstance(item, (int, slice)) or item is None or item is Ellipsis for item in items)
 
 
-def _coerce_index_array(self: TracedArray, key: object) -> np.ndarray | None:
-    traced_type = type(self)
-
-    index_array: np.ndarray | None = None
-    if isinstance(key, np.ndarray):
-        index_array = key
-    elif isinstance(key, list):
-        index_array = np.asarray(key)
-
-    if index_array is None:
+def _index_array(item: object) -> np.ndarray | None:
+    """Validate one sequence index component as an int64 or bool array."""
+    if not isinstance(item, (np.ndarray, list, tuple)):
         return None
-
+    index_array = np.asarray(item)
     if index_array.dtype == object:
-        if any(isinstance(item, traced_type) for item in index_array.flat):
+        if any(_is_traced(value) for value in index_array.flat):
             msg = (
                 "Advanced indexing with TracedArray is not yet supported. "
                 "Index arrays must be concrete."
             )
             raise TracingError(msg)
-
         msg = "Advanced indexing with object arrays is not supported."
         raise TracingError(msg)
-
     if index_array.dtype.kind == "b":
         return index_array.astype(np.bool_, copy=False)
-
     if index_array.dtype.kind in {"i", "u"}:
         return index_array.astype(np.int64, copy=False)
-
     msg = (
         "Advanced indexing with arrays is only supported for integer/bool arrays. "
         f"Got dtype {index_array.dtype!s}."
@@ -89,69 +81,22 @@ def _coerce_index_array(self: TracedArray, key: object) -> np.ndarray | None:
     raise TracingError(msg)
 
 
-def validate_index_key(self: TracedArray, key: object) -> None:
-    """Validate index components and reject unsupported traced/object variants."""
-    traced_type = type(self)
-
-    if isinstance(key, traced_type):
-        msg = (
-            "Advanced indexing with TracedArray is not yet supported. "
-            "Use basic slicing (integers, slices) instead."
-        )
-        raise TracingError(msg)
-
-    if _coerce_index_array(self, key) is not None:
-        return
-
-    if isinstance(key, tuple):
-        for item in key:
-            if _coerce_index_array(self, item) is not None:
-                continue
-
-            validate_index_key(self, item)
-
-
-def normalize_index_key(key: object) -> tuple[object, ...]:
-    """Normalize index key to a tuple."""
-    if isinstance(key, tuple):
-        return key
-    return (key,)
-
-
-def _serialize_index_array(index_array: np.ndarray) -> dict[str, object]:
-    if index_array.dtype == object:
-        msg = "Advanced indexing with object arrays is not supported."
-        raise TracingError(msg)
-
-    if index_array.dtype.kind == "b":
-        index_array = index_array.astype(np.bool_, copy=False)
-    elif index_array.dtype.kind in {"i", "u"}:
-        index_array = index_array.astype(np.int64, copy=False)
-    else:
-        msg = (
-            "Advanced indexing with arrays is only supported for integer/bool arrays. "
-            f"Got dtype {index_array.dtype!s}."
-        )
-        raise TracingError(msg)
-
-    return {
-        "type": "array",
-        "dtype": str(index_array.dtype),
-        "shape": tuple(int(i) for i in index_array.shape),
-        "values": index_array.tolist(),
-    }
-
-
 def index_to_attrs(key: tuple[object, ...]) -> list[dict[str, object]]:
-    """Convert normalized index key to serializable attrs."""
+    """Validate and serialize one normalized index key as graph attributes."""
     result: list[dict[str, object]] = []
     for item in key:
-        if isinstance(item, np.ndarray):
-            result.append(_serialize_index_array(item))
-        elif isinstance(item, list):
-            result.append(_serialize_index_array(np.asarray(item)))
-        else:
+        index_array = _index_array(item)
+        if index_array is None:
             result.extend(encode_basic_index((item,)))
+            continue
+        result.append(
+            {
+                "type": "array",
+                "dtype": str(index_array.dtype),
+                "shape": tuple(int(i) for i in index_array.shape),
+                "values": index_array.tolist(),
+            }
+        )
     return result
 
 
@@ -191,57 +136,63 @@ def index_from_spec(index_spec: object) -> object:
     return items[0] if len(items) == 1 else tuple(items)
 
 
-def apply_direct_index_add(
+def _update_operand(self: TracedArray, operand: object, operation: str) -> tuple[int | None, Any]:
+    """Resolve an update operand to a same-trace SSA parent or a backend literal."""
+    if not isinstance(operand, type(self)):
+        return None, np.asarray(operand)
+    if operand.recorder is not self.recorder:
+        msg = (
+            f"Cannot use a TracedArray from a different trace context in {operation}. "
+            "Both arrays must belong to the same trace recorder."
+        )
+        raise TracingError(msg)
+    return operand._advect_snapshot_in_active_trace()  # noqa: SLF001
+
+
+def _record_update(
+    self: TracedArray,
+    op: str,
+    source_node_id: int,
+    resolved: tuple[int | None, Any],
+    result: Any,  # noqa: ANN401 - backend array payload
+    attrs: dict[str, object],
+) -> int:
+    """Record ``op(source, operand)``, keeping an untraced operand as a literal."""
+    operand_node_id, operand_value = resolved
+    literal = operand_node_id is None
+    return self.recorder.record_operation(
+        op,
+        (source_node_id,) if literal else (source_node_id, operand_node_id),
+        result,
+        attrs,
+        result.shape,
+        result.dtype,
+        input_positions=(0,) if literal else None,
+        literals=(operand_value,) if literal else (),
+    )
+
+
+def _apply_direct_index_add(
     self: TracedArray,
     *,
     key: object,
-    index_attrs: object,
     operand: object,
     location: SourceLocation | None,
 ) -> None:
     """Emit one pure additive index update and advance the root wrapper."""
-    traced_type = type(self)
-    if isinstance(operand, traced_type):
-        if operand.recorder is not self.recorder:
-            msg = (
-                "Cannot add a TracedArray from a different trace context. "
-                "Both arrays must belong to the same trace recorder."
-            )
-            raise TracingError(msg)
-        operand_node_id, actual_operand = operand._advect_snapshot_in_active_trace()  # noqa: SLF001
-    else:
-        actual_operand = np.asarray(operand)
-        operand_node_id = None
-
+    resolved = _update_operand(self, operand, "an indexed add")
     source_node_id, source_value = self._advect_snapshot_in_active_trace()
-    result_value = cast("Any", source_value).copy()
-    result_value[cast("Any", key)] += actual_operand
-    if operand_node_id is None:
-        node_id = self.recorder.record_operation_with_literals(
-            "advect.index_update",
-            (source_node_id,),
-            (0,),
-            (actual_operand,),
-            result_value,
-            {"index": index_attrs, "mode": "add"},
-            result_value.shape,
-            result_value.dtype,
-            literal_weak=literal_is_weak(operand),
-        )
-    else:
-        node_id = self.recorder.record_operation(
-            "advect.index_update",
-            (source_node_id, operand_node_id),
-            result_value,
-            {"index": index_attrs, "mode": "add"},
-            result_value.shape,
-            result_value.dtype,
-        )
-    self._commit_current(
-        value=result_value,
-        node_id=node_id,
-        location=location,
+    result = cast("Any", source_value).copy()
+    result[cast("Any", key)] += resolved[1]
+    node_id = _record_update(
+        self,
+        "advect.index_update",
+        source_node_id,
+        resolved,
+        result,
+        {"index": key, "mode": "add"},
     )
+    self._commit_current(value=result, node_id=node_id, location=location)
 
 
 def _consume_matching_pending(
@@ -293,12 +244,11 @@ def getitem(self: TracedArray, key: object) -> TracedArray:
         index_attrs = key
     else:
         index_spec = None
-        validate_index_key(self, key)
-        index_attrs = index_to_attrs(normalize_index_key(key))
+        index_attrs = index_to_attrs(key if isinstance(key, tuple) else (key,))
 
     _source_node_id, source_value = self._advect_snapshot_in_active_trace()
     result_value = cast("Any", source_value)[cast("Any", key)]
-    is_view = is_basic and isinstance(_unwrap_traced_leaf(result_value), np.ndarray)
+    is_view = is_basic and isinstance(_innermost(result_value), np.ndarray)
 
     attrs = {"index": index_attrs}
 
@@ -337,7 +287,7 @@ def setitem(self: TracedArray, key: object, value: object) -> None:
         take_pending=True,
     )
 
-    validate_index_key(self, key)
+    key = normalize_integer_scalars(key)
     if not _is_basic_index(key):
         msg = (
             "Advanced-index assignment is not supported during tracing. "
@@ -346,7 +296,6 @@ def setitem(self: TracedArray, key: object, value: object) -> None:
         raise TracingError(msg)
 
     index_spec = _basic_index_spec(key)
-    index_attrs = key
     pending = _consume_matching_pending(
         self,
         pending=pending_update,
@@ -366,45 +315,92 @@ def setitem(self: TracedArray, key: object, value: object) -> None:
 
     self._require_mutable_in_active_trace(operation="item assignment")
 
-    traced_type = type(self)
-    value_node_id: int | None = None
-    actual_value: Any
-    if isinstance(value, traced_type):
-        if value.recorder is not self.recorder:
-            msg = (
-                "Cannot assign a TracedArray from a different trace context. "
-                "Both arrays must belong to the same graph."
-            )
-            raise TracingError(msg)
-        value_node_id, actual_value = value._advect_snapshot_in_active_trace()  # noqa: SLF001
-    else:
-        actual_value = np.asarray(value)
-
+    resolved = _update_operand(self, value, "item assignment")
     source_node_id, source_value = self._advect_snapshot_in_active_trace()
-    result_value = cast("Any", source_value).copy()
-    result_value[cast("Any", key)] = actual_value
+    result = cast("Any", source_value).copy()
+    result[cast("Any", key)] = resolved[1]
+    node_id = _record_update(
+        self, "advect.index_update", source_node_id, resolved, result, {"index": key}
+    )
+    self._commit_current(value=result, node_id=node_id)
 
-    attrs: dict[str, object] = {"index": index_attrs}
 
-    if value_node_id is not None:
-        node_id = self.recorder.record_operation(
-            "advect.index_update",
-            (source_node_id, value_node_id),
-            result_value,
-            attrs,
-            result_value.shape,
-            result_value.dtype,
-        )
+def _functional_result(self: TracedArray, other: object, ufunc: np.ufunc) -> tuple[int, Any]:
+    """Evaluate an in-place-shaped operation into fresh storage and emit a pure node."""
+    resolved = _update_operand(self, other, f"augmented {ufunc.__name__}")
+    other_node_id, other_value = resolved
+    if other_node_id is None:
+        # A Python scalar keeps NumPy's weak promotion, as in eager code.
+        other_leaf = outer_other = other if literal_is_weak(other) else other_value
     else:
-        node_id = self.recorder.record_operation_with_literals(
-            "advect.index_update",
-            (source_node_id,),
-            (0,),
-            (actual_value,),
-            result_value,
-            attrs,
-            result_value.shape,
-            result_value.dtype,
-            literal_weak=literal_is_weak(value),
+        # A weak scalar tracer computes as the Python scalar it stands for.
+        other_leaf = weak_scalar_runtime_value(other, np.asarray(_innermost(other_value)))
+        outer_other = other_value
+    receiver_node_id, receiver_value = self._advect_snapshot_in_active_trace()
+    receiver_leaf = np.asarray(_innermost(receiver_value))
+    concrete_result = np.empty_like(receiver_leaf)
+    # Supplying a fresh destination preserves NumPy's in-place shape, dtype,
+    # casting, and broadcasting checks without modifying an existing SSA value.
+    ufunc(receiver_leaf, other_leaf, out=concrete_result)
+    result = concrete_result
+    if _is_traced(receiver_value) or _is_traced(other_value):
+        # An outer trace records the ufunc without loop selection; the in-place
+        # result keeps the receiver's dtype.
+        result = ufunc(receiver_value, outer_other)
+        if result.dtype != receiver_leaf.dtype:
+            result = result.astype(receiver_leaf.dtype)
+    node_id = _record_update(
+        self,
+        canonicalize_numpy_op(f"numpy.{ufunc.__name__}"),
+        receiver_node_id,
+        resolved,
+        result,
+        {"dtype": str(receiver_leaf.dtype), "_advect_backend": "numpy"},
+    )
+    return node_id, result
+
+
+def inplace_op(self: TracedArray, other: object, ufunc: np.ufunc) -> TracedArray:
+    """Functionalize an augmented assignment at the tracer-wrapper boundary."""
+    require_active_trace(recorder=self.recorder)
+    self._check_view_epoch()
+
+    view_state = self._view_state
+    if view_state is not None:
+        root = view_state.root
+        root._require_mutable_in_active_trace(  # noqa: SLF001
+            operation=f"{ufunc.__name__} through an indexed view"
         )
-    self._commit_current(value=result_value, node_id=node_id)
+        index_spec = view_state.index_spec
+        if index_spec is None:
+            msg = (
+                "Mutation through this traced view is not supported. "
+                "Update the base with a single basic index expression, or call `.copy()` first."
+            )
+            raise MutationError(msg)
+        key = index_from_spec(index_spec)
+        location = user_location()
+        if ufunc is np.add:
+            _apply_direct_index_add(root, key=key, operand=other, location=location)
+        else:
+            replacement_node_id, replacement_value = _functional_result(self, other, ufunc)
+            replacement = type(self)(
+                value=replacement_value,
+                node_id=replacement_node_id,
+                recorder=self.recorder,
+            )
+            root[key] = replacement
+        self._refresh_direct_view(key=key, index_spec=index_spec)
+        pending = PendingIndexUpdate(
+            root=root,
+            root_epoch=root.epoch,
+            index_spec=index_spec,
+            replacement=self,
+        )
+        _set_pending_update(self.recorder, pending)
+        return self
+
+    self._require_mutable_in_active_trace(operation=f"augmented {ufunc.__name__}")
+    node_id, value = _functional_result(self, other, ufunc)
+    self._commit_current(value=value, node_id=node_id)
+    return self

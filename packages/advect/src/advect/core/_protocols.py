@@ -96,6 +96,21 @@ def _snapshot_traced(value: object) -> tuple[int, Any]:
     return cast("tuple[int, Any]", snapshot())
 
 
+def _is_traced(value: object) -> bool:
+    """Return whether ``value`` implements Advect's tracer snapshot protocol."""
+    return callable(getattr(value, "_advect_snapshot", None))
+
+
+def _innermost(value: object) -> Any:
+    """Unwrap a traced value through every nested trace to its concrete payload."""
+    while _is_traced(value):
+        _node_id, nested = _snapshot_traced(value)
+        if nested is value:
+            break
+        value = nested
+    return value
+
+
 def _snapshot_traced_in_active_trace(value: object) -> tuple[int, Any]:
     """Use a frontend fast path after dispatch validated the active trace."""
     snapshot = getattr(value, "_advect_snapshot_in_active_trace", None)

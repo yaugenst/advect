@@ -2,20 +2,24 @@
 
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from advect.autodiff.rules.array_family._backend_runtime import xp
 from advect.autodiff.rules.array_family._signal import native_signal_product
+from advect.autodiff.rules.array_family._transpose_utils import _shape_of
 from advect.autodiff.rules.array_family.jvp.common import (
-    _asarray_preserving_trace,
     _coerce_tangent_or_zeros,
     _infer_tangent_dtype,
     _normalize_output_tangent,
     _validate_tangent_arity,
     _zeros_output_tangent,
+    product_rule,
 )
 
-_MATMUL_INPUT_ARITY = 2
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+_MATRIX_RANK = 2
 
 
 def _jvp_concatenate(
@@ -54,40 +58,6 @@ def _jvp_stack(
     return _normalize_output_tangent(ans, tangents, xp.stack(parts, axis=axis))
 
 
-def _signal_binary_jvp(
-    ans: xp.ndarray,
-    left: xp.ndarray,
-    right: xp.ndarray,
-    *,
-    tangents: tuple[xp.ndarray | None, ...],
-    mode: str,
-    correlate: bool,
-) -> xp.ndarray:
-    """Differentiate a bilinear one-dimensional signal operation."""
-    left_tangent = tangents[0] if tangents else None
-    right_tangent = tangents[1] if len(tangents) > 1 else None
-    if left_tangent is None and right_tangent is None:
-        return _zeros_output_tangent(ans, tangents)
-
-    result: Any | None = None
-    if left_tangent is not None:
-        result = native_signal_product(
-            left_tangent,
-            right,
-            mode=mode,
-            correlate=correlate,
-        )
-    if right_tangent is not None:
-        contribution = native_signal_product(
-            left,
-            right_tangent,
-            mode=mode,
-            correlate=correlate,
-        )
-        result = contribution if result is None else result + contribution
-    return _normalize_output_tangent(ans, tangents, result)
-
-
 def _jvp_convolve(
     ans: xp.ndarray,
     left: xp.ndarray,
@@ -98,13 +68,11 @@ def _jvp_convolve(
     **attrs: Any,
 ) -> xp.ndarray:
     _ = rest, attrs
-    return _signal_binary_jvp(
+    return product_rule(
         ans,
-        left,
-        right,
-        tangents=tangents,
-        mode=mode,
-        correlate=False,
+        tangents,
+        lambda d: native_signal_product(d, right, mode=mode, correlate=False),
+        lambda d: native_signal_product(left, d, mode=mode, correlate=False),
     )
 
 
@@ -118,13 +86,11 @@ def _jvp_correlate(
     **attrs: Any,
 ) -> xp.ndarray:
     _ = rest, attrs
-    return _signal_binary_jvp(
+    return product_rule(
         ans,
-        left,
-        right,
-        tangents=tangents,
-        mode=mode,
-        correlate=True,
+        tangents,
+        lambda d: native_signal_product(d, right, mode=mode, correlate=True),
+        lambda d: native_signal_product(left, d, mode=mode, correlate=True),
     )
 
 
@@ -138,58 +104,7 @@ def _jvp_matmul(
 ) -> xp.ndarray:
     """Apply the matrix-product rule directly."""
     _ = rest, attrs
-    if len(tangents) < _MATMUL_INPUT_ARITY:
-        msg = (
-            "numpy.matmul JVP tangent arity mismatch: "
-            f"expected {_MATMUL_INPUT_ARITY}, got {len(tangents)}"
-        )
-        raise RuntimeError(msg)
-    dx, dy = tangents[:_MATMUL_INPUT_ARITY]
-    tangent: Any | None = None
-    if dx is not None:
-        tangent = xp.matmul(dx, y)
-    if dy is not None:
-        contribution = xp.matmul(x, dy)
-        tangent = contribution if tangent is None else tangent + contribution
-    if tangent is not None:
-        tangent = _normalize_output_tangent(ans, tangents, tangent)
-    return cast(
-        "xp.ndarray[Any, Any]",
-        _zeros_output_tangent(ans, tangents) if tangent is None else tangent,
-    )
-
-
-def _vector_matrix_product_jvp(
-    ans: xp.ndarray,
-    left: xp.ndarray,
-    right: xp.ndarray,
-    *rest: xp.ndarray,
-    tangents: tuple[xp.ndarray | None, ...],
-    conjugate_left: bool,
-    **attrs: Any,
-) -> xp.ndarray:
-    _ = rest, attrs
-    if len(tangents) < _MATMUL_INPUT_ARITY:
-        msg = (
-            "vector-matrix JVP tangent arity mismatch: "
-            f"expected {_MATMUL_INPUT_ARITY}, got {len(tangents)}"
-        )
-        raise RuntimeError(msg)
-    d_left, d_right = tangents[:_MATMUL_INPUT_ARITY]
-    primal_left = xp.conjugate(left) if conjugate_left else left
-    tangent: Any | None = None
-    if d_left is not None:
-        tangent_left = xp.conjugate(d_left) if conjugate_left else d_left
-        tangent = xp.matmul(tangent_left, right)
-    if d_right is not None:
-        contribution = xp.matmul(primal_left, d_right)
-        tangent = contribution if tangent is None else tangent + contribution
-    if tangent is not None:
-        tangent = _normalize_output_tangent(ans, tangents, tangent)
-    return cast(
-        "xp.ndarray[Any, Any]",
-        _zeros_output_tangent(ans, tangents) if tangent is None else tangent,
-    )
+    return product_rule(ans, tangents, lambda d: xp.matmul(d, y), lambda d: xp.matmul(x, d))
 
 
 def _jvp_matvec(
@@ -200,14 +115,13 @@ def _jvp_matvec(
     tangents: tuple[xp.ndarray | None, ...],
     **attrs: Any,
 ) -> xp.ndarray:
-    return _vector_matrix_product_jvp(
+    """Differentiate ``matrix @ vector`` over the gufunc's broadcast loop dimensions."""
+    _ = rest, attrs
+    return product_rule(
         ans,
-        matrix,
-        vector,
-        *rest,
-        tangents=tangents,
-        conjugate_left=False,
-        **attrs,
+        tangents,
+        lambda d: xp.matmul(d, vector[..., None])[..., 0],
+        lambda d: xp.matmul(matrix, d[..., None])[..., 0],
     )
 
 
@@ -219,14 +133,13 @@ def _jvp_vecmat(
     tangents: tuple[xp.ndarray | None, ...],
     **attrs: Any,
 ) -> xp.ndarray:
-    return _vector_matrix_product_jvp(
+    """Differentiate ``conj(vector) @ matrix``, which conjugates its vector."""
+    _ = rest, attrs
+    return product_rule(
         ans,
-        vector,
-        matrix,
-        *rest,
-        tangents=tangents,
-        conjugate_left=True,
-        **attrs,
+        tangents,
+        lambda d: xp.matmul(xp.conjugate(d)[..., None, :], matrix)[..., 0, :],
+        lambda d: xp.matmul(xp.conjugate(vector)[..., None, :], d)[..., 0, :],
     )
 
 
@@ -258,22 +171,19 @@ def _jvp_dot(
     **attrs: Any,
 ) -> xp.ndarray:
     """JVP for numpy.dot."""
-    _ = ans, rest, attrs
-    dx = tangents[0] if len(tangents) > 0 else None
-    dy = tangents[1] if len(tangents) > 1 else None
+    _ = rest, attrs
+    return product_rule(ans, tangents, lambda d: _dot(d, y), lambda d: _dot(x, d))
 
-    if dx is None and dy is None:
-        return _zeros_output_tangent(ans, tangents)
 
-    if dx is None:
-        dy_arr = _asarray_preserving_trace(cast("xp.ndarray[Any, Any]", dy))
-        return cast("xp.ndarray[Any, Any]", xp.dot(x, dy_arr))
-    if dy is None:
-        return cast("xp.ndarray[Any, Any]", xp.dot(_asarray_preserving_trace(dx), y))
-    return cast(
-        "xp.ndarray[Any, Any]",
-        xp.dot(_asarray_preserving_trace(dx), y) + xp.dot(x, _asarray_preserving_trace(dy)),
-    )
+def _dot(a: Any, b: Any) -> Any:
+    """Contract as ``numpy.dot`` does through Array API functions, which lack dot."""
+    a_rank, b_rank = len(_shape_of(a)), len(_shape_of(b))
+    if not a_rank or not b_rank:
+        return xp.multiply(a, b)
+    if b_rank <= _MATRIX_RANK:
+        # A vector or matrix right operand contracts, and batches, as matmul.
+        return xp.matmul(a, b)
+    return xp.tensordot(a, b, axes=((a_rank - 1,), (b_rank - 2,)))
 
 
 def _jvp_inner(
@@ -285,19 +195,8 @@ def _jvp_inner(
     **attrs: Any,
 ) -> xp.ndarray:
     """JVP for numpy.inner."""
-    _ = ans, rest, attrs
-    da = tangents[0] if len(tangents) > 0 else None
-    db = tangents[1] if len(tangents) > 1 else None
-
-    if da is None and db is None:
-        return _zeros_output_tangent(ans, tangents)
-
-    if da is None:
-        db_arr = cast("xp.ndarray[Any, Any]", db)
-        return cast("xp.ndarray[Any, Any]", xp.inner(a, db_arr))
-    if db is None:
-        return cast("xp.ndarray[Any, Any]", xp.inner(da, b))
-    return cast("xp.ndarray[Any, Any]", xp.inner(da, b) + xp.inner(a, db))
+    _ = rest, attrs
+    return product_rule(ans, tangents, lambda d: xp.inner(d, b), lambda d: xp.inner(a, d))
 
 
 def _jvp_outer(
@@ -309,19 +208,8 @@ def _jvp_outer(
     **attrs: Any,
 ) -> xp.ndarray:
     """JVP for numpy.outer."""
-    _ = ans, rest, attrs
-    da = tangents[0] if len(tangents) > 0 else None
-    db = tangents[1] if len(tangents) > 1 else None
-
-    if da is None and db is None:
-        return _zeros_output_tangent(ans, tangents)
-
-    if da is None:
-        db_arr = cast("xp.ndarray[Any, Any]", db)
-        return xp.outer(a, db_arr)
-    if db is None:
-        return xp.outer(da, b)
-    return cast("xp.ndarray[Any, Any]", xp.outer(da, b) + xp.outer(a, db))
+    _ = rest, attrs
+    return product_rule(ans, tangents, lambda d: xp.outer(d, b), lambda d: xp.outer(a, d))
 
 
 def _jvp_tensordot(
@@ -334,22 +222,12 @@ def _jvp_tensordot(
     **attrs: Any,
 ) -> xp.ndarray:
     """JVP for numpy.tensordot."""
-    _ = ans, rest, attrs
-    da = tangents[0] if len(tangents) > 0 else None
-    db = tangents[1] if len(tangents) > 1 else None
-
-    if da is None and db is None:
-        return _zeros_output_tangent(ans, tangents)
-
-    if da is None:
-        db_arr = _asarray_preserving_trace(cast("xp.ndarray[Any, Any]", db))
-        return xp.tensordot(a, db_arr, axes=axes)
-    if db is None:
-        return xp.tensordot(_asarray_preserving_trace(da), b, axes=axes)
-    return cast(
-        "xp.ndarray[Any, Any]",
-        xp.tensordot(_asarray_preserving_trace(da), b, axes=axes)
-        + xp.tensordot(a, _asarray_preserving_trace(db), axes=axes),
+    _ = rest, attrs
+    return product_rule(
+        ans,
+        tangents,
+        lambda d: xp.tensordot(d, b, axes=axes),
+        lambda d: xp.tensordot(a, d, axes=axes),
     )
 
 
@@ -365,17 +243,11 @@ def _jvp_cross(
     axis: int | None = None,
     **attrs: Any,
 ) -> xp.ndarray:
-    _ = ans, rest, attrs
-    da = tangents[0] if len(tangents) > 0 else None
-    db = tangents[1] if len(tangents) > 1 else None
-    if da is None and db is None:
-        return _zeros_output_tangent(ans, tangents)
-    out = _zeros_output_tangent(ans, tangents)
-    if da is not None:
-        out = out + xp.cross(da, b, axisa=axisa, axisb=axisb, axisc=axisc, axis=axis)
-    if db is not None:
-        out = out + xp.cross(a, db, axisa=axisa, axisb=axisb, axisc=axisc, axis=axis)
-    return out
+    _ = rest, attrs
+    axes = {"axisa": axisa, "axisb": axisb, "axisc": axisc, "axis": axis}
+    return product_rule(
+        ans, tangents, lambda d: xp.cross(d, b, **axes), lambda d: xp.cross(a, d, **axes)
+    )
 
 
 def _jvp_kron(
@@ -386,17 +258,8 @@ def _jvp_kron(
     tangents: tuple[xp.ndarray | None, ...],
     **attrs: Any,
 ) -> xp.ndarray:
-    _ = ans, rest, attrs
-    da = tangents[0] if len(tangents) > 0 else None
-    db = tangents[1] if len(tangents) > 1 else None
-    if da is None and db is None:
-        return _zeros_output_tangent(ans, tangents)
-    out = _zeros_output_tangent(ans, tangents)
-    if da is not None:
-        out = out + xp.kron(da, b)
-    if db is not None:
-        out = out + xp.kron(a, db)
-    return out
+    _ = rest, attrs
+    return product_rule(ans, tangents, lambda d: xp.kron(d, b), lambda d: xp.kron(a, d))
 
 
 def _jvp_einsum(
@@ -407,19 +270,16 @@ def _jvp_einsum(
     optimize: bool | str | list[Any] | tuple[Any, ...] | None = None,
     **attrs: Any,
 ) -> xp.ndarray:
-    _ = ans, attrs
+    _ = attrs
     _validate_tangent_arity(op_name="numpy.einsum", inputs=inputs, tangents=tangents)
-    if all(tangent is None for tangent in tangents):
-        return _zeros_output_tangent(ans, tangents)
     optimize_arg = False if optimize is None else optimize
-    out = _zeros_output_tangent(ans, tangents)
-    for index, tangent in enumerate(tangents):
-        if tangent is None:
-            continue
-        args = list(inputs)
-        args[index] = tangent
-        out = out + xp.einsum(subscripts, *args, optimize=optimize_arg)
-    return out
+
+    def term(index: int) -> Callable[[Any], Any]:
+        return lambda d: xp.einsum(
+            subscripts, *inputs[:index], d, *inputs[index + 1 :], optimize=optimize_arg
+        )
+
+    return product_rule(ans, tangents, *(term(index) for index in range(len(inputs))))
 
 
 def _jvp_linspace(
@@ -433,26 +293,11 @@ def _jvp_linspace(
     axis: int = 0,
     **attrs: Any,
 ) -> xp.ndarray:
-    _ = ans, rest, attrs
-    d_start = tangents[0] if len(tangents) > 0 else None
-    d_stop = tangents[1] if len(tangents) > 1 else None
-    if d_start is None and d_stop is None:
-        return _zeros_output_tangent(ans, tangents)
-    out = _zeros_output_tangent(ans, tangents)
-    if d_start is not None:
-        out = out + xp.linspace(
-            _asarray_preserving_trace(d_start),
-            0.0,
-            num=num,
-            endpoint=endpoint,
-            axis=axis,
-        )
-    if d_stop is not None:
-        out = out + xp.linspace(
-            0.0,
-            _asarray_preserving_trace(d_stop),
-            num=num,
-            endpoint=endpoint,
-            axis=axis,
-        )
-    return cast("xp.ndarray[Any, Any]", _asarray_preserving_trace(out))
+    _ = start, stop, rest, attrs
+    grid = {"num": num, "endpoint": endpoint, "axis": axis}
+    return product_rule(
+        ans,
+        tangents,
+        lambda d: xp.linspace(d, 0.0, **grid),
+        lambda d: xp.linspace(0.0, d, **grid),
+    )

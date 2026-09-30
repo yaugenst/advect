@@ -3,24 +3,32 @@
 from __future__ import annotations
 
 import importlib
-from typing import TYPE_CHECKING, Any, Literal, cast
+from functools import partial
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as _numpy  # noqa: ICN001 - concrete namespace with dynamic protocol operands
 
 from advect.core._array_api.results import restore_array_api_result
 from advect.core._errors import TracingError
 from advect.core._protocols import _snapshot_traced
-from advect.numpy._array_function.composite import _finish, _first_traced
+from advect.numpy._array_function.composite import (
+    _concrete_array,
+    _finish,
+    _first_traced,
+    _lift_composite_constant,
+    _lift_lapack_rank,
+)
 from advect.numpy._array_function.emission import (
     _add_backend_node,
+    _emit,
+    _get_array_value,
     _get_node,
     _get_value,
+    _make_binary_handler,
     _result_shape_and_dtype,
 )
-from advect.numpy._array_function.normalization import (
-    _binary_handler,
-    _bind_optional_positionals,
-)
+from advect.numpy._array_function.normalization import _bind_optional_positionals
+from advect.numpy._composite_lowering import operand_dtype
 from advect.numpy._op_bindings import canonicalize_numpy_op
 
 if TYPE_CHECKING:
@@ -36,67 +44,54 @@ if TYPE_CHECKING:
 np: Any = _numpy
 
 
-def _op_name(suffix: str) -> str:
-    return f"numpy.linalg.{suffix}"
-
-
-def _record_multi_output(
-    *,
+def _record(
     graph: DynamicTape,
     traced_type: type[TracedArrayLike],
     name: str,
-    source: object,
-    outputs: tuple[Any, ...],
-    attrs: dict[str, Any],
-    expected: int,
-) -> tuple[int, ...]:
-    if len(outputs) != expected:
-        msg = f"np.linalg.{name} returned {len(outputs)} outputs, expected {expected}"
-        raise ValueError(msg)
-    output_meta = tuple(_result_shape_and_dtype(output) for output in outputs)
+    operands: tuple[Any, ...],
+    value: object,
+    attrs: dict[str, Any] | None = None,
+) -> ArrayFunctionResult:
+    """Record ``numpy.linalg.<name>``; a tuple result gets one getoutput node per field."""
+    op = f"numpy.linalg.{name}"
+    if not isinstance(value, tuple):
+        return _emit(graph, traced_type, op, operands, value, attrs)
+    outputs = tuple(value)
+    shape, dtype = _result_shape_and_dtype(outputs[0])
     parent_id = _add_backend_node(
         graph=graph,
-        op=canonicalize_numpy_op(_op_name(name)),
-        inputs=(_get_node(source, graph, traced_type),),
+        op=canonicalize_numpy_op(op),
+        inputs=tuple(_get_node(operand, graph, traced_type) for operand in operands),
         value=outputs,
-        attrs=attrs,
-        shape=output_meta[0][0],
-        dtype=output_meta[0][1],
+        attrs={} if attrs is None else attrs,
+        shape=shape,
+        dtype=dtype,
     )
-    return tuple(
+    node_ids = tuple(
         _add_backend_node(
             graph=graph,
             op="advect.getoutput",
             inputs=(parent_id,),
             value=output,
             attrs={"index": index, "num_outputs": len(outputs)},
-            shape=shape,
-            dtype=dtype,
         )
-        for index, (output, (shape, dtype)) in enumerate(zip(outputs, output_meta, strict=True))
+        for index, output in enumerate(outputs)
     )
+    return restore_array_api_result(f"linalg.{name}", outputs), node_ids
 
 
-def _slogdet_handler(
+def _plain_handler(
     graph: DynamicTape,
     traced_type: type[TracedArrayLike],
     args: tuple[Any, ...],
     _kwargs: dict[str, Any],
+    *,
+    name: str,
 ) -> ArrayFunctionResult:
-    """Handle np.linalg.slogdet as a multi-output op."""
-    a = args[0]
-    result = np.linalg.slogdet(_get_value(a, traced_type))
-    outputs = tuple(result)
-    node_ids = _record_multi_output(
-        graph=graph,
-        traced_type=traced_type,
-        name="slogdet",
-        source=a,
-        outputs=outputs,
-        attrs={},
-        expected=2,
-    )
-    return restore_array_api_result("linalg.slogdet", outputs), node_ids
+    """Record a control-free ``np.linalg`` function of its positional arrays."""
+    # One trace level down, so an enclosing trace records the call as well.
+    value = getattr(np.linalg, name)(*(_get_value(arg, traced_type) for arg in args))
+    return _record(graph, traced_type, name, args, value)
 
 
 def _svd_handler(
@@ -106,82 +101,20 @@ def _svd_handler(
     kwargs: dict[str, Any],
 ) -> ArrayFunctionResult:
     """Handle np.linalg.svd as a multi-output op, or svdvals when compute_uv=False."""
-    pos_full_matrices = 1
-    pos_compute_uv = 2
-    pos_hermitian = 3
-
+    values = dict(zip(("full_matrices", "compute_uv", "hermitian"), args[1:], strict=False))
+    values |= kwargs
     a = args[0]
-    full_matrices = (
-        args[pos_full_matrices]
-        if len(args) > pos_full_matrices
-        else kwargs.get("full_matrices", True)
-    )
-    compute_uv = (
-        args[pos_compute_uv] if len(args) > pos_compute_uv else kwargs.get("compute_uv", True)
-    )
-    hermitian = args[pos_hermitian] if len(args) > pos_hermitian else kwargs.get("hermitian", False)
-
-    if compute_uv is False:
-        svals = np.linalg.svd(
-            _get_value(a, traced_type),
-            compute_uv=False,
-            hermitian=bool(hermitian),
-        )
-        svals_shape, svals_dtype = _result_shape_and_dtype(svals)
-        node_id = _add_backend_node(
-            graph=graph,
-            op=canonicalize_numpy_op(_op_name("svdvals")),
-            inputs=(_get_node(a, graph, traced_type),),
-            value=svals,
-            attrs={"hermitian": bool(hermitian)},
-            shape=svals_shape,
-            dtype=svals_dtype,
-        )
-        return svals, node_id
-
-    result = np.linalg.svd(
-        _get_value(a, traced_type),
-        full_matrices=bool(full_matrices),
-        compute_uv=True,
-        hermitian=bool(hermitian),
-    )
-    outputs = tuple(result)
-    node_ids = _record_multi_output(
-        graph=graph,
-        traced_type=traced_type,
-        name="svd",
-        source=a,
-        outputs=outputs,
-        attrs={
-            "full_matrices": bool(full_matrices),
-            "compute_uv": True,
-            "hermitian": bool(hermitian),
-        },
-        expected=3,
-    )
-    return outputs, node_ids
-
-
-def _svdvals_handler(
-    graph: DynamicTape,
-    traced_type: type[TracedArrayLike],
-    args: tuple[Any, ...],
-    _kwargs: dict[str, Any],
-) -> ArrayFunctionResult:
-    """Handle np.linalg.svdvals as a single-output op."""
-    a = args[0]
-    svals = np.linalg.svdvals(_get_value(a, traced_type))
-    svals_shape, svals_dtype = _result_shape_and_dtype(svals)
-    node_id = _add_backend_node(
-        graph=graph,
-        op=canonicalize_numpy_op(_op_name("svdvals")),
-        inputs=(_get_node(a, graph, traced_type),),
-        value=svals,
-        attrs={},
-        shape=svals_shape,
-        dtype=svals_dtype,
-    )
-    return svals, node_id
+    hermitian = bool(values.get("hermitian", False))
+    if not values.get("compute_uv", True):
+        value = np.linalg.svd(_get_value(a, traced_type), compute_uv=False, hermitian=hermitian)
+        return _record(graph, traced_type, "svdvals", (a,), value, {"hermitian": hermitian})
+    attrs = {
+        "full_matrices": bool(values.get("full_matrices", True)),
+        "compute_uv": True,
+        "hermitian": hermitian,
+    }
+    value = np.linalg.svd(_get_value(a, traced_type), **attrs)
+    return _record(graph, traced_type, "svd", (a,), value, attrs)
 
 
 def _normalize_norm_axis(axis: object) -> int | tuple[int, ...] | None:
@@ -217,98 +150,20 @@ def _norm_handler(
     kwargs: dict[str, Any],
 ) -> ArrayFunctionResult:
     """Handle np.linalg.norm as a single-output op."""
-    pos_ord = 1
-    pos_axis = 2
-    pos_keepdims = 3
-
+    values = dict(zip(("ord", "axis", "keepdims"), args[1:], strict=False)) | kwargs
     a = args[0]
-    ord_raw = args[pos_ord] if len(args) > pos_ord else kwargs.get("ord")
-    axis_raw = args[pos_axis] if len(args) > pos_axis else kwargs.get("axis")
-    keepdims = (
-        bool(args[pos_keepdims])
-        if len(args) > pos_keepdims
-        else bool(kwargs.get("keepdims", False))
+    ord_norm = _normalize_norm_ord(values.get("ord"))
+    axis_norm = _normalize_norm_axis(values.get("axis"))
+    keepdims = bool(values.get("keepdims", False))
+    result = np.linalg.norm(
+        _get_value(a, traced_type), ord=ord_norm, axis=axis_norm, keepdims=keepdims
     )
-
-    ord_norm = _normalize_norm_ord(ord_raw)
-    axis_norm = _normalize_norm_axis(axis_raw)
-
-    norm_fn = cast("Callable[..., Any]", np.linalg.norm)
-    # Unwrap one trace layer only so nested autodiff records the norm in the
-    # enclosing graph instead of materializing a constant result.
-    a_value = _get_value(a, traced_type)
-    result = norm_fn(
-        a_value,
-        ord=ord_norm,
-        axis=axis_norm,
-        keepdims=keepdims,
-    )
-    result_shape, result_dtype = _result_shape_and_dtype(result)
-
     attrs: dict[str, Any] = {"keepdims": keepdims}
     if ord_norm is not None:
         attrs["ord"] = ord_norm
     if axis_norm is not None:
         attrs["axis"] = axis_norm
-
-    node_id = _add_backend_node(
-        graph=graph,
-        op=canonicalize_numpy_op(_op_name("norm")),
-        inputs=(_get_node(a, graph, traced_type),),
-        value=result,
-        attrs=attrs,
-        shape=result_shape,
-        dtype=result_dtype,
-    )
-    return result, node_id
-
-
-def _det_handler(
-    graph: DynamicTape,
-    traced_type: type[TracedArrayLike],
-    args: tuple[Any, ...],
-    _kwargs: dict[str, Any],
-) -> ArrayFunctionResult:
-    """Handle np.linalg.det as a single-output op."""
-    a = args[0]
-    # Preserve an enclosing trace for higher-order derivatives.
-    a_value = _get_value(a, traced_type)
-    det_value = np.linalg.det(a_value)
-    det_shape, det_dtype = _result_shape_and_dtype(det_value)
-    node_id = _add_backend_node(
-        graph=graph,
-        op=canonicalize_numpy_op(_op_name("det")),
-        inputs=(_get_node(a, graph, traced_type),),
-        value=det_value,
-        attrs={},
-        shape=det_shape,
-        dtype=det_dtype,
-    )
-    return det_value, node_id
-
-
-def _inv_handler(
-    graph: DynamicTape,
-    traced_type: type[TracedArrayLike],
-    args: tuple[Any, ...],
-    _kwargs: dict[str, Any],
-) -> ArrayFunctionResult:
-    """Handle np.linalg.inv as a single-output op."""
-    a = args[0]
-    # Preserve an enclosing trace for higher-order derivatives.
-    a_value = _get_value(a, traced_type)
-    inv_value = np.linalg.inv(a_value)
-    inv_shape, inv_dtype = _result_shape_and_dtype(inv_value)
-    node_id = _add_backend_node(
-        graph=graph,
-        op=canonicalize_numpy_op(_op_name("inv")),
-        inputs=(_get_node(a, graph, traced_type),),
-        value=inv_value,
-        attrs={},
-        shape=inv_shape,
-        dtype=inv_dtype,
-    )
-    return inv_value, node_id
+    return _record(graph, traced_type, "norm", (a,), result, attrs)
 
 
 def _cholesky_handler(
@@ -323,43 +178,8 @@ def _cholesky_handler(
     if type(upper) is not bool:
         msg = "np.linalg.cholesky upper= must be a bool during tracing"
         raise TracingError(msg)
-    chol_value = np.linalg.cholesky(_get_value(a, traced_type), upper=upper)
-    chol_shape, chol_dtype = _result_shape_and_dtype(chol_value)
-    node_id = _add_backend_node(
-        graph=graph,
-        op=canonicalize_numpy_op(_op_name("cholesky")),
-        inputs=(_get_node(a, graph, traced_type),),
-        value=chol_value,
-        attrs={"upper": upper},
-        shape=chol_shape,
-        dtype=chol_dtype,
-    )
-    return chol_value, node_id
-
-
-def _solve_handler(
-    graph: DynamicTape,
-    traced_type: type[TracedArrayLike],
-    args: tuple[Any, ...],
-    _kwargs: dict[str, Any],
-) -> ArrayFunctionResult:
-    """Handle np.linalg.solve as a single-output op."""
-    a, b = args
-    solve_value = np.linalg.solve(_get_value(a, traced_type), _get_value(b, traced_type))
-    solve_shape, solve_dtype = _result_shape_and_dtype(solve_value)
-    node_id = _add_backend_node(
-        graph=graph,
-        op=canonicalize_numpy_op(_op_name("solve")),
-        inputs=(
-            _get_node(a, graph, traced_type),
-            _get_node(b, graph, traced_type),
-        ),
-        value=solve_value,
-        attrs={},
-        shape=solve_shape,
-        dtype=solve_dtype,
-    )
-    return solve_value, node_id
+    value = np.linalg.cholesky(_get_value(a, traced_type), upper=upper)
+    return _record(graph, traced_type, "cholesky", (a,), value, {"upper": upper})
 
 
 def _pinv_handler(
@@ -369,9 +189,7 @@ def _pinv_handler(
     kwargs: dict[str, Any],
 ) -> ArrayFunctionResult:
     """Handle np.linalg.pinv as a single-output op."""
-    a = args[0]
-    values = dict(kwargs)
-    values.update(dict(zip(("rcond", "hermitian"), args[1:], strict=False)))
+    values = dict(kwargs) | dict(zip(("rcond", "hermitian"), args[1:], strict=False))
     if "rcond" in values and "rtol" in values:
         msg = "np.linalg.pinv accepts only one of rcond= and rtol="
         raise TracingError(msg)
@@ -379,35 +197,12 @@ def _pinv_handler(
         if isinstance(values.get(name), traced_type):
             msg = f"np.linalg.pinv {name}= must be static because it controls numerical rank"
             raise TracingError(msg)
-
-    call_kwargs: dict[str, Any] = {}
-    if "rcond" in values:
-        call_kwargs["rcond"] = values["rcond"]
-    if "rtol" in values:
-        call_kwargs["rtol"] = values["rtol"]
-    if "hermitian" in values:
-        call_kwargs["hermitian"] = bool(values["hermitian"])
-
-    pinv_value = np.linalg.pinv(_get_value(a, traced_type), **call_kwargs)
-    pinv_shape, pinv_dtype = _result_shape_and_dtype(pinv_value)
-    attrs: dict[str, Any] = {}
-    if "rcond" in values:
-        attrs["rcond"] = values["rcond"]
-    if "rtol" in values:
-        attrs["rtol"] = values["rtol"]
+    attrs = {name: values[name] for name in ("rcond", "rtol") if name in values}
     if "hermitian" in values:
         attrs["hermitian"] = bool(values["hermitian"])
-
-    node_id = _add_backend_node(
-        graph=graph,
-        op=canonicalize_numpy_op(_op_name("pinv")),
-        inputs=(_get_node(a, graph, traced_type),),
-        value=pinv_value,
-        attrs=attrs,
-        shape=pinv_shape,
-        dtype=pinv_dtype,
-    )
-    return pinv_value, node_id
+    a = args[0]
+    value = np.linalg.pinv(_get_value(a, traced_type), **attrs)
+    return _record(graph, traced_type, "pinv", (a,), value, attrs)
 
 
 def _qr_handler(
@@ -417,169 +212,43 @@ def _qr_handler(
     kwargs: dict[str, Any],
 ) -> ArrayFunctionResult:
     """Handle np.linalg.qr as a multi-output op, or a single-output qr_r op when mode='r'."""
-    pos_mode = 1
-
     a = args[0]
-    mode = args[pos_mode] if len(args) > pos_mode else kwargs.get("mode", "reduced")
-
+    mode = args[1] if len(args) > 1 else kwargs.get("mode", "reduced")
     if mode is None:
         mode = "reduced"
-
-    if mode == "r":
-        r_value = np.linalg.qr(_get_value(a, traced_type), mode="r")
-        r_shape, r_dtype = _result_shape_and_dtype(r_value)
-        node_id = _add_backend_node(
-            graph=graph,
-            op=canonicalize_numpy_op(_op_name("qr_r")),
-            inputs=(_get_node(a, graph, traced_type),),
-            value=r_value,
-            attrs={"mode": "r"},
-            shape=r_shape,
-            dtype=r_dtype,
-        )
-        return r_value, node_id
-
-    if mode not in {"reduced", "complete"}:
+    if mode not in {"reduced", "complete", "r"}:
         msg = (
             f"np.linalg.qr(mode={mode!r}) is not supported during tracing because it can change "
             "the output arity. Use mode='reduced', mode='complete', or mode='r'."
         )
         raise TracingError(msg)
-
-    result = np.linalg.qr(_get_value(a, traced_type), mode=mode)
-    outputs = tuple(result)
-    node_ids = _record_multi_output(
-        graph=graph,
-        traced_type=traced_type,
-        name="qr",
-        source=a,
-        outputs=outputs,
-        attrs={"mode": mode},
-        expected=2,
-    )
-    return outputs, node_ids
+    value = np.linalg.qr(_get_value(a, traced_type), mode=mode)
+    return _record(graph, traced_type, "qr_r" if mode == "r" else "qr", (a,), value, {"mode": mode})
 
 
-def _eig_handler(
-    graph: DynamicTape,
-    traced_type: type[TracedArrayLike],
-    args: tuple[Any, ...],
-    _kwargs: dict[str, Any],
-) -> ArrayFunctionResult:
-    """Handle np.linalg.eig as a multi-output op."""
-    a = args[0]
-    result = np.linalg.eig(_get_value(a, traced_type))
-    outputs = tuple(result)
-    node_ids = _record_multi_output(
-        graph=graph,
-        traced_type=traced_type,
-        name="eig",
-        source=a,
-        outputs=outputs,
-        attrs={},
-        expected=2,
-    )
-    return outputs, node_ids
-
-
-def _eigh_handler(
+def _hermitian_eigen_handler(
     graph: DynamicTape,
     traced_type: type[TracedArrayLike],
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
+    *,
+    name: str,
 ) -> ArrayFunctionResult:
-    """Handle np.linalg.eigh as a multi-output op."""
-    pos_uplo = 1
-    a = args[0]
-    uplo = args[pos_uplo] if len(args) > pos_uplo else kwargs.get("UPLO", "L")
-    uplo_raw = str(uplo)
-    if uplo_raw in {"L", "l"}:
-        uplo_norm: Literal["L", "U", "l", "u"] = "L"
-    elif uplo_raw in {"U", "u"}:
-        uplo_norm = "U"
-    else:
-        msg = f"np.linalg.eigh(UPLO={uplo!r}) is not supported during tracing. Use 'L' or 'U'."
+    """Handle np.linalg.eigh and eigvalsh with a normalized UPLO= control."""
+    raw = args[1] if len(args) > 1 else kwargs.get("UPLO", "L")
+    uplo = str(raw).upper()
+    if uplo not in {"L", "U"}:
+        msg = f"np.linalg.{name}(UPLO={raw!r}) is not supported during tracing. Use 'L' or 'U'."
         raise TracingError(msg)
-
-    result = np.linalg.eigh(_get_value(a, traced_type), UPLO=uplo_norm)
-    outputs = tuple(result)
-    node_ids = _record_multi_output(
-        graph=graph,
-        traced_type=traced_type,
-        name="eigh",
-        source=a,
-        outputs=outputs,
-        attrs={"UPLO": uplo_norm},
-        expected=2,
-    )
-    return outputs, node_ids
-
-
-def _eigvals_handler(
-    graph: DynamicTape,
-    traced_type: type[TracedArrayLike],
-    args: tuple[Any, ...],
-    _kwargs: dict[str, Any],
-) -> ArrayFunctionResult:
-    """Handle np.linalg.eigvals as a single-output op."""
     a = args[0]
-    eigvals = np.linalg.eigvals(_get_value(a, traced_type))
-    eigvals_shape, eigvals_dtype = _result_shape_and_dtype(eigvals)
-    node_id = _add_backend_node(
-        graph=graph,
-        op=canonicalize_numpy_op(_op_name("eigvals")),
-        inputs=(_get_node(a, graph, traced_type),),
-        value=eigvals,
-        attrs={},
-        shape=eigvals_shape,
-        dtype=eigvals_dtype,
-    )
-    return eigvals, node_id
-
-
-def _eigvalsh_handler(
-    graph: DynamicTape,
-    traced_type: type[TracedArrayLike],
-    args: tuple[Any, ...],
-    kwargs: dict[str, Any],
-) -> ArrayFunctionResult:
-    """Handle np.linalg.eigvalsh as a single-output op."""
-    pos_uplo = 1
-    a = args[0]
-    uplo = args[pos_uplo] if len(args) > pos_uplo else kwargs.get("UPLO", "L")
-    uplo_raw = str(uplo)
-    if uplo_raw in {"L", "l"}:
-        uplo_norm: Literal["L", "U", "l", "u"] = "L"
-    elif uplo_raw in {"U", "u"}:
-        uplo_norm = "U"
-    else:
-        msg = f"np.linalg.eigvalsh(UPLO={uplo!r}) is not supported during tracing. Use 'L' or 'U'."
-        raise TracingError(msg)
-
-    eigvals = np.linalg.eigvalsh(_get_value(a, traced_type), UPLO=uplo_norm)
-    eigvals_shape, eigvals_dtype = _result_shape_and_dtype(eigvals)
-    node_id = _add_backend_node(
-        graph=graph,
-        op=canonicalize_numpy_op(_op_name("eigvalsh")),
-        inputs=(_get_node(a, graph, traced_type),),
-        value=eigvals,
-        attrs={"UPLO": uplo_norm},
-        shape=eigvals_shape,
-        dtype=eigvals_dtype,
-    )
-    return eigvals, node_id
+    value = getattr(np.linalg, name)(_get_value(a, traced_type), UPLO=uplo)
+    return _record(graph, traced_type, name, (a,), value, {"UPLO": uplo})
 
 
 _BINARY_ARG_COUNT = 2
 _MATRIX_RANK = 2
-_MIN_EINSUM_ARGS = 2
 _TENSORDOT_DEFAULT_AXES = 2
 _TENSORDOT_MAX_ARGS = 3
-
-
-def _real_epsilon(dtype: object) -> float:
-    real_dtype = np.empty((), dtype=np.dtype(dtype)).real.dtype
-    return float(np.finfo(real_dtype).eps)
 
 
 def _matrix_rank_handler(
@@ -597,38 +266,22 @@ def _matrix_rank_handler(
         keyword_only=frozenset({"rtol"}),
     )
     matrix = args[0]
-    if int(matrix.ndim) < 1:
-        msg = "numpy.linalg.matrix_rank requires an array with ndim >= 1"
-        raise TracingError(msg)
-    tolerance = values.get("tol")
-    relative_tolerance = values.get("rtol")
-    if tolerance is not None and relative_tolerance is not None:
+    tolerances = {name: values[name] for name in ("tol", "rtol") if values.get(name) is not None}
+    if len(tolerances) > 1:
         msg = "numpy.linalg.matrix_rank cannot receive both tol and rtol"
         raise TracingError(msg)
-
-    if int(matrix.ndim) == 1:
-        singular_values = np.reshape(np.linalg.norm(matrix), (1,))
-    elif 0 in tuple(int(size) for size in matrix.shape[-2:]):
-        batch_shape = tuple(int(size) for size in matrix.shape[:-2])
-        zero = np.astype(np.sum(matrix) * 0, np.int64)
-        return _finish(np.broadcast_to(zero, batch_shape), traced_type=traced_type)
-    elif bool(values.get("hermitian", False)):
-        if int(matrix.shape[-2]) != int(matrix.shape[-1]):
-            msg = "numpy.linalg.matrix_rank(hermitian=True) requires square matrices"
-            raise TracingError(msg)
-        singular_values = np.sort(np.absolute(np.linalg.eigvalsh(matrix)), axis=-1)[..., ::-1]
-    else:
-        singular_values = np.linalg.svdvals(matrix)
-
-    maximum = np.max(singular_values, axis=-1, keepdims=True)
-    if tolerance is None:
-        if relative_tolerance is None:
-            relative_tolerance = max(int(size) for size in matrix.shape) * _real_epsilon(
-                matrix.dtype
-            )
-        tolerance = maximum * relative_tolerance
-    rank = np.sum(np.greater(singular_values, tolerance), axis=-1)
-    return _finish(np.astype(rank, np.int64), traced_type=traced_type)
+    hermitian = bool(values.get("hermitian", False))
+    if hermitian and int(matrix.ndim) >= _MATRIX_RANK and matrix.shape[-2] != matrix.shape[-1]:
+        msg = "numpy.linalg.matrix_rank(hermitian=True) requires square matrices"
+        raise TracingError(msg)
+    # The rank is integer-valued and has no derivative, so NumPy computes it concretely.
+    rank = np.linalg.matrix_rank(
+        _concrete_array(matrix),
+        hermitian=hermitian,
+        **{name: _concrete_array(value) for name, value in tolerances.items()},
+    )
+    anchor = _first_traced((matrix, *tolerances.values()), traced_type=traced_type)
+    return _finish(_lift_composite_constant(rank, anchor), traced_type=traced_type)
 
 
 def _lstsq_handler(
@@ -645,10 +298,7 @@ def _lstsq_handler(
         optional=("rcond",),
     )
     matrix, right = args[:2]
-    anchor = cast(
-        "TracedArrayLike",
-        _first_traced((matrix, right), traced_type=traced_type),
-    )
+    anchor = _first_traced((matrix, right), traced_type=traced_type)
     if int(matrix.ndim) != _MATRIX_RANK:
         msg = "numpy.linalg.lstsq matrix must be two-dimensional"
         raise TracingError(msg)
@@ -660,7 +310,8 @@ def _lstsq_handler(
         msg = "numpy.linalg.lstsq rcond must be static because it controls numerical rank"
         raise TracingError(msg)
     if rcond is None:
-        rcond = max(int(size) for size in matrix.shape) * _real_epsilon(matrix.dtype)
+        # NumPy solves in double precision, so its default uses float64 epsilon.
+        rcond = max(int(size) for size in matrix.shape) * np.finfo(np.float64).eps
     rcond_value = float(rcond)
 
     solution = np.matmul(np.linalg.pinv(matrix, rcond=rcond_value), right)
@@ -669,10 +320,7 @@ def _lstsq_handler(
         _node_id, concrete_singular_values = _snapshot_traced(singular_values)
     else:
         concrete_singular_values = singular_values
-        singular_array = np.asarray(concrete_singular_values)
-        # Keep the mixed result traceable while preserving this static output's real dtype.
-        zero = np.astype(np.real(np.sum(anchor)) * 0, singular_array.dtype)
-        singular_values = zero + singular_array
+        singular_values = _lift_composite_constant(concrete_singular_values, anchor)
     singular_array = np.asarray(concrete_singular_values)
     rank = (
         int(np.sum(singular_array > singular_array[0] * rcond_value)) if singular_array.size else 0
@@ -682,59 +330,11 @@ def _lstsq_handler(
         residual = right - np.matmul(matrix, solution)
         residuals = np.atleast_1d(np.sum(np.real(np.conjugate(residual) * residual), axis=0))
     else:
-        residuals = np.zeros((0,), dtype=solution.dtype) + np.sum(solution) * 0
-    rank_value = np.astype(np.sum(solution) * 0 + rank, np.int32)
+        residuals = _lift_composite_constant(np.zeros((0,), dtype=solution.dtype), solution)
+    rank_value = _lift_lapack_rank(rank, solution)
     return _finish(
         (solution, residuals, rank_value, singular_values),
         traced_type=traced_type,
-    )
-
-
-def _inner_handler(
-    graph: DynamicTape,
-    traced_type: type[TracedArrayLike],
-    args: tuple[Any, ...],
-    kwargs: dict[str, Any],
-) -> tuple[Any, int]:
-    return _binary_handler(
-        op_name="numpy.inner",
-        np_func=np.inner,
-        graph=graph,
-        traced_type=traced_type,
-        args=args,
-        kwargs=kwargs,
-    )
-
-
-def _outer_handler(
-    graph: DynamicTape,
-    traced_type: type[TracedArrayLike],
-    args: tuple[Any, ...],
-    kwargs: dict[str, Any],
-) -> tuple[Any, int]:
-    return _binary_handler(
-        op_name="numpy.outer",
-        np_func=np.outer,
-        graph=graph,
-        traced_type=traced_type,
-        args=args,
-        kwargs=kwargs,
-    )
-
-
-def _kron_handler(
-    graph: DynamicTape,
-    traced_type: type[TracedArrayLike],
-    args: tuple[Any, ...],
-    kwargs: dict[str, Any],
-) -> tuple[Any, int]:
-    return _binary_handler(
-        op_name="numpy.kron",
-        np_func=np.kron,
-        graph=graph,
-        traced_type=traced_type,
-        args=args,
-        kwargs=kwargs,
     )
 
 
@@ -756,19 +356,7 @@ def _cross_handler(
         if key in values and values[key] is not None:
             attrs[key] = int(values[key])
 
-    node_id = _add_backend_node(
-        graph=graph,
-        op=canonicalize_numpy_op("numpy.cross"),
-        inputs=(
-            _get_node(a, graph, traced_type),
-            _get_node(b, graph, traced_type),
-        ),
-        value=result,
-        attrs=attrs,
-        shape=result.shape,
-        dtype=result.dtype,
-    )
-    return result, node_id
+    return _emit(graph, traced_type, "numpy.cross", (a, b), result, attrs)
 
 
 def _tensordot_handler(
@@ -795,19 +383,7 @@ def _tensordot_handler(
     else:
         attrs["axes"] = int(axes)
 
-    node_id = _add_backend_node(
-        graph=graph,
-        op=canonicalize_numpy_op("numpy.tensordot"),
-        inputs=(
-            _get_node(a, graph, traced_type),
-            _get_node(b, graph, traced_type),
-        ),
-        value=result,
-        attrs=attrs,
-        shape=result.shape,
-        dtype=result.dtype,
-    )
-    return result, node_id
+    return _emit(graph, traced_type, "numpy.tensordot", (a, b), result, attrs)
 
 
 def _resolve_einsum_string_form(
@@ -815,15 +391,9 @@ def _resolve_einsum_string_form(
     *,
     traced_type: type[TracedArrayLike],
 ) -> tuple[str, tuple[Any, ...], tuple[Any, ...]]:
-    if len(args) < _MIN_EINSUM_ARGS:
-        msg = "numpy.einsum expects a subscript string and at least one operand"
-        raise TracingError(msg)
     subscripts = args[0]
-    if not isinstance(subscripts, str):
-        msg = "numpy.einsum string form requires a subscript string"
-        raise TracingError(msg)
     operands = args[1:]
-    values = tuple(_get_value(op, traced_type) for op in operands)
+    values = tuple(_get_array_value(op, traced_type) for op in operands)
     normalized = _normalize_einsum_syntax(
         (subscripts, *(_einsum_shape_dummy(value) for value in values))
     )
@@ -833,7 +403,7 @@ def _resolve_einsum_string_form(
 def _einsum_shape_dummy(value: object) -> _numpy.ndarray[Any, Any]:
     array_value = cast("Any", value)
     shape = tuple(int(size) for size in array_value.shape)
-    scalar = np.empty((), dtype=np.dtype(array_value.dtype))
+    scalar = np.empty((), dtype=operand_dtype(array_value))
     return cast(
         "_numpy.ndarray[Any, Any]",
         np.lib.stride_tricks.as_strided(
@@ -881,7 +451,7 @@ def _resolve_einsum_sublist_form(
         msg = "numpy.einsum sublist form requires one label-list per operand"
         raise TracingError(msg)
 
-    values = tuple(_get_value(operand, traced_type) for operand in operands)
+    values = tuple(_get_array_value(operand, traced_type) for operand in operands)
     einsum_operands: list[Any] = []
     for value, label in zip(values, labels, strict=True):
         einsum_operands.extend((_einsum_shape_dummy(value), label))
@@ -899,7 +469,7 @@ def _einsum_calculation_dtype(
 ) -> object:
     if dtype is not None:
         return np.dtype(dtype)
-    operand_dtypes = tuple(np.dtype(value.dtype) for value in values)
+    operand_dtypes = tuple(operand_dtype(value) for value in values)
     return np.result_type(*operand_dtypes)
 
 
@@ -983,24 +553,12 @@ def _einsum_call(
     )
 
 
-def _einsum_node_inputs(
-    *,
-    operands: tuple[Any, ...],
-    graph: DynamicTape,
-    traced_type: type[TracedArrayLike],
-) -> tuple[Any, ...]:
-    return tuple(_get_node(op, graph, traced_type) for op in operands)
-
-
 def _einsum_handler(
     graph: DynamicTape,
     traced_type: type[TracedArrayLike],
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
 ) -> tuple[Any, int]:
-    if not args:
-        msg = "numpy.einsum expects at least one operand"
-        raise TracingError(msg)
     unsupported = set(kwargs) - {"optimize", "dtype", "order", "casting"}
     if unsupported:
         msg = f"numpy.einsum kwargs not supported during tracing: {sorted(unsupported)}"
@@ -1043,37 +601,26 @@ def _einsum_handler(
         attrs["optimize"] = optimize
     if dtype is not None:
         attrs["dtype"] = str(np.dtype(dtype))
-    node_id = _add_backend_node(
-        graph=graph,
-        op=canonicalize_numpy_op("numpy.einsum"),
-        inputs=_einsum_node_inputs(
-            operands=operands,
-            graph=graph,
-            traced_type=traced_type,
-        ),
-        value=result,
-        attrs=attrs,
-        shape=result.shape,
-        dtype=result.dtype,
-    )
-    return result, node_id
+    return _emit(graph, traced_type, "numpy.einsum", operands, result, attrs)
 
 
 def register_linalg_handlers(
     handlers: dict[Callable[..., Any], ArrayFunctionHandler],
 ) -> None:
     """Register linalg-related array functions."""
-    handlers[np.linalg.slogdet] = _slogdet_handler
+    for name in ("det", "inv", "eigvals", "svdvals", "eig", "slogdet", "solve"):
+        handlers[getattr(np.linalg, name)] = partial(_plain_handler, name=name)
+    for name in ("eigh", "eigvalsh"):
+        handlers[getattr(np.linalg, name)] = partial(_hermitian_eigen_handler, name=name)
     handlers[np.linalg.svd] = _svd_handler
-    handlers[np.linalg.svdvals] = _svdvals_handler
     handlers[np.linalg.qr] = _qr_handler
-    handlers[np.linalg.eig] = _eig_handler
-    handlers[np.linalg.eigh] = _eigh_handler
-    handlers[np.linalg.eigvals] = _eigvals_handler
-    handlers[np.linalg.eigvalsh] = _eigvalsh_handler
     handlers[np.linalg.norm] = _norm_handler
-    handlers[np.linalg.det] = _det_handler
-    handlers[np.linalg.inv] = _inv_handler
     handlers[np.linalg.cholesky] = _cholesky_handler
-    handlers[np.linalg.solve] = _solve_handler
     handlers[np.linalg.pinv] = _pinv_handler
+    handlers[np.linalg.lstsq] = _lstsq_handler
+    handlers[np.linalg.matrix_rank] = _matrix_rank_handler
+    for function in (np.inner, np.outer, np.kron):
+        handlers[function] = _make_binary_handler(function, f"numpy.{function.__name__}")
+    handlers[np.cross] = _cross_handler
+    handlers[np.tensordot] = _tensordot_handler
+    handlers[np.einsum] = _einsum_handler

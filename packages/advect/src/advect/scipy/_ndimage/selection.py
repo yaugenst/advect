@@ -9,9 +9,11 @@ install public filter primitives; :mod:`.morphology` owns that wiring.
 
 from __future__ import annotations
 
+import functools
+import itertools
 import math
 import operator
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
@@ -34,24 +36,25 @@ from advect.scipy._ndimage.common import (
     _zero_tangent,
 )
 from advect.scipy._ndimage.stencil import (
-    _axis_indices,
-    _normalize_indices,
+    _fold_numpy,
     _pad_numpy,
-    _PadWidth,
+    _pad_width,
+    _padded_transpose_numpy,
     _shift,
-    _stencil_input_transpose_numpy,
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Iterable, Iterator
 
     from advect.core import AbstractValue, ArraySpec
 
 
 type _NeighborhoodEntry = tuple[int, tuple[int, ...], tuple[int, ...]]
-type _NeighborhoodSlices = tuple[tuple[slice, ...], ...]
-type _HomogeneousNeighborhoodData = tuple[np.ndarray, _PadWidth, str, _NeighborhoodSlices]
 type _SelectionPullback = tuple[np.ndarray, np.ndarray, np.ndarray]
+
+# Above this many window slots, sorting distinct values once beats visiting
+# every slot.
+_UNIQUE_VALUE_SLOTS = 25
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,6 +64,21 @@ class _Neighborhood:
     footprint: tuple[bool, ...]
     origins: tuple[int, ...]
     modes: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class _Selector(_Neighborhood):
+    """A neighborhood and how each output selects from its window.
+
+    Its fields are the transpose primitive's static attributes. ``rank`` is
+    ``None`` for extrema, and dilation reads the window reflected and adds
+    the structure instead of subtracting it.
+    """
+
+    selection: str
+    dilation: bool
+    rank: int | None
+    has_structure: bool
 
 
 def _static_footprint(value: object) -> np.ndarray:
@@ -146,39 +164,28 @@ def _neighborhood(
     )
 
 
-def _neighborhood_entries(
-    neighborhood: _Neighborhood,
-    *,
-    dilation: bool,
-) -> Iterator[_NeighborhoodEntry]:
-    if not neighborhood.axes:
+def _neighborhood_entries(selector: _Selector) -> Iterator[_NeighborhoodEntry]:
+    if not selector.axes:
         yield 0, (), ()
         return
-    centers = tuple(size // 2 for size in neighborhood.shape)
-    for flat_index, index in enumerate(np.ndindex(neighborhood.shape)):
-        if not neighborhood.footprint[flat_index]:
-            continue
-        if dilation:
+    centers = tuple(size // 2 for size in selector.shape)
+    # Dilation reads the window reflected through its center.
+    sign = -1 if selector.dilation else 1
+    for flat_index, index in enumerate(np.ndindex(selector.shape)):
+        if selector.footprint[flat_index]:
             offsets = tuple(
-                center - item + origin
-                for item, center, origin in zip(
-                    index,
-                    centers,
-                    neighborhood.origins,
-                    strict=True,
-                )
+                sign * (item - center - origin)
+                for item, center, origin in zip(index, centers, selector.origins, strict=True)
             )
-        else:
-            offsets = tuple(
-                item - center - origin
-                for item, center, origin in zip(
-                    index,
-                    centers,
-                    neighborhood.origins,
-                    strict=True,
-                )
-            )
-        yield flat_index, index, offsets
+            yield flat_index, index, offsets
+
+
+def _select(values: Iterable[Any], selector: _Selector) -> Any:
+    """Select each output from its window's ``values``."""
+    if selector.rank is None:
+        reducer = np.maximum if selector.selection == "maximum" else np.minimum
+        return functools.reduce(reducer, values)
+    return np.sort(np.stack(tuple(values), axis=0), axis=0)[selector.rank]
 
 
 def _neighborhood_candidates(
@@ -188,34 +195,23 @@ def _neighborhood_candidates(
     structure_tangent: Any | None,
     cval: Any,
     cval_tangent: Any,
-    *,
-    neighborhood: _Neighborhood,
-    dilation: bool,
-    has_structure: bool,
+    selector: _Selector,
 ) -> Iterator[tuple[Any, Any]]:
-    structure_delta = None if structure_tangent is None else structure_tangent
-    for _flat_index, index, offsets in _neighborhood_entries(
-        neighborhood,
-        dilation=dilation,
-    ):
+    for _flat_index, index, offsets in _neighborhood_entries(selector):
         candidate = _shift(
-            input,
-            axes=neighborhood.axes,
-            offsets=offsets,
-            modes=neighborhood.modes,
-            cval=cval,
+            input, axes=selector.axes, offsets=offsets, modes=selector.modes, cval=cval
         )
         candidate_tangent = _shift(
             input_tangent,
-            axes=neighborhood.axes,
+            axes=selector.axes,
             offsets=offsets,
-            modes=neighborhood.modes,
+            modes=selector.modes,
             cval=cval_tangent,
         )
-        if has_structure:
+        if selector.has_structure:
             delta = structure[index]
-            tangent_delta = 0 if structure_delta is None else structure_delta[index]
-            if dilation:
+            tangent_delta = 0 if structure_tangent is None else structure_tangent[index]
+            if selector.dilation:
                 candidate = candidate + delta
                 candidate_tangent = candidate_tangent + tangent_delta
             else:
@@ -232,121 +228,22 @@ def _selection_jvp(
     structure_tangent: Any | None,
     cval: Any,
     cval_tangent: Any | None,
-    *,
-    neighborhood: _Neighborhood,
-    selection: str,
-    dilation: bool,
-    rank: int | None,
-    has_structure: bool,
+    selector: _Selector,
 ) -> Any:
-    if (
-        has_structure
-        and rank is None
-        and not any(
-            _is_traced_value(value)
-            for value in (
-                output,
-                input,
-                input_tangent,
-                structure,
-                structure_tangent,
-                cval,
-                cval_tangent,
-            )
-        )
-    ):
-        result = _homogeneous_selection_jvp_numpy(
-            output,
-            input,
-            input_tangent,
-            structure,
-            structure_tangent,
-            cval,
-            cval_tangent,
-            neighborhood=neighborhood,
-            dilation=dilation,
-        )
-        if result is not None:
-            return result
-    tangent_input = _zero_tangent(input, input_tangent)
-    tangent_cval = 0 if cval_tangent is None else cval_tangent
-    if (
-        not has_structure
-        and rank is None
-        and len(neighborhood.axes) == 1
-        and sum(neighborhood.footprint) <= 9
-        and not any(
-            _is_traced_value(value) for value in (output, input, tangent_input, cval, tangent_cval)
-        )
-    ):
-        entries = tuple(_neighborhood_entries(neighborhood, dilation=dilation))
-        chosen = _small_axis_selection_sources_numpy(
-            input,
-            cval,
-            output,
-            entries=entries,
-            neighborhood=neighborhood,
-        )
-        if chosen is not None:
-            axis = neighborhood.axes[0]
-            gathered = np.take_along_axis(
-                tangent_input,
-                np.clip(chosen, 0, input.shape[axis] - 1),
-                axis=axis,
-            )
-            return _cast_tangent(np.where(chosen >= 0, gathered, tangent_cval), output)
-    if not has_structure and not any(
-        _is_traced_value(value) for value in (output, input, tangent_input, cval, tangent_cval)
-    ):
-        plateau_result = _plateau_selection_jvp_numpy(
-            output,
-            input,
-            tangent_input,
-            cval,
-            tangent_cval,
-            neighborhood=neighborhood,
-            dilation=dilation,
-        )
-        if plateau_result is not None:
-            return plateau_result
-        chosen = _unique_value_selection_sources_numpy(input, cval, output)
-        if chosen is not None:
-            selected = tangent_input.ravel()[np.clip(chosen, 0, input.size - 1)]
-            return _cast_tangent(np.where(chosen >= 0, selected, tangent_cval), output)
-        small_result = _small_flat_selection_jvp_numpy(
-            output,
-            input,
-            tangent_input,
-            cval,
-            tangent_cval,
-            entries=tuple(_neighborhood_entries(neighborhood, dilation=dilation)),
-            neighborhood=neighborhood,
-        )
-        if small_result is not None:
-            return small_result
-    candidates = list(
-        _neighborhood_candidates(
-            input,
-            tangent_input,
-            structure,
-            structure_tangent,
-            cval,
-            tangent_cval,
-            neighborhood=neighborhood,
-            dilation=dilation,
-            has_structure=has_structure,
-        )
+    operands = (
+        input,
+        _zero_tangent(input, input_tangent),
+        structure,
+        structure_tangent,
+        cval,
+        0 if cval_tangent is None else cval_tangent,
     )
+    if not any(_is_traced_value(value) for value in (output, *operands)):
+        return _selection_jvp_numpy(output, *operands, selector)
+    candidates = list(_neighborhood_candidates(*operands, selector))
     if not candidates:
         return np.zeros_like(output)
-    values = [candidate for candidate, _ in candidates]
-    if rank is None:
-        selected = values[0]
-        reducer = np.maximum if selection == "maximum" else np.minimum
-        for candidate in values[1:]:
-            selected = reducer(selected, candidate)
-    else:
-        selected = np.sort(np.stack(values, axis=0), axis=0)[rank]
+    selected = _select((candidate for candidate, _ in candidates), selector)
     tangent_sum = np.zeros_like(output)
     winner_count = np.zeros_like(output)
     for candidate, candidate_tangent in candidates:
@@ -356,98 +253,157 @@ def _selection_jvp(
     return _cast_tangent(tangent_sum / winner_count, output)
 
 
-def _neighborhood_destinations_numpy(
-    input_shape: tuple[int, ...],
-    entries: tuple[_NeighborhoodEntry, ...],
-    neighborhood: _Neighborhood,
-) -> np.ndarray:
-    source_indices = np.arange(math.prod(input_shape), dtype=np.intp).reshape(input_shape)
-    destinations = np.broadcast_to(source_indices, (len(entries), *input_shape)).copy()
-    valid_destinations: np.ndarray | None = None
-    for offset_axis, (axis, mode) in enumerate(
-        zip(neighborhood.axes, neighborhood.modes, strict=True)
-    ):
-        length = input_shape[axis]
-        positions = np.arange(length)
-        offsets = np.asarray([entry[2][offset_axis] for entry in entries])
-        indices, valid = _normalize_indices(
-            positions[np.newaxis, :] + offsets[:, np.newaxis],
-            length=length,
-            mode=mode,
+def _all_finite(*values: Any) -> bool:
+    return all(bool(np.isfinite(value).all()) for value in values if value is not None)
+
+
+def _winning(winner: np.ndarray, value: np.ndarray, *, finite: bool) -> np.ndarray:
+    """Return ``value`` at winning slots and exact zeros at losing ones.
+
+    Weighting by the 0/1 winner mask is several times faster than ``np.where``
+    but turns a non-finite value at a losing slot into NaN (``0 * inf``).
+    """
+    return winner * value if finite else np.where(winner, value, 0)
+
+
+class _WindowSlots:
+    """Every window slot of one concrete selection as a view of one padded copy.
+
+    Padding follows each axis's boundary mode, so reflected duplicates and
+    constant-boundary slots are ordinary views, and :meth:`fold` returns a
+    padded cotangent's shares to the samples or ``cval`` those slots read.
+    """
+
+    def __init__(
+        self,
+        input: np.ndarray,
+        structure: np.ndarray,
+        cval: Any,
+        output: np.ndarray,
+        selector: _Selector,
+    ) -> None:
+        self.selector = selector
+        self.shape = input.shape
+        self.entries = tuple(_neighborhood_entries(selector))
+        offsets_by_axis = tuple(zip(*(offsets for _, _, offsets in self.entries), strict=True))
+        self.pad_width = _pad_width(
+            input.ndim,
+            selector.axes,
+            tuple((min(offsets), max(offsets)) for offsets in offsets_by_axis),
         )
-        broadcast_shape = [1] * (len(input_shape) + 1)
-        broadcast_shape[0] = len(entries)
-        broadcast_shape[axis + 1] = length
-        adjustment = (indices - positions) * math.prod(input_shape[axis + 1 :])
-        destinations += adjustment.reshape(broadcast_shape)
-        if valid is not None:
-            broadcast_valid = valid.reshape(broadcast_shape)
-            valid_destinations = (
-                broadcast_valid
-                if valid_destinations is None
-                else valid_destinations & broadcast_valid
-            )
-    if valid_destinations is not None:
-        destinations = np.where(valid_destinations, destinations, -1)
-    return destinations
+        self.views = tuple(self._view(offsets) for _, _, offsets in self.entries)
+        self.padded = self.pad(input, cval)
+        self.structure = structure if selector.has_structure else None
+        self.output = self.selected = output
+        if next(self.values(self.padded, self.structure)).dtype != output.dtype:
+            self._reselect()
 
-
-def _neighborhood_destination_numpy(
-    source_indices: np.ndarray,
-    neighborhood: _Neighborhood,
-    offsets: tuple[int, ...],
-) -> np.ndarray:
-    destination = np.array(source_indices, copy=True)
-    valid_destination: np.ndarray | None = None
-    for axis, offset, mode in zip(
-        neighborhood.axes,
-        offsets,
-        neighborhood.modes,
-        strict=True,
-    ):
-        length = source_indices.shape[axis]
-        positions = np.arange(length)
-        indices, valid = _normalize_indices(
-            positions + offset,
-            length=length,
-            mode=mode,
+    def _view(self, offsets: tuple[int, ...]) -> tuple[slice, ...]:
+        starts = [before for before, _after in self.pad_width]
+        for axis, offset in zip(self.selector.axes, offsets, strict=True):
+            starts[axis] += offset
+        return tuple(
+            slice(start, start + length) for start, length in zip(starts, self.shape, strict=True)
         )
-        broadcast_shape = [1] * source_indices.ndim
-        broadcast_shape[axis] = length
-        adjustment = (indices - positions) * math.prod(source_indices.shape[axis + 1 :])
-        destination += adjustment.reshape(broadcast_shape)
-        if valid is not None:
-            broadcast_valid = valid.reshape(broadcast_shape)
-            valid_destination = (
-                broadcast_valid
-                if valid_destination is None
-                else valid_destination & broadcast_valid
-            )
-    if valid_destination is not None:
-        destination = np.where(valid_destination, destination, -1)
-    return destination
 
+    def _reselect(self) -> None:
+        # SciPy cast or rounded its result, so select at the candidates' precision.
+        self.selected = _select(self.values(self.padded, self.structure), self.selector)
 
-def _scatter_numpy(
-    destinations: np.ndarray,
-    weights: np.ndarray,
-    *,
-    size: int,
-    dtype: np.dtype[Any],
-) -> np.ndarray:
-    if np.iscomplexobj(weights):
-        scattered = np.bincount(
-            destinations,
-            weights=np.real(weights),
-            minlength=size,
-        ) + 1j * np.bincount(
-            destinations,
-            weights=np.imag(weights),
-            minlength=size,
+    def pad(self, value: np.ndarray, cval: Any) -> np.ndarray:
+        return _pad_numpy(
+            value,
+            self.pad_width,
+            axes=self.selector.axes,
+            modes=self.selector.modes,
+            cval=cval,
         )
-    else:
-        scattered = np.bincount(destinations, weights=weights, minlength=size)
-    return np.asarray(scattered, dtype=dtype)
+
+    def fold(self, padded: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        return _fold_numpy(
+            padded,
+            self.pad_width,
+            axes=self.selector.axes,
+            modes=self.selector.modes,
+            shape=self.shape,
+        )
+
+    def values(self, padded: np.ndarray, structure: np.ndarray | None) -> Iterator[np.ndarray]:
+        """Yield each slot's view of ``padded``, moved by its ``structure`` entry."""
+        for (_flat_index, index, _offsets), view in zip(self.entries, self.views, strict=True):
+            value = padded[view]
+            if structure is not None:
+                value = (
+                    value + structure[index] if self.selector.dilation else value - structure[index]
+                )
+            yield value
+
+    def winners(self) -> Iterator[np.ndarray]:
+        for value in self.values(self.padded, self.structure):
+            yield value == self.selected
+
+    def tally(
+        self,
+        padded: np.ndarray | None = None,
+        structure: np.ndarray | None = None,
+    ) -> tuple[Any, np.ndarray]:
+        """Count each output's winning slots and sum their ``padded`` values.
+
+        NaN outputs have no winning slot. Any other output without one (SciPy
+        rounded it) selects every output again, once, at the candidates'
+        precision.
+        """
+        total: Any = 0
+        winner_count = np.zeros(self.shape, np.min_scalar_type(len(self.entries)))
+        values = () if padded is None else self.values(padded, structure)
+        finite = _all_finite(padded, structure)
+        for winner, value in itertools.zip_longest(self.winners(), values):
+            winner_count += winner
+            if value is not None:
+                total = total + _winning(winner, value, finite=finite)
+        if (
+            winner_count.all()
+            or self.selected is not self.output
+            or np.isnan(self.output[winner_count == 0]).all()
+        ):
+            return total, winner_count
+        self._reselect()
+        return self.tally(padded, structure)
+
+
+def _selection_jvp_numpy(
+    output: np.ndarray,
+    input: np.ndarray,
+    input_tangent: np.ndarray,
+    structure: np.ndarray,
+    structure_tangent: np.ndarray | None,
+    cval: Any,
+    cval_tangent: Any,
+    selector: _Selector,
+) -> np.ndarray:
+    if input.size == 0:
+        return np.zeros_like(output)
+    if not selector.has_structure:
+        plateau_result = _plateau_selection_jvp_numpy(
+            output, input, input_tangent, cval, cval_tangent, selector
+        )
+        if plateau_result is not None:
+            return plateau_result
+        chosen = (
+            _unique_value_selection_sources_numpy(input, cval, output)
+            if sum(selector.footprint) > _UNIQUE_VALUE_SLOTS
+            else None
+        )
+        if chosen is not None:
+            selected = input_tangent.ravel()[np.clip(chosen, 0, input.size - 1)]
+            return _cast_tangent(np.where(chosen >= 0, selected, cval_tangent), output)
+    slots = _WindowSlots(input, structure, cval, output, selector)
+    tangent_dtype = np.result_type(input_tangent, cval_tangent)
+    tangent_sum, winner_count = slots.tally(
+        slots.pad(input_tangent.astype(tangent_dtype, copy=False), cval_tangent),
+        structure_tangent if selector.has_structure else None,
+    )
+    return _cast_tangent(tangent_sum / winner_count, output)
 
 
 def _unique_value_selection_sources_numpy(
@@ -492,520 +448,16 @@ def _unique_value_selection_transpose_numpy(
         return None
     from_input = chosen.ravel() >= 0
     flat_cotangent = cotangent.ravel()
-    scattered = _scatter_numpy(
+    # SciPy selects only real inputs, so only a cotangent's real part routes.
+    scattered = np.bincount(
         chosen.ravel()[from_input],
-        flat_cotangent[from_input],
-        size=input.size,
-        dtype=cotangent.dtype,
+        weights=np.real(flat_cotangent[from_input]),
+        minlength=input.size,
     )
     return (
         _project_cotangent(scattered.reshape(input.shape), input, output),
         np.zeros_like(structure),
         _project_cotangent(np.sum(flat_cotangent[~from_input]), cval, output),
-    )
-
-
-def _small_axis_selection_sources_numpy(
-    input: np.ndarray,
-    cval: np.ndarray,
-    output: np.ndarray,
-    *,
-    entries: tuple[_NeighborhoodEntry, ...],
-    neighborhood: _Neighborhood,
-) -> np.ndarray | None:
-    (axis,) = neighborhood.axes
-    (mode,) = neighborhood.modes
-    length = input.shape[axis]
-    offsets = tuple(entry[2][0] for entry in entries)
-    before = max(0, -min(offsets))
-    after = max(0, *offsets)
-    pad_width = [(0, 0)] * input.ndim
-    pad_width[axis] = (before, after)
-    padded = _pad_numpy(
-        input,
-        tuple(pad_width),
-        mode=mode,
-        cval=cval,
-    )
-    broadcast_shape = [1] * input.ndim
-    broadcast_shape[axis] = length
-    winners = []
-    sources = []
-    for offset in offsets:
-        indices, valid = _axis_indices(length, offset=offset, mode=mode)
-        source = indices
-        if valid is not None:
-            source = np.where(valid, indices, -1)
-        slices = [slice(None)] * input.ndim
-        start = before + offset
-        slices[axis] = slice(start, start + length)
-        candidate = padded[tuple(slices)]
-        if candidate.dtype != output.dtype:
-            return None
-        winners.append(candidate == output)
-        sources.append(source.reshape(broadcast_shape))
-    chosen = np.broadcast_to(sources[-1], input.shape)
-    for winner, source in reversed(tuple(zip(winners[:-1], sources[:-1], strict=True))):
-        chosen = np.where(winner, source, chosen)
-    matched = np.array(winners[0], copy=True)
-    conflict = winners[0] & (sources[0] != chosen)
-    for winner, source in zip(winners[1:], sources[1:], strict=True):
-        matched |= winner
-        conflict |= winner & (source != chosen)
-    if np.any(conflict) or np.any(~matched):
-        return None
-    return chosen
-
-
-def _small_axis_selection_transpose_numpy(
-    cotangent: np.ndarray,
-    input: np.ndarray,
-    structure: np.ndarray,
-    cval: np.ndarray,
-    output: np.ndarray,
-    *,
-    entries: tuple[_NeighborhoodEntry, ...],
-    neighborhood: _Neighborhood,
-) -> _SelectionPullback | None:
-    chosen = _small_axis_selection_sources_numpy(
-        input,
-        cval,
-        output,
-        entries=entries,
-        neighborhood=neighborhood,
-    )
-    if chosen is None:
-        return None
-    (axis,) = neighborhood.axes
-    length = input.shape[axis]
-    moved_chosen = np.moveaxis(chosen, axis, -1).reshape(-1, length)
-    moved_cotangent = np.moveaxis(cotangent, axis, -1).reshape(-1, length)
-    valid = moved_chosen >= 0
-    destinations = np.arange(moved_chosen.shape[0], dtype=np.intp)[:, np.newaxis] * length
-    destinations = destinations + moved_chosen
-    scattered = _scatter_numpy(
-        destinations[valid],
-        moved_cotangent[valid],
-        size=input.size,
-        dtype=cotangent.dtype,
-    )
-    moved_shape = np.moveaxis(input, axis, -1).shape
-    input_cotangent = np.moveaxis(scattered.reshape(moved_shape), -1, axis)
-    return (
-        _project_cotangent(input_cotangent, input, output),
-        np.zeros_like(structure),
-        _project_cotangent(np.sum(moved_cotangent[~valid]), cval, output),
-    )
-
-
-def _homogeneous_neighborhood_data_numpy(
-    input: np.ndarray,
-    cval: np.ndarray,
-    *,
-    entries: tuple[_NeighborhoodEntry, ...],
-    neighborhood: _Neighborhood,
-) -> _HomogeneousNeighborhoodData | None:
-    normalized_modes = {_mode_name(mode) for mode in neighborhood.modes}
-    if len(normalized_modes) != 1:
-        return None
-    offsets = tuple(entry[2] for entry in entries)
-    before = tuple(max(0, -min(items)) for items in zip(*offsets, strict=True))
-    after = tuple(max(0, *items) for items in zip(*offsets, strict=True))
-    padding = dict(zip(neighborhood.axes, zip(before, after, strict=True), strict=True))
-    pad_width = tuple(padding.get(axis, (0, 0)) for axis in range(input.ndim))
-    mode = neighborhood.modes[0]
-    padded = _pad_numpy(input, pad_width, mode=mode, cval=cval)
-    slices = []
-    for _flat_index, _index, entry_offsets in entries:
-        entry_slices = [slice(None)] * input.ndim
-        for axis, lower, offset in zip(
-            neighborhood.axes,
-            before,
-            entry_offsets,
-            strict=True,
-        ):
-            start = lower + offset
-            entry_slices[axis] = slice(start, start + input.shape[axis])
-        slices.append(tuple(entry_slices))
-    return padded, pad_width, mode, tuple(slices)
-
-
-def _small_flat_selection_data_numpy(
-    input: np.ndarray,
-    cval: np.ndarray,
-    output: np.ndarray,
-    *,
-    entries: tuple[_NeighborhoodEntry, ...],
-    neighborhood: _Neighborhood,
-) -> _HomogeneousNeighborhoodData | None:
-    if len(entries) > 32 or input.dtype != output.dtype:
-        return None
-    data = _homogeneous_neighborhood_data_numpy(
-        input,
-        cval,
-        entries=entries,
-        neighborhood=neighborhood,
-    )
-    if data is None:
-        return None
-    padded, pad_width, mode, slices = data
-    winners = np.empty((len(entries), *input.shape), dtype=bool)
-    for position, entry_slices in enumerate(slices):
-        np.equal(padded[entry_slices], output, out=winners[position])
-    return winners, pad_width, mode, slices
-
-
-def _small_flat_selection_jvp_numpy(
-    output: np.ndarray,
-    input: np.ndarray,
-    input_tangent: np.ndarray,
-    cval: np.ndarray,
-    cval_tangent: Any,
-    *,
-    entries: tuple[_NeighborhoodEntry, ...],
-    neighborhood: _Neighborhood,
-) -> np.ndarray | None:
-    data = _small_flat_selection_data_numpy(
-        input,
-        cval,
-        output,
-        entries=entries,
-        neighborhood=neighborhood,
-    )
-    if data is None:
-        return None
-    winners, pad_width, mode, slices = data
-    padded_tangent = _pad_numpy(input_tangent, pad_width, mode=mode, cval=cval_tangent)
-    tangent_sum = np.zeros_like(input_tangent)
-    for winner, entry_slices in zip(winners, slices, strict=True):
-        np.add(tangent_sum, padded_tangent[entry_slices], out=tangent_sum, where=winner)
-    return _cast_tangent(tangent_sum / np.sum(winners, axis=0), output)
-
-
-def _small_flat_selection_transpose_numpy(
-    cotangent: np.ndarray,
-    input: np.ndarray,
-    structure: np.ndarray,
-    cval: np.ndarray,
-    output: np.ndarray,
-    *,
-    entries: tuple[_NeighborhoodEntry, ...],
-    neighborhood: _Neighborhood,
-    active_inputs: set[int],
-) -> _SelectionPullback | None:
-    data = _small_flat_selection_data_numpy(
-        input,
-        cval,
-        output,
-        entries=entries,
-        neighborhood=neighborhood,
-    )
-    if data is None:
-        return None
-    winners, _pad_width, _mode, _slices = data
-    active = cotangent / np.sum(winners, axis=0)
-    destinations = _neighborhood_destinations_numpy(input.shape, entries, neighborhood)
-    valid = destinations >= 0
-    live = valid & winners
-    weights = np.broadcast_to(active, winners.shape)
-    input_cotangent = (
-        _scatter_numpy(
-            destinations[live],
-            weights[live],
-            size=input.size,
-            dtype=cotangent.dtype,
-        ).reshape(input.shape)
-        if 0 in active_inputs
-        else np.zeros_like(input)
-    )
-    boundary_cotangent = (
-        np.sum(weights[~valid & winners], dtype=cotangent.dtype)
-        if 2 in active_inputs
-        else np.zeros_like(cval)
-    )
-    return (
-        _project_cotangent(input_cotangent, input, output),
-        np.zeros_like(structure),
-        _project_cotangent(boundary_cotangent, cval, output),
-    )
-
-
-def _homogeneous_selection_entry_numpy(
-    input: np.ndarray,
-    structure: np.ndarray,
-    cval: np.ndarray,
-    output: np.ndarray,
-    *,
-    entries: tuple[_NeighborhoodEntry, ...],
-    neighborhood: _Neighborhood,
-    dilation: bool,
-) -> np.ndarray | None:
-    if not neighborhood.axes:
-        return None
-    data = _homogeneous_neighborhood_data_numpy(
-        input,
-        cval,
-        entries=entries,
-        neighborhood=neighborhood,
-    )
-    if data is None:
-        return None
-    padded, _pad_width, _mode, slices = data
-    index_dtype = np.min_scalar_type(len(entries))
-    chosen = np.zeros(input.shape, dtype=index_dtype)
-    winner_count = np.zeros(input.shape, dtype=index_dtype)
-    if np.result_type(padded.dtype, structure.dtype) != output.dtype:
-        return None
-    candidate = np.empty_like(output)
-    winner = np.empty(input.shape, dtype=bool)
-    operation = np.add if dilation else np.subtract
-    for position, ((_flat_index, index, _entry_offsets), entry_slices) in enumerate(
-        zip(entries, slices, strict=True)
-    ):
-        operation(padded[entry_slices], structure[index], out=candidate)
-        np.equal(candidate, output, out=winner)
-        np.putmask(chosen, winner, position)
-        winner_count += winner
-    if np.any(winner_count != 1):
-        return None
-    return chosen
-
-
-def _chosen_entry_destinations_numpy(
-    chosen: np.ndarray,
-    entries: tuple[_NeighborhoodEntry, ...],
-    neighborhood: _Neighborhood,
-) -> np.ndarray:
-    if neighborhood.axes == tuple(range(chosen.ndim)) and all(
-        _mode_name(mode) == "constant" for mode in neighborhood.modes
-    ):
-        offsets = np.asarray([entry[2] for entry in entries], dtype=np.intp)
-        destination = np.zeros(chosen.shape, dtype=np.intp)
-        valid = np.ones(chosen.shape, dtype=bool)
-        for offset_axis, axis in enumerate(neighborhood.axes):
-            position_shape = [1] * chosen.ndim
-            position_shape[axis] = chosen.shape[axis]
-            source = np.arange(chosen.shape[axis]).reshape(position_shape)
-            source = source + offsets[:, offset_axis][chosen]
-            valid &= (source >= 0) & (source < chosen.shape[axis])
-            destination += source * math.prod(chosen.shape[axis + 1 :])
-        np.putmask(destination, ~valid, -1)
-        return destination
-    destination = np.arange(chosen.size, dtype=np.intp).reshape(chosen.shape)
-    valid_destination: np.ndarray | None = None
-    for offset_axis, (axis, mode) in enumerate(
-        zip(neighborhood.axes, neighborhood.modes, strict=True)
-    ):
-        length = chosen.shape[axis]
-        positions = np.arange(length)
-        offsets = np.asarray([entry[2][offset_axis] for entry in entries])
-        indices, valid = _normalize_indices(
-            positions[np.newaxis, :] + offsets[:, np.newaxis],
-            length=length,
-            mode=mode,
-        )
-        if valid is not None:
-            indices = np.where(valid, indices, -1)
-        broadcast_shape = [len(entries), *((1,) * chosen.ndim)]
-        broadcast_shape[axis + 1] = length
-        chosen_index = chosen[np.newaxis, ...]
-        source = np.take_along_axis(
-            indices.reshape(broadcast_shape),
-            chosen_index,
-            axis=0,
-        )[0]
-        position_shape = [1] * chosen.ndim
-        position_shape[axis] = length
-        destination += (source - positions.reshape(position_shape)) * math.prod(
-            chosen.shape[axis + 1 :]
-        )
-        if valid is not None:
-            source_valid = source >= 0
-            valid_destination = (
-                source_valid if valid_destination is None else valid_destination & source_valid
-            )
-    if valid_destination is not None:
-        destination = np.where(valid_destination, destination, -1)
-    return destination
-
-
-def _homogeneous_selection_jvp_numpy(
-    output: np.ndarray,
-    input: np.ndarray,
-    input_tangent: np.ndarray | None,
-    structure: np.ndarray,
-    structure_tangent: np.ndarray | None,
-    cval: np.ndarray,
-    cval_tangent: np.ndarray | None,
-    *,
-    neighborhood: _Neighborhood,
-    dilation: bool,
-) -> np.ndarray | None:
-    entries = tuple(_neighborhood_entries(neighborhood, dilation=dilation))
-    chosen_entry = _homogeneous_selection_entry_numpy(
-        input,
-        structure,
-        cval,
-        output,
-        entries=entries,
-        neighborhood=neighborhood,
-        dilation=dilation,
-    )
-    if chosen_entry is None:
-        return None
-    if input_tangent is None and structure_tangent is None and cval_tangent is None:
-        return np.zeros_like(output)
-    result: Any = 0
-    if input_tangent is not None or cval_tangent is not None:
-        chosen_source = _chosen_entry_destinations_numpy(
-            chosen_entry,
-            entries,
-            neighborhood,
-        )
-        valid_source = chosen_source >= 0
-        tangent_input = _zero_tangent(input, input_tangent)
-        selected_input = tangent_input.ravel()[np.clip(chosen_source, 0, input.size - 1)]
-        result = np.where(
-            valid_source,
-            selected_input,
-            0 if cval_tangent is None else cval_tangent,
-        )
-    if structure_tangent is not None:
-        entry_indices = np.asarray([entry[0] for entry in entries], dtype=np.intp)
-        selected_structure = structure_tangent.ravel()[entry_indices[chosen_entry]]
-        result = result + selected_structure if dilation else result - selected_structure
-    return _cast_tangent(result, output)
-
-
-def _unique_candidate_selection_transpose_numpy(
-    cotangent: np.ndarray,
-    input: np.ndarray,
-    structure: np.ndarray,
-    cval: np.ndarray,
-    output: np.ndarray,
-    *,
-    neighborhood: _Neighborhood,
-    dilation: bool,
-    active_inputs: set[int],
-) -> _SelectionPullback | None:
-    entries = tuple(_neighborhood_entries(neighborhood, dilation=dilation))
-    chosen_entry = _homogeneous_selection_entry_numpy(
-        input,
-        structure,
-        cval,
-        output,
-        entries=entries,
-        neighborhood=neighborhood,
-        dilation=dilation,
-    )
-    if chosen_entry is not None:
-        flat_cotangent = cotangent.ravel()
-        needs_source = bool(active_inputs & {0, 2})
-        chosen_source = (
-            _chosen_entry_destinations_numpy(
-                chosen_entry,
-                entries,
-                neighborhood,
-            )
-            if needs_source
-            else None
-        )
-        valid_source = None if chosen_source is None else chosen_source.ravel() >= 0
-        input_cotangent = (
-            _scatter_numpy(
-                cast("np.ndarray", chosen_source).ravel()[cast("np.ndarray", valid_source)],
-                flat_cotangent[cast("np.ndarray", valid_source)],
-                size=input.size,
-                dtype=cotangent.dtype,
-            ).reshape(input.shape)
-            if 0 in active_inputs
-            else np.zeros_like(input)
-        )
-        entry_indices = np.asarray([entry[0] for entry in entries], dtype=np.intp)
-        structure_cotangent = (
-            _scatter_numpy(
-                entry_indices[chosen_entry.ravel()],
-                (1 if dilation else -1) * flat_cotangent,
-                size=structure.size,
-                dtype=cotangent.dtype,
-            ).reshape(structure.shape)
-            if 1 in active_inputs
-            else np.zeros_like(structure)
-        )
-        boundary_cotangent = (
-            np.sum(flat_cotangent[~cast("np.ndarray", valid_source)])
-            if 2 in active_inputs
-            else np.zeros_like(cval)
-        )
-        return (
-            _project_cotangent(input_cotangent, input, output),
-            _project_cotangent(structure_cotangent, structure, output),
-            _project_cotangent(boundary_cotangent, cval, output),
-        )
-    source_indices = np.arange(input.size, dtype=np.intp).reshape(input.shape)
-    flat_input = input.ravel()
-    chosen_source = np.full(input.shape, -2, dtype=np.intp)
-    track_entry = 1 in active_inputs
-    chosen_entry = np.full(input.shape, -1, dtype=np.intp) if track_entry else None
-    has_constant_mode = any(_mode_name(mode) == "constant" for mode in neighborhood.modes)
-    conflict = np.zeros(input.shape, dtype=bool)
-    for flat_index, index, offsets in entries:
-        source = _neighborhood_destination_numpy(
-            source_indices,
-            neighborhood,
-            offsets,
-        )
-        candidate = (
-            np.where(
-                source >= 0,
-                flat_input[np.clip(source, 0, input.size - 1)],
-                cval,
-            )
-            if has_constant_mode
-            else flat_input[source]
-        )
-        candidate = candidate + structure[index] if dilation else candidate - structure[index]
-        if candidate.dtype != output.dtype:
-            return None
-        winner = candidate == output
-        unset = chosen_source == -2
-        conflict |= winner & ~unset & (chosen_source != source)
-        if chosen_entry is not None:
-            conflict |= winner & ~unset & (chosen_entry != flat_index)
-        chosen_source = np.where(winner & unset, source, chosen_source)
-        if chosen_entry is not None:
-            chosen_entry = np.where(winner & unset, flat_index, chosen_entry)
-    if np.any(conflict) or np.any(chosen_source == -2):
-        return None
-    flat_cotangent = cotangent.ravel()
-    valid_source = chosen_source.ravel() >= 0
-    input_cotangent = (
-        _scatter_numpy(
-            chosen_source.ravel()[valid_source],
-            flat_cotangent[valid_source],
-            size=input.size,
-            dtype=cotangent.dtype,
-        ).reshape(input.shape)
-        if 0 in active_inputs
-        else np.zeros_like(input)
-    )
-    structure_cotangent = (
-        _scatter_numpy(
-            cast("np.ndarray", chosen_entry).ravel(),
-            (1 if dilation else -1) * flat_cotangent,
-            size=structure.size,
-            dtype=cotangent.dtype,
-        ).reshape(structure.shape)
-        if 1 in active_inputs
-        else np.zeros_like(structure)
-    )
-    boundary_cotangent = (
-        np.sum(flat_cotangent[~valid_source]) if 2 in active_inputs else np.zeros_like(cval)
-    )
-    return (
-        _project_cotangent(input_cotangent, input, output),
-        _project_cotangent(structure_cotangent, structure, output),
-        _project_cotangent(boundary_cotangent, cval, output),
     )
 
 
@@ -1035,54 +487,70 @@ def _limited_unique_values_numpy(
     return np.asarray(selected_values, dtype=value.dtype) if np.all(covered) else None
 
 
-def _plateau_selection_data_numpy(
+class _Plateau:
+    """The few values a plateau-heavy selection outputs, one leading entry each.
+
+    Box filters count each value's winning slots in every window at once.
+    """
+
+    def __init__(
+        self,
+        input: np.ndarray,
+        cval: np.ndarray,
+        output: np.ndarray,
+        selector: _Selector,
+        values: np.ndarray,
+    ) -> None:
+        self.selector = selector
+        values = values.reshape((values.size, *((1,) * input.ndim)))
+        self.winners = input == values
+        self.output_winners = output == values
+        self.boundary_winners = values == np.asarray(cval, dtype=output.dtype)
+        # Dilation mirrors the window, so an even extent also shifts its origin by
+        # one to count the same slots that ``_neighborhood_entries`` enumerates.
+        self.origins = tuple(
+            -origin - (1 - size % 2) if selector.dilation else origin
+            for origin, size in zip(selector.origins, selector.shape, strict=True)
+        )
+        self.axes = tuple(axis + 1 for axis in selector.axes)
+        # The fraction of each window that reads the constant boundary.
+        self.boundary: np.ndarray | None = None
+        if any(_mode_name(mode) == "constant" for mode in selector.modes):
+            self.boundary = 1 - self.box(np.ones((1, *input.shape)))[0]
+        # Two values that cover the input need one count; the other is its complement.
+        self.pair = bool(
+            values.size == 2 and self.boundary is None and np.all(self.winners[0] | self.winners[1])
+        )
+
+    def box(self, payload: np.ndarray) -> np.ndarray:
+        """Average each leading entry of ``payload`` over every window."""
+        return _scipy_ndimage.uniform_filter(
+            payload,
+            size=self.selector.shape,
+            mode=self.selector.modes,
+            cval=0,
+            origin=self.origins,
+            axes=self.axes,
+        )
+
+
+def _plateau_numpy(
     input: np.ndarray,
     cval: np.ndarray,
     output: np.ndarray,
-    *,
-    neighborhood: _Neighborhood,
-    dilation: bool,
-) -> (
-    tuple[
-        np.ndarray,
-        np.ndarray,
-        np.ndarray,
-        tuple[int, ...],
-        tuple[int, ...],
-        np.ndarray | None,
-    ]
-    | None
-):
-    if not all(neighborhood.footprint) or input.dtype != output.dtype:
+    selector: _Selector,
+    derivatives: tuple[Any, ...],
+) -> _Plateau | None:
+    # SciPy's box filters keep one running sum per line. A non-finite derivative
+    # would reach every later window on its line, so the window engine handles
+    # it instead. Finite results are accurate to about eps times the largest
+    # derivative on the line, not entry by entry.
+    if not all(selector.footprint) or input.dtype != output.dtype or not _all_finite(*derivatives):
         return None
-    selected_values = _limited_unique_values_numpy(output)
-    if selected_values is None or selected_values.size == 0:
+    values = _limited_unique_values_numpy(output)
+    if values is None or values.size == 0:
         return None
-    value_shape = (selected_values.size, *((1,) * input.ndim))
-    winners = input[np.newaxis, ...] == selected_values.reshape(value_shape)
-    boundary_value = np.asarray(cval, dtype=output.dtype)
-    boundary_winners = selected_values == boundary_value
-    filter_origins = tuple(-origin if dilation else origin for origin in neighborhood.origins)
-    filter_axes = tuple(axis + 1 for axis in neighborhood.axes)
-    boundary_fraction: np.ndarray | None = None
-    if any(_mode_name(mode) == "constant" for mode in neighborhood.modes):
-        valid_fraction = _scipy_ndimage.uniform_filter(
-            np.ones_like(input, dtype=float),
-            size=neighborhood.shape,
-            mode=neighborhood.modes,
-            cval=0,
-            origin=filter_origins,
-            axes=neighborhood.axes,
-        )
-        boundary_fraction = 1 - valid_fraction
-    return (
-        selected_values,
-        winners,
-        boundary_winners,
-        filter_origins,
-        filter_axes,
-        boundary_fraction,
-    )
+    return _Plateau(input, cval, output, selector, values)
 
 
 def _plateau_selection_jvp_numpy(
@@ -1091,55 +559,29 @@ def _plateau_selection_jvp_numpy(
     input_tangent: np.ndarray,
     cval: np.ndarray,
     cval_tangent: Any,
-    *,
-    neighborhood: _Neighborhood,
-    dilation: bool,
+    selector: _Selector,
 ) -> np.ndarray | None:
-    data = _plateau_selection_data_numpy(
-        input,
-        cval,
-        output,
-        neighborhood=neighborhood,
-        dilation=dilation,
-    )
-    if data is None:
+    plateau = _plateau_numpy(input, cval, output, selector, (input_tangent, cval_tangent))
+    if plateau is None:
         return None
-    selected_values, winners, boundary_winners, filter_origins, filter_axes, boundary = data
-    winner_values = winners.astype(input_tangent.dtype)
-    complementary_pair = (
-        selected_values.size == 2 and boundary is None and np.all(winners[0] | winners[1])
-    )
-    if complementary_pair:
-        payload = np.stack((winner_values[0], winner_values[0] * input_tangent, input_tangent))
-    else:
-        payload = np.concatenate(
-            (winner_values, winner_values * input_tangent[np.newaxis, ...]),
-            axis=0,
+    winner_values = plateau.winners.astype(input_tangent.dtype)
+    if plateau.pair:
+        first_count, first_sum, total_sum = plateau.box(
+            np.stack((winner_values[0], winner_values[0] * input_tangent, input_tangent))
         )
-    filtered = _scipy_ndimage.uniform_filter(
-        payload,
-        size=neighborhood.shape,
-        mode=neighborhood.modes,
-        cval=0,
-        origin=filter_origins,
-        axes=filter_axes,
-    )
-    if complementary_pair:
-        first_count, first_sum, total_sum = filtered
         winner_count = np.stack((first_count, 1 - first_count))
         tangent_sum = np.stack((first_sum, total_sum - first_sum))
     else:
-        winner_count, tangent_sum = np.split(filtered, 2, axis=0)
-    if boundary is not None:
-        boundary_terms = boundary_winners.reshape((selected_values.size, *((1,) * input.ndim)))
-        winner_count = winner_count + boundary_terms * boundary
-        tangent_sum = tangent_sum + boundary_terms * boundary * cval_tangent
-    output_winners = output[np.newaxis, ...] == selected_values.reshape(
-        (selected_values.size, *((1,) * input.ndim))
-    )
+        winner_count, tangent_sum = np.split(
+            plateau.box(np.concatenate((winner_values, winner_values * input_tangent))), 2
+        )
+    if plateau.boundary is not None:
+        boundary = plateau.boundary_winners * plateau.boundary
+        winner_count = winner_count + boundary
+        tangent_sum = tangent_sum + boundary * cval_tangent
     result = np.sum(
         np.where(
-            output_winners,
+            plateau.output_winners,
             tangent_sum / np.where(winner_count == 0, 1, winner_count),
             0,
         ),
@@ -1154,171 +596,71 @@ def _plateau_selection_transpose_numpy(
     structure: np.ndarray,
     cval: np.ndarray,
     output: np.ndarray,
-    *,
-    neighborhood: _Neighborhood,
-    dilation: bool,
+    selector: _Selector,
     active_inputs: set[int],
 ) -> _SelectionPullback | None:
-    if 1 in active_inputs:
+    plateau = _plateau_numpy(input, cval, output, selector, (cotangent,))
+    if plateau is None:
         return None
-    data = _plateau_selection_data_numpy(
-        input,
-        cval,
-        output,
-        neighborhood=neighborhood,
-        dilation=dilation,
-    )
-    if data is None:
-        return None
-    selected_values, winners, boundary_winners, filter_origins, filter_axes, boundary = data
-    filter_size = math.prod(neighborhood.shape)
-    complementary_pair = (
-        selected_values.size == 2 and boundary is None and np.all(winners[0] | winners[1])
-    )
-    winner_count = _scipy_ndimage.uniform_filter(
-        (winners[:1] if complementary_pair else winners).astype(cotangent.dtype),
-        size=neighborhood.shape,
-        mode=neighborhood.modes,
-        cval=0,
-        origin=filter_origins,
-        axes=filter_axes,
-    )
-    if complementary_pair:
-        winner_count = np.concatenate((winner_count, 1 - winner_count), axis=0)
-    if boundary is not None:
-        winner_count = (
-            winner_count
-            + boundary_winners.reshape((selected_values.size, *((1,) * input.ndim))) * boundary
-        )
+    filter_size = math.prod(selector.shape)
+    winners = plateau.winners[:1] if plateau.pair else plateau.winners
+    winner_count = plateau.box(winners.astype(cotangent.dtype))
+    if plateau.pair:
+        winner_count = np.concatenate((winner_count, 1 - winner_count))
+    if plateau.boundary is not None:
+        winner_count = winner_count + plateau.boundary_winners * plateau.boundary
     winner_count = winner_count * filter_size
-    output_winners = output[np.newaxis, ...] == selected_values.reshape(
-        (selected_values.size, *((1,) * input.ndim))
-    )
     active = np.where(
-        output_winners,
-        cotangent[np.newaxis, ...] / np.where(winner_count == 0, 1, winner_count),
+        plateau.output_winners,
+        cotangent / np.where(winner_count == 0, 1, winner_count),
         0,
     )
     boundary_cotangent = (
-        np.sum(
-            active
-            * boundary_winners.reshape((selected_values.size, *((1,) * input.ndim)))
-            * boundary
-            * filter_size
-        )
-        if boundary is not None and 2 in active_inputs
+        np.sum(active * plateau.boundary_winners * plateau.boundary * filter_size)
+        if plateau.boundary is not None and 2 in active_inputs
         else np.zeros_like(cval)
     )
-    symmetric_reflect = all(
-        _mode_name(mode) == "reflect" for mode in neighborhood.modes
-    ) and not any(neighborhood.origins)
-    if symmetric_reflect:
-        routed = (
-            _scipy_ndimage.uniform_filter(
-                active,
-                size=neighborhood.shape,
-                mode="reflect",
-                axes=filter_axes,
-            )
-            * filter_size
-        )
+    windows = tuple(zip(plateau.origins, selector.shape, strict=True))
+    if all(
+        size % 2 and not origin and _mode_name(mode) in {"constant", "reflect", "wrap"}
+        for (origin, size), mode in zip(windows, selector.modes, strict=True)
+    ):
+        # A centered box is its own adjoint under these boundary modes.
+        routed = filter_size * plateau.box(active)
     else:
-        routed = active
-        configurations = tuple(
-            zip(
-                neighborhood.axes,
-                neighborhood.shape,
-                neighborhood.origins,
-                neighborhood.modes,
-                strict=True,
-            )
+        # Each counting box reads the offsets spanned by ``extents``. Its
+        # adjoint is the mirrored box over a zero-padded cotangent, whose
+        # padding then folds back onto the samples each boundary mode read.
+        extents = tuple(
+            (-(size // 2) - origin, size - 1 - size // 2 - origin) for origin, size in windows
         )
-        for axis, size, origin, mode in reversed(configurations):
-            routed, _boundary = _stencil_input_transpose_numpy(
-                routed,
-                np.ones(size, dtype=cotangent.dtype),
-                axes=(axis + 1,),
-                origins=(origin,),
-                modes=(mode,),
-                convolution=dilation,
-            )
+        mirrored_origins = tuple(-origin - (1 - size % 2) for origin, size in windows)
+        routed, _boundary = _padded_transpose_numpy(
+            active,
+            lambda embedded: (
+                filter_size
+                * _scipy_ndimage.uniform_filter(
+                    embedded,
+                    size=selector.shape,
+                    mode="constant",
+                    cval=0,
+                    origin=mirrored_origins,
+                    axes=plateau.axes,
+                )
+            ),
+            axes=plateau.axes,
+            extents=extents,
+            modes=selector.modes,
+        )
     input_cotangent = (
-        np.sum(np.where(winners, routed, 0), axis=0) if 0 in active_inputs else np.zeros_like(input)
+        np.sum(np.where(plateau.winners, routed, 0), axis=0)
+        if 0 in active_inputs
+        else np.zeros_like(input)
     )
     return (
         _project_cotangent(input_cotangent, input, output),
         np.zeros_like(structure),
         _project_cotangent(boundary_cotangent, cval, output),
-    )
-
-
-def _fast_selection_transpose_numpy(
-    cotangent: np.ndarray,
-    input: np.ndarray,
-    structure: np.ndarray,
-    cval: np.ndarray,
-    output: np.ndarray,
-    *,
-    neighborhood: _Neighborhood,
-    dilation: bool,
-    has_structure: bool,
-    active_inputs: set[int],
-) -> _SelectionPullback | None:
-    if has_structure:
-        return _unique_candidate_selection_transpose_numpy(
-            cotangent,
-            input,
-            structure,
-            cval,
-            output,
-            neighborhood=neighborhood,
-            dilation=dilation,
-            active_inputs=active_inputs,
-        )
-    if 1 in active_inputs:
-        return None
-    if len(neighborhood.axes) == 1 and sum(neighborhood.footprint) <= 9:
-        axis_result = _small_axis_selection_transpose_numpy(
-            cotangent,
-            input,
-            structure,
-            cval,
-            output,
-            entries=tuple(_neighborhood_entries(neighborhood, dilation=dilation)),
-            neighborhood=neighborhood,
-        )
-        if axis_result is not None:
-            return axis_result
-    plateau_result = _plateau_selection_transpose_numpy(
-        cotangent,
-        input,
-        structure,
-        cval,
-        output,
-        neighborhood=neighborhood,
-        dilation=dilation,
-        active_inputs=active_inputs,
-    )
-    if plateau_result is not None:
-        return plateau_result
-    unique_result = _unique_value_selection_transpose_numpy(
-        cotangent,
-        input,
-        structure,
-        cval,
-        output,
-    )
-    if unique_result is not None:
-        return unique_result
-    return _small_flat_selection_transpose_numpy(
-        cotangent,
-        input,
-        structure,
-        cval,
-        output,
-        entries=tuple(_neighborhood_entries(neighborhood, dilation=dilation)),
-        neighborhood=neighborhood,
-        active_inputs=active_inputs,
     )
 
 
@@ -1328,96 +670,54 @@ def _selection_transpose_numpy(
     structure: np.ndarray,
     cval: np.ndarray,
     output: np.ndarray,
-    *,
-    neighborhood: _Neighborhood,
-    selection: str,
-    dilation: bool,
-    rank: int | None,
-    has_structure: bool,
+    selector: _Selector,
     active_input_indices: tuple[int, ...] | None = None,
 ) -> _SelectionPullback:
     if input.size == 0:
         return np.zeros_like(input), np.zeros_like(structure), np.zeros_like(cval)
     active_inputs = {0, 1, 2} if active_input_indices is None else set(active_input_indices)
-    fast_result = _fast_selection_transpose_numpy(
-        cotangent,
-        input,
-        structure,
-        cval,
-        output,
-        neighborhood=neighborhood,
-        dilation=dilation,
-        has_structure=has_structure,
-        active_inputs=active_inputs,
-    )
-    if fast_result is not None:
-        return fast_result
-    entries = tuple(_neighborhood_entries(neighborhood, dilation=dilation))
-    if not entries:
-        return np.zeros_like(input), np.zeros_like(structure), np.zeros_like(cval)
-    destination_stack = _neighborhood_destinations_numpy(input.shape, entries, neighborhood)
-    valid_destinations = destination_stack >= 0
-    flat_input = input.ravel()
-    values = np.where(
-        valid_destinations,
-        flat_input[np.clip(destination_stack, 0, input.size - 1)],
-        cval,
-    )
-    if has_structure:
-        deltas = np.asarray([structure[index] for _flat, index, _offsets in entries])
-        deltas = deltas.reshape((len(entries), *((1,) * input.ndim)))
-        values = values + deltas if dilation else values - deltas
-    if values.dtype == output.dtype:
-        selected = output
-    elif rank is None:
-        selected = values[0]
-        reducer = np.maximum if selection == "maximum" else np.minimum
-        for candidate in values[1:]:
-            selected = reducer(selected, candidate)
-    else:
-        selected = np.sort(values, axis=0)[rank]
-    winners = values == selected
-    winner_count = np.sum(winners, axis=0)
-    active = np.where(
-        winners,
-        cotangent[np.newaxis, ...] / winner_count,
-        np.zeros_like(values),
-    )
-    flat_destinations = destination_stack.ravel()
-    weights = active.ravel()
-    flat_winners = winners.ravel()
-    valid = flat_destinations >= 0
-    live = valid & flat_winners
-    if 0 not in active_inputs:
-        input_cotangent = np.zeros_like(input)
-    else:
-        input_cotangent = _scatter_numpy(
-            flat_destinations[live],
-            weights[live],
-            size=input.size,
-            dtype=cotangent.dtype,
-        ).reshape(input.shape)
-    boundary_cotangent = (
-        np.sum(weights[~valid & flat_winners], dtype=cotangent.dtype)
-        if 2 in active_inputs
-        else np.zeros_like(cval)
-    )
-    if has_structure and 1 in active_inputs:
-        active_sums = np.sum(active, axis=tuple(range(1, active.ndim)))
-        structure_terms = np.zeros(math.prod(neighborhood.shape), dtype=cotangent.dtype)
-        for (flat_index, _index, _offsets), contribution in zip(
-            entries,
-            active_sums,
-            strict=True,
-        ):
-            structure_terms[flat_index] = (1 if dilation else -1) * contribution
-        structure_cotangent = structure_terms.reshape(structure.shape)
-    else:
-        structure_cotangent = np.zeros_like(structure)
+    if not selector.has_structure:
+        fast_result = _plateau_selection_transpose_numpy(
+            cotangent, input, structure, cval, output, selector, active_inputs
+        )
+        if fast_result is None and sum(selector.footprint) > _UNIQUE_VALUE_SLOTS:
+            fast_result = _unique_value_selection_transpose_numpy(
+                cotangent, input, structure, cval, output
+            )
+        if fast_result is not None:
+            return fast_result
+    slots = _WindowSlots(input, structure, cval, output, selector)
+    # NaN outputs have no winning slot and route nothing.
+    share = cotangent / np.maximum(slots.tally()[1], 1)
+    finite = _all_finite(share)
+    padded_cotangent = np.zeros(slots.padded.shape, share.dtype)
+    structure_cotangent = np.zeros(structure.shape, share.dtype)
+    routed = bool(active_inputs & {0, 2})
+    weighted = selector.has_structure and 1 in active_inputs
+    for (flat_index, _index, _offsets), view, winner in zip(
+        slots.entries,
+        slots.views,
+        slots.winners(),
+        strict=True,
+    ):
+        routed_share = _winning(winner, share, finite=finite)
+        if routed:
+            padded_cotangent[view] += routed_share
+        if weighted:
+            structure_cotangent.flat[flat_index] = np.sum(routed_share)
+    input_cotangent, boundary_cotangent = slots.fold(padded_cotangent)
     return (
-        _project_cotangent(input_cotangent, input, output),
-        _project_cotangent(structure_cotangent, structure, output),
-        _project_cotangent(boundary_cotangent, cval, output),
+        _project_cotangent(input_cotangent, input, output)
+        if 0 in active_inputs
+        else np.zeros_like(input),
+        _project_cotangent(
+            structure_cotangent if selector.dilation else -structure_cotangent, structure, output
+        )
+        if weighted
+        else np.zeros_like(structure),
+        _project_cotangent(boundary_cotangent, cval, output)
+        if 2 in active_inputs
+        else np.zeros_like(cval),
     )
 
 
@@ -1455,18 +755,11 @@ def _selection_transpose_primitive(
     selected_input_indices: tuple[int, ...] | None = None,
 ) -> tuple[Any, Any, Any]:
     _require_numpy_values("_selection_transpose", cotangent, input, structure, cval, output)
+    selector = _Selector(
+        axes, shape, footprint, origins, modes, selection, dilation, rank, has_structure
+    )
     return _selection_transpose_numpy(
-        cotangent,
-        input,
-        structure,
-        cval,
-        output,
-        neighborhood=_Neighborhood(axes, shape, footprint, origins, modes),
-        selection=selection,
-        dilation=dilation,
-        rank=rank,
-        has_structure=has_structure,
-        active_input_indices=selected_input_indices,
+        cotangent, input, structure, cval, output, selector, selected_input_indices
     )
 
 
@@ -1477,20 +770,9 @@ def _selection_transpose_abstract(
     structure: AbstractValue,
     cval: AbstractValue,
     output: AbstractValue,
-    *,
-    axes: tuple[int, ...],
-    shape: tuple[int, ...],
-    footprint: tuple[bool, ...],
-    origins: tuple[int, ...],
-    modes: tuple[str, ...],
-    selection: str,
-    dilation: bool,
-    rank: int | None,
-    has_structure: bool,
-    selected_input_indices: tuple[int, ...] | None,
+    **static: Any,
 ) -> tuple[ArraySpec, ArraySpec, ArraySpec]:
-    del cotangent, output, axes, shape, footprint, origins, modes
-    del selection, dilation, rank, has_structure, selected_input_indices
+    del cotangent, output, static
     return input.spec, structure.spec, cval.spec
 
 
@@ -1499,38 +781,13 @@ def _selection_transpose_jvp(
     output: Any,
     primals: tuple[Any, ...],
     tangents: tuple[Any | None, ...],
-    *,
-    axes: tuple[int, ...],
-    shape: tuple[int, ...],
-    footprint: tuple[bool, ...],
-    origins: tuple[int, ...],
-    modes: tuple[str, ...],
-    selection: str,
-    dilation: bool,
-    rank: int | None,
-    has_structure: bool,
-    selected_input_indices: tuple[int, ...] | None,
+    **static: Any,
 ) -> tuple[Any, Any, Any]:
     _cotangent, input, structure, cval, primal_output = primals
-    cotangent_tangent = tangents[0]
-    if cotangent_tangent is None:
+    if tangents[0] is None:
         return tuple(np.zeros_like(value) for value in output)
     return _selection_transpose_primitive(
-        cotangent_tangent,
-        input,
-        structure,
-        cval,
-        primal_output,
-        axes=axes,
-        shape=shape,
-        footprint=footprint,
-        origins=origins,
-        modes=modes,
-        selection=selection,
-        dilation=dilation,
-        rank=rank,
-        has_structure=has_structure,
-        selected_input_indices=selected_input_indices,
+        tangents[0], input, structure, cval, primal_output, **static
     )
 
 
@@ -1540,16 +797,8 @@ def _selection_transpose_transpose(
     primals: tuple[Any, ...],
     output: Any,
     *,
-    axes: tuple[int, ...],
-    shape: tuple[int, ...],
-    footprint: tuple[bool, ...],
-    origins: tuple[int, ...],
-    modes: tuple[str, ...],
-    selection: str,
-    dilation: bool,
-    rank: int | None,
-    has_structure: bool,
     selected_input_indices: tuple[int, ...] | None,
+    **static: Any,
 ) -> tuple[Any, Any, Any, Any, Any]:
     del output
     _cotangent, input, structure, cval, primal_output = primals
@@ -1564,11 +813,7 @@ def _selection_transpose_transpose(
             structure_cotangent if 1 in selected else None,
             cval,
             cval_cotangent if 2 in selected else None,
-            neighborhood=_Neighborhood(axes, shape, footprint, origins, modes),
-            selection=selection,
-            dilation=dilation,
-            rank=rank,
-            has_structure=has_structure,
+            _Selector(**static),
         ),
         np.zeros_like(input),
         np.zeros_like(structure),
@@ -1583,44 +828,14 @@ def _selection_transpose(
     structure: Any,
     cval: Any,
     output: Any,
-    *,
-    neighborhood: _Neighborhood,
-    selection: str,
-    dilation: bool,
-    rank: int | None,
-    has_structure: bool,
+    selector: _Selector,
     active_input_indices: tuple[int, ...] | None = None,
 ) -> tuple[Any, Any, Any]:
     if not np.issubdtype(_operand_dtype(output), np.inexact):
         return np.zeros_like(input), np.zeros_like(structure), np.zeros_like(cval)
-    if not any(_is_traced_value(value) for value in (cotangent, input, structure, cval, output)):
-        return _selection_transpose_numpy(
-            cotangent,
-            input,
-            structure,
-            cval,
-            output,
-            neighborhood=neighborhood,
-            selection=selection,
-            dilation=dilation,
-            rank=rank,
-            has_structure=has_structure,
-            active_input_indices=active_input_indices,
-        )
+    operands = (cotangent, input, structure, cval, output)
+    if not any(_is_traced_value(value) for value in operands):
+        return _selection_transpose_numpy(*operands, selector, active_input_indices)
     return _selection_transpose_primitive(
-        cotangent,
-        input,
-        structure,
-        cval,
-        output,
-        axes=neighborhood.axes,
-        shape=neighborhood.shape,
-        footprint=neighborhood.footprint,
-        origins=neighborhood.origins,
-        modes=neighborhood.modes,
-        selection=selection,
-        dilation=dilation,
-        rank=rank,
-        has_structure=has_structure,
-        selected_input_indices=active_input_indices,
+        *operands, **asdict(selector), selected_input_indices=active_input_indices
     )

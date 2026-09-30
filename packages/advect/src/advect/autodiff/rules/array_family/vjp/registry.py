@@ -1,8 +1,10 @@
 """Explicit array-family transposes and non-differentiability contracts.
 
-Most operations rely on structural transposition of their JVP. The explicit
-rules below are the exceptional real-linear or performance-critical adjoints
-that earn a direct implementation.
+Diagonal elementwise operations transpose their shared JVP partials in closed
+form, which is measured to be an order of magnitude faster than tracing and
+transposing their JVPs. Other operations rely on structural transposition of
+their JVP; the explicit rules below are the exceptional real-linear or
+performance-critical adjoints that earn a direct implementation.
 """
 
 from __future__ import annotations
@@ -10,27 +12,17 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from advect.autodiff.rules.array_family._backend_runtime import wrap_array_family_vjp_rule
+from advect.autodiff.rules.array_family.jvp.elementwise_partials import ELEMENTWISE_PARTIALS
 from advect.autodiff.rules.array_family.vjp.elementwise import (
     _vjp_absolute,
-    _vjp_add,
     _vjp_astype,
     _vjp_conjugate,
-    _vjp_cos,
-    _vjp_divide,
-    _vjp_exp,
-    _vjp_identity,
     _vjp_imag,
     _vjp_ldexp,
-    _vjp_multiply,
-    _vjp_negative,
-    _vjp_power,
     _vjp_real,
     _vjp_sign,
-    _vjp_sin,
-    _vjp_subtract,
     _vjp_where,
-    _vjp_zero,
+    make_diagonal_vjp_from_partials,
 )
 from advect.autodiff.rules.array_family.vjp.fft import (
     _vjp_fft,
@@ -50,6 +42,7 @@ from advect.autodiff.rules.array_family.vjp.fft import (
 )
 from advect.autodiff.rules.array_family.vjp.gather import (
     _vjp_bincount,
+    _vjp_scatter_add,
     _vjp_take,
     _vjp_take_along_axis,
 )
@@ -125,30 +118,12 @@ from advect.autodiff.rules.array_family.vjp.signal import (
 _VJPFn = Callable[..., tuple[Any | None, ...]]
 
 _EXCEPTION_VJP_REGISTRATIONS: tuple[tuple[str, _VJPFn, bool, bool], ...] = (
-    ("array.add", _vjp_add, False, False),
-    ("array.subtract", _vjp_subtract, False, False),
-    ("array.negative", _vjp_negative, False, False),
-    ("array.positive", _vjp_identity, False, False),
     ("array.conjugate", _vjp_conjugate, False, False),
     ("array.astype", _vjp_astype, True, False),
-    ("array.real", _vjp_real, True, False),
+    ("array.real", _vjp_real, False, False),
     ("array.where", _vjp_where, True, False),
-    ("advect.copy", _vjp_identity, False, False),
-    ("array.multiply", _vjp_multiply, True, False),
-    ("array.divide", _vjp_divide, True, False),
-    ("array_ext.true_divide", _vjp_divide, True, False),
-    ("array.power", _vjp_power, True, True),
-    ("array.sin", _vjp_sin, True, False),
-    ("array.cos", _vjp_cos, True, False),
-    ("array.exp", _vjp_exp, False, True),
     ("array_ext.ldexp", _vjp_ldexp, True, False),
     ("array.sign", _vjp_sign, True, False),
-    ("array.floor", _vjp_zero, True, False),
-    ("array.ceil", _vjp_zero, True, False),
-    ("array.trunc", _vjp_zero, True, False),
-    ("array.rint", _vjp_zero, True, False),
-    ("array_ext.spacing", _vjp_zero, True, False),
-    ("array.floor_divide", _vjp_zero, True, False),
     ("array.reshape", _vjp_reshape, True, False),
     ("array.transpose", _vjp_transpose, False, False),
     ("array.moveaxis", _vjp_moveaxis, False, False),
@@ -164,12 +139,13 @@ _EXCEPTION_VJP_REGISTRATIONS: tuple[tuple[str, _VJPFn, bool, bool], ...] = (
     ("array_ext.bincount", _vjp_bincount, True, False),
     ("array.take", _vjp_take, True, False),
     ("array.take_along_axis", _vjp_take_along_axis, True, False),
+    ("advect.scatter_add", _vjp_scatter_add, True, False),
     ("array.absolute", _vjp_absolute, True, False),
     ("array.imag", _vjp_imag, True, False),
-    ("array.matmul", _vjp_matmul, True, True),
-    ("array_ext.dot", _vjp_dot, True, True),
-    ("array.tensordot", _vjp_tensordot, True, True),
-    ("array_ext.einsum", _vjp_einsum, True, True),
+    ("array.matmul", _vjp_matmul, True, False),
+    ("array_ext.dot", _vjp_dot, True, False),
+    ("array.tensordot", _vjp_tensordot, True, False),
+    ("array_ext.einsum", _vjp_einsum, True, False),
     ("array_ext.convolve", _vjp_convolve, True, False),
     ("array_ext.correlate", _vjp_correlate, True, False),
     ("array.concatenate", _vjp_concatenate, True, False),
@@ -187,7 +163,7 @@ _EXCEPTION_VJP_REGISTRATIONS: tuple[tuple[str, _VJPFn, bool, bool], ...] = (
     ("array.atleast_1d", _vjp_atleast, True, False),
     ("array.atleast_2d", _vjp_atleast, True, False),
     ("array.atleast_3d", _vjp_atleast, True, False),
-    ("array_ext.diag", _vjp_diag, False, False),
+    ("array_ext.diag", _vjp_diag, True, False),
     ("array.diagonal", _vjp_diagonal, True, False),
     ("array.trace", _vjp_trace, True, False),
     ("array.cumsum", _vjp_cumsum, True, False),
@@ -209,7 +185,7 @@ _EXCEPTION_VJP_REGISTRATIONS: tuple[tuple[str, _VJPFn, bool, bool], ...] = (
     ("array_ext.linalg.qr", _vjp_qr, True, True),
     ("array_ext.linalg.svd", _vjp_svd, True, True),
     ("array_ext.linalg.svdvals", _vjp_svdvals, True, False),
-    ("array.vecdot", _vjp_vecdot, True, True),
+    ("array.vecdot", _vjp_vecdot, True, False),
     ("array_ext.fft.fft", _vjp_fft, True, False),
     ("array_ext.fft.ifft", _vjp_ifft, True, False),
     ("array_ext.fft.fft2", _vjp_fft2, True, False),
@@ -226,126 +202,88 @@ _EXCEPTION_VJP_REGISTRATIONS: tuple[tuple[str, _VJPFn, bool, bool], ...] = (
     ("array_ext.fft.ifftshift", _vjp_ifftshift, False, False),
 )
 
-_NON_DIFFERENTIABLE_OP_CONTRACTS = (
+#: Each reason with the operations it makes non-differentiable.
+_NON_DIFFERENTIABLE_OPS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("Boolean reductions are not differentiable.", ("array.all", "array.any")),
     (
-        "array.all",
-        "Boolean reductions are not differentiable.",
-    ),
-    (
-        "array.any",
-        "Boolean reductions are not differentiable.",
-    ),
-    (
-        "array.argmin",
         "Arg reductions return integer indices and are not differentiable.",
+        ("array.argmin", "array.argmax"),
     ),
+    ("Sorting indices are discrete and are not differentiable.", ("array.argsort",)),
     (
-        "array.argmax",
-        "Arg reductions return integer indices and are not differentiable.",
-    ),
-    (
-        "array.argsort",
-        "Sorting indices are discrete and are not differentiable.",
-    ),
-    (
-        "array.count_nonzero",
         "Count reductions return integer values and are not differentiable.",
+        ("array.count_nonzero",),
     ),
+    ("Insertion indices are discrete and are not differentiable.", ("array.searchsorted",)),
     (
-        "array.searchsorted",
-        "Insertion indices are discrete and are not differentiable.",
-    ),
-    (
-        "array.equal",
         "Comparison operations produce boolean outputs and are not differentiable.",
+        (
+            "array.equal",
+            "array.not_equal",
+            "array.less",
+            "array.less_equal",
+            "array.greater",
+            "array.greater_equal",
+        ),
     ),
     (
-        "array.not_equal",
-        "Comparison operations produce boolean outputs and are not differentiable.",
-    ),
-    (
-        "array.less",
-        "Comparison operations produce boolean outputs and are not differentiable.",
-    ),
-    (
-        "array.less_equal",
-        "Comparison operations produce boolean outputs and are not differentiable.",
-    ),
-    (
-        "array.greater",
-        "Comparison operations produce boolean outputs and are not differentiable.",
-    ),
-    (
-        "array.greater_equal",
-        "Comparison operations produce boolean outputs and are not differentiable.",
-    ),
-    (
-        "array.isnan",
         "NaN predicate operations produce boolean outputs and are not differentiable.",
+        ("array.isnan",),
     ),
     (
-        "array.isfinite",
         "Finite-value predicates produce boolean outputs and are not differentiable.",
+        ("array.isfinite",),
     ),
     (
-        "array.isinf",
         "Infinity predicates produce boolean outputs and are not differentiable.",
+        ("array.isinf",),
     ),
     (
-        "array.signbit",
         "Sign-bit predicates produce boolean outputs and are not differentiable.",
+        ("array.signbit",),
     ),
     (
-        "array.invert",
         "Boolean/discrete masking operations produce non-differentiable outputs.",
+        (
+            "array.invert",
+            "array.logical_not",
+            "array.logical_and",
+            "array.logical_or",
+            "array.logical_xor",
+            "array.bitwise_and",
+            "array.bitwise_or",
+            "array.bitwise_xor",
+        ),
     ),
     (
-        "array.logical_not",
-        "Boolean/discrete masking operations produce non-differentiable outputs.",
+        "Unique/set operations are discrete and not differentiable.",
+        (
+            "array.unique_counts",
+            "array.unique_inverse",
+            "array_ext.unique",
+            "array_ext.unique_index",
+            "array_ext.unique_index_counts",
+            "array_ext.unique_index_inverse",
+            "array_ext.unique_index_inverse_counts",
+            "array_ext.unique_inverse_counts",
+        ),
     ),
-    (
-        "array.logical_and",
-        "Boolean/discrete masking operations produce non-differentiable outputs.",
-    ),
-    (
-        "array.logical_or",
-        "Boolean/discrete masking operations produce non-differentiable outputs.",
-    ),
-    (
-        "array.logical_xor",
-        "Boolean/discrete masking operations produce non-differentiable outputs.",
-    ),
-    (
-        "array.bitwise_and",
-        "Boolean/discrete masking operations produce non-differentiable outputs.",
-    ),
-    (
-        "array.bitwise_or",
-        "Boolean/discrete masking operations produce non-differentiable outputs.",
-    ),
-    (
-        "array.bitwise_xor",
-        "Boolean/discrete masking operations produce non-differentiable outputs.",
-    ),
-)
-
-_DYNAMIC_ONLY_NON_DIFFERENTIABLE_OPS = (
-    "array.unique_counts",
-    "array.unique_inverse",
-    "array_ext.unique",
-    "array_ext.unique_index",
-    "array_ext.unique_index_counts",
-    "array_ext.unique_index_inverse",
-    "array_ext.unique_index_inverse_counts",
-    "array_ext.unique_inverse_counts",
 )
 
 
 def vjp_rule_items() -> tuple[tuple[str, _VJPFn, bool, bool], ...]:
     """Build canonical VJP payloads for the built-in operation definitions."""
-    items = tuple(
-        (name, wrap_array_family_vjp_rule(rule), needs_inputs, needs_output)
-        for name, rule, needs_inputs, needs_output in _EXCEPTION_VJP_REGISTRATIONS
+    items = (
+        *_EXCEPTION_VJP_REGISTRATIONS,
+        *(
+            (
+                name,
+                make_diagonal_vjp_from_partials(partials),
+                partials.reads_operands,
+                partials.reads_result,
+            )
+            for name, partials in ELEMENTWISE_PARTIALS.items()
+        ),
     )
     names = tuple(name for name, *_rest in items)
     if len(names) != len(set(names)):
@@ -356,11 +294,7 @@ def vjp_rule_items() -> tuple[tuple[str, _VJPFn, bool, bool], ...]:
 
 def non_differentiable_items() -> tuple[tuple[str, str], ...]:
     """Return explicit non-differentiability contracts for built-in operations."""
-    reason = "Unique/set operations are discrete and not differentiable."
-    items = (
-        *_NON_DIFFERENTIABLE_OP_CONTRACTS,
-        *((name, reason) for name in _DYNAMIC_ONLY_NON_DIFFERENTIABLE_OPS),
-    )
+    items = tuple((name, reason) for reason, names in _NON_DIFFERENTIABLE_OPS for name in names)
     names = tuple(name for name, _reason in items)
     if len(names) != len(set(names)):
         msg = "Duplicate array-family non-differentiability declaration"

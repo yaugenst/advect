@@ -5,7 +5,7 @@ from __future__ import annotations
 from functools import partial
 from typing import Any, cast
 
-from advect.autodiff.rules.array_family._backend_runtime import xp
+from advect.autodiff.rules.array_family._backend_runtime import _zero_pad_axis, xp
 from advect.autodiff.rules.array_family._signal import native_signal_product
 
 
@@ -51,15 +51,12 @@ def _full_signal_cotangent(
     full_size = left_size + right_size - 1
     if output_size == full_size:
         return cotangent
-    zero = xp.sum(cotangent[:1] * 0)
-    parts: list[xp.ndarray] = []
-    if start:
-        parts.append(xp.broadcast_to(zero, (start,)))
-    parts.append(cotangent)
-    trailing = full_size - start - output_size
-    if trailing:
-        parts.append(xp.broadcast_to(zero, (trailing,)))
-    return xp.concatenate(tuple(parts), axis=0)
+    return _zero_pad_axis(
+        cotangent,
+        axis=0,
+        before=start,
+        after=full_size - start - output_size,
+    )
 
 
 def _vjp_signal_binary(
@@ -78,6 +75,9 @@ def _vjp_signal_binary(
     if not active <= {0, 1}:
         msg = f"signal product active input indices are invalid: {sorted(active)}"
         raise ValueError(msg)
+    # NumPy's convolve reads a rank-zero signal as one of length one; the VJP
+    # binding sums that contribution back to rank zero.
+    left, right = (xp.reshape(value, (1,)) if value.ndim == 0 else value for value in (left, right))
 
     full_cotangent = _full_signal_cotangent(
         g,

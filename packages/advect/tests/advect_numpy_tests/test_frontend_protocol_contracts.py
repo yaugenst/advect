@@ -4,10 +4,17 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+import array_api_strict as strict
 import numpy as np
 import pytest
 
 import advect as ad
+from advect.core._array_api.profiles import LATEST_ARRAY_API_VERSION
+from advect_numpy_tests._assertions import (
+    assert_jvp_matches_central_difference,
+    assert_staged_round_trip,
+    assert_tree_close,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -71,14 +78,46 @@ def test_normalized_numpy_forms_preserve_values_and_tangents(
     expected_primal = operation(value)
     tangent_reference = expected_tangent(direction)
 
-    if isinstance(primal, tuple):
-        for actual, reference in zip(primal, expected_primal, strict=True):
-            np.testing.assert_allclose(actual, reference)
-        for actual, reference in zip(tangent, tangent_reference, strict=True):
-            np.testing.assert_allclose(actual, reference)
-    else:
-        np.testing.assert_allclose(primal, expected_primal)
-        np.testing.assert_allclose(tangent, tangent_reference)
+    assert_tree_close(primal, expected_primal)
+    assert_tree_close(tangent, tangent_reference)
+
+
+@pytest.mark.parametrize(
+    ("function", "stages"),
+    [
+        pytest.param(lambda x: np.copy(x, "F", False), True, id="copy"),  # noqa: FBT003
+        pytest.param(lambda x: np.take(x, [-1, 3], 1, None, "wrap"), True, id="take"),
+        pytest.param(lambda x: np.sort(x, 0, "mergesort"), True, id="sort"),
+        pytest.param(lambda x: np.reshape(x, (1, 6), "F", copy=True), True, id="reshape"),
+        pytest.param(lambda x: np.diag(x, -1), False, id="diag"),
+        pytest.param(lambda x: np.trace(x, 1, 0, 1, np.float64), True, id="trace"),
+        pytest.param(lambda x: np.diff(x, 2, 1, 0.0, 10.0), True, id="diff"),
+        pytest.param(
+            lambda x: np.diff(x, 2, 0, np.ones((1, 3)), np.full((1, 3), 2.0)),
+            True,
+            id="diff-array-boundaries",
+        ),
+        pytest.param(
+            lambda x: np.take_along_axis(x, np.array([[2, 0], [1, 1]]), -1),
+            True,
+            id="take-along-axis",
+        ),
+        # Staging still rejects NumPy integer and 0-d array metadata for these two.
+        pytest.param(lambda x: np.moveaxis(x, np.int64(0), 1), False, id="moveaxis-numpy-integer"),
+        pytest.param(lambda x: np.tile(x, np.asarray(2)), False, id="tile-0d-reps"),
+    ],
+)
+def test_positional_and_numpy_scalar_metadata_trace_and_stage(
+    function: Callable[[Any], Any],
+    *,
+    stages: bool,
+) -> None:
+    value = np.array([[4.0, 1.0, 7.0], [2.0, 6.0, 3.0]])
+    direction = np.arange(0.1, 0.7, 0.1).reshape(2, 3)
+
+    assert_jvp_matches_central_difference(function, (value,), (direction,), rtol=1e-7, atol=1e-9)
+    if stages:
+        assert_staged_round_trip(function, value)
 
 
 def test_scalar_array_shape_metadata_normalizes_through_resize() -> None:
@@ -107,44 +146,8 @@ def test_numpy_aliases_preserve_nondefault_metadata_during_tracing() -> None:
             np.linalg.trace(x @ x.T, offset=1, dtype=np.float32),
         )
 
-    primal, tangent = ad.jvp(aliases)(value, tangents=direction)
-    expected_primal = aliases(value)
-    epsilon = 1e-3
-    expected_tangent = tuple(
-        (upper - lower) / (2 * epsilon)
-        for upper, lower in zip(
-            aliases(value + epsilon * direction),
-            aliases(value - epsilon * direction),
-            strict=True,
-        )
-    )
-
-    for actual, expected in zip(primal, expected_primal, strict=True):
-        np.testing.assert_allclose(actual, expected)
-    for actual, expected in zip(tangent, expected_tangent, strict=True):
-        np.testing.assert_allclose(actual, expected, rtol=2e-3, atol=2e-3)
-
-
-@pytest.mark.parametrize("operation", [np.cumulative_sum, np.cumulative_prod])
-def test_cumulative_aliases_include_the_initial_identity_dynamically(
-    operation: Callable[..., Any],
-) -> None:
-    value = np.arange(1.0, 7.0).reshape(2, 3)
-    direction = np.full_like(value, 0.1)
-
-    def cumulative(x: Any) -> Any:
-        return operation(x, axis=-1, dtype=np.float64, include_initial=True)
-
-    primal, tangent = ad.jvp(cumulative)(value, tangents=direction)
-    epsilon = 1e-6
-
-    np.testing.assert_allclose(primal, cumulative(value))
-    np.testing.assert_allclose(
-        tangent,
-        (cumulative(value + epsilon * direction) - cumulative(value - epsilon * direction))
-        / (2 * epsilon),
-        rtol=2e-6,
-        atol=2e-6,
+    assert_jvp_matches_central_difference(
+        aliases, (value,), (direction,), rtol=2e-3, atol=2e-3, step=1e-3
     )
 
 
@@ -161,13 +164,8 @@ def test_cumulative_aliases_include_the_initial_identity_dynamically(
             ad.TracingError,
             "runtime-dependent alias",
         ),
-        (
-            lambda x: np.cumulative_sum(x, include_initial=True),
-            ValueError,
-            "axis.*required",
-        ),
     ],
-    ids=["astype-device", "astype-alias", "cumulative-axis"],
+    ids=["astype-device", "astype-alias"],
 )
 def test_numpy_aliases_reject_nonportable_runtime_contracts(
     operation: Callable[[Any], Any],
@@ -178,6 +176,21 @@ def test_numpy_aliases_reject_nonportable_runtime_contracts(
 
     with pytest.raises(error, match=match):
         ad.jvp(operation)(value, tangents=np.ones_like(value))
+
+
+def test_astype_without_a_copy_reads_a_selected_python_scalar_as_its_array() -> None:
+    # np.astype(copy=False) read the dtype of the scalar's Python value: "'float'
+    # object has no attribute 'dtype'", where a copying astype, and both calls
+    # on a rank-zero array, trace the scalar as that array.
+    def narrowed(s: Any) -> Any:
+        return np.astype(s, np.float32, copy=False) * 2.0
+
+    gradient = ad.grad(narrowed)(0.5)
+
+    assert type(gradient) is float
+    assert gradient == ad.grad(narrowed)(np.asarray(0.5)) == 2.0
+    with pytest.raises(ad.TracingError, match="runtime-dependent alias"):
+        ad.grad(lambda s: np.astype(s, np.float64, copy=False))(0.5)
 
 
 def test_staged_aliases_and_evaluator_controls_round_trip() -> None:
@@ -200,69 +213,60 @@ def test_staged_aliases_and_evaluator_controls_round_trip() -> None:
             np.linalg.trace(x @ x.T, offset=1, dtype=np.float32),
         )
 
-    program = ad.stage(aliases, specs=(ad.ArraySpec(value.shape, value.dtype),))
-    restored = ad.StagedProgram.from_dict(program.to_dict())
-    expected = aliases(value)
-
-    for staged in (program, restored):
-        for actual, reference in zip(staged(value), expected, strict=True):
-            np.testing.assert_allclose(actual, reference)
+    assert_staged_round_trip(aliases, value)
 
 
-def test_staged_diff_accepts_live_prepend_and_append_operands() -> None:
-    value = np.arange(6.0).reshape(2, 3)
-    prepend = np.asarray([[10.0], [20.0]])
-    append = np.asarray([[30.0], [40.0]])
+def test_full_constructors_differentiate_the_fill_and_not_the_like_anchor() -> None:
+    anchor = np.arange(6.0).reshape(2, 3)
+    fill = np.asarray(2.0)
 
-    def difference(x: Any, before: Any, after: Any) -> Any:
-        return np.diff(x, n=2, axis=1, prepend=before, append=after)
-
-    directions = (
-        np.full_like(value, 0.1),
-        np.full_like(prepend, 0.2),
-        np.full_like(append, -0.3),
-    )
-    primal, tangent = ad.jvp(difference, argnums=(0, 1, 2))(
-        value,
-        prepend,
-        append,
-        tangents=directions,
-    )
-    np.testing.assert_allclose(primal, difference(value, prepend, append))
-    np.testing.assert_allclose(tangent, difference(*directions))
-
-    program = ad.stage(
-        difference,
-        specs=tuple(ad.ArraySpec(item.shape, item.dtype) for item in (value, prepend, append)),
-    )
-    expected = difference(value, prepend, append)
-
-    np.testing.assert_allclose(program(value, prepend, append), expected)
-    restored = ad.StagedProgram.from_dict(program.to_dict())
-    np.testing.assert_allclose(restored(value, prepend, append), expected)
-
-
-def test_dynamic_full_differentiates_fill_and_not_like_dispatch_anchor() -> None:
-    anchor = np.zeros(2)
-    fill = np.asarray(3.0)
-
-    def filled(like: Any, value: Any) -> Any:
-        return np.full(
-            (2, 2),
-            value,
-            dtype=np.float64,
-            order="F",
-            device="cpu",
-            like=like,
+    def create(array: Any, value: Any) -> tuple[Any, ...]:
+        return (
+            np.full((2, 3), value, np.float32, "F", device="cpu", like=array),
+            np.full_like(
+                array,
+                value,
+                np.float32,
+                "F",
+                False,  # noqa: FBT003 - exercise NumPy's positional form
+                (3, 2),
+                device="cpu",
+            ),
         )
 
-    primal, tangent = ad.jvp(filled, argnums=(0, 1))(
+    primal, tangent = ad.jvp(create, argnums=(0, 1))(
         anchor,
         fill,
-        tangents=(np.ones_like(anchor), np.asarray(0.5)),
+        tangents=(np.ones_like(anchor), np.asarray(0.25)),
     )
-    np.testing.assert_allclose(primal, np.full((2, 2), fill))
-    np.testing.assert_allclose(tangent, np.full((2, 2), 0.5))
+
+    for actual, reference in zip(primal, create(anchor, fill), strict=True):
+        np.testing.assert_array_equal(actual, reference)
+        assert actual.flags.f_contiguous
+    for actual in tangent:
+        np.testing.assert_array_equal(actual, np.full(actual.shape, 0.25, dtype=np.float32))
+    assert_staged_round_trip(create, anchor, fill)
+
+
+def test_like_constructors_preserve_explicit_copy_dtype_and_boolean_constants() -> None:
+    value = np.arange(6.0).reshape(2, 3)
+    direction = np.linspace(0.1, 0.6, 6).reshape(2, 3)
+
+    def construct(array: Any) -> tuple[Any, ...]:
+        return (
+            np.asarray(array, dtype=np.float32, copy=True, like=array),
+            np.asarray([True, False], like=array),
+            np.asarray(array, order="A", like=array),
+        )
+
+    primal, tangent = ad.jvp(construct)(value, tangents=direction)
+
+    np.testing.assert_allclose(primal[0], value.astype(np.float32))
+    np.testing.assert_allclose(tangent[0], direction.astype(np.float32))
+    np.testing.assert_array_equal(primal[1], [True, False])
+    np.testing.assert_array_equal(tangent[1], [False, False])
+    np.testing.assert_allclose(primal[2], value)
+    np.testing.assert_allclose(tangent[2], direction)
 
 
 def test_expired_tracers_cannot_cross_array_function_boundaries() -> None:
@@ -282,6 +286,29 @@ def test_expired_tracers_cannot_cross_array_function_boundaries() -> None:
         )
 
 
+@pytest.mark.parametrize(
+    ("protocol", "write"),
+    [
+        ("ufunc", lambda y, buffer: np.add(y, 1.0, out=buffer)),
+        ("array-function", lambda y, buffer: np.clip(y, 0.0, 1.0, out=buffer)),
+    ],
+)
+def test_inner_traces_cannot_write_into_an_outer_trace_out_buffer(
+    protocol: str, write: Callable[[Any, Any], object]
+) -> None:
+    def outer(x: Any) -> Any:
+        buffer = x * 1.0
+
+        def inner(y: Any) -> Any:
+            write(y, buffer)
+            return np.sum(y)
+
+        return np.sum(ad.grad(inner)(x)) + np.sum(buffer)
+
+    with pytest.raises(ad.TracingError, match=f"{protocol} out= must belong to the current trace"):
+        ad.grad(outer)(np.arange(3.0))
+
+
 def test_debug_mode_uses_the_full_ufunc_protocol_without_changing_results() -> None:
     value = np.asarray([0.2, -0.4, 0.7])
     direction = np.asarray([0.3, 0.1, -0.2])
@@ -291,6 +318,27 @@ def test_debug_mode_uses_the_full_ufunc_protocol_without_changing_results() -> N
 
     np.testing.assert_allclose(primal, np.sin(value))
     np.testing.assert_allclose(tangent, np.cos(value) * direction)
+
+
+def test_debug_mode_preserves_the_unsupported_ufunc_error() -> None:
+    with ad.debug(), pytest.raises(ad.TracingError, match="Unsupported ufunc: gcd"):
+        ad.jvp(lambda array: np.gcd(array, 2))(
+            np.asarray([2, 3]),
+            tangents=np.zeros(2, dtype=int),
+        )
+
+
+def test_debug_mode_records_the_user_callsite_of_simple_ufuncs() -> None:
+    def operation(array: Any) -> Any:
+        return np.bitwise_and(np.astype(array, np.int64), 1)
+
+    with ad.debug(), pytest.raises(ad.NoJVPError) as caught:
+        ad.jvp(operation)(np.asarray([2.0, 3.0]), tangents=np.ones(2))
+
+    location = caught.value.source_location
+    assert location is not None
+    assert __file__ in location
+    assert "in operation()" in location
 
 
 def test_ufunc_none_out_sentinel_and_multi_output_controls_remain_traceable() -> None:
@@ -340,138 +388,448 @@ def test_unsupported_array_function_fails_clearly_in_both_lifetimes() -> None:
 
 
 @pytest.mark.parametrize(
-    ("order", "error", "match"),
-    [(1, TypeError, "order must be str"), ("Z", ValueError, "order must be one of")],
+    ("operation", "value"),
+    [
+        pytest.param(np.gradient, [0.25, -0.5, 2.0, 1.0], id="gradient"),
+        pytest.param(
+            lambda x: np.linalg.matrix_power(x, 0), [[0.25, -0.5], [2.0, 1.0]], id="matrix-power"
+        ),
+        pytest.param(
+            lambda x: np.max(x, where=np.asarray([True, False, True, True]), initial=-1.0),
+            [0.25, -0.5, 2.0, 1.0],
+            id="max-where-initial",
+        ),
+    ],
 )
-def test_array_copy_rejects_invalid_memory_orders_in_both_lifetimes(
-    order: object,
-    error: type[Exception],
-    match: str,
+def test_numpy_helpers_differentiate_programs_staged_from_another_provider(
+    operation: Callable[[Any], Any], value: list[Any]
 ) -> None:
-    with pytest.raises(error, match=match):
-        ad.jvp(lambda x: x.copy(order=order))(
-            np.arange(4.0),
-            tangents=np.ones(4),
+    # The helpers read the staged dtypes, not the provider dtype objects that
+    # staged code sees, so a program staged from strict examples differentiates.
+    def loss(x: Any) -> Any:
+        return np.sum(operation(x) ** 2)
+
+    example = strict.asarray(value, dtype=strict.float64)
+
+    gradient = ad.grad(ad.stage(loss, example))(example)
+
+    assert gradient.dtype == strict.float64
+    np.testing.assert_allclose(np.asarray(gradient), ad.grad(loss)(np.asarray(value)))
+
+
+def test_numpy_powers_stage_a_dtype_the_examples_provider_lacks() -> None:
+    # array_api_strict has no float16, so the NumPy power reads the staged dtype.
+    value = np.asarray([0.25, -0.5, 2.0], dtype=np.float32)
+    version = min(np.__array_api_version__, LATEST_ARRAY_API_VERSION)
+
+    def graph(example: object) -> object:
+        program = ad.stage(
+            lambda x: np.astype(x, np.float16) ** 2, example, array_api_version=version
         )
-    with pytest.raises(error, match=match):
-        ad.stage(
-            lambda x: x.copy(order=order),
-            specs=(ad.ArraySpec((2, 3), "float64"),),
-        )
+        return program.to_dict()["program"]["graph"]
+
+    assert graph(strict.asarray(value)) == graph(value)
+
+
+def test_numpy_calls_reject_a_provider_dtype_that_staged_code_passes() -> None:
+    # Staged code sees the example provider's dtype objects, which NumPy cannot read.
+    value = strict.asarray([0.25, -0.5, 2.0], dtype=strict.float64)
+
+    with pytest.raises(TypeError, match=r"^Cannot interpret 'array_api_strict\.float64' as a"):
+        ad.stage(lambda x: x.astype(x.dtype, casting="same_kind"), value)
+
+
+def test_numpy_tracers_over_staged_provider_values_report_numpy_dtypes() -> None:
+    # grad wraps a staged strict value in an Array API tracer; a NumPy call on
+    # it returns a NumPy tracer, which reports NumPy dtypes whatever the provider.
+    value = strict.asarray([0.25, -0.5, 2.0], dtype=strict.float64)
+    seen: list[object] = []
+
+    def loss(x: Any) -> Any:
+        total = np.cumsum(x)
+        seen.append(total.dtype)
+        return np.sum(total**2)
+
+    program = ad.stage(ad.grad(loss), value)
+
+    assert seen == [np.dtype(np.float64)]
+    with pytest.raises(TypeError, match=r"NumPy-authored node 'array\.cumsum' requires NumPy"):
+        program(value)
+
+
+@pytest.mark.parametrize("function", [np.ones_like, np.zeros_like, np.imag])
+def test_numpy_constants_under_grad_replay_on_the_staged_provider(
+    function: Callable[[Any], Any],
+) -> None:
+    value = strict.asarray([0.25, -0.5, 2.0], dtype=strict.float64)
+    program = ad.stage(ad.grad(lambda x: np.sum(function(x) ** 2)), value)
+
+    gradient = program(value)
+
+    assert gradient.dtype == strict.float64
+    np.testing.assert_array_equal(np.asarray(gradient), np.zeros(3))
 
 
 @pytest.mark.parametrize(
-    ("operation", "specs", "error", "match"),
+    ("construct", "source"),
     [
-        (
-            lambda x: np.gradient(x, axis=(0, 0)),
-            (ad.ArraySpec((2, 3), "float64"),),
-            ValueError,
-            "invalid axes",
+        pytest.param(lambda x: np.asarray(x, like=x), strict.float64, id="own-dtype"),
+        pytest.param(
+            lambda x: np.asarray(x, dtype=np.float64, like=x), strict.float64, id="same-dtype"
         ),
-        (
-            lambda x: np.gradient(x, edge_order=3),
-            (ad.ArraySpec((2, 3), "float64"),),
-            ValueError,
-            "edge_order must be 1 or 2",
+        pytest.param(
+            lambda x: np.asarray(x, dtype="float64", like=x), strict.float64, id="same-dtype-name"
         ),
-        (
-            lambda x: np.gradient(x, 1.0, 2.0, 3.0, axis=(0, 1)),
-            (ad.ArraySpec((2, 3), "float64"),),
-            TypeError,
-            "one spacing per gradient axis",
+        pytest.param(
+            lambda x: np.array(x, dtype=np.float64, copy=False, like=x),
+            strict.float64,
+            id="same-dtype-without-copy",
         ),
-        (
-            lambda x, condition: np.compress(condition, x, axis=1),
-            (ad.ArraySpec((2, 3), "float64"), ad.ArraySpec((3,), "bool")),
-            ad.TracingError,
-            "data-dependent output shape",
+        pytest.param(
+            lambda x: np.asarray(x, np.float32, like=x), strict.float64, id="positional-dtype"
         ),
-        (
-            lambda x: np.cumulative_sum(x, include_initial=True),
-            (ad.ArraySpec((2, 3), "float64"),),
-            ValueError,
-            "axis=",
+        pytest.param(
+            lambda x: np.array(x, dtype=np.float32, like=x), strict.float64, id="array-dtype"
         ),
-        (
-            np.matrix_transpose,
-            (ad.ArraySpec((3,), "float64"),),
-            ValueError,
-            "at least two dimensions",
+        pytest.param(
+            lambda x: np.asarray(x, dtype=np.float64, like=x), strict.int64, id="int-to-float"
         ),
-        (
-            np.linalg.matrix_power,
-            (ad.ArraySpec((2, 2), "float64"), ad.ArraySpec((), "int64")),
-            TypeError,
-            "static integer",
-        ),
-        (
-            lambda x: x.astype(np.float32, order="Z"),
-            (ad.ArraySpec((2, 3), "float64"),),
-            ValueError,
-            "invalid order",
-        ),
-        (
-            lambda x: x.astype(np.float32, casting="unsafe", copy=1),
-            (ad.ArraySpec((2, 3), "float64"),),
-            TypeError,
-            "copy must be a bool",
-        ),
-        (
-            lambda x: np.eye(2, like=x, device="gpu"),
-            (ad.ArraySpec((2, 3), "float64"),),
-            TypeError,
-            "device='cpu'",
-        ),
-        (
-            lambda x: np.linalg.pinv(x, rcond=1e-4, rtol=1e-4),
-            (ad.ArraySpec((2, 2), "float64"),),
-            TypeError,
-            "only one of rcond= and rtol=",
-        ),
-    ],
-    ids=[
-        "gradient-duplicate-axis",
-        "gradient-edge-order",
-        "gradient-spacing-count",
-        "compress-live-condition",
-        "cumulative-axis",
-        "matrix-transpose-rank",
-        "matrix-power-static-exponent",
-        "astype-order",
-        "astype-copy",
-        "eye-device",
-        "pinv-tolerance",
     ],
 )
-def test_staging_rejects_invalid_or_runtime_dependent_numpy_contracts(
+def test_like_constructors_keep_a_staged_values_provider(
+    construct: Callable[[Any], Any], source: object
+) -> None:
+    value = strict.asarray([1, -2, 3], dtype=source)
+    expected = construct(np.asarray(value)) * 2
+    program = ad.stage(lambda x: construct(x) * 2, value)
+
+    actual = program(value)
+
+    assert actual.dtype == getattr(strict, expected.dtype.name)
+    np.testing.assert_array_equal(np.asarray(actual), expected)
+    assert np.asarray(actual).dtype == expected.dtype
+
+
+@pytest.mark.parametrize("order", ["c", "F", None])
+def test_astype_accepts_numpy_memory_orders_in_both_lifetimes(order: str | None) -> None:
+    value = np.arange(6.0).reshape(2, 3)
+    expected = value.astype(np.float32, order=order)
+
+    def operation(array: Any) -> Any:
+        return array.astype(np.float32, order=order)
+
+    dynamic, _tangent = ad.jvp(operation)(value, tangents=np.ones_like(value))
+    staged = ad.stage(operation, specs=(ad.ArraySpec((2, 3), "float64"),))(value)
+
+    for actual in (dynamic, staged):
+        np.testing.assert_array_equal(actual, expected)
+        assert np.asarray(actual).dtype == expected.dtype
+
+
+_MATRIX = ad.ArraySpec((2, 3), "float64")
+_SQUARE = ad.ArraySpec((2, 2), "float64")
+_SCALAR = ad.ArraySpec((), "float64")
+_VECTOR = ad.ArraySpec((3,), "float64")
+_EMPTY = ad.ArraySpec((0,), "float64")
+type _Rejection = tuple[type[Exception], str] | None
+# Each lifetime's rejection as it stands: (error, match), or None where that
+# lifetime accepts the call or owns no such contract. Dynamic tracing often
+# wraps NumPy's ValueError or TypeError in TracingError; staging mirrors NumPy.
+_REJECTIONS: dict[
+    str, tuple[Callable[..., Any], tuple[ad.ArraySpec, ...], _Rejection, _Rejection]
+] = {
+    "gradient-duplicate-axis": (
+        lambda x: np.gradient(x, axis=(0, 0)),
+        (_MATRIX,),
+        (ad.TracingError, "axis contains duplicates"),
+        (ValueError, "invalid axes"),
+    ),
+    "gradient-axis-bounds": (
+        lambda x: np.gradient(x, axis=3),
+        (_MATRIX,),
+        (ad.TracingError, "out of bounds"),
+        (ValueError, "invalid axes 3"),
+    ),
+    "gradient-axis-type": (
+        lambda x: np.gradient(x, axis="rows"),
+        (_MATRIX,),
+        (ad.TracingError, "Unsupported axis value"),
+        None,
+    ),
+    "gradient-edge-order": (
+        lambda x: np.gradient(x, edge_order=3),
+        (_MATRIX,),
+        (ad.TracingError, "edge_order must be 1 or 2"),
+        (ValueError, "edge_order must be 1 or 2"),
+    ),
+    "gradient-spacing-count": (
+        lambda x: np.gradient(x, 1.0, 2.0, 3.0, axis=(0, 1)),
+        (_MATRIX,),
+        (ad.TracingError, "one spacing per gradient axis"),
+        (TypeError, "one spacing per gradient axis"),
+    ),
+    "gradient-coordinate-length": (
+        lambda x: np.gradient(x, np.ones(2), axis=1),
+        (_MATRIX,),
+        (ValueError, "must be one-dimensional and match axis 1 length 3"),
+        (ValueError, "must be one-dimensional and match axis 1 length 3"),
+    ),
+    "pad-width": (
+        lambda x: np.pad(x, (1, 2, 3)),
+        (_MATRIX,),
+        (ad.TracingError, "Unsupported pad_width shape"),
+        None,
+    ),
+    "pad-unsupported-mode": (
+        lambda x: np.pad(x, 1, mode="empty"),
+        (_VECTOR,),
+        (ad.TracingError, "not differentiable"),
+        None,
+    ),
+    "pad-negative-width": (
+        lambda x: np.pad(x, (-1, 1), mode="edge"),
+        (_VECTOR,),
+        (ValueError, "index can't contain negative values"),
+        None,
+    ),
+    "pad-reflect-type": (
+        lambda x: np.pad(x, 1, mode="reflect", reflect_type="neither"),
+        (_VECTOR,),
+        (ad.TracingError, "reflect_type"),
+        None,
+    ),
+    "pad-empty-edge": (
+        lambda x: np.pad(x, 1, mode="edge"),
+        (_EMPTY,),
+        (ValueError, "can't extend empty axis"),
+        None,
+    ),
+    "pad-static-boundary-shape": (
+        lambda x: np.pad(x, ((1, 1), (1, 1)), mode="linear_ramp", end_values=(1.0, 2.0, 3.0)),
+        (_MATRIX,),
+        (ad.TracingError, "end_values shape"),
+        None,
+    ),
+    "pad-live-boundary-shape": (
+        lambda x, edge: np.pad(x, 1, mode="constant", constant_values=edge),
+        (_MATRIX, _VECTOR),
+        (ad.TracingError, "constant_values shape"),
+        None,
+    ),
+    "pad-stat-length-shape": (
+        lambda x: np.pad(x, ((1, 1), (1, 1)), mode="mean", stat_length=(1, 2, 3)),
+        (_MATRIX,),
+        (ad.TracingError, "stat_length shape"),
+        None,
+    ),
+    "pad-statistical-negative-width": (
+        lambda x: np.pad(x, (-1, 1), mode="mean"),
+        (_VECTOR,),
+        (ValueError, "index can't contain negative values"),
+        None,
+    ),
+    "pad-negative-stat-length": (
+        lambda x: np.pad(x, 1, mode="mean", stat_length=-1),
+        (_VECTOR,),
+        (ValueError, "index can't contain negative values"),
+        None,
+    ),
+    "pad-empty-extremum-region": (
+        lambda x: np.pad(x, 1, mode="maximum", stat_length=0),
+        (_VECTOR,),
+        (ValueError, "stat_length of 0 yields no value"),
+        None,
+    ),
+    "pad-unpadded-empty-extremum-region": (
+        lambda x: np.pad(x, ((0, 0), (1, 1)), mode="minimum", stat_length=((0, 0), (1, 1))),
+        (_MATRIX,),
+        (ValueError, "stat_length of 0 yields no value"),
+        None,
+    ),
+    "pad-empty-mean": (
+        lambda x: np.pad(x, 1, mode="mean"),
+        (_EMPTY,),
+        (ValueError, "can't extend empty axis"),
+        None,
+    ),
+    "compress-live-condition": (
+        lambda x, condition: np.compress(condition, x, axis=1),
+        (_MATRIX, ad.ArraySpec((3,), "bool")),
+        None,
+        (ad.TracingError, "data-dependent output shape"),
+    ),
+    "compress-condition-rank": (
+        lambda x: np.compress(np.asarray(1, dtype=bool), x),
+        (_MATRIX,),
+        (ValueError, "condition must be a 1-d array"),
+        (ValueError, "condition must be a 1-d array"),
+    ),
+    "cumulative-axis": (
+        lambda x: np.cumulative_sum(x, include_initial=True),
+        (_MATRIX,),
+        (ValueError, "more than one dimension ``axis`` argument is required"),
+        (ValueError, "more than one dimension ``axis`` argument is required"),
+    ),
+    "diff-order": (
+        lambda x: np.diff(x, n=-1),
+        (_MATRIX,),
+        (ad.TracingError, "requires n >= 0"),
+        (ValueError, "non-negative integer"),
+    ),
+    "matrix-transpose-rank": (
+        np.matrix_transpose,
+        (ad.ArraySpec((3,), "float64"),),
+        (ValueError, "at least 2-dimensional"),
+        (ValueError, "at least two dimensions"),
+    ),
+    "matrix-power-shape": (
+        lambda x: np.linalg.matrix_power(x, 2),
+        (_MATRIX,),
+        (ad.TracingError, "requires square matrices"),
+        (ValueError, "requires square matrices"),
+    ),
+    "matrix-power-traced-exponent": (
+        np.linalg.matrix_power,
+        (_SQUARE, _SCALAR),
+        (ad.TracingError, "exponent must be a static integer"),
+        (TypeError, "exponent must be a static integer"),
+    ),
+    "matrix-power-traced-integer-exponent": (
+        np.linalg.matrix_power,
+        (_SQUARE, ad.ArraySpec((), "int64")),
+        None,
+        (TypeError, "exponent must be a static integer"),
+    ),
+    "pinv-tolerance": (
+        lambda x: np.linalg.pinv(x, rcond=1e-4, rtol=1e-4),
+        (_SQUARE,),
+        (ad.TracingError, "only one of rcond= and rtol="),
+        (TypeError, "only one of rcond= and rtol="),
+    ),
+    "variance-traced-ddof": (
+        lambda x, ddof: np.var(x, ddof=ddof, correction=1),
+        (_MATRIX, _SCALAR),
+        (ad.TracingError, "requires a static ddof= beside correction="),
+        (TypeError, "requires a static ddof= beside correction="),
+    ),
+    "variance-traced-ddof-where": (
+        lambda x, ddof: np.var(x, ddof=ddof, correction=1, where=True),
+        (_MATRIX, _SCALAR),
+        (ad.TracingError, "requires a static ddof= beside correction="),
+        (TypeError, "requires a static ddof= beside correction="),
+    ),
+    "where-one-argument": (
+        lambda x: np.where(x > 0),
+        (_MATRIX,),
+        (ad.TracingError, "only supported during tracing in its 3-argument form"),
+        (TypeError, r"where\(\) requires 3 array operands"),
+    ),
+    "extrema-where-initial": (
+        lambda x: np.max(x, axis=1, where=x > 0),
+        (_MATRIX,),
+        (ad.TracingError, r"numpy\.max with where=.*requires initial="),
+        (TypeError, "with where= requires initial="),
+    ),
+    "eye-order": (
+        lambda x: np.eye(2, order="F", like=x),
+        (_MATRIX,),
+        None,
+        (TypeError, "supports only order='C'"),
+    ),
+    "eye-device": (
+        lambda x: np.eye(2, like=x, device="gpu"),
+        (_MATRIX,),
+        None,
+        (TypeError, "device='cpu'"),
+    ),
+    "asarray-copy-free-order": (
+        lambda x: np.asarray(x, order="F", copy=False, like=x),
+        (_MATRIX,),
+        (ValueError, "avoid copy"),
+        (ad.TracingError, "layout-constraining order"),
+    ),
+    "copy-order-type": (
+        lambda x: x.copy(order=1),
+        (_MATRIX,),
+        (TypeError, "order must be str"),
+        (TypeError, "order must be str"),
+    ),
+    "copy-order": (
+        lambda x: x.copy(order="Z"),
+        (_MATRIX,),
+        (ValueError, "order must be one of"),
+        (ValueError, "order must be one of"),
+    ),
+    "astype-order": (
+        lambda x: x.astype(np.float32, order="Z"),
+        (_MATRIX,),
+        (ValueError, "order must be one of"),
+        (ValueError, "order must be one of"),
+    ),
+    "astype-casting": (
+        lambda x: x.astype(np.float32, casting="banana"),
+        (_MATRIX,),
+        (ValueError, "casting must be one of"),
+        (ValueError, "invalid casting rule"),
+    ),
+    "astype-safe": (
+        lambda x: x.astype(np.int32, casting="safe"),
+        (_MATRIX,),
+        (TypeError, "according to the rule 'safe'"),
+        (TypeError, "according to the 'safe' rule"),
+    ),
+    "astype-copy": (
+        lambda x: x.astype(np.float32, casting="unsafe", copy=1),
+        (_MATRIX,),
+        None,
+        (TypeError, "copy must be a bool"),
+    ),
+    "astype-subok": (
+        lambda x: x.astype(np.float32, subok=1),
+        (_MATRIX,),
+        None,
+        (TypeError, "subok must be a bool"),
+    ),
+    "like-non-numeric-constant": (
+        lambda x: np.asarray(["not", "numeric"], like=x),
+        (_VECTOR,),
+        (TypeError, "numeric and boolean"),
+        (TypeError, "numeric and boolean"),
+    ),
+    "like-copy-false-dtype": (
+        lambda x: np.asarray(x, dtype=np.float32, copy=False, like=x),
+        (_VECTOR,),
+        (ValueError, "avoid copy"),
+        (ValueError, "avoid copy"),
+    ),
+    "like-negative-ndmin": (
+        lambda x: np.array(x, ndmin=-1, like=x),
+        (_VECTOR,),
+        (ValueError, "ndmin must be non-negative"),
+        (ValueError, "ndmin must be non-negative"),
+    ),
+}
+
+
+@pytest.mark.parametrize(
+    ("operation", "specs", "dynamic", "staged"), _REJECTIONS.values(), ids=_REJECTIONS.keys()
+)
+def test_each_lifetime_rejects_invalid_public_forms(
     operation: Callable[..., Any],
     specs: tuple[ad.ArraySpec, ...],
-    error: type[Exception],
-    match: str,
+    dynamic: _Rejection,
+    staged: _Rejection,
 ) -> None:
-    with pytest.raises(error, match=match):
-        ad.stage(operation, specs=specs)
-
-
-@pytest.mark.parametrize(
-    ("operation", "match"),
-    [
-        (lambda x: np.pad(x, (1, 2, 3)), "Unsupported pad_width shape"),
-        (lambda x: np.gradient(x, axis="rows"), "Unsupported axis value"),
-        (lambda x: np.gradient(x, axis=(0, 0)), "axis contains duplicates"),
-        (lambda x: np.gradient(x, axis=3), "out of bounds"),
-    ],
-    ids=["pad-width", "axis-type", "duplicate-axis", "axis-bounds"],
-)
-def test_dynamic_protocol_rejects_invalid_normalized_metadata(
-    operation: Callable[[Any], Any],
-    match: str,
-) -> None:
-    value = np.arange(6.0).reshape(2, 3)
-
-    with pytest.raises(ad.TracingError, match=match):
-        ad.jvp(operation)(value, tangents=np.ones_like(value))
+    values = tuple(np.ones(spec.shape, dtype=spec.dtype) for spec in specs)
+    argnums = tuple(index for index, value in enumerate(values) if value.dtype.kind == "f")
+    if dynamic is not None:
+        with pytest.raises(dynamic[0], match=dynamic[1]):
+            ad.jvp(operation, argnums=argnums)(
+                *values, tangents=tuple(np.ones_like(values[index]) for index in argnums)
+            )
+    if staged is not None:
+        with pytest.raises(staged[0], match=staged[1]):
+            ad.stage(operation, specs=specs)
 
 
 def test_dynamic_protocol_rejects_complex_padding_metadata() -> None:

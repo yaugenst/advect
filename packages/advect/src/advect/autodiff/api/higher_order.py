@@ -23,10 +23,16 @@ from advect.autodiff.api.higher_order_loops import (
 )
 from advect.autodiff.api.inputs import _normalize_argnums_for_call, _normalize_argnums_spec
 from advect.autodiff.api.reverse import grad, value_and_grad
-from advect.core._pytree import tree_flatten
+from advect.autodiff.rules.array_family._transpose_utils import _dtype_is_complex
+from advect.core._pytree import static, tree_flatten, tree_unflatten
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+    from advect.core._pytree import Static, TreeDef
+
+
+type _GradientLayout = tuple[TreeDef, tuple[bool, ...]]
 
 
 class _HvpTransform[R](Protocol):
@@ -38,10 +44,6 @@ class _HvpTransform[R](Protocol):
         vectors: object,
         **kwargs: object,
     ) -> tuple[R, object]: ...
-
-
-def _dtype_is_complex(dtype: object) -> bool:
-    return bool(getattr(dtype, "kind", None) == "c" or "complex" in str(dtype).lower())
 
 
 def _hessian_context(
@@ -77,6 +79,48 @@ def _hessian_context(
         primal_dtypes=dtypes,
         single_argnum=single_argnum,
     )
+
+
+def _dense_hessian_transform[**P](
+    f: Callable[P, object],
+    argnums: int | tuple[int, ...],
+    *,
+    api_name: str,
+    diagonal: bool,
+) -> Callable[P, object]:
+    """Build the dense Hessian or Hessian-diagonal reverse-over-reverse transform."""
+    argnums_tuple, single_argnum = _normalize_argnums_spec(argnums)
+    gradient_function = grad(f, argnums=argnums)
+    sweep = _hessian_diag_reverse_loop if diagonal else _hessian_reverse_loop
+
+    @functools.wraps(f)
+    def dense_hessian_fn(*args: P.args, **kwargs: P.kwargs) -> object:
+        context = _hessian_context(
+            args=args,
+            kwargs=kwargs,
+            argnums=argnums_tuple,
+            single_argnum=single_argnum,
+            api_name=api_name,
+        )
+        gradient, linear = linearize_call(
+            gradient_function,
+            args=args,
+            kwargs=kwargs,
+            argnums=argnums_tuple,
+            argnames=None,
+            single_argnum=single_argnum,
+            reverse_only=True,
+        )
+        with linear:
+            result = sweep(context=context, linear=linear, grad_value=gradient)
+        return _unlift_hessian_result(
+            result,
+            args=args,
+            argnums=argnums_tuple,
+            diagonal=diagonal,
+        )
+
+    return dense_hessian_fn
 
 
 def _unlift_hessian_result(
@@ -144,7 +188,8 @@ def hvp[R](
         must match the pytree structure and leaf shapes selected by `argnums`;
         use ``None`` for a static or otherwise untraceable leaf. ``value``
         preserves the output structure of ``f``, and ``product`` preserves the
-        integer-versus-tuple selection structure described above.
+        integer-versus-tuple selection structure described above, with
+        ``None`` at each static leaf.
 
     Raises
     ------
@@ -190,15 +235,28 @@ def hvp[R](
     # evaluated once rather than once for the reported value and again for the
     # differentiated gradient.
     argnums_tuple, single_argnum = _normalize_argnums_spec(argnums)
-    jvp_value_and_grad = jvp(value_and_grad(f, argnums=argnums), argnums=argnums)
+    value_and_gradient = value_and_grad(f, argnums=argnums)
+
+    def value_and_traced_gradient(*args: object, **kwargs: object) -> object:
+        # The gradient of a static leaf is None, which is no traceable output, so
+        # trace the other leaves and carry the gradient structure statically.
+        value, gradient = value_and_gradient(*args, **kwargs)
+        leaves, treedef = tree_flatten(gradient)
+        traced = [leaf for leaf in leaves if leaf is not None]
+        return value, traced, static((treedef, tuple(leaf is None for leaf in leaves)))
+
+    jvp_value_and_grad = jvp(value_and_traced_gradient, argnums=argnums)
 
     @functools.wraps(f)
     def hvp_fn(*args: object, vectors: object, **kwargs: object) -> tuple[R, object]:
         _resolve_selected_argnums(argnums=argnums_tuple, nargs=len(args))
-        (value, _gradient), (_directional, product) = cast(
-            "tuple[tuple[R, object], tuple[object, object]]",
+        (value, _gradient, layout), (_directional, traced, _layout) = cast(
+            "tuple[tuple[R, object, Static[_GradientLayout]], tuple[object, list[object], object]]",
             jvp_value_and_grad(*args, tangents=vectors, **kwargs),
         )
+        treedef, is_static = layout.value
+        products = iter(traced)
+        product = tree_unflatten(treedef, [None if skip else next(products) for skip in is_static])
         return value, _unlift_scalar_tree_by_mask(
             product,
             mask=_selected_scalar_mask(
@@ -218,9 +276,10 @@ def hessian[**P](
     """Return a dynamic transform that assembles an exact dense Hessian.
 
     Each selected positional argument is one dense real input block. For
-    selected shapes ``S_i``, block ``[i][j]`` has shape ``S_i + S_j``: its rows
-    index coordinates of the gradient with respect to argument ``i`` and its
-    columns index coordinates of argument ``j``.
+    selected shapes ``S_i``, block ``[i][j]`` has shape ``S_i + S_j`` and
+    differentiates the gradient with respect to argument ``j`` by argument
+    ``i``: its rows index coordinates of argument ``i`` and its columns index
+    coordinates of that gradient.
 
     Parameters
     ----------
@@ -285,41 +344,7 @@ def hessian[**P](
     >>> ad.hessian(lambda x: np.sum(x**3))(np.array([1.0, 2.0])).tolist()
     [[6.0, 0.0], [0.0, 12.0]]
     """
-    argnums_tuple, single_argnum = _normalize_argnums_spec(argnums)
-    gradient_function = grad(f, argnums=argnums)
-
-    @functools.wraps(f)
-    def hessian_fn(*args: P.args, **kwargs: P.kwargs) -> object:
-        context = _hessian_context(
-            args=args,
-            kwargs=kwargs,
-            argnums=argnums_tuple,
-            single_argnum=single_argnum,
-            api_name="hessian",
-        )
-        gradient, linear = linearize_call(
-            gradient_function,
-            args=args,
-            kwargs=kwargs,
-            argnums=argnums_tuple,
-            argnames=None,
-            single_argnum=single_argnum,
-            reverse_only=True,
-        )
-        with linear:
-            result = _hessian_reverse_loop(
-                context=context,
-                linear=linear,
-                grad_value=gradient,
-            )
-        return _unlift_hessian_result(
-            result,
-            args=args,
-            argnums=argnums_tuple,
-            diagonal=False,
-        )
-
-    return hessian_fn
+    return _dense_hessian_transform(f, argnums, api_name="hessian", diagonal=False)
 
 
 def hessian_diag[**P](
@@ -394,41 +419,7 @@ def hessian_diag[**P](
     >>> ad.hessian_diag(lambda x: np.sum(x**3))(np.array([1.0, 2.0])).tolist()
     [6.0, 12.0]
     """
-    argnums_tuple, single_argnum = _normalize_argnums_spec(argnums)
-    gradient_function = grad(f, argnums=argnums)
-
-    @functools.wraps(f)
-    def hessian_diag_fn(*args: P.args, **kwargs: P.kwargs) -> object:
-        context = _hessian_context(
-            args=args,
-            kwargs=kwargs,
-            argnums=argnums_tuple,
-            single_argnum=single_argnum,
-            api_name="hessian_diag",
-        )
-        gradient, linear = linearize_call(
-            gradient_function,
-            args=args,
-            kwargs=kwargs,
-            argnums=argnums_tuple,
-            argnames=None,
-            single_argnum=single_argnum,
-            reverse_only=True,
-        )
-        with linear:
-            result = _hessian_diag_reverse_loop(
-                context=context,
-                linear=linear,
-                grad_value=gradient,
-            )
-        return _unlift_hessian_result(
-            result,
-            args=args,
-            argnums=argnums_tuple,
-            diagonal=True,
-        )
-
-    return hessian_diag_fn
+    return _dense_hessian_transform(f, argnums, api_name="hessian_diag", diagonal=True)
 
 
 __all__ = ["hessian", "hessian_diag", "hvp"]

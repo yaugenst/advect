@@ -4,16 +4,19 @@
 
 from __future__ import annotations
 
+from functools import partial
 from typing import TYPE_CHECKING, Any
 
 import numpy as _numpy  # noqa: ICN001 - typed module and dynamic lowering namespace
 
 from advect.core._errors import TracingError
-from advect.core._protocols import _snapshot_traced
+from advect.core._protocols import _innermost, _snapshot_traced
 from advect.numpy._array_function.composite import (
+    _concrete_array,
     _finish,
     _first_traced,
     _lift_composite_constant,
+    _lift_lapack_rank,
 )
 
 np: Any = _numpy
@@ -60,11 +63,8 @@ def _poly_handler(
     _graph: DynamicTape,
     traced_type: type[TracedArrayLike],
     args: tuple[Any, ...],
-    kwargs: dict[str, Any],
+    _kwargs: dict[str, Any],
 ) -> CompositeResult:
-    if len(args) != 1 or kwargs:
-        msg = "numpy.poly expects one root vector or square matrix during tracing"
-        raise TracingError(msg)
     roots = args[0]
     if roots.ndim == _MATRIX_RANK:
         if roots.shape[0] != roots.shape[1] or roots.shape[0] == 0:
@@ -74,8 +74,13 @@ def _poly_handler(
     elif roots.ndim != 1:
         msg = "numpy.poly input must be one-dimensional or a square matrix"
         raise TracingError(msg)
+    else:
+        # NumPy computes root vectors in their minimum inexact type code.
+        dtype = np.dtype(np.mintypecode(roots.dtype.char))
+        if roots.dtype != dtype:
+            roots = np.astype(roots, dtype)
     if roots.size == 0:
-        return _finish(np.sum(roots) * 0 + 1.0, traced_type=traced_type)
+        return _finish(_lift_composite_constant(1.0, roots), traced_type=traced_type)
     coefficients = _lift_composite_constant(
         np.ones((1,), dtype=roots.dtype),
         roots,
@@ -83,24 +88,23 @@ def _poly_handler(
     for index in range(int(roots.shape[0])):
         factor = np.stack((np.ones_like(roots[index]), -roots[index]))
         coefficients = np.convolve(coefficients, factor)
+    if coefficients.dtype.kind == "c":
+        # Like NumPy, conjugate-closed complex roots give real coefficients.
+        concrete_roots = _concrete_array(roots).astype(complex)
+        if np.all(np.sort(concrete_roots) == np.sort(concrete_roots.conjugate())):
+            coefficients = np.real(coefficients)
     return _finish(coefficients, traced_type=traced_type)
 
 
 def _poly_add_sub_handler(
-    *,
-    subtract: bool,
+    _graph: DynamicTape,
     traced_type: type[TracedArrayLike],
     args: tuple[Any, ...],
-    kwargs: dict[str, Any],
+    _kwargs: dict[str, Any],
+    *,
+    subtract: bool,
 ) -> CompositeResult:
-    if len(args) != _BINARY_ARITY or kwargs:
-        name = "polysub" if subtract else "polyadd"
-        msg = f"numpy.{name} expects two coefficient vectors during tracing"
-        raise TracingError(msg)
     anchor = _first_traced(args, traced_type=traced_type)
-    if anchor is None:
-        msg = "polynomial arithmetic requires a traced operand"
-        raise TracingError(msg)
     left = np.atleast_1d(_as_traced(args[0], anchor=anchor, traced_type=traced_type))
     right = np.atleast_1d(_as_traced(args[1], anchor=anchor, traced_type=traced_type))
     if left.ndim != 1 or right.ndim != 1:
@@ -113,47 +117,13 @@ def _poly_add_sub_handler(
     return _finish(left - right if subtract else left + right, traced_type=traced_type)
 
 
-def _polyadd_handler(
-    _graph: DynamicTape,
-    traced_type: type[TracedArrayLike],
-    args: tuple[Any, ...],
-    kwargs: dict[str, Any],
-) -> CompositeResult:
-    return _poly_add_sub_handler(
-        subtract=False,
-        traced_type=traced_type,
-        args=args,
-        kwargs=kwargs,
-    )
-
-
-def _polysub_handler(
-    _graph: DynamicTape,
-    traced_type: type[TracedArrayLike],
-    args: tuple[Any, ...],
-    kwargs: dict[str, Any],
-) -> CompositeResult:
-    return _poly_add_sub_handler(
-        subtract=True,
-        traced_type=traced_type,
-        args=args,
-        kwargs=kwargs,
-    )
-
-
 def _polymul_handler(
     _graph: DynamicTape,
     traced_type: type[TracedArrayLike],
     args: tuple[Any, ...],
-    kwargs: dict[str, Any],
+    _kwargs: dict[str, Any],
 ) -> CompositeResult:
-    if len(args) != _BINARY_ARITY or kwargs:
-        msg = "numpy.polymul expects two coefficient vectors during tracing"
-        raise TracingError(msg)
     anchor = _first_traced(args, traced_type=traced_type)
-    if anchor is None:
-        msg = "numpy.polymul requires a traced operand"
-        raise TracingError(msg)
     left = np.atleast_1d(_as_traced(args[0], anchor=anchor, traced_type=traced_type))
     right = np.atleast_1d(_as_traced(args[1], anchor=anchor, traced_type=traced_type))
     if left.ndim != 1 or right.ndim != 1:
@@ -168,15 +138,9 @@ def _polydiv_handler(
     _graph: DynamicTape,
     traced_type: type[TracedArrayLike],
     args: tuple[Any, ...],
-    kwargs: dict[str, Any],
+    _kwargs: dict[str, Any],
 ) -> CompositeResult:
-    if len(args) != _BINARY_ARITY or kwargs:
-        msg = "numpy.polydiv expects two coefficient vectors during tracing"
-        raise TracingError(msg)
     anchor = _first_traced(args, traced_type=traced_type)
-    if anchor is None:
-        msg = "numpy.polydiv requires a traced operand"
-        raise TracingError(msg)
     dividend = np.atleast_1d(_as_traced(args[0], anchor=anchor, traced_type=traced_type)) + 0.0
     divisor = np.atleast_1d(_as_traced(args[1], anchor=anchor, traced_type=traced_type)) + 0.0
     if dividend.ndim != 1 or divisor.ndim != 1:
@@ -187,7 +151,7 @@ def _polydiv_handler(
         1,
     )
     dtype = np.result_type(dividend.dtype, divisor.dtype)
-    quotient = np.zeros(quotient_size, dtype=dtype) + (np.sum(dividend) + np.sum(divisor)) * 0
+    quotient = _lift_composite_constant(np.zeros(quotient_size, dtype=dtype), anchor)
     remainder = np.astype(dividend, dtype)
     if int(dividend.shape[0]) >= int(divisor.shape[0]):
         scale = 1.0 / divisor[0]
@@ -208,26 +172,14 @@ def _polydiv_handler(
     )
 
 
-def _polyfit_handler(  # noqa: C901, PLR0912, PLR0915 - mirrors NumPy's output contracts
+def _polyfit_handler(  # noqa: PLR0915 - mirrors NumPy's output contracts
     _graph: DynamicTape,
     traced_type: type[TracedArrayLike],
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
 ) -> CompositeResult:
     positional_names = ("rcond", "full", "w", "cov")
-    if len(args) < _TERNARY_ARITY or len(args) > _TERNARY_ARITY + len(positional_names):
-        msg = "numpy.polyfit expects (x, y, deg, rcond=None, full=False, w=None, cov=False)"
-        raise TracingError(msg)
-    unsupported = set(kwargs) - set(positional_names)
-    if unsupported:
-        msg = f"numpy.polyfit kwargs not supported during tracing: {sorted(unsupported)}"
-        raise TracingError(msg)
-    values = dict(kwargs)
-    for name, value in zip(positional_names, args[_TERNARY_ARITY:], strict=False):
-        if name in values:
-            msg = f"numpy.polyfit received {name} twice"
-            raise TracingError(msg)
-        values[name] = value
+    values = dict(zip(positional_names, args[_TERNARY_ARITY:], strict=False)) | kwargs
     degree_raw = args[2]
     if isinstance(degree_raw, traced_type):
         msg = "numpy.polyfit degree must be a static non-negative integer"
@@ -241,9 +193,6 @@ def _polyfit_handler(  # noqa: C901, PLR0912, PLR0915 - mirrors NumPy's output c
         (args[0], args[1], values.get("w")),
         traced_type=traced_type,
     )
-    if anchor is None:
-        msg = "numpy.polyfit requires a traced x, y, or weight operand"
-        raise TracingError(msg)
     x = np.atleast_1d(_as_traced(args[0], anchor=anchor, traced_type=traced_type)) + 0.0
     y = np.atleast_1d(_as_traced(args[1], anchor=anchor, traced_type=traced_type)) + 0.0
     if x.ndim != 1 or x.size == 0:
@@ -299,8 +248,8 @@ def _polyfit_handler(  # noqa: C901, PLR0912, PLR0915 - mirrors NumPy's output c
     )
     residuals = np.sum(np.real(np.conjugate(residual) * residual), axis=0)
     if bool(values.get("full", False)):
-        rank_value = np.astype(np.sum(coefficients) * 0 + rank, np.int64)
-        rcond_value = np.sum(coefficients) * 0 + float(rcond)
+        rank_value = _lift_lapack_rank(rank, coefficients)
+        rcond_value = _lift_composite_constant(float(rcond), coefficients)
         return _finish(
             (coefficients, np.atleast_1d(residuals), rank_value, singular_values, rcond_value),
             traced_type=traced_type,
@@ -334,12 +283,6 @@ def _polyder_handler(
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
 ) -> CompositeResult:
-    if len(args) not in {1, _BINARY_ARITY} or set(kwargs) - {"m"}:
-        msg = "numpy.polyder expects (p, m=1) during tracing"
-        raise TracingError(msg)
-    if len(args) == _BINARY_ARITY and "m" in kwargs:
-        msg = "numpy.polyder received m twice"
-        raise TracingError(msg)
     coefficients = np.atleast_1d(args[0])
     order = int(args[1] if len(args) == _BINARY_ARITY else kwargs.get("m", 1))
     if order < 0:
@@ -360,15 +303,7 @@ def _polyint_handler(
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
 ) -> CompositeResult:
-    if len(args) not in {1, _BINARY_ARITY, _TERNARY_ARITY} or set(kwargs) - {"m", "k"}:
-        msg = "numpy.polyint expects (p, m=1, k=None) during tracing"
-        raise TracingError(msg)
-    values = dict(kwargs)
-    for name, value in zip(("m", "k"), args[1:], strict=False):
-        if name in values:
-            msg = f"numpy.polyint received {name} twice"
-            raise TracingError(msg)
-        values[name] = value
+    values = dict(zip(("m", "k"), args[1:], strict=False)) | kwargs
     coefficients = np.atleast_1d(args[0])
     order = int(values.get("m", 1))
     if order < 0:
@@ -397,15 +332,9 @@ def _polyval_handler(
     _graph: DynamicTape,
     traced_type: type[TracedArrayLike],
     args: tuple[Any, ...],
-    kwargs: dict[str, Any],
+    _kwargs: dict[str, Any],
 ) -> CompositeResult:
-    if len(args) != _BINARY_ARITY or kwargs:
-        msg = "numpy.polyval expects (p, x) during tracing"
-        raise TracingError(msg)
     anchor = _first_traced(args, traced_type=traced_type)
-    if anchor is None:
-        msg = "numpy.polyval requires a traced operand"
-        raise TracingError(msg)
     coefficients = np.atleast_1d(_as_traced(args[0], anchor=anchor, traced_type=traced_type))
     x = _as_traced(args[1], anchor=anchor, traced_type=traced_type)
     result = np.zeros_like(x)
@@ -418,31 +347,41 @@ def _roots_handler(
     _graph: DynamicTape,
     traced_type: type[TracedArrayLike],
     args: tuple[Any, ...],
-    kwargs: dict[str, Any],
+    _kwargs: dict[str, Any],
 ) -> CompositeResult:
-    if len(args) != 1 or kwargs:
-        msg = "numpy.roots expects one coefficient vector during tracing"
-        raise TracingError(msg)
     coefficients = np.atleast_1d(args[0])
     if coefficients.ndim != 1:
         msg = "numpy.roots coefficients must be one-dimensional"
         raise TracingError(msg)
-    _node_id, concrete = _snapshot_traced(coefficients)
+    concrete = _innermost(coefficients)
     if bool(getattr(type(concrete), "__advect_abstract_array__", False)):
         msg = "staging numpy.roots requires a statically nonzero leading coefficient"
         raise TracingError(msg)
     concrete_array = np.asarray(concrete)
+    # NumPy decides realness after stripping trailing zero coefficients, so its
+    # own roots fix the result dtype. The traced companion keeps those zero
+    # roots, which keeps every simple root's dependence on each coefficient.
+    dtype = np.roots(concrete_array).dtype
     nonzero = np.flatnonzero(concrete_array)
     if nonzero.size == 0 or int(nonzero[0]) == concrete_array.size - 1:
-        return _finish(coefficients[:0], traced_type=traced_type)
+        return _finish(np.astype(coefficients[:0], dtype), traced_type=traced_type)
     coefficients = coefficients[int(nonzero[0]) :]
+    if not np.issubdtype(coefficients.dtype, np.inexact):
+        # NumPy solves integer and boolean coefficients in float64.
+        coefficients = np.astype(coefficients, np.float64)
     degree = int(coefficients.shape[0]) - 1
     first_row = -coefficients[1:] / coefficients[0]
-    companion = np.eye(degree, k=-1, dtype=coefficients.dtype) + np.sum(coefficients) * 0
+    companion = _lift_composite_constant(
+        np.eye(degree, k=-1, dtype=coefficients.dtype),
+        coefficients,
+    )
     companion[0, :] = first_row
     roots = np.linalg.eigvals(companion)
-    if not np.iscomplexobj(np.roots(concrete_array)):
+    if dtype.kind != "c":
         roots = np.real(roots)
+    if roots.dtype != dtype:
+        # NumPy returns float64 zeros when no nonzero root remains.
+        roots = np.astype(roots, dtype)
     return _finish(roots, traced_type=traced_type)
 
 
@@ -451,8 +390,8 @@ def register_polynomial_handlers(
 ) -> None:
     """Register classic polynomial functions with differentiable parameters."""
     handlers[np.poly] = _poly_handler
-    handlers[np.polyadd] = _polyadd_handler
-    handlers[np.polysub] = _polysub_handler
+    handlers[np.polyadd] = partial(_poly_add_sub_handler, subtract=False)
+    handlers[np.polysub] = partial(_poly_add_sub_handler, subtract=True)
     handlers[np.polymul] = _polymul_handler
     handlers[np.polydiv] = _polydiv_handler
     handlers[np.polyfit] = _polyfit_handler

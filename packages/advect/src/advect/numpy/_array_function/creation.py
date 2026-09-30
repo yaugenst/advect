@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+from functools import partial
 from typing import TYPE_CHECKING, Any, cast
 
 import numpy as _numpy  # noqa: ICN001 - typed module and dynamic lowering namespace
@@ -11,11 +12,11 @@ import numpy as _numpy  # noqa: ICN001 - typed module and dynamic lowering names
 from advect.core._errors import TracingError
 from advect.core._protocols import _snapshot_traced
 from advect.numpy._array_function.composite import (
+    _find_traced,
     _finish,
-    _first_traced,
     _lift_composite_constant,
 )
-from advect.numpy._array_function.emission import _add_backend_node, _get_node, _get_value
+from advect.numpy._array_function.emission import _emit, _get_value
 from advect.numpy._array_function.normalization import (
     _bind_optional_positionals,
     _normalize_constant_values,
@@ -27,8 +28,6 @@ from advect.numpy._constructors import (
     asanyarray as traced_asanyarray,
     asarray as traced_asarray,
 )
-from advect.numpy._op_bindings import canonicalize_numpy_op
-from advect.numpy._static_attr_arrays import encode_static_array_attr
 
 np: Any = _numpy
 
@@ -44,8 +43,25 @@ _MIN_REQUIRED_ARGS = 2
 
 # ``numpy.linspace(start, stop, num, endpoint, retstep, dtype, axis)``
 _LINSPACE_TRAILING_PARAMETERS = ("num", "endpoint", "retstep", "dtype", "axis")
-_LINEAR_PAD_MODES = frozenset({"constant", "edge", "linear_ramp", "reflect", "symmetric", "wrap"})
-_STATISTICAL_PAD_MODES = frozenset({"maximum", "mean", "median", "minimum"})
+# The keyword parameters of every np.pad mode that traces differentiably.
+_PAD_MODE_PARAMETERS = {
+    "constant": frozenset({"constant_values"}),
+    "edge": frozenset(),
+    "linear_ramp": frozenset({"end_values"}),
+    "reflect": frozenset({"reflect_type"}),
+    "symmetric": frozenset({"reflect_type"}),
+    "wrap": frozenset(),
+    "maximum": frozenset({"stat_length"}),
+    "mean": frozenset({"stat_length"}),
+    "median": frozenset({"stat_length"}),
+    "minimum": frozenset({"stat_length"}),
+}
+_STATISTICAL_PAD_REDUCERS = {
+    "maximum": _numpy.max,
+    "mean": _numpy.mean,
+    "median": _numpy.median,
+    "minimum": _numpy.min,
+}
 _CONSTRUCTOR_KEYWORD_ONLY = frozenset({"device", "like"})
 
 
@@ -63,18 +79,16 @@ def _full_handler(
     dtype = values.get("dtype")
     order = str(values.get("order", "C"))
     device = values.get("device")
-    like = values.get("like")
 
-    full_fn = cast("Callable[..., Any]", np.full)
-    call_kwargs: dict[str, Any] = {"dtype": dtype, "order": order}
+    # NumPy dispatches full to the tracer only through a traced like= operand.
+    call_kwargs: dict[str, Any] = {
+        "dtype": dtype,
+        "order": order,
+        "like": _get_value(values["like"], traced_type),
+    }
     if device is not None:
         call_kwargs["device"] = device
-    if like is not None:
-        like_array = _get_value(like, traced_type)
-        call_kwargs["like"] = like_array
-    else:
-        like_array = None
-    result = full_fn(shape, _get_value(fill_value, traced_type), **call_kwargs)
+    result = cast("Any", np.full)(shape, _get_value(fill_value, traced_type), **call_kwargs)
 
     attrs: dict[str, Any] = {"shape": shape}
     if dtype is not None:
@@ -83,37 +97,11 @@ def _full_handler(
         attrs["order"] = order
     if device is not None:
         attrs["device"] = device
-    if like_array is not None and not isinstance(like, traced_type):
-        attrs["like"] = encode_static_array_attr(like_array)
 
-    node_id = _add_backend_node(
-        graph=graph,
-        op=canonicalize_numpy_op("numpy.full"),
-        inputs=(_get_node(fill_value, graph, traced_type),),
-        value=result,
-        attrs=attrs,
-        shape=result.shape,
-        dtype=result.dtype,
-    )
-    return result, node_id
+    return _emit(graph, traced_type, "numpy.full", (fill_value,), result, attrs)
 
 
-def _like_anchor(
-    values: dict[str, Any],
-    *,
-    traced_type: type[TracedArrayLike],
-    name: str,
-) -> TracedArrayLike:
-    anchor = _first_traced(values.get("like"), traced_type=traced_type)
-    if anchor is None:
-        msg = (
-            f"numpy.{name} tracing requires like= to be a traced array; "
-            "constructor shape metadata must remain static"
-        )
-        raise TracingError(msg)
-    return anchor
-
-
+# NumPy dispatches its constructors to the tracer only through a traced like=.
 def _basic_constructor_handler(
     _graph: DynamicTape,
     traced_type: type[TracedArrayLike],
@@ -121,6 +109,7 @@ def _basic_constructor_handler(
     kwargs: dict[str, Any],
     *,
     name: str,
+    like_function: Callable[..., Any],
 ) -> CompositeResult:
     values = _bind_optional_positionals(
         name=name,
@@ -131,7 +120,7 @@ def _basic_constructor_handler(
         keyword_only=_CONSTRUCTOR_KEYWORD_ONLY,
     )
     shape = _normalize_shape(args[0])
-    anchor = _like_anchor(values, traced_type=traced_type, name=name)
+    anchor = values["like"]
     dtype = float if values.get("dtype") is None else values["dtype"]
     order = str(values.get("order", "C"))
     device = values.get("device")
@@ -142,145 +131,50 @@ def _basic_constructor_handler(
     }
     if device is not None:
         like_kwargs["device"] = device
-    function = {
-        "zeros": np.zeros_like,
-        "ones": np.ones_like,
-        "empty": np.empty_like,
-    }[name]
-    return _finish(
-        function(anchor, **like_kwargs),
-        traced_type=traced_type,
-    )
+    return _finish(like_function(anchor, **like_kwargs), traced_type=traced_type)
 
 
-def _eye_handler(
+def _static_constructor_handler(
     _graph: DynamicTape,
     traced_type: type[TracedArrayLike],
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
+    *,
+    function: Callable[..., Any],
+    optional: tuple[str, ...],
 ) -> CompositeResult:
+    """Lift a like=-dispatched eye, identity or tri into the anchor's trace."""
+    name = function.__name__
     values = _bind_optional_positionals(
-        name="eye",
+        name=name,
         args=args,
         kwargs=kwargs,
         required=1,
-        optional=("M", "k", "dtype", "order"),
+        optional=optional,
         keyword_only=_CONSTRUCTOR_KEYWORD_ONLY,
     )
-    anchor = _like_anchor(values, traced_type=traced_type, name="eye")
-    rows = int(args[0])
-    columns = rows if values.get("M") is None else int(values["M"])
-    diagonal = int(values.get("k", 0))
-    dtype = values.get("dtype", float)
-    order = str(values.get("order", "C"))
-    concrete = np.eye(rows, columns, k=diagonal, dtype=dtype, order=order)
+    anchor = values.pop("like")
+    device = values.pop("device", None)
+    concrete = function(args[0], **values)
     result = np.zeros_like(
         anchor,
         dtype=concrete.dtype,
-        order=order,
+        order=str(values.get("order", "C")),
         shape=concrete.shape,
-        device=values.get("device"),
+        device=device,
     )
     return _finish(result + concrete, traced_type=traced_type)
 
 
-def _identity_handler(
+def _constructor_handler(
     _graph: DynamicTape,
     traced_type: type[TracedArrayLike],
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
+    *,
+    constructor: Callable[..., Any],
 ) -> CompositeResult:
-    values = _bind_optional_positionals(
-        name="identity",
-        args=args,
-        kwargs=kwargs,
-        required=1,
-        optional=("dtype",),
-        keyword_only=_CONSTRUCTOR_KEYWORD_ONLY,
-    )
-    anchor = _like_anchor(values, traced_type=traced_type, name="identity")
-    concrete = np.identity(int(args[0]), dtype=values.get("dtype"))
-    result = np.zeros_like(
-        anchor,
-        dtype=concrete.dtype,
-        shape=concrete.shape,
-        device=values.get("device"),
-    )
-    return _finish(result + concrete, traced_type=traced_type)
-
-
-def _tri_handler(
-    _graph: DynamicTape,
-    traced_type: type[TracedArrayLike],
-    args: tuple[Any, ...],
-    kwargs: dict[str, Any],
-) -> CompositeResult:
-    values = _bind_optional_positionals(
-        name="tri",
-        args=args,
-        kwargs=kwargs,
-        required=1,
-        optional=("M", "k", "dtype"),
-        keyword_only=_CONSTRUCTOR_KEYWORD_ONLY,
-    )
-    anchor = _like_anchor(values, traced_type=traced_type, name="tri")
-    rows = int(args[0])
-    columns = rows if values.get("M") is None else int(values["M"])
-    concrete = np.tri(
-        rows,
-        columns,
-        k=int(values.get("k", 0)),
-        dtype=values.get("dtype", float),
-    )
-    result = np.zeros_like(
-        anchor,
-        dtype=concrete.dtype,
-        shape=concrete.shape,
-        device=values.get("device"),
-    )
-    return _finish(result + concrete, traced_type=traced_type)
-
-
-def register_creation_handlers(
-    handlers: dict[Callable[..., Any], ArrayFunctionHandler],
-) -> None:
-    """Register constructors that NumPy dispatches through a traced like= value."""
-    handlers[np.array] = lambda _graph, traced_type, args, kwargs: _finish(
-        traced_array(*args, **kwargs),
-        traced_type=traced_type,
-    )
-    handlers[np.asarray] = lambda _graph, traced_type, args, kwargs: _finish(
-        traced_asarray(*args, **kwargs),
-        traced_type=traced_type,
-    )
-    handlers[np.asanyarray] = lambda _graph, traced_type, args, kwargs: _finish(
-        traced_asanyarray(*args, **kwargs),
-        traced_type=traced_type,
-    )
-    handlers[np.zeros] = lambda graph, traced_type, args, kwargs: _basic_constructor_handler(
-        graph,
-        traced_type,
-        args,
-        kwargs,
-        name="zeros",
-    )
-    handlers[np.ones] = lambda graph, traced_type, args, kwargs: _basic_constructor_handler(
-        graph,
-        traced_type,
-        args,
-        kwargs,
-        name="ones",
-    )
-    handlers[np.empty] = lambda graph, traced_type, args, kwargs: _basic_constructor_handler(
-        graph,
-        traced_type,
-        args,
-        kwargs,
-        name="empty",
-    )
-    handlers[np.eye] = _eye_handler
-    handlers[np.identity] = _identity_handler
-    handlers[np.tri] = _tri_handler
+    return _finish(constructor(*args, **kwargs), traced_type=traced_type)
 
 
 def _full_like_handler(
@@ -324,19 +218,7 @@ def _full_like_handler(
     if device is not None:
         attrs["device"] = device
 
-    node_id = _add_backend_node(
-        graph=graph,
-        op=canonicalize_numpy_op("numpy.full_like"),
-        inputs=(
-            _get_node(a, graph, traced_type),
-            _get_node(fill_value, graph, traced_type),
-        ),
-        value=result,
-        attrs=attrs,
-        shape=result.shape,
-        dtype=result.dtype,
-    )
-    return result, node_id
+    return _emit(graph, traced_type, "numpy.full_like", (a, fill_value), result, attrs)
 
 
 def _linspace_handler(
@@ -383,18 +265,7 @@ def _linspace_handler(
     if bound.get("device") is not None:
         attrs["device"] = bound["device"]
 
-    node_id = _add_backend_node(
-        graph=graph,
-        op=canonicalize_numpy_op("numpy.linspace"),
-        inputs=(
-            _get_node(start, graph, traced_type),
-            _get_node(stop, graph, traced_type),
-        ),
-        value=result,
-        attrs=attrs,
-        shape=result.shape,
-        dtype=result.dtype,
-    )
+    _, node_id = _emit(graph, traced_type, "numpy.linspace", (start, stop), result, attrs)
     if not retstep:
         return result, node_id
     traced_ctor = cast("Callable[..., TracedArrayLike]", traced_type)
@@ -424,17 +295,8 @@ def _pad_handler(
     kwargs: dict[str, Any],
 ) -> CompositeResult:
     mode = str(args[2] if len(args) > _MIN_REQUIRED_ARGS else kwargs.get("mode", "constant"))
-    mode_parameters = {
-        "constant": frozenset({"constant_values"}),
-        "linear_ramp": frozenset({"end_values"}),
-        "reflect": frozenset({"reflect_type"}),
-        "symmetric": frozenset({"reflect_type"}),
-        "maximum": frozenset({"stat_length"}),
-        "mean": frozenset({"stat_length"}),
-        "median": frozenset({"stat_length"}),
-        "minimum": frozenset({"stat_length"}),
-    }.get(mode, frozenset())
-    unsupported = set(kwargs) - ({"mode"} | set(mode_parameters))
+    mode_parameters = _PAD_MODE_PARAMETERS.get(mode, frozenset())
+    unsupported = set(kwargs) - ({"mode"} | mode_parameters)
     if unsupported:
         msg = f"numpy.pad kwargs not supported during tracing: {sorted(unsupported)}"
         raise TracingError(msg)
@@ -443,13 +305,13 @@ def _pad_handler(
     pad_width = _normalize_pad_width(args[1])
     constant_values = kwargs.get("constant_values", 0)
 
-    if mode not in _LINEAR_PAD_MODES | _STATISTICAL_PAD_MODES:
+    if mode not in _PAD_MODE_PARAMETERS:
         msg = (
             f"numpy.pad(mode={mode!r}) has a data-dependent nonlinear padding rule "
             "and is not differentiable through Advect's NumPy frontend"
         )
         raise TracingError(msg)
-    if mode in _STATISTICAL_PAD_MODES:
+    if mode in _STATISTICAL_PAD_REDUCERS:
         return _statistical_pad(
             x,
             pad_width,
@@ -457,10 +319,7 @@ def _pad_handler(
             stat_length=kwargs.get("stat_length"),
             traced_type=traced_type,
         )
-    parameter_is_traced = _first_traced(
-        (constant_values, kwargs.get("end_values")),
-        traced_type=traced_type,
-    )
+    parameter_is_traced = _find_traced((constant_values, kwargs.get("end_values")), traced_type)
     if mode != "constant" or parameter_is_traced is not None:
         return _linear_pad(
             x,
@@ -483,16 +342,7 @@ def _pad_handler(
         "constant_values": _normalize_constant_values(constant_values),
     }
 
-    node_id = _add_backend_node(
-        graph=graph,
-        op=canonicalize_numpy_op("numpy.pad"),
-        inputs=(_get_node(x, graph, traced_type),),
-        value=result,
-        attrs=attrs,
-        shape=result.shape,
-        dtype=result.dtype,
-    )
-    return result, node_id
+    return _emit(graph, traced_type, "numpy.pad", (x,), result, attrs)
 
 
 def _normalize_pad_parameter(
@@ -682,13 +532,7 @@ def _linear_pad(
     traced_type: type[TracedArrayLike],
 ) -> CompositeResult:
     ndim = int(value.ndim)
-    widths = pad_width if len(pad_width) == ndim else pad_width * ndim
-    if len(widths) != ndim:
-        msg = f"numpy.pad pad_width cannot broadcast to {ndim} dimensions"
-        raise TracingError(msg)
-    if any(before < 0 or after < 0 for before, after in widths):
-        msg = "numpy.pad pad_width cannot contain negative values"
-        raise TracingError(msg)
+    widths = _pad_widths(pad_width, ndim)
     if reflect_type not in {"even", "odd"}:
         msg = "numpy.pad reflect_type must be 'even' or 'odd'"
         raise TracingError(msg)
@@ -720,20 +564,18 @@ def _linear_pad(
     return _finish(result, traced_type=traced_type)
 
 
-def _normalize_stat_lengths(
-    value: object,
-    *,
+def _pad_widths(
+    pad_width: tuple[tuple[int, int], ...],
     ndim: int,
-) -> tuple[tuple[int | None, int | None], ...]:
-    if value is None:
-        return ((None, None),) * ndim
-    array = np.asarray(value)
-    try:
-        broadcast = np.broadcast_to(array, (ndim, 2))
-    except ValueError as error:
-        msg = f"numpy.pad stat_length shape {array.shape} cannot broadcast to ({ndim}, 2)"
-        raise TracingError(msg) from error
-    return tuple((int(row[0]), int(row[1])) for row in broadcast)
+) -> tuple[tuple[int, int], ...]:
+    widths = pad_width if len(pad_width) == ndim else pad_width * ndim
+    if len(widths) != ndim:
+        msg = f"numpy.pad pad_width cannot broadcast to {ndim} dimensions"
+        raise TracingError(msg)
+    if any(before < 0 or after < 0 for before, after in widths):
+        msg = "index can't contain negative values"
+        raise ValueError(msg)
+    return widths
 
 
 def _statistical_pad(
@@ -745,41 +587,84 @@ def _statistical_pad(
     traced_type: type[TracedArrayLike],
 ) -> CompositeResult:
     ndim = int(value.ndim)
-    widths = pad_width if len(pad_width) == ndim else pad_width * ndim
-    if len(widths) != ndim:
-        msg = f"numpy.pad pad_width cannot broadcast to {ndim} dimensions"
-        raise TracingError(msg)
-    lengths = _normalize_stat_lengths(stat_length, ndim=ndim)
-    reducer = {
-        "maximum": np.max,
-        "mean": np.mean,
-        "median": np.median,
-        "minimum": np.min,
-    }[mode]
-    result: Any = value
-    for axis, ((before, after), (before_length, after_length)) in enumerate(
-        zip(widths, lengths, strict=True)
-    ):
-        size = int(result.shape[axis])
-        before_count = size if before_length is None else min(before_length, size)
-        after_count = size if after_length is None else min(after_length, size)
-        before_index = [slice(None)] * ndim
-        after_index = [slice(None)] * ndim
-        before_index[axis] = slice(0, before_count)
-        after_index[axis] = slice(size - after_count, size)
-        before_value = reducer(result[tuple(before_index)], axis=axis, keepdims=True)
-        after_value = reducer(result[tuple(after_index)], axis=axis, keepdims=True)
-        before_shape = [int(length) for length in result.shape]
-        after_shape = list(before_shape)
-        before_shape[axis] = before
-        after_shape[axis] = after
-        result = np.concatenate(
-            (
-                np.broadcast_to(before_value, tuple(before_shape)),
-                result,
-                np.broadcast_to(after_value, tuple(after_shape)),
-            ),
-            axis=axis,
+    widths = _pad_widths(pad_width, ndim)
+    lengths: tuple[tuple[object, object], ...] = ((None, None),) * ndim
+    # NumPy returns an empty array before it reads stat_length or takes statistics.
+    empty = 0 in tuple(value.shape)
+    if stat_length is not None and not empty:
+        # NumPy rounds stat_length to non-negative indices.
+        rounded = np.round(np.asarray(stat_length)).astype(np.intp)
+        if np.any(rounded < 0):
+            msg = "index can't contain negative values"
+            raise ValueError(msg)
+        lengths = _normalize_pad_parameter(
+            rounded,
+            ndim=ndim,
+            traced_type=traced_type,
+            name="stat_length",
         )
-        result = np.astype(result, value.dtype)
+    reducer = _STATISTICAL_PAD_REDUCERS[mode]
+    rounds = np.issubdtype(value.dtype, np.integer)
+    result: Any = value
+    for axis, (width, length_pair) in enumerate(zip(widths, lengths, strict=True)):
+        size = int(result.shape[axis])
+        if size == 0 and any(width):
+            msg = f"can't extend empty axis {axis} using modes other than 'constant' or 'empty'"
+            raise ValueError(msg)
+        counts = tuple(
+            size if length is None else min(int(cast("Any", length)), size)
+            for length in length_pair
+        )
+        if 0 in counts and mode in {"maximum", "minimum"} and not empty:
+            msg = "stat_length of 0 yields no value for padding"
+            raise ValueError(msg)
+        if not any(width):
+            continue
+        regions = (slice(0, counts[0]), slice(size - counts[1], size))
+        parts: list[Any] = []
+        for position, (pad_length, region) in enumerate(zip(width, regions, strict=True)):
+            if position == 1:
+                parts.append(result)
+            if pad_length == 0:
+                continue
+            chunk = result[_pad_axis_slice(result, axis=axis, index=region)]
+            statistic = reducer(chunk, axis=axis, keepdims=True)
+            if rounds:
+                # NumPy rounds statistics before storing them in an integer array.
+                statistic = np.round(statistic)
+            shape = _pad_axis_shape(result, axis=axis, length=pad_length)
+            parts.append(np.broadcast_to(statistic, shape))
+        result = np.astype(np.concatenate(tuple(parts), axis=axis), value.dtype)
     return _finish(result, traced_type=traced_type)
+
+
+def register_creation_handlers(
+    handlers: dict[Callable[..., Any], ArrayFunctionHandler],
+) -> None:
+    """Register constructors that NumPy dispatches through a traced like= value."""
+    for function, constructor in (
+        (np.array, traced_array),
+        (np.asarray, traced_asarray),
+        (np.asanyarray, traced_asanyarray),
+    ):
+        handlers[function] = partial(_constructor_handler, constructor=constructor)
+    for function, like_function in (
+        (np.zeros, np.zeros_like),
+        (np.ones, np.ones_like),
+        (np.empty, np.empty_like),
+    ):
+        handlers[function] = partial(
+            _basic_constructor_handler, name=function.__name__, like_function=like_function
+        )
+    for function, optional in (
+        (np.eye, ("M", "k", "dtype", "order")),
+        (np.identity, ("dtype",)),
+        (np.tri, ("M", "k", "dtype")),
+    ):
+        handlers[function] = partial(
+            _static_constructor_handler, function=function, optional=optional
+        )
+    handlers[np.full] = _full_handler
+    handlers[np.full_like] = _full_like_handler
+    handlers[np.linspace] = _linspace_handler
+    handlers[np.pad] = _pad_handler

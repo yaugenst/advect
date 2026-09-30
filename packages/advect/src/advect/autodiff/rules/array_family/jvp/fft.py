@@ -1,304 +1,87 @@
-"""Fft JVP rules."""
+"""Fft JVP rules: each transform is linear, so it applies itself to the tangent."""
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from advect.autodiff.rules.array_family._backend_runtime import xp
 from advect.autodiff.rules.array_family._transpose_utils import (
     _adjoint_fft_norm as _adjoint_norm,
 )
-from advect.autodiff.rules.array_family.jvp.common import _zeros_output_tangent
+from advect.autodiff.rules.array_family.jvp.common import linear_jvp
 
 if TYPE_CHECKING:
     from advect.autodiff.rules.array_family._transpose_utils import FFTNorm
+    from advect.autodiff.rules.array_family.jvp.common import _JVPFn
+
+type _Ints = tuple[int, ...] | None
 
 
-def _jvp_fft(
-    ans: xp.ndarray,
-    x: xp.ndarray,
-    *rest: xp.ndarray,
-    tangents: tuple[xp.ndarray | None, ...],
-    n: int | None = None,
-    axis: int = -1,
-    norm: FFTNorm | None = None,
-    **attrs: Any,
-) -> xp.ndarray:
-    _ = ans, x, rest, attrs
-    tangent = tangents[0] if tangents else None
-    if tangent is None:
-        return _zeros_output_tangent(ans, tangents)
-    return cast("xp.ndarray[Any, Any]", xp.fft.fft(tangent, n=n, axis=axis, norm=norm))
+def _along_axis(name: str) -> _JVPFn:
+    @linear_jvp
+    def jvp(
+        t: Any, n: int | None = None, axis: int = -1, norm: FFTNorm | None = None, **_: Any
+    ) -> Any:
+        return getattr(xp.fft, name)(t, n=n, axis=axis, norm=norm)
+
+    return jvp
 
 
-def _jvp_ifft(
-    ans: xp.ndarray,
-    x: xp.ndarray,
-    *rest: xp.ndarray,
-    tangents: tuple[xp.ndarray | None, ...],
-    n: int | None = None,
-    axis: int = -1,
-    norm: FFTNorm | None = None,
-    **attrs: Any,
-) -> xp.ndarray:
-    _ = ans, x, rest, attrs
-    tangent = tangents[0] if tangents else None
-    if tangent is None:
-        return _zeros_output_tangent(ans, tangents)
-    return cast("xp.ndarray[Any, Any]", xp.fft.ifft(tangent, n=n, axis=axis, norm=norm))
+def _over_axes(name: str, default_axes: _Ints) -> _JVPFn:
+    @linear_jvp
+    def jvp(
+        t: Any, s: _Ints = None, axes: _Ints = default_axes, norm: FFTNorm | None = None, **_: Any
+    ) -> Any:
+        return getattr(xp.fft, name)(t, s=s, axes=axes, norm=norm)
+
+    return jvp
 
 
-def _jvp_fft2(
-    ans: xp.ndarray,
-    x: xp.ndarray,
-    *rest: xp.ndarray,
-    tangents: tuple[xp.ndarray | None, ...],
-    s: tuple[int, ...] | None = None,
-    axes: tuple[int, ...] | None = (-2, -1),
-    norm: FFTNorm | None = None,
-    **attrs: Any,
-) -> xp.ndarray:
-    _ = ans, x, rest, attrs
-    tangent = tangents[0] if tangents else None
-    if tangent is None:
-        return _zeros_output_tangent(ans, tangents)
-    return cast("xp.ndarray[Any, Any]", xp.fft.fft2(tangent, s=s, axes=axes, norm=norm))
+_jvp_fft = _along_axis("fft")
+_jvp_ifft = _along_axis("ifft")
+_jvp_rfft = _along_axis("rfft")
+_jvp_irfft = _along_axis("irfft")
+# The Array API has no two-dimensional transforms; each is its n-dimensional
+# transform over the last two axes by default.
+_jvp_fft2 = _over_axes("fftn", (-2, -1))
+_jvp_ifft2 = _over_axes("ifftn", (-2, -1))
+_jvp_rfft2 = _over_axes("rfftn", (-2, -1))
+_jvp_irfft2 = _over_axes("irfftn", (-2, -1))
+_jvp_fftn = _over_axes("fftn", None)
+_jvp_ifftn = _over_axes("ifftn", None)
+_jvp_rfftn = _over_axes("rfftn", None)
 
 
-def _jvp_ifft2(
-    ans: xp.ndarray,
-    x: xp.ndarray,
-    *rest: xp.ndarray,
-    tangents: tuple[xp.ndarray | None, ...],
-    s: tuple[int, ...] | None = None,
-    axes: tuple[int, ...] | None = (-2, -1),
-    norm: FFTNorm | None = None,
-    **attrs: Any,
-) -> xp.ndarray:
-    _ = ans, x, rest, attrs
-    tangent = tangents[0] if tangents else None
-    if tangent is None:
-        return _zeros_output_tangent(ans, tangents)
-    return cast("xp.ndarray[Any, Any]", xp.fft.ifft2(tangent, s=s, axes=axes, norm=norm))
-
-
-def _jvp_fftn(
-    ans: xp.ndarray,
-    x: xp.ndarray,
-    *rest: xp.ndarray,
-    tangents: tuple[xp.ndarray | None, ...],
-    s: tuple[int, ...] | None = None,
-    axes: tuple[int, ...] | None = None,
-    norm: FFTNorm | None = None,
-    **attrs: Any,
-) -> xp.ndarray:
-    _ = ans, x, rest, attrs
-    tangent = tangents[0] if tangents else None
-    if tangent is None:
-        return _zeros_output_tangent(ans, tangents)
-    return cast("xp.ndarray[Any, Any]", xp.fft.fftn(tangent, s=s, axes=axes, norm=norm))
-
-
-def _jvp_ifftn(
-    ans: xp.ndarray,
-    x: xp.ndarray,
-    *rest: xp.ndarray,
-    tangents: tuple[xp.ndarray | None, ...],
-    s: tuple[int, ...] | None = None,
-    axes: tuple[int, ...] | None = None,
-    norm: FFTNorm | None = None,
-    **attrs: Any,
-) -> xp.ndarray:
-    _ = ans, x, rest, attrs
-    tangent = tangents[0] if tangents else None
-    if tangent is None:
-        return _zeros_output_tangent(ans, tangents)
-    return cast("xp.ndarray[Any, Any]", xp.fft.ifftn(tangent, s=s, axes=axes, norm=norm))
-
-
-def _jvp_rfft(
-    ans: xp.ndarray,
-    x: xp.ndarray,
-    *rest: xp.ndarray,
-    tangents: tuple[xp.ndarray | None, ...],
-    n: int | None = None,
-    axis: int = -1,
-    norm: FFTNorm | None = None,
-    **attrs: Any,
-) -> xp.ndarray:
-    _ = ans, x, rest, attrs
-    tangent = tangents[0] if tangents else None
-    if tangent is None:
-        return _zeros_output_tangent(ans, tangents)
-    return cast("xp.ndarray[Any, Any]", xp.fft.rfft(tangent, n=n, axis=axis, norm=norm))
-
-
-def _jvp_rfft2(
-    ans: xp.ndarray,
-    x: xp.ndarray,
-    *rest: xp.ndarray,
-    tangents: tuple[xp.ndarray | None, ...],
-    s: tuple[int, ...] | None = None,
-    axes: tuple[int, ...] | None = (-2, -1),
-    norm: FFTNorm | None = None,
-    **attrs: Any,
-) -> xp.ndarray:
-    _ = ans, x, rest, attrs
-    tangent = tangents[0] if tangents else None
-    if tangent is None:
-        return _zeros_output_tangent(ans, tangents)
-    return cast("xp.ndarray[Any, Any]", xp.fft.rfft2(tangent, s=s, axes=axes, norm=norm))
-
-
-def _jvp_rfftn(
-    ans: xp.ndarray,
-    x: xp.ndarray,
-    *rest: xp.ndarray,
-    tangents: tuple[xp.ndarray | None, ...],
-    s: tuple[int, ...] | None = None,
-    axes: tuple[int, ...] | None = None,
-    norm: FFTNorm | None = None,
-    **attrs: Any,
-) -> xp.ndarray:
-    _ = ans, x, rest, attrs
-    tangent = tangents[0] if tangents else None
-    if tangent is None:
-        return _zeros_output_tangent(ans, tangents)
-    return cast("xp.ndarray[Any, Any]", xp.fft.rfftn(tangent, s=s, axes=axes, norm=norm))
-
-
-def _jvp_irfft(
-    ans: xp.ndarray,
-    x: xp.ndarray,
-    *rest: xp.ndarray,
-    tangents: tuple[xp.ndarray | None, ...],
-    n: int | None = None,
-    axis: int = -1,
-    norm: FFTNorm | None = None,
-    **attrs: Any,
-) -> xp.ndarray:
-    _ = ans, x, rest, attrs
-    tangent = tangents[0] if tangents else None
-    if tangent is None:
-        return _zeros_output_tangent(ans, tangents)
-    return cast("xp.ndarray[Any, Any]", xp.fft.irfft(tangent, n=n, axis=axis, norm=norm))
-
-
-def _jvp_irfft2(
-    ans: xp.ndarray,
-    x: xp.ndarray,
-    *rest: xp.ndarray,
-    tangents: tuple[xp.ndarray | None, ...],
-    s: tuple[int, ...] | None = None,
-    axes: tuple[int, ...] | None = (-2, -1),
-    norm: FFTNorm | None = None,
-    **attrs: Any,
-) -> xp.ndarray:
-    _ = ans, x, rest, attrs
-    tangent = tangents[0] if tangents else None
-    if tangent is None:
-        return _zeros_output_tangent(ans, tangents)
-    return cast("xp.ndarray[Any, Any]", xp.fft.irfft2(tangent, s=s, axes=axes, norm=norm))
-
-
+@linear_jvp
 def _jvp_irfftn(
-    ans: xp.ndarray,
-    x: xp.ndarray,
-    *rest: xp.ndarray,
-    tangents: tuple[xp.ndarray | None, ...],
-    s: tuple[int, ...] | None = None,
-    axes: tuple[int, ...] | None = None,
-    norm: FFTNorm | None = None,
-    **attrs: Any,
-) -> xp.ndarray:
-    _ = ans, x, rest, attrs
-    tangent = tangents[0] if tangents else None
-    if tangent is None:
-        return _zeros_output_tangent(ans, tangents)
+    t: Any, s: _Ints = None, axes: _Ints = None, norm: FFTNorm | None = None, **_: Any
+) -> Any:
     if s is not None and axes is None:
-        axes = tuple(range(tangent.ndim - len(s), tangent.ndim))
-    return cast("xp.ndarray[Any, Any]", xp.fft.irfftn(tangent, s=s, axes=axes, norm=norm))
+        axes = tuple(range(t.ndim - len(s), t.ndim))
+    return xp.fft.irfftn(t, s=s, axes=axes, norm=norm)
 
 
+@linear_jvp
 def _jvp_hfft(
-    ans: xp.ndarray,
-    x: xp.ndarray,
-    *rest: xp.ndarray,
-    tangents: tuple[xp.ndarray | None, ...],
-    n: int | None = None,
-    axis: int = -1,
-    norm: FFTNorm | None = None,
-    **attrs: Any,
-) -> xp.ndarray:
+    t: Any, n: int | None = None, axis: int = -1, norm: FFTNorm | None = None, **_: Any
+) -> Any:
     """Differentiate hfft through its conjugated inverse-real FFT identity."""
-    _ = ans, x, rest, attrs
-    tangent = tangents[0] if tangents else None
-    if tangent is None:
-        return _zeros_output_tangent(ans, tangents)
-    return cast(
-        "xp.ndarray[Any, Any]",
-        xp.fft.irfft(
-            xp.conj(tangent),
-            n=n,
-            axis=axis,
-            norm=_adjoint_norm(norm),
-        ),
-    )
+    return xp.fft.irfft(xp.conj(t), n=n, axis=axis, norm=_adjoint_norm(norm))
 
 
+@linear_jvp
 def _jvp_ihfft(
-    ans: xp.ndarray,
-    x: xp.ndarray,
-    *rest: xp.ndarray,
-    tangents: tuple[xp.ndarray | None, ...],
-    n: int | None = None,
-    axis: int = -1,
-    norm: FFTNorm | None = None,
-    **attrs: Any,
-) -> xp.ndarray:
+    t: Any, n: int | None = None, axis: int = -1, norm: FFTNorm | None = None, **_: Any
+) -> Any:
     """Differentiate ihfft through its conjugated real FFT identity."""
-    _ = ans, x, rest, attrs
-    tangent = tangents[0] if tangents else None
-    if tangent is None:
-        return _zeros_output_tangent(ans, tangents)
-    return cast(
-        "xp.ndarray[Any, Any]",
-        xp.conj(
-            xp.fft.rfft(
-                tangent,
-                n=n,
-                axis=axis,
-                norm=_adjoint_norm(norm),
-            )
-        ),
-    )
+    return xp.conj(xp.fft.rfft(t, n=n, axis=axis, norm=_adjoint_norm(norm)))
 
 
-def _jvp_fftshift(
-    ans: xp.ndarray,
-    x: xp.ndarray,
-    *rest: xp.ndarray,
-    tangents: tuple[xp.ndarray | None, ...],
-    axes: int | tuple[int, ...] | None = None,
-    **attrs: Any,
-) -> xp.ndarray:
-    _ = ans, x, rest, attrs
-    tangent = tangents[0] if tangents else None
-    if tangent is None:
-        return _zeros_output_tangent(ans, tangents)
-    return cast("xp.ndarray[Any, Any]", xp.fft.fftshift(tangent, axes=axes))
+@linear_jvp
+def _jvp_fftshift(t: Any, axes: int | tuple[int, ...] | None = None, **_: Any) -> Any:
+    return xp.fft.fftshift(t, axes=axes)
 
 
-def _jvp_ifftshift(
-    ans: xp.ndarray,
-    x: xp.ndarray,
-    *rest: xp.ndarray,
-    tangents: tuple[xp.ndarray | None, ...],
-    axes: int | tuple[int, ...] | None = None,
-    **attrs: Any,
-) -> xp.ndarray:
-    _ = ans, x, rest, attrs
-    tangent = tangents[0] if tangents else None
-    if tangent is None:
-        return _zeros_output_tangent(ans, tangents)
-    return cast("xp.ndarray[Any, Any]", xp.fft.ifftshift(tangent, axes=axes))
+@linear_jvp
+def _jvp_ifftshift(t: Any, axes: int | tuple[int, ...] | None = None, **_: Any) -> Any:
+    return xp.fft.ifftshift(t, axes=axes)

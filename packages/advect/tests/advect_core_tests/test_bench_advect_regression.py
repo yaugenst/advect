@@ -2,13 +2,19 @@
 
 from __future__ import annotations
 
+import sys
 from typing import TYPE_CHECKING
 
 import pytest
+from hypothesis import given, strategies as st
 from scripts import bench_advect_regression as benchmark
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
     from pathlib import Path
+
+_THRESHOLDS = benchmark._ThresholdConfig(0.05, 0.20, 6.0)
+_MEDIANS = st.floats(1e-3, 1e6)
 
 
 def _sample(value: float) -> dict[str, object]:
@@ -61,6 +67,19 @@ def test_artifact_provenance_hashes_the_exact_wheel(tmp_path: Path) -> None:
     assert len(provenance["sha256"]) == 64
 
 
+def test_non_finite_noise_multiplier_is_an_argument_error(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(sys, "argv", ["bench_advect_regression", "--noise-multiplier", "nan"])
+
+    with pytest.raises(SystemExit) as raised:
+        benchmark._arguments()
+
+    assert raised.value.code == 2
+    assert "expected a finite positive number, got 'nan'" in capsys.readouterr().err
+
+
 def test_worker_command_uses_an_isolated_non_project_environment(tmp_path: Path) -> None:
     wheel = tmp_path / "advect.whl"
     spec = benchmark._WorkerSpec("reference", "abc", "digest", 8, 1, 1, 1)
@@ -95,6 +114,85 @@ def test_phase_gate_uses_paired_noise_with_a_stability_ceiling(
 
     assert comparisons[0]["passed"] is passed
     assert any(violation in item for item in violations) if violation else violations == []
+
+
+@st.composite
+def _paired_medians(draw: st.DrawFn) -> tuple[list[float], list[float]]:
+    """Draw paired replicate medians, mostly near one common candidate/reference ratio."""
+    count = draw(st.integers(1, 9))
+    reference = draw(st.lists(_MEDIANS, min_size=count, max_size=count))
+    if draw(st.booleans()):
+        return reference, draw(st.lists(_MEDIANS, min_size=count, max_size=count))
+    factor = draw(st.floats(0.5, 2.0))
+    jitter = st.floats(-0.05, 0.05)
+    return reference, [value * factor * (1 + draw(jitter)) for value in reference]
+
+
+def _compare(
+    reference: Sequence[float],
+    candidate: Sequence[float],
+) -> tuple[list[dict[str, object]], list[str]]:
+    return benchmark._compare_phases(
+        [_sample(value) for value in reference],
+        [_sample(value) for value in candidate],
+        thresholds=_THRESHOLDS,
+    )
+
+
+@given(pairs=_paired_medians(), data=st.data())
+def test_phase_gate_ignores_replicate_order(
+    pairs: tuple[list[float], list[float]],
+    data: st.DataObject,
+) -> None:
+    reference, candidate = pairs
+    order = data.draw(st.permutations(range(len(reference))))
+
+    permuted = _compare([reference[i] for i in order], [candidate[i] for i in order])
+
+    assert permuted == _compare(reference, candidate)
+
+
+@given(pairs=_paired_medians(), exponent=st.integers(-20, 20))
+def test_phase_gate_verdict_is_independent_of_the_time_unit(
+    pairs: tuple[list[float], list[float]],
+    exponent: int,
+) -> None:
+    reference, candidate = pairs
+    scale = 2.0**exponent
+    keys = ("candidate_over_reference", "effective_threshold", "stable", "passed")
+
+    comparisons, violations = _compare(reference, candidate)
+    scaled, scaled_violations = _compare(
+        [value * scale for value in reference], [value * scale for value in candidate]
+    )
+
+    assert [{key: item[key] for key in keys} for item in scaled] == [
+        {key: item[key] for key in keys} for item in comparisons
+    ]
+    assert scaled_violations == violations
+
+
+@given(reference=st.lists(_MEDIANS, min_size=1, max_size=9))
+def test_identical_artifacts_pass_at_the_minimum_threshold(reference: list[float]) -> None:
+    (comparison,), violations = _compare(reference, reference)
+
+    assert violations == []
+    assert comparison["candidate_over_reference"] == 1.0
+    assert comparison["effective_threshold"] == _THRESHOLDS.minimum
+    assert comparison["passed"] is True
+
+
+@given(pairs=_paired_medians())
+def test_two_artifacts_never_regress_against_each_other(
+    pairs: tuple[list[float], list[float]],
+) -> None:
+    first, second = pairs
+
+    def regressed(reference: list[float], candidate: list[float]) -> bool:
+        (comparison,), _violations = _compare(reference, candidate)
+        return comparison["stable"] is True and comparison["passed"] is False
+
+    assert not (regressed(first, second) and regressed(second, first))
 
 
 def test_acceptance_requires_five_comparable_replicates() -> None:

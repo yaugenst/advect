@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from typing import Any, cast
 
-from advect.autodiff.rules.array_family._backend_runtime import _take_along_axis, xp
+from advect.autodiff.rules.array_family._backend_runtime import (
+    _clip_indices,
+    _int64_indices,
+    _take_along_axis,
+    xp,
+)
 from advect.autodiff.rules.array_family.jvp.common import (
     _zeros_output_tangent,
 )
@@ -24,13 +29,19 @@ def _jvp_take(
     tangent = tangents[0] if tangents else None
     if tangent is None:
         return _zeros_output_tangent(ans, tangents)
+    if not tangent.shape:
+        # NumPy takes along the axis 0 or -1 of a rank-0 source from its
+        # one-element flattening.
+        axis = None
+    if mode == "raise":
+        return xp.take(tangent, indices, axis=axis)
     axis_size = tangent.size if axis is None else tangent.shape[axis]
-    normalized = indices
+    positions = _int64_indices(indices)
     if mode == "wrap":
-        normalized = xp.remainder(indices, axis_size)
-    elif mode == "clip":
-        normalized = xp.clip(indices, 0, axis_size - 1)
-    return xp.take(tangent, normalized, axis=axis)
+        positions = xp.remainder(positions, axis_size)
+    else:
+        positions = _clip_indices(positions, axis_size)
+    return xp.take(tangent, positions, axis=axis)
 
 
 def _jvp_take_along_axis(

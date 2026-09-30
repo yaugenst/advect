@@ -32,9 +32,12 @@ provider, it defaults to `2024.12`.
 The selected target is stored in the graph, preserved by
 [`grad`](transforms.md#advect.grad) and
 [`vjp_program`](staging.md#advect.vjp_program), and enforced before runtime
-graph evaluation. Choosing an older target is the deliberate way to build a
-more portable artifact; Advect does not infer a minimum revision from the
-operations used by the function.
+graph evaluation. Derivative rules emit only functions of that target, so a
+derived program stages again, and forward mode stages, at the same target even
+when a NumPy function itself uses operations newer than the target. Choosing
+an older target is the deliberate way to build a more portable artifact;
+Advect does not infer a minimum revision from the operations used by the
+function.
 
 ::: advect.ArraySpec
 

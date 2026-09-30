@@ -9,6 +9,7 @@ import pytest
 from numpy.testing import assert_allclose
 
 import advect as ad
+from advect.testing import check_gradient
 
 
 def test_grad_composes_rules_and_supports_multiple_arguments() -> None:
@@ -59,29 +60,150 @@ def test_grad_accumulates_reused_and_broadcast_inputs() -> None:
 
 
 @pytest.mark.parametrize(
-    ("operation", "expected_value", "expected_tangent"),
+    ("function", "operands", "expected"),
     [
-        (np.maximum, np.array([0.0, 2.0, 1.0]), np.array([0.0, -0.3, 0.0])),
-        (np.minimum, np.array([-1.0, 1.0, 0.5]), np.array([0.2, 0.0, 0.4])),
+        (
+            lambda a: np.sin(a) + np.float64(1.0),
+            (np.asarray(1.5, dtype=np.float32),),
+            (np.cos(1.5),),
+        ),
+        (
+            lambda a, b: a + b,
+            (np.asarray(1.5, dtype=np.float32), np.asarray(0.25)),
+            (1.0, 1.0),
+        ),
+        (
+            lambda a, b: np.sum(a) + b,
+            (np.ones(3, dtype=np.float32), np.asarray(0.25)),
+            (np.ones(3), 1.0),
+        ),
+        (
+            lambda a, b: np.sum(a + b),
+            (np.asarray(1.5, dtype=np.float32), np.ones(3)),
+            (3.0, np.ones(3)),
+        ),
     ],
-    ids=["maximum", "minimum"],
+    ids=["float64_scalar_constant", "rank_zero_operands", "reduction", "broadcast_rank_zero"],
 )
-def test_elementwise_extrema_use_the_ephemeral_ufunc_path(
-    operation: Any,
-    expected_value: np.ndarray,
-    expected_tangent: np.ndarray,
+def test_numpy_scalar_cotangents_return_in_each_operand_dtype(
+    function: Any,
+    operands: tuple[np.ndarray, ...],
+    expected: tuple[object, ...],
 ) -> None:
-    x = np.array([-1.0, 2.0, 0.5])
-    bound = np.array([0.0, 1.0, 1.0])
-    tangent = np.array([0.2, -0.3, 0.4])
-
-    value, output_tangent = ad.jvp(lambda argument: operation(argument, bound))(
-        x,
-        tangents=tangent,
+    argnums = tuple(range(len(operands)))
+    _value, pullback = ad.vjp(function, argnums=argnums)(*operands)
+    results = (
+        ad.grad(function, argnums=argnums)(*operands),
+        pullback(np.float64(1.0)),
     )
 
-    assert_allclose(value, expected_value)
-    assert_allclose(output_tangent, expected_tangent)
+    for gradients in results:
+        for gradient, operand, reference in zip(gradients, operands, expected, strict=True):
+            assert np.asarray(gradient).dtype == operand.dtype
+            assert_allclose(gradient, reference, rtol=1e-6)
+
+
+def test_gradient_check_pairs_array_leaves_on_every_supported_numpy() -> None:
+    """NumPy 2.0 offers no namespace at Advect's default Array API revision."""
+    check_gradient(
+        lambda x: np.sum(np.sin(x) * x),
+        np.linspace(-1.0, 1.0, 4),
+        tangent=np.array([0.5, -1.0, 2.0, 0.25]),
+    )
+
+
+def test_traced_numpy_scalar_exposes_its_array_namespace() -> None:
+    """A reduction's traced scalar negotiates a namespace also on NumPy 2.0."""
+
+    def total(x: np.ndarray) -> Any:
+        s = np.sum(x)
+        return s.__array_namespace__().sin(s)
+
+    assert_allclose(ad.grad(total)(np.array([0.1, 0.2])), np.full(2, np.cos(0.3)))
+
+
+@pytest.mark.parametrize("stable", [True, False])
+def test_sort_stable_keyword_differentiates_on_every_supported_numpy(*, stable: bool) -> None:
+    """NumPy's argsort accepts ``descending`` only from 2.5, so an ascending rule omits it."""
+    x = np.array([[2.0, 7.0, 1.0], [5.0, 4.0, 9.0]])
+    weight = np.arange(6.0).reshape(2, 3)
+    order = np.argsort(x, axis=0)
+
+    def sort(value: np.ndarray) -> np.ndarray:
+        return np.sort(value, axis=0, stable=stable)
+
+    _primal, tangent = ad.jvp(sort)(x, tangents=weight)
+    gradient = ad.grad(lambda value: np.sum(sort(value) * weight))(x)
+
+    assert_allclose(tangent, np.take_along_axis(weight, order, axis=0))
+    assert_allclose(gradient, np.take_along_axis(weight, np.argsort(order, axis=0), axis=0))
+
+
+def test_implicit_root_of_zero_dimensional_arrays_on_every_supported_numpy() -> None:
+    """0-d arithmetic returns NumPy scalars, which must match the 0-d initial's provider."""
+
+    def newton(residual: Any, initial: np.ndarray) -> Any:
+        value = initial
+        for _iteration in range(12):
+            value = value - residual(value) / (2 * value)
+        return value
+
+    root = ad.implicit_root(
+        lambda solution, params: solution**2 - params,
+        solve=newton,
+        linear_solve=lambda operator, rhs: rhs / operator(np.ones_like(rhs)),
+    )
+
+    value, gradient = ad.value_and_grad(lambda p: root(p, initial=np.array(1.0)))(np.array(4.0))
+
+    assert_allclose(value, 2.0)
+    assert_allclose(gradient, 0.25)
+
+
+_SELECTIONS = pytest.mark.parametrize(
+    ("operation", "slope"),
+    [(np.maximum, 1.0), (np.minimum, 0.0), (np.fmax, 1.0), (np.fmin, 0.0)],
+    ids=["maximum", "minimum", "fmax", "fmin"],
+)
+
+
+@_SELECTIONS
+@pytest.mark.parametrize(
+    ("scalar", "tangent"),
+    [(0.3, 1.0), (np.float64(0.3), np.float64(1.0)), (np.array(0.3), np.array(1.0))],
+    ids=["python", "numpy_scalar", "rank_zero"],
+)
+def test_scalar_selection_derivatives_on_every_supported_numpy(
+    operation: Any,
+    slope: float,
+    scalar: Any,
+    tangent: Any,
+) -> None:
+    """NumPy 2.0 compares 0-d operands to a bool scalar, which its astype rejects."""
+
+    def select(value: Any) -> Any:
+        return operation(value, 0.1)
+
+    primal, forward = ad.jvp(select)(scalar, tangents=tangent)
+    gradient = ad.grad(select)(scalar)
+    curvature = ad.hessian(lambda value: select(value) ** 3)(scalar)
+
+    assert type(forward) is type(primal)
+    assert_allclose(forward, slope)
+    assert_allclose(gradient, slope)
+    assert_allclose(curvature, 6 * 0.3 * slope)
+
+
+@_SELECTIONS
+def test_selection_gradient_of_indexed_elements_on_every_supported_numpy(
+    operation: Any,
+    slope: float,
+) -> None:
+    gradient = ad.grad(lambda a: operation(a[0], 0.1) + operation(a[1], a[0]))(
+        np.array([0.3, -0.2])
+    )
+
+    assert_allclose(gradient, [2 * slope, 1 - slope])
 
 
 def _extreme_ldexp_values() -> tuple[np.ndarray, np.ndarray]:
@@ -211,46 +333,6 @@ def test_shape_jvps_preserve_nested_tangent_tracers() -> None:
         return np.sum(columns.T * weights)
 
     assert_allclose(ad.grad(loss)(x), np.array([5.0, 7.0, 9.0]))
-
-
-def test_fft_jvp_accepts_numpy_default_n() -> None:
-    x = np.array([1.0, 2.0, 3.0])
-    tangent = np.ones_like(x)
-
-    value, output_tangent = ad.jvp(
-        lambda arg: np.fft.fft(arg)  # noqa: PLW0108 - JVP boundary
-    )(x, tangents=tangent)
-
-    assert_allclose(value, np.fft.fft(x))
-    assert_allclose(output_tangent, np.fft.fft(tangent))
-
-
-@pytest.mark.parametrize(
-    ("loss", "first", "second"),
-    [
-        (
-            lambda value: np.sum(np.log(value)),
-            lambda value: 1.0 / value,
-            lambda value: -1.0 / value**2,
-        ),
-        (
-            lambda value: np.sum(np.sqrt(value)),
-            lambda value: 0.5 / np.sqrt(value),
-            lambda value: -0.25 / value**1.5,
-        ),
-    ],
-    ids=["log", "sqrt"],
-)
-def test_division_based_jvps_transpose_and_nest(
-    loss: Any,
-    first: Any,
-    second: Any,
-) -> None:
-    x = np.array([0.7, 1.2, 1.8])
-    gradient = ad.grad(loss)
-
-    assert_allclose(gradient(x), first(x))
-    assert_allclose(ad.grad(lambda value: np.sum(gradient(value)))(x), second(x))
 
 
 def test_nested_grad_retains_captured_outer_array() -> None:

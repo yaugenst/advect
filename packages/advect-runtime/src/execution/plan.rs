@@ -3,121 +3,23 @@
 use std::sync::Arc;
 
 use super::host::{Host, LinkedOperation, OutputOwnership};
-use crate::{AttrMap, ExecutionError, GraphStore, NodeId, Parents, ValueSpec};
+use crate::{ExecutionError, GraphStore, NodeId, NodeRef};
 
-#[derive(Clone, Copy, Debug)]
-pub(super) enum ValueSource {
-    Input(usize),
-    Constant(NodeId),
-    Evaluate,
-}
-
-#[derive(Clone, Copy, Debug)]
-pub(super) struct NodeView<'a> {
-    pub(super) id: NodeId,
-    pub(super) op: &'a str,
-    pub(super) schema_version: u32,
-    pub(super) parents: Parents<'a>,
-    pub(super) attrs: &'a AttrMap,
-    pub(super) outputs: &'a [ValueSpec],
-    pub(super) source: ValueSource,
-}
-
+/// How one node obtains its value during execution.
 #[derive(Debug)]
-pub(super) struct ExecutionPlan {
-    pub(super) store: Arc<GraphStore>,
-    pub(super) sources: Vec<ValueSource>,
-    pub(super) input_count: usize,
-    pub(super) remaining_uses: Vec<usize>,
-}
-
-impl ExecutionPlan {
-    fn from_store<E>(store: Arc<GraphStore>) -> Result<Self, ExecutionError<E>> {
-        let node_count = store.node_count();
-        let mut sources = vec![ValueSource::Evaluate; node_count];
-        for (slot, &node_id) in store.inputs().iter().enumerate() {
-            let index = node_index(node_id, node_count, "input")?;
-            *sources
-                .get_mut(index)
-                .ok_or_else(|| ExecutionError::runtime("graph input source is unavailable"))? =
-                ValueSource::Input(slot);
-        }
-        for &node_id in store.constants().keys() {
-            let index = node_index(node_id, node_count, "constant")?;
-            *sources
-                .get_mut(index)
-                .ok_or_else(|| ExecutionError::runtime("graph constant source is unavailable"))? =
-                ValueSource::Constant(node_id);
-        }
-
-        let mut remaining_uses = vec![0_usize; node_count];
-        for &node in store.arena().nodes() {
-            let parents = store
-                .arena()
-                .parents(node)
-                .ok_or_else(|| ExecutionError::runtime("graph edge range is invalid"))?;
-            for parent in parents.iter() {
-                increment_use(&mut remaining_uses, parent)?;
-            }
-        }
-        for &output in store.outputs() {
-            increment_use(&mut remaining_uses, output)?;
-        }
-        let input_count = store.inputs().len();
-        Ok(Self {
-            store,
-            sources,
-            input_count,
-            remaining_uses,
-        })
-    }
-
-    pub(super) fn node<E>(&self, index: usize) -> Result<NodeView<'_>, ExecutionError<E>> {
-        let id = NodeId::try_from(index)
-            .map_err(|_| ExecutionError::runtime("graph node ID exceeded its range"))?;
-        let node = self
-            .store
-            .arena()
-            .node(id)
-            .ok_or_else(|| ExecutionError::runtime("graph node is unavailable"))?;
-        let schema = self
-            .store
-            .arena()
-            .op_schema(node.op())
-            .ok_or_else(|| ExecutionError::runtime("graph operation ID is invalid"))?;
-        let parents = self
-            .store
-            .arena()
-            .parents(node)
-            .ok_or_else(|| ExecutionError::runtime("graph edge range is invalid"))?;
-        let metadata = self
-            .store
-            .metadata()
-            .get(index)
-            .ok_or_else(|| ExecutionError::runtime("graph metadata is unavailable"))?;
-        let source = *self
-            .sources
-            .get(index)
-            .ok_or_else(|| ExecutionError::runtime("graph value source is unavailable"))?;
-        Ok(NodeView {
-            id,
-            op: schema.name(),
-            schema_version: schema.schema_version(),
-            parents,
-            attrs: metadata.attrs(),
-            outputs: metadata.outputs(),
-            source,
-        })
-    }
+pub(super) enum Step<T> {
+    Input,
+    Constant,
+    Evaluate(LinkedOperation<T>),
 }
 
 /// Immutable prelinked plan reused across invocations.
 #[derive(Debug)]
 pub struct LinkedExecutionPlan<T> {
-    pub(super) structure: ExecutionPlan,
-    pub(super) bindings: Vec<Option<LinkedOperation<T>>>,
+    pub(super) store: Arc<GraphStore>,
+    pub(super) steps: Vec<Step<T>>,
+    pub(super) remaining_uses: Vec<usize>,
     pub(super) alias_root_sets: Vec<Vec<usize>>,
-    pub(super) owned_values: Vec<bool>,
 }
 
 impl<T> LinkedExecutionPlan<T> {
@@ -129,111 +31,113 @@ impl<T> LinkedExecutionPlan<T> {
     where
         H: Host<LinkedOp = T>,
     {
-        let structure = ExecutionPlan::from_store(store)?;
-        let node_count = structure.store.node_count();
-        let mut bindings = Vec::with_capacity(node_count);
-        for index in 0..node_count {
-            let node = structure.node(index)?;
-            if !matches!(node.source, ValueSource::Evaluate) {
-                bindings.push(None);
-                continue;
+        let node_count = store.node_count();
+        let mut steps = Vec::with_capacity(node_count);
+        let mut remaining_uses = vec![0_usize; node_count];
+        // Each value lists the owned values whose storage it may share. Only
+        // owned values are donation candidates, so inputs, constants, and
+        // unknown results need no roots of their own.
+        let mut alias_root_sets = Vec::with_capacity(node_count);
+        for node in store.nodes() {
+            let node = node?;
+            for parent in node.parents.iter() {
+                increment_use(&mut remaining_uses, parent)?;
             }
-            let linked = host
-                .link(node.op, node.schema_version, node.attrs, node.outputs)
-                .map_err(|source| ExecutionError::Host {
-                    node_id: node.id,
-                    op: node.op.to_owned(),
-                    source,
-                })?;
-            validate_binding(node, &linked)?;
-            bindings.push(Some(linked));
-        }
-
-        let mut alias_root_sets = (0..node_count).map(|index| vec![index]).collect::<Vec<_>>();
-        let mut owned_values = vec![false; node_count];
-        for (index, binding) in bindings.iter().enumerate() {
-            let Some(binding) = binding else {
-                continue;
+            let (step, roots) = match node.schema.name() {
+                "advect.input" => (Step::Input, Vec::new()),
+                "advect.const" => (Step::Constant, Vec::new()),
+                op => {
+                    let linked = host
+                        .link(
+                            op,
+                            node.schema.schema_version(),
+                            node.metadata.attrs(),
+                            node.metadata.outputs(),
+                        )
+                        .map_err(|source| host_error(node, source))?;
+                    validate_binding(node, &linked)?;
+                    let roots = alias_roots(&alias_root_sets, node, linked.output_ownership)?;
+                    (Step::Evaluate(linked), roots)
+                }
             };
-            let node = structure.node(index)?;
-            match binding.output_ownership {
-                OutputOwnership::Owned => {
-                    *owned_values.get_mut(index).ok_or_else(|| {
-                        ExecutionError::runtime("staged ownership slot is unavailable")
-                    })? = true;
-                }
-                OutputOwnership::Alias(position) => {
-                    let parent = node.parents.get(position).ok_or_else(|| {
-                        ExecutionError::runtime("validated alias position is unavailable")
-                    })?;
-                    let parent_index = node_index(parent, node_count, "alias source")?;
-                    let parent_roots = alias_root_sets
-                        .get(parent_index)
-                        .ok_or_else(|| {
-                            ExecutionError::runtime("staged alias-root set is unavailable")
-                        })?
-                        .clone();
-                    *alias_root_sets.get_mut(index).ok_or_else(|| {
-                        ExecutionError::runtime("staged alias slot is unavailable")
-                    })? = parent_roots;
-                }
-                OutputOwnership::Unknown => {
-                    let mut roots = vec![index];
-                    for parent in node.parents.iter() {
-                        let parent_index = node_index(parent, node_count, "unknown alias source")?;
-                        roots.extend_from_slice(alias_root_sets.get(parent_index).ok_or_else(
-                            || ExecutionError::runtime("staged alias-root set is unavailable"),
-                        )?);
-                    }
-                    roots.sort_unstable();
-                    roots.dedup();
-                    *alias_root_sets.get_mut(index).ok_or_else(|| {
-                        ExecutionError::runtime("staged alias slot is unavailable")
-                    })? = roots;
-                }
-            }
+            steps.push(step);
+            alias_root_sets.push(roots);
+        }
+        for &output in store.outputs() {
+            increment_use(&mut remaining_uses, output)?;
         }
         Ok(Self {
-            structure,
-            bindings,
+            store,
+            steps,
+            remaining_uses,
             alias_root_sets,
-            owned_values,
         })
     }
 
     /// Number of constants.
     #[must_use]
     pub fn constant_count(&self) -> usize {
-        self.structure.store.constants().len()
+        self.store.constants().len()
     }
 
     /// Portable constant IDs in materialization order.
     pub fn constant_ids(&self) -> impl Iterator<Item = NodeId> + '_ {
-        self.structure.store.constants().keys().copied()
+        self.store.constants().keys().copied()
     }
 }
 
+fn alias_roots<E>(
+    alias_root_sets: &[Vec<usize>],
+    node: NodeRef<'_>,
+    ownership: OutputOwnership,
+) -> Result<Vec<usize>, ExecutionError<E>> {
+    let parent_roots = |parent| {
+        alias_root_sets
+            .get(slot(parent)?)
+            .ok_or_else(|| ExecutionError::runtime("staged alias-root set is unavailable"))
+    };
+    Ok(match ownership {
+        OutputOwnership::Owned => vec![slot(node.id)?],
+        OutputOwnership::Alias(position) => {
+            let parent = node.parents.get(position).ok_or_else(|| {
+                ExecutionError::runtime("validated alias position is unavailable")
+            })?;
+            parent_roots(parent)?.clone()
+        }
+        OutputOwnership::Unknown => {
+            let mut roots = Vec::new();
+            for parent in node.parents.iter() {
+                roots.extend_from_slice(parent_roots(parent)?);
+            }
+            roots.sort_unstable();
+            roots.dedup();
+            roots
+        }
+    })
+}
+
 fn validate_binding<T, E>(
-    node: NodeView<'_>,
+    node: NodeRef<'_>,
     binding: &LinkedOperation<T>,
 ) -> Result<(), ExecutionError<E>> {
+    let invalid = |role| {
+        Err(ExecutionError::runtime(format!(
+            "linked operation '{}' at node %{} declares an invalid {role} position",
+            node.schema.name(),
+            node.id
+        )))
+    };
     if binding
         .donation_positions
         .iter()
         .any(|&position| position >= node.parents.len())
     {
-        return Err(ExecutionError::runtime(format!(
-            "linked operation '{}' at node %{} declares an invalid donation position",
-            node.op, node.id
-        )));
+        return invalid("donation");
     }
     if let OutputOwnership::Alias(position) = binding.output_ownership
         && position >= node.parents.len()
     {
-        return Err(ExecutionError::runtime(format!(
-            "linked operation '{}' at node %{} declares an invalid alias position",
-            node.op, node.id
-        )));
+        return invalid("alias");
     }
     Ok(())
 }
@@ -242,9 +146,8 @@ fn increment_use<E>(
     remaining_uses: &mut [usize],
     node_id: NodeId,
 ) -> Result<(), ExecutionError<E>> {
-    let index = node_index(node_id, remaining_uses.len(), "use")?;
     let count = remaining_uses
-        .get_mut(index)
+        .get_mut(slot(node_id)?)
         .ok_or_else(|| ExecutionError::runtime("staged use-count slot is unavailable"))?;
     *count = count
         .checked_add(1)
@@ -252,17 +155,17 @@ fn increment_use<E>(
     Ok(())
 }
 
-pub(super) fn node_index<E>(
-    node_id: NodeId,
-    node_count: usize,
-    role: &str,
-) -> Result<usize, ExecutionError<E>> {
-    let index = usize::try_from(node_id)
-        .map_err(|_| ExecutionError::runtime(format!("graph {role} node ID exceeded its range")))?;
-    if index >= node_count {
-        return Err(ExecutionError::runtime(format!(
-            "graph {role} node %{node_id} does not exist"
-        )));
+/// Dense storage slot of one node.
+pub(super) fn slot<E>(node_id: NodeId) -> Result<usize, ExecutionError<E>> {
+    usize::try_from(node_id)
+        .map_err(|_| ExecutionError::runtime(format!("graph node %{node_id} exceeded its range")))
+}
+
+/// Attribute a host failure to the node that caused it.
+pub(super) fn host_error<E>(node: NodeRef<'_>, source: E) -> ExecutionError<E> {
+    ExecutionError::Host {
+        node_id: node.id,
+        op: node.schema.name().to_owned(),
+        source,
     }
-    Ok(index)
 }

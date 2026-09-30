@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from advect.core._abstract_helpers import arange_length, dtype_name, shape_tuple
+from advect.core._abstract_helpers import arange_length, dtype_name
 from advect.core._abstract_model import ArraySpec, rule
 
 if TYPE_CHECKING:
@@ -22,18 +22,6 @@ RULES: dict[str, AbstractRule] = {
         allowed=("dtype", "start", "step", "stop"),
         required=("dtype", "start"),
     ),
-    "array.empty": rule(
-        "creation",
-        0,
-        positional=("shape",),
-        allowed=("device", "dtype", "order", "shape"),
-        required=("dtype", "shape"),
-    ),
-    "array.empty_like": rule(
-        "like",
-        1,
-        allowed=("device", "dtype", "order", "shape", "subok"),
-    ),
     "array.eye": rule(
         "eye",
         0,
@@ -48,7 +36,7 @@ RULES: dict[str, AbstractRule] = {
         required=("shape",),
     ),
     "array.full_like": rule(
-        "full_like",
+        "like",
         2,
         positional=("dtype", "order", "subok", "shape"),
         allowed=("device", "dtype", "order", "shape", "subok"),
@@ -60,38 +48,27 @@ RULES: dict[str, AbstractRule] = {
         allowed=("dtype", "endpoint", "num", "start", "stop"),
         required=("dtype", "num", "start", "stop"),
     ),
-    "array.ones": rule(
-        "creation",
-        0,
-        positional=("shape",),
-        allowed=("device", "dtype", "order", "shape"),
-        required=("dtype", "shape"),
-    ),
-    "array.ones_like": rule(
-        "like",
-        1,
-        allowed=("device", "dtype", "order", "shape", "subok"),
-    ),
-    "array.zeros": rule(
-        "creation",
-        0,
-        positional=("shape",),
-        allowed=("device", "dtype", "order", "shape"),
-        required=("dtype", "shape"),
-    ),
-    "array.zeros_like": rule(
-        "like",
-        1,
-        allowed=("device", "dtype", "order", "shape", "subok"),
-    ),
 }
+for _name in ("empty", "ones", "zeros"):
+    RULES[f"array.{_name}"] = rule(
+        "creation",
+        0,
+        positional=("shape",),
+        allowed=("device", "dtype", "order", "shape"),
+        required=("dtype", "shape"),
+    )
+    RULES[f"array.{_name}_like"] = rule(
+        "like",
+        1,
+        allowed=("device", "dtype", "order", "shape", "subok"),
+    )
 
 
 def _creation(
     _specs: Sequence[ArraySpec],
     attrs: Mapping[str, Any],
 ) -> tuple[ArraySpec, ...]:
-    return (ArraySpec(shape_tuple(attrs["shape"]), dtype_name(attrs["dtype"])),)
+    return (ArraySpec(attrs["shape"], attrs["dtype"]),)
 
 
 def _eye(
@@ -110,12 +87,7 @@ def _eye(
         )
     ):
         raise ValueError("eye dimensions must be non-negative integers")
-    return (
-        ArraySpec(
-            (n_rows, n_rows if n_cols is None else n_cols),
-            dtype_name(attrs["dtype"]),
-        ),
-    )
+    return (ArraySpec((n_rows, n_rows if n_cols is None else n_cols), attrs["dtype"]),)
 
 
 def _arange(
@@ -126,12 +98,7 @@ def _arange(
     stop = attrs.get("stop")
     if stop is None:
         start, stop = 0, start
-    return (
-        ArraySpec(
-            (arange_length(start, stop, attrs.get("step", 1)),),
-            dtype_name(attrs["dtype"]),
-        ),
-    )
+    return (ArraySpec((arange_length(start, stop, attrs.get("step", 1)),), attrs["dtype"]),)
 
 
 def _linspace(
@@ -143,29 +110,22 @@ def _linspace(
         raise ValueError("linspace num must be a non-negative integer")
     if type(attrs.get("endpoint", True)) is not bool:
         raise TypeError("linspace endpoint must be a bool")
-    return (ArraySpec((num,), dtype_name(attrs["dtype"])),)
+    return (ArraySpec((num,), attrs["dtype"]),)
 
 
 def _creation_full(
     specs: Sequence[ArraySpec],
     attrs: Mapping[str, Any],
 ) -> tuple[ArraySpec, ...]:
-    dtype = dtype_name(attrs["dtype"]) if attrs.get("dtype") is not None else None
-    return (
-        ArraySpec(
-            shape_tuple(attrs["shape"]),
-            dtype or dtype_name(specs[0].dtype),
-        ),
-    )
+    return (ArraySpec(attrs["shape"], attrs.get("dtype") or dtype_name(specs[0].dtype)),)
 
 
 def _like(
     specs: Sequence[ArraySpec],
     attrs: Mapping[str, Any],
 ) -> tuple[ArraySpec, ...]:
-    dtype = dtype_name(attrs["dtype"]) if attrs.get("dtype") is not None else None
-    shape = specs[0].shape if attrs.get("shape") is None else shape_tuple(attrs["shape"])
-    return (ArraySpec(shape, dtype or dtype_name(specs[0].dtype)),)
+    shape = specs[0].shape if attrs.get("shape") is None else attrs["shape"]
+    return (ArraySpec(shape, attrs.get("dtype") or dtype_name(specs[0].dtype)),)
 
 
 EVALUATORS: dict[str, ResultEvaluator] = {
@@ -174,6 +134,5 @@ EVALUATORS: dict[str, ResultEvaluator] = {
     "arange": _arange,
     "linspace": _linspace,
     "creation_full": _creation_full,
-    "full_like": _like,
     "like": _like,
 }

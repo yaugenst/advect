@@ -8,8 +8,8 @@ from typing import TYPE_CHECKING
 
 from advect.core._abstract_helpers import (
     broadcast_shape,
+    division_dtype,
     dtype_kind_bits,
-    dtype_name,
     promote_dtype,
     real_dtype,
     reduction_shape,
@@ -47,7 +47,9 @@ RULES: dict[str, AbstractRule] = {
         positional=("ord", "axis", "keepdims"),
         allowed=("axis", "keepdims", "ord"),
     ),
-    "array_ext.linalg.pinv": rule("pinv", 1, allowed=("hermitian",)),
+    "array_ext.linalg.pinv": rule(
+        "pinv", 1, allowed=("hermitian",), optional=("_advect_pinv_tolerance",)
+    ),
     "array_ext.linalg.qr": rule(
         "qr",
         1,
@@ -84,10 +86,11 @@ def _norm(
 ) -> tuple[ArraySpec, ...]:
     first = specs[0]
     axis = attrs.get("axis")
+    # Without ord or axis, NumPy takes the 2-norm of every element at any rank.
     if axis is None:
-        if len(first.shape) not in {1, 2}:
+        if len(first.shape) not in {1, 2} and attrs.get("ord") is not None:
             raise ValueError(
-                "numpy.linalg.norm requires axis= for inputs with rank other than 1 or 2"
+                "numpy.linalg.norm with ord= requires axis= for inputs with rank other than 1 or 2"
             )
     elif isinstance(axis, tuple) and len(axis) not in {1, 2}:
         raise ValueError("numpy.linalg.norm axis tuples must contain one or two axes")
@@ -98,7 +101,7 @@ def _norm(
                 axis,
                 keepdims=bool(attrs.get("keepdims", False)),
             ),
-            real_dtype(first.dtype),
+            real_dtype(division_dtype(first.dtype)),
         ),
     )
 
@@ -114,35 +117,37 @@ def _matrix_result(  # noqa: C901, PLR0911, PLR0912 - closed matrix shape cases
         raise ValueError(f"{kind} input must have at least two dimensions")
     batch_shape = first.shape[:-2]
     rows, columns = first.shape[-2:]
+    dtype = division_dtype(first.dtype)
     if kind in {"cholesky", "det", "eigvals", "eigvalsh", "inv"} and rows != columns:
         raise ValueError(f"{kind} input must end in a square matrix")
     if kind == "cholesky":
         if type(attrs.get("upper", False)) is not bool:
             raise TypeError("cholesky upper must be a bool")
-        return (ArraySpec(first.shape, dtype_name(first.dtype)),)
+        return (ArraySpec(first.shape, dtype),)
     if kind == "det":
-        return (ArraySpec(batch_shape, dtype_name(first.dtype)),)
+        return (ArraySpec(batch_shape, dtype),)
     if kind == "eigvals":
-        dtype_kind, _bits = dtype_kind_bits(dtype_name(first.dtype))
+        dtype_kind, _bits = dtype_kind_bits(dtype)
         if dtype_kind != "complex":
             raise TypeError(
                 "Staging numpy.linalg.eigvals requires a complex input because "
                 "NumPy's output dtype for real matrices is data-dependent"
             )
-        return (ArraySpec((*batch_shape, rows), dtype_name(first.dtype)),)
+        return (ArraySpec((*batch_shape, rows), dtype),)
     if kind == "eigvalsh":
         uplo = attrs.get("UPLO", "L")
-        if uplo not in {"L", "U"}:
+        # NumPy upper-cases UPLO, so a lowercase triangle name is valid.
+        if not isinstance(uplo, str) or uplo.upper() not in {"L", "U"}:
             raise ValueError("eigvalsh UPLO must be 'L' or 'U'")
-        return (ArraySpec((*batch_shape, rows), real_dtype(first.dtype)),)
+        return (ArraySpec((*batch_shape, rows), real_dtype(dtype)),)
     if kind == "inv":
-        return (ArraySpec(first.shape, dtype_name(first.dtype)),)
+        return (ArraySpec(first.shape, dtype),)
     if kind == "matrix_norm":
         keepdims = attrs.get("keepdims", False)
         if type(keepdims) is not bool:
             raise TypeError("matrix_norm keepdims must be a bool")
         shape = (*batch_shape, 1, 1) if keepdims else batch_shape
-        return (ArraySpec(shape, real_dtype(first.dtype)),)
+        return (ArraySpec(shape, real_dtype(dtype)),)
     if kind == "pinv":
         if len(specs) == 2:
             tolerance_shape = specs[1].shape
@@ -151,7 +156,7 @@ def _matrix_result(  # noqa: C901, PLR0911, PLR0912 - closed matrix shape cases
         return (
             ArraySpec(
                 (*batch_shape, columns, rows),
-                dtype_name(first.dtype),
+                dtype,
             ),
         )
     if kind == "qr_r":
@@ -160,13 +165,13 @@ def _matrix_result(  # noqa: C901, PLR0911, PLR0912 - closed matrix shape cases
         return (
             ArraySpec(
                 (*batch_shape, min(rows, columns), columns),
-                dtype_name(first.dtype),
+                dtype,
             ),
         )
     return (
         ArraySpec(
             (*batch_shape, min(rows, columns)),
-            real_dtype(first.dtype),
+            real_dtype(dtype),
         ),
     )
 
@@ -186,7 +191,7 @@ def _vector_norm(
                 attrs.get("axis"),
                 keepdims=keepdims,
             ),
-            real_dtype(first.dtype),
+            real_dtype(division_dtype(first.dtype)),
         ),
     )
 
@@ -212,7 +217,9 @@ def _solve(
             size,
             right_shape[-1],
         )
-    return (ArraySpec(shape, promote_dtype(specs)),)
+    # NumPy's linalg computes boolean and integer operands in float64.
+    dtypes = [ArraySpec((), division_dtype(spec.dtype)) for spec in specs]
+    return (ArraySpec(shape, promote_dtype(dtypes)),)
 
 
 def _decomposition(
@@ -226,8 +233,8 @@ def _decomposition(
         raise ValueError(f"{kind} input must have at least two dimensions")
     batch_shape = first.shape[:-2]
     rows, columns = first.shape[-2:]
-    input_dtype = dtype_name(first.dtype)
-    result_real_dtype = real_dtype(first.dtype)
+    input_dtype = division_dtype(first.dtype)
+    result_real_dtype = real_dtype(input_dtype)
 
     if kind in {"eig", "eigh", "slogdet"} and rows != columns:
         raise ValueError(f"{kind} input must end in a square matrix")

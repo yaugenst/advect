@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import array_api_strict as strict
 import numpy as np
 import pytest
@@ -55,6 +57,42 @@ def test_real_input_projects_complex_pullback_and_preserves_float32() -> None:
 
     assert result.dtype == x.dtype
     assert_allclose(result, np.array([7.0, -6.0], dtype=np.float32))
+
+
+@pytest.mark.parametrize("operation", [np.add, np.subtract, np.multiply, np.divide])
+@pytest.mark.parametrize(
+    "dtypes",
+    [(np.float32, np.float64), (np.complex64, np.complex128), (np.float32, np.complex128)],
+)
+def test_mixed_precision_cotangents_take_each_input_dtype(operation, dtypes) -> None:
+    inputs = tuple(np.array([0.75, 1.5], dtype=dtype) for dtype in dtypes)
+
+    def loss(x, y):
+        return np.real(np.sum(operation(x, y)))
+
+    gradients = grad(loss, argnums=(0, 1))(*inputs)
+    references = grad(loss, argnums=(0, 1))(*(value.astype(np.complex128) for value in inputs))
+
+    for gradient, value, reference in zip(gradients, inputs, references, strict=True):
+        assert gradient.dtype == value.dtype
+        expected = reference if np.iscomplexobj(value) else np.real(reference)
+        assert_allclose(gradient, expected, rtol=1e-6)
+
+
+@pytest.mark.parametrize("dtype", [strict.float64, strict.float32], ids=["float64", "float32"])
+def test_foreign_provider_cotangent_passes_through_a_lifted_python_scalar(dtype) -> None:
+    # A Python-float primal lifts with NumPy; an Array API cotangent pulled back
+    # through it keeps its own provider instead of taking the NumPy dtype.
+    def pulled_back(cotangent):
+        return vjp(lambda value: value + 2.0)(3.0)[1](cotangent)
+
+    cotangent = strict.asarray(2.0, dtype=dtype)
+    value, tangent = jvp(pulled_back)(cotangent, tangents=cotangent)
+    gradient = grad(pulled_back)(cotangent)
+
+    assert (value, tangent) == (2.0, 2.0)
+    assert gradient.dtype == dtype
+    assert float(gradient) == 1.0
 
 
 def test_complex_product_and_unary_coefficients_are_conjugated() -> None:
@@ -117,3 +155,46 @@ def test_negative_real_power_higher_order_is_warning_clean() -> None:
 
     assert_allclose(product, 6.0 * x * direction)
     assert_allclose(matrix, np.diag(6.0 * x))
+
+
+def test_complex_absolute_forward_over_forward_keeps_the_direction_traced() -> None:
+    z = np.array([0.3 + 0.4j, -1.2 + 0.5j])
+    direction = np.array([1.0 + 0.5j, -0.3 + 0.2j])
+
+    def directional(value: np.ndarray) -> np.ndarray:
+        return jvp(np.abs)(value, tangents=direction)[1]
+
+    _value, curvature = jvp(directional)(z, tangents=direction)
+
+    # d^2|z|[v, v] = |v|^2 / |z| - Re(conj(z) v)^2 / |z|^3.
+    magnitude = np.abs(z)
+    projection = np.real(np.conjugate(z) * direction)
+    expected = np.abs(direction) ** 2 / magnitude - projection**2 / magnitude**3
+    assert_allclose(curvature, expected, rtol=1e-12)
+
+
+def test_array_api_complex_cast_keeps_the_imaginary_part_of_its_derivatives() -> None:
+    """A complex cast to another precision matches the NumPy frontend.
+
+    The cast recognizes a complex target through the provider's
+    ``complexfloating`` class, which a standard namespace must expose unwrapped.
+    """
+    value = np.array([0.3 + 0.1j, -1.2 + 0.5j])
+    tangent = np.array([1.0 + 2.0j, -0.5 + 1.5j])
+
+    def cast(v: Any) -> Any:
+        xp = v.__array_namespace__()
+        return xp.astype(v, xp.complex64)
+
+    def loss(v: Any) -> Any:
+        xp = v.__array_namespace__()
+        return xp.sum(xp.imag(cast(v) * cast(v)))
+
+    _output, output_tangent = jvp(cast)(strict.asarray(value), tangents=strict.asarray(tangent))
+    _output, expected_tangent = jvp(lambda v: v.astype(np.complex64))(value, tangents=tangent)
+    gradient = grad(loss)(strict.asarray(value))
+    expected_gradient = grad(lambda v: np.sum(np.imag(v.astype(np.complex64) ** 2)))(value)
+
+    assert np.asarray(output_tangent).dtype == np.complex64
+    assert_allclose(np.asarray(output_tangent), expected_tangent)
+    assert_allclose(np.asarray(gradient), expected_gradient)

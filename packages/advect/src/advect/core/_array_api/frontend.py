@@ -1,7 +1,6 @@
-# ruff: noqa: ANN401, FBT001, PLW1641
+# ruff: noqa: ANN401, FBT001
 # ANN401: the Array API protocol is intentionally backend-agnostic.
 # FBT001: __array__ follows NumPy's positional copy protocol.
-# PLW1641: elementwise equality intentionally makes tracers unhashable.
 """Backend-neutral tracing for Python Array API implementations.
 
 This frontend is deliberately small and provider-agnostic.  It recognizes an
@@ -17,11 +16,13 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from functools import partial, wraps
-from typing import TYPE_CHECKING, Any, cast
+from functools import partial
+from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 from advect.core._abstract_domains import operation_semantics
 from advect.core._abstract_helpers import (
+    ABSTRACT_NAMESPACE_NAME,
+    PYTHON_SCALAR_TYPES,
     accumulation_dtype,
     broadcast_shape as _broadcast_shape,
     dtype_name,
@@ -34,19 +35,25 @@ from advect.core._array_api.profiles import (
 from advect.core._array_api.providers import (
     _get_array_namespace,
     _get_backend_key_from_namespace,
+    _namespace_serves,
 )
 from advect.core._array_api.results import restore_array_api_result
 from advect.core._array_api.signatures import (
     OFFICIAL_SIGNATURES,
     official_parameter_names,
+    official_parameters,
     official_positional_parameter_names,
 )
-from advect.core._array_family_ops import _canonical_array_family_op_name
+from advect.core._array_family_ops import (
+    ARRAY_API_TO_CANONICAL,
+    _canonical_array_family_op_name,
+)
 from advect.core._array_protocol_helpers import (
+    PYTHON_ATTRIBUTE_OPS,
     literal_is_weak,
-    literals_are_weak,
     materialize_weak_scalar_operands,
-    normalize_item_index,
+    python_operator,
+    select_item,
     weak_scalar_runtime_value,
 )
 from advect.core._context import (
@@ -64,7 +71,7 @@ from advect.core._errors import (
     TracingError,
     _array_conversion_error,
 )
-from advect.core._protocols import _snapshot_traced
+from advect.core._protocols import _is_traced, _snapshot_traced
 from advect.core._registry import get_registry
 
 if TYPE_CHECKING:
@@ -77,6 +84,7 @@ __all__ = [
     "ArrayAPINamespace",
     "ArrayAPITracer",
     "bind_array_api_call",
+    "lower_array_api_call",
 ]
 
 _MIN_MATRIX_RANK = 2
@@ -117,49 +125,18 @@ _NONDIFFERENTIABLE_ARRAY_API_COMPOSITES = frozenset(
 class _FunctionSpec:
     op: str
     operands: tuple[str, ...]
+    positional: tuple[str, ...]
     sequence_operands: frozenset[str] = frozenset()
-    positional_operands: tuple[int, ...] = ()
-    positional_attrs: tuple[tuple[int, str], ...] = ()
+    optional_operands: frozenset[str] = frozenset()
 
 
-def _metadata_functions() -> frozenset[str]:
-    return frozenset({"can_cast", "finfo", "iinfo", "isdtype", "result_type"})
+_ARRAY_API_META_FUNCTIONS = frozenset({"can_cast", "finfo", "iinfo", "isdtype", "result_type"})
 
 
 def _function_specs() -> dict[str, _FunctionSpec]:
     unsupported = {
         "from_dlpack",
         *_ARRAY_API_COMPOSITES,
-    }
-    aliases = {
-        "abs": "array.absolute",
-        "acos": "array.arccos",
-        "acosh": "array.arccosh",
-        "asin": "array.arcsin",
-        "asinh": "array.arcsinh",
-        "asarray": "array.astype",
-        "atan": "array.arctan",
-        "atan2": "array.arctan2",
-        "atanh": "array.arctanh",
-        "bitwise_invert": "array.invert",
-        "bitwise_left_shift": "array.left_shift",
-        "bitwise_right_shift": "array.right_shift",
-        "concat": "array.concatenate",
-        "conj": "array.conjugate",
-        "cumulative_prod": "array.cumprod",
-        "cumulative_sum": "array.cumsum",
-        "linalg.cross": "array.cross",
-        "linalg.diagonal": "array.diagonal",
-        "linalg.matmul": "array.matmul",
-        "linalg.matrix_transpose": "array.transpose",
-        "linalg.outer": "array.outer",
-        "linalg.tensordot": "array.tensordot",
-        "linalg.trace": "array.trace",
-        "linalg.vecdot": "array.vecdot",
-        "matrix_transpose": "array.transpose",
-        "permute_dims": "array.transpose",
-        "pow": "array.power",
-        "round": "array.rint",
     }
     operand_exceptions = {
         "clip": ("x", "min", "max"),
@@ -169,27 +146,25 @@ def _function_specs() -> dict[str, _FunctionSpec]:
     schemas = {name: schema for name, schema, _evaluator in operation_semantics()}
     specs: dict[str, _FunctionSpec] = {}
     for path in OFFICIAL_SIGNATURES:
-        if path in unsupported or path in _metadata_functions():
+        if path in unsupported or path in _ARRAY_API_META_FUNCTIONS:
             continue
-        suffix = path
-        default_op = _canonical_array_family_op_name(suffix)
-        op = aliases.get(path, default_op)
+        op = (
+            "array.astype"
+            if path == "asarray"
+            else _canonical_array_family_op_name(ARRAY_API_TO_CANONICAL.get(path, path))
+        )
         schema = schemas[op]
-        parameters = official_parameter_names(path)
-        positional = official_positional_parameter_names(path)
-        operands = operand_exceptions.get(path, parameters[: schema.operands])
-        positional_operands = tuple(
-            parameters.index(name) for name in operands if name in positional
-        )
-        positional_attrs = tuple(
-            (parameters.index(name), name) for name in positional if name not in operands
-        )
+        operands = operand_exceptions.get(path, official_parameter_names(path)[: schema.operands])
         specs[path] = _FunctionSpec(
             op=op,
             operands=operands,
+            positional=official_positional_parameter_names(path),
             sequence_operands=(frozenset(operands[:1]) if schema.sequence_operand else frozenset()),
-            positional_operands=positional_operands,
-            positional_attrs=positional_attrs,
+            optional_operands=frozenset(
+                parameter.name
+                for parameter in official_parameters(path)
+                if parameter.has_default and parameter.name in operands
+            ),
         )
     return specs
 
@@ -204,20 +179,40 @@ _INTERNAL_FUNCTION_SPECS: dict[str, _FunctionSpec] = {
     # Array API revision predates the standard cumulative-function names.
     "cumprod": _FUNCTION_SPECS["cumulative_prod"],
     "cumsum": _FUNCTION_SPECS["cumulative_sum"],
-    "ldexp": _FunctionSpec(
-        "array_ext.ldexp",
-        ("x", "exponent"),
-        positional_operands=(0, 1),
-    ),
-    "linalg.eig": _FunctionSpec(
-        "array_ext.linalg.eig",
-        ("x",),
-        positional_operands=(0,),
-    ),
+    "ldexp": _FunctionSpec("array_ext.ldexp", ("x", "exponent"), ("x", "exponent")),
+    "linalg.eig": _FunctionSpec("array_ext.linalg.eig", ("x",), ("x",)),
 }
 _BINARY_ARITY = 2
-_ARRAY_API_META_FUNCTIONS = _metadata_functions()
+# Official static parameters recorded under another node attribute name.
+# Frontend-private ``_advect_*`` attributes bypass abstract attribute schemas.
+_RENAMED_PARAMETERS = {"device": "_advect_device", "repetitions": "reps"}
 _ACCUMULATION_FUNCTIONS = frozenset({"prod", "sum"})
+# Python operator stems and the standard functions both tracer classes call.
+# Arithmetic and bitwise operators also install reflected methods; Python
+# reflects a comparison through the other operand's mirrored method.
+_ARITHMETIC_OPERATORS = {
+    "add": "add",
+    "sub": "subtract",
+    "mul": "multiply",
+    "truediv": "divide",
+    "floordiv": "floor_divide",
+    "mod": "remainder",
+    "pow": "pow",
+    "matmul": "matmul",
+    "and": "bitwise_and",
+    "or": "bitwise_or",
+    "xor": "bitwise_xor",
+    "lshift": "bitwise_left_shift",
+    "rshift": "bitwise_right_shift",
+}
+_COMPARISON_OPERATORS = {
+    "lt": "less",
+    "le": "less_equal",
+    "gt": "greater",
+    "ge": "greater_equal",
+    "eq": "equal",
+    "ne": "not_equal",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -230,67 +225,54 @@ class ArrayAPICallBinding:
     num_outputs: int
 
 
-def _bind_array_api_arguments(
-    args: tuple[Any, ...],
-    kwargs: dict[str, Any],
-    spec: _FunctionSpec,
-) -> tuple[dict[str, Any], tuple[str, ...], dict[str, str]]:
-    bound = {f"__arg_{index}": value for index, value in enumerate(args)}
-    bound.update(kwargs)
-    aliases: dict[str, str] = {}
-    positional_names: list[str] = []
-    for operand_index, position in enumerate(spec.positional_operands):
-        positional_name = f"__arg_{position}"
-        positional_names.append(positional_name)
-        if operand_index < len(spec.operands):
-            aliases[positional_name] = spec.operands[operand_index]
-    operand_names = (*positional_names, *(name for name in spec.operands if name in bound))
-    return bound, operand_names, aliases
-
-
-def _move_positional_array_api_attrs(
+def _bind_array_api_parameters(
     path: str,
     spec: _FunctionSpec,
-    attrs: dict[str, Any],
-) -> None:
-    for position, name in spec.positional_attrs:
-        positional_name = f"__arg_{position}"
-        if positional_name not in attrs:
-            continue
-        if name in attrs:
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+) -> dict[str, Any]:
+    if len(args) > len(spec.positional):
+        msg = (
+            f"Array API {path}() takes {len(spec.positional)} positional arguments "
+            f"but {len(args)} were given"
+        )
+        raise TypeError(msg)
+    bound = dict(zip(spec.positional, args, strict=False))
+    for name, value in kwargs.items():
+        if name in bound:
             msg = f"Array API {path}() received {name!r} twice"
             raise TypeError(msg)
-        attrs[name] = attrs.pop(positional_name)
+        bound[name] = value
+    return bound
 
 
 def _collect_array_api_operands(
     path: str,
     spec: _FunctionSpec,
-    bound: dict[str, Any],
-    operand_names: tuple[str, ...],
-    operand_aliases: dict[str, str],
     attrs: dict[str, Any],
 ) -> list[Any]:
+    """Move bound operands out of ``attrs`` in the canonical schema order."""
     operands: list[Any] = []
-    for operand_name in operand_names:
-        if operand_name not in bound:
+    for name in spec.operands:
+        if name not in attrs:
+            if name not in spec.optional_operands:
+                msg = f"Array API {path}() missing required argument {name!r}"
+                raise TypeError(msg)
             continue
-        value = bound[operand_name]
-        attrs.pop(operand_name, None)
-        canonical_name = operand_aliases.get(operand_name, operand_name)
-        if path == "clip" and canonical_name in {"min", "max"}:
-            attrs[f"_advect_clip_{canonical_name}_is_input"] = value is not None
+        value = attrs.pop(name)
+        if path == "clip" and name in {"min", "max"}:
+            attrs[f"_advect_clip_{name}_is_input"] = value is not None
             if value is None:
                 continue
-        if path == "linalg.pinv" and canonical_name == "rtol":
+        if path == "linalg.pinv" and name == "rtol":
             attrs["_advect_pinv_tolerance"] = "rtol" if value is not None else None
             if value is None:
                 continue
-        if canonical_name not in spec.sequence_operands:
+        if name not in spec.sequence_operands:
             operands.append(value)
             continue
         if not isinstance(value, (tuple, list)):
-            msg = f"Array API {path}() expects {canonical_name!r} to be a list or tuple"
+            msg = f"Array API {path}() expects {name!r} to be a list or tuple"
             raise TypeError(msg)
         if not value:
             msg = f"Array API {path}() requires a non-empty list or tuple of arrays"
@@ -306,17 +288,21 @@ def _normalize_array_api_attrs(
 ) -> None:
     if path == "asarray":
         attrs["_advect_array_api_asarray"] = True
-    device = attrs.pop("device", None)
-    if device is not None:
-        attrs["_advect_device"] = str(device)
+    for name, attribute in _RENAMED_PARAMETERS.items():
+        value = attrs.pop(name, None)
+        if value is not None:
+            attrs[attribute] = str(value) if name == "device" else value
     if path == "clip":
         attrs.setdefault("_advect_clip_min_is_input", False)
         attrs.setdefault("_advect_clip_max_is_input", False)
-    if path == "tile" and "repetitions" in attrs:
-        attrs["reps"] = attrs.pop("repetitions")
     if path == "sort":
         attrs.setdefault("descending", False)
         attrs.setdefault("stable", True)
+    if path == "repeat" and getattr(_unwrap(attrs.get("repeats")), "ndim", 0) != 0:
+        # The support inventory declares array-valued repeats untraceable;
+        # reject them here, as the NumPy frontend does, not in the transpose.
+        msg = "repeat supports only scalar repeats during tracing"
+        raise TracingError(msg)
     if path in {"linalg.diagonal", "linalg.trace"}:
         attrs["axis1"] = -2
         attrs["axis2"] = -1
@@ -346,21 +332,8 @@ def bind_array_api_call(
         )
         raise NotImplementedError(msg)
 
-    bound, operand_names, operand_aliases = _bind_array_api_arguments(
-        args,
-        kwargs,
-        spec,
-    )
-    attrs = dict(bound)
-    _move_positional_array_api_attrs(path, spec, attrs)
-    operands = _collect_array_api_operands(
-        path,
-        spec,
-        bound,
-        operand_names,
-        operand_aliases,
-        attrs,
-    )
+    attrs = _bind_array_api_parameters(path, spec, args, kwargs)
+    operands = _collect_array_api_operands(path, spec, attrs)
     _normalize_array_api_attrs(path, attrs, operands)
 
     return ArrayAPICallBinding(
@@ -426,31 +399,11 @@ def _raw_namespace(value: Any, *, api_version: str | None = None) -> Any | None:
     if not callable(namespace_function):
         return None
     try:
-        return namespace_function(api_version=selected)
+        # A default namespace still lets the acceptance predicate emit a
+        # precise version error for providers that cannot serve the pin.
+        return namespace_function()
     except Exception:  # noqa: BLE001 - backend discovery must be non-invasive
-        try:
-            # A default namespace still lets the acceptance predicate emit a
-            # precise version error for providers that cannot serve the pin.
-            return namespace_function()
-        except Exception:  # noqa: BLE001 - backend discovery must be non-invasive
-            return None
-
-
-def _is_standard_array_api_namespace(namespace: Any, *, api_version: str) -> bool:
-    version = getattr(namespace, "__array_api_version__", None)
-    namespace_info = getattr(namespace, "__array_namespace_info__", None)
-    selected = tuple(int(part) for part in api_version.split("."))
-    reported = (
-        tuple(int(part) for part in version.split("."))
-        if isinstance(version, str) and all(part.isdigit() for part in version.split("."))
-        else None
-    )
-    return (
-        reported is not None
-        and reported >= selected
-        and (api_version == "2022.12" or callable(namespace_info))
-        and callable(getattr(namespace, "asarray", None))
-    )
+        return None
 
 
 def _accepts_array_api(value: Any) -> bool:
@@ -476,10 +429,10 @@ def _accepts_array_api(value: Any) -> bool:
     namespace_info = getattr(namespace, "__array_namespace_info__", None)
     asarray = getattr(namespace, "asarray", None)
     if isinstance(version, str) and callable(namespace_info) and callable(asarray):
-        if not _is_standard_array_api_namespace(namespace, api_version=selected):
+        if not _namespace_serves(namespace, selected):
             msg = f"Advect selected Array API {selected}; the input provider exposes {version}"
             raise TypeError(msg)
-    elif not _is_standard_array_api_namespace(namespace, api_version=selected):
+    elif not _namespace_serves(namespace, selected):
         return False
     return backend is not None
 
@@ -499,8 +452,8 @@ def _handle_array_api_input(
     if namespace is None:
         msg = f"{type(value).__name__} no longer exposes an Array API namespace"
         raise TypeError(msg)
-    if not callable(getattr(value, "_advect_snapshot", None)) and not (
-        _is_standard_array_api_namespace(namespace, api_version=selected)
+    if not callable(getattr(value, "_advect_snapshot", None)) and not _namespace_serves(
+        namespace, selected
     ):
         version = getattr(namespace, "__array_api_version__", None)
         msg = f"Advect selected Array API {selected}; the input provider exposes {version!r}"
@@ -551,7 +504,7 @@ def _copy_array_value(value: Any, namespace: Any) -> Any:
 
 def _unwrap(value: Any) -> Any:
     if isinstance(value, ArrayAPITracer):
-        payload = _unwrap(_snapshot_traced(value)[1])
+        payload = _unwrap(value._advect_snapshot()[1])  # noqa: SLF001 - same frontend
         return weak_scalar_runtime_value(value, payload)
     if isinstance(value, tuple):
         return tuple(_unwrap(item) for item in value)
@@ -560,6 +513,36 @@ def _unwrap(value: Any) -> Any:
     if isinstance(value, dict):
         return {key: _unwrap(item) for key, item in value.items()}
     return value
+
+
+def _as_array_api_nested(value: Any, namespace: ArrayAPINamespace) -> Any:
+    """Present other frontends' tracers in a dynamic trace inside a stage as Array API tracers.
+
+    Inside a stage, a dynamic trace wraps staged values as Array API tracers,
+    and a NumPy function of one returns the NumPy frontend's tracer of the same
+    node, as a primitive call on constants returns one of a constant node. An
+    Array API function then reads that node through this frontend.
+    """
+    if isinstance(value, tuple):
+        return tuple(_as_array_api_nested(item, namespace) for item in value)
+    if isinstance(value, list):
+        return [_as_array_api_nested(item, namespace) for item in value]
+    if isinstance(value, dict):
+        return {key: _as_array_api_nested(item, namespace) for key, item in value.items()}
+    if getattr(type(value), "__advect_frontend__", None) is None:
+        return value
+    node_id, payload = _snapshot_traced(value)
+    # A tracer of an enclosing dynamic trace's value stays with its frontend.
+    if _is_traced(payload) and not bool(getattr(type(payload), "__advect_abstract_array__", False)):
+        return value
+    return ArrayAPITracer(
+        payload,
+        node_id,
+        value.recorder,
+        namespace=namespace.raw_namespace,
+        array_api_version=namespace._array_api_version,  # noqa: SLF001 - same frontend
+        owned=False,
+    )
 
 
 def _tracer_recorders(value: Any) -> tuple[DynamicTape, ...]:
@@ -579,18 +562,14 @@ def _operand_for_recorder(
 ) -> tuple[int | None, Any]:
     original = operand
     current = operand
-    original_level: int | None = None
     while isinstance(current, ArrayAPITracer):
-        owner = current.recorder
-        level, _frame_id = owner.runtime_trace_identity()
-        if original_level is None:
-            original_level = level
-        node_id, value = _snapshot_traced(current)
-        if owner is recorder:
-            return node_id, weak_scalar_runtime_value(current, value)
-        current = value
+        if current.recorder is recorder:
+            # Callers pass an active recorder, so this SSA value is live.
+            return current._node_id, weak_scalar_runtime_value(current, current._value)  # noqa: SLF001
+        current = current._advect_snapshot()[1]  # noqa: SLF001 - same frontend
 
     if isinstance(original, ArrayAPITracer):
+        original_level, _frame_id = original.recorder.runtime_trace_identity()
         recorder_level, _frame_id = recorder.runtime_trace_identity()
         if (
             original_level is not None
@@ -618,35 +597,28 @@ def _record_array_api_operation(
     attrs: dict[str, Any],
     shape: tuple[int, ...],
     dtype: Any,
+    weak: bool,
 ) -> int:
     projected = tuple(_operand_for_recorder(operand, recorder=recorder) for operand in operands)
     parents = tuple(node_id for node_id, _value in projected if node_id is not None)
     literals = tuple(item for node_id, item in projected if node_id is None)
-    source_location = get_source_location()
-    if not literals:
-        return recorder.record_operation(
-            op,
-            parents,
-            value,
-            attrs,
-            shape,
-            dtype,
-            source_location=source_location,
-        )
-    parent_positions = tuple(
-        position for position, (node_id, _value) in enumerate(projected) if node_id is not None
-    )
-    return recorder.record_operation_with_literals(
+    return recorder.record_operation(
         op,
         parents,
-        parent_positions,
-        literals,
         value,
         attrs,
         shape,
         dtype,
-        source_location=source_location,
-        literal_weak=literals_are_weak(list(literals)),
+        input_positions=(
+            tuple(
+                position for position, (node_id, _) in enumerate(projected) if node_id is not None
+            )
+            if literals
+            else None
+        ),
+        literals=literals,
+        weak=weak,
+        source_location=get_source_location(),
     )
 
 
@@ -696,25 +668,29 @@ def _normalize_array_api_outputs(
 def _record_array_api_result(
     *,
     recorder: DynamicTape,
-    op: str,
-    operands: tuple[Any, ...],
+    binding: ArrayAPICallBinding,
     values: tuple[Any, ...],
     attrs: dict[str, Any],
     metadata: tuple[tuple[tuple[int, ...], Any], ...],
     namespace: Any,
     array_api_version: str,
+    weak: bool,
 ) -> Any:
-    """Record one fixed-arity result and return recorder-local wrappers."""
+    """Record one fixed-arity result and return recorder-local wrappers.
+
+    ``weak`` marks a single rank-zero result as a weak scalar (NEP 50).
+    """
     parent_value: Any = values[0] if len(values) == 1 else tuple(values)
     first_shape, first_dtype = metadata[0]
     parent_id = _record_array_api_operation(
         recorder=recorder,
-        op=op,
-        operands=operands,
+        op=binding.op,
+        operands=binding.operands,
         value=parent_value,
         attrs=attrs,
         shape=first_shape,
         dtype=first_dtype,
+        weak=weak,
     )
     if len(values) == 1:
         return ArrayAPITracer(
@@ -753,6 +729,39 @@ def _recorder_trace_level(recorder: DynamicTape) -> int:
         msg = "Array API operation recorder is not bound to an active trace level"
         raise TracingError(msg)
     return level
+
+
+def _recording_targets(tracers: list[ArrayAPITracer]) -> tuple[DynamicTape, ...]:
+    """Return every recorder one operation records into, outermost first.
+
+    Callers validate each tracer's own recorder. Operands owned by one
+    recorder with concrete payloads, the common case, need no trace-level
+    ordering; nested tracers also record into each enclosing recorder.
+    """
+    recorder = tracers[0].recorder
+    if all(
+        tracer.recorder is recorder and not isinstance(tracer._value, ArrayAPITracer)  # noqa: SLF001
+        for tracer in tracers
+    ):
+        return (recorder,)
+    recorder = cast(
+        "DynamicTape",
+        _select_deepest_active_recorder(tracer.recorder for tracer in tracers),
+    )
+    recorder_chain = {
+        nested_recorder for tracer in tracers for nested_recorder in _tracer_recorders(tracer)
+    }
+    target_level = _recorder_trace_level(recorder)
+    enclosing_recorders = sorted(
+        (
+            nested_recorder
+            for nested_recorder in recorder_chain
+            if nested_recorder is not recorder
+            and _recorder_trace_level(nested_recorder) < target_level
+        ),
+        key=_recorder_trace_level,
+    )
+    return (*enclosing_recorders, recorder)
 
 
 def _array_api_tracers(value: Any) -> tuple[ArrayAPITracer, ...]:
@@ -893,12 +902,107 @@ def _staged_array_api_composite(  # noqa: C901, PLR0912 - explicit bounded surfa
     raise AssertionError(message)
 
 
+_CUMULATIVE_IDENTITIES = {"cumulative_prod": 1, "cumulative_sum": 0}
+
+
+def _cumulative_with_initial(
+    path: str,
+    namespace: Any,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+) -> Any:
+    if len(args) != 1:
+        message = f"{path}() expects one positional array argument"
+        raise TypeError(message)
+    source = args[0]
+    options = dict(kwargs)
+    del options["include_initial"]
+    rank = len(source.shape)
+    axis_value = options.get("axis")
+    if axis_value is None and rank != 1:
+        message = "cumulative operations require axis= for inputs with more than one dimension"
+        raise ValueError(message)
+    axis = 0 if axis_value is None else _normalize_axis(axis_value, rank)
+    base = getattr(namespace, path)(source, **{**options, "axis": axis})
+    seed_shape = list(base.shape)
+    seed_shape[axis] = 1
+    seed = namespace.full(tuple(seed_shape), _CUMULATIVE_IDENTITIES[path], dtype=base.dtype)
+    return namespace.concat((seed, base), axis=axis)
+
+
+def _diff_with_boundaries(
+    namespace: Any,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+) -> Any:
+    if len(args) != 1:
+        message = "diff() expects one positional array argument"
+        raise TypeError(message)
+    source = args[0]
+    options = dict(kwargs)
+    prepend = options.pop("prepend", None)
+    append = options.pop("append", None)
+    if (prepend is None and append is None) or options.get("n", 1) == 0:
+        return namespace.diff(source, **options)
+    axis = _normalize_axis(options.get("axis", -1), len(source.shape))
+    boundary_shape = list(source.shape)
+    boundary_shape[axis] = 1
+
+    def boundary(value: Any) -> Any:
+        # Scalars and rank-zero arrays broadcast across the boundary slice.
+        if getattr(value, "shape", ()) != ():
+            return value
+        return namespace.full(tuple(boundary_shape), value)
+
+    parts = (
+        *(() if prepend is None else (boundary(prepend),)),
+        source,
+        *(() if append is None else (boundary(append),)),
+    )
+    return namespace.diff(namespace.concat(parts, axis=axis), **options)
+
+
+def _searchsorted_with_sorter(
+    namespace: Any,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+) -> Any:
+    if len(args) != _BINARY_ARITY:
+        message = "searchsorted() expects two positional array arguments"
+        raise TypeError(message)
+    options = dict(kwargs)
+    sorted_source = namespace.take(args[0], options.pop("sorter"), axis=0)
+    return namespace.searchsorted(sorted_source, args[1], **options)
+
+
+def lower_array_api_call(
+    path: str,
+    namespace: Any,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+) -> Any:
+    """Lower a standard form that has no single canonical operation.
+
+    The dynamic proxy and the abstract namespace both pass themselves, so each
+    lowered step records through that frontend's ordinary namespace calls.
+    Return ``NotImplemented`` when the call binds to one canonical operation.
+    """
+    if path in _CUMULATIVE_IDENTITIES and kwargs.get("include_initial"):
+        return _cumulative_with_initial(path, namespace, args, kwargs)
+    if path == "diff" and ("prepend" in kwargs or "append" in kwargs):
+        return _diff_with_boundaries(namespace, args, kwargs)
+    if path == "searchsorted" and kwargs.get("sorter") is not None:
+        return _searchsorted_with_sorter(namespace, args, kwargs)
+    return NotImplemented
+
+
 class ArrayAPINamespace:
     """Trace-aware proxy for one concrete Python Array API namespace."""
 
     __slots__ = (
         "_array_api_version",
         "_namespace",
+        "_nests_in_stage",
         "_path",
         "_profile",
         "_root_namespace",
@@ -917,6 +1021,10 @@ class ArrayAPINamespace:
         self._root_namespace = namespace if root_namespace is None else root_namespace
         self._array_api_version = array_api_version
         self._profile = materialize_array_api_profile(array_api_version)
+        # A dynamic trace inside a stage wraps abstract staged values.
+        self._nests_in_stage = (
+            getattr(self.raw_namespace, "__name__", "") == ABSTRACT_NAMESPACE_NAME
+        )
 
     @property
     def __name__(self) -> str:
@@ -993,112 +1101,18 @@ class ArrayAPINamespace:
                 array_api_version=self._array_api_version,
             )
         if callable(value):
-            if isinstance(self._namespace, ArrayAPINamespace):
-                raw_owner = self._namespace
-                while isinstance(raw_owner, ArrayAPINamespace):
-                    raw_owner = raw_owner._namespace  # noqa: SLF001 - nested proxy unwrapping
-                raw_function = getattr(raw_owner, name)
-                traced_function = value
-
-                @wraps(raw_function)
-                def call_through_parent(*args: Any, **kwargs: Any) -> Any:
-                    return traced_function(*args, **kwargs)
-
-                value = call_through_parent
+            # A nested proxy's value already calls through its parent proxy.
             return partial(self._call, path, value)
         return value
 
     def __dir__(self) -> list[str]:
-        names = set(super().__dir__()) | set(dir(self._namespace))
-        if self._path:
-            names = {
-                name
-                for name in names
-                if f"{self._path}.{name}" not in OFFICIAL_SIGNATURES
-                or self._profile.admits(f"{self._path}.{name}")
-            }
-        else:
-            names = {
-                name
-                for name in names
-                if name not in OFFICIAL_SIGNATURES or self._profile.admits(name)
-            }
-        return sorted(names)
-
-    def _cumulative_with_initial(
-        self,
-        path: str,
-        function: Callable[..., Any],
-        args: tuple[Any, ...],
-        kwargs: dict[str, Any],
-    ) -> Any:
-        if not args:
-            msg = f"{path}() requires an array"
-            raise TypeError(msg)
-        source = args[0]
-        axis_value = kwargs.get("axis")
-        source_shape = tuple(int(size) for size in source.shape)
-        if axis_value is None:
-            if len(source_shape) != 1:
-                msg = "cumulative operations require axis= for inputs with more than one dimension"
-                raise ValueError(msg)
-            axis = 0
-        else:
-            axis = int(axis_value)
-            if axis < 0:
-                axis += len(source_shape)
-            if axis < 0 or axis >= len(source_shape):
-                msg = f"axis {axis_value} is out of bounds"
-                raise ValueError(msg)
-        base_kwargs = dict(kwargs)
-        base_kwargs["axis"] = axis
-        base_kwargs["include_initial"] = False
-        base = self._call(path, function, *args, **base_kwargs)
-        seed_shape = list(base.shape)
-        seed_shape[axis] = 1
-        fill_value = 1 if path == "cumulative_prod" else 0
-        seed = self.raw_namespace.full(
-            tuple(seed_shape),
-            fill_value,
-            dtype=base.dtype,
+        prefix = f"{self._path}." if self._path else ""
+        return sorted(
+            name
+            for name in set(super().__dir__()) | set(dir(self._namespace))
+            if f"{prefix}{name}" not in OFFICIAL_SIGNATURES
+            or self._profile.admits(f"{prefix}{name}")
         )
-        concat = cast("Callable[..., Any]", self.raw_namespace.concat)
-        return self._call("concat", concat, (seed, base), axis=axis)
-
-    def _diff_with_boundaries(
-        self,
-        function: Callable[..., Any],
-        args: tuple[Any, ...],
-        kwargs: dict[str, Any],
-    ) -> Any:
-        if len(args) != 1:
-            message = "diff() expects one positional array argument"
-            raise TypeError(message)
-        options = dict(kwargs)
-        prepend = options.pop("prepend", None)
-        append = options.pop("append", None)
-        if options.get("n", 1) == 0:
-            return self._call("diff", function, args[0], **options)
-        axis = options.get("axis", -1)
-        parts = tuple(part for part in (prepend, args[0], append) if part is not None)
-        concat = cast("Callable[..., Any]", self.raw_namespace.concat)
-        joined = self._call("concat", concat, parts, axis=axis)
-        return self._call("diff", function, joined, **options)
-
-    def _searchsorted_with_sorter(
-        self,
-        function: Callable[..., Any],
-        args: tuple[Any, ...],
-        kwargs: dict[str, Any],
-    ) -> Any:
-        if len(args) != _BINARY_ARITY:
-            message = "searchsorted() expects two positional array arguments"
-            raise TypeError(message)
-        options = dict(kwargs)
-        sorter = options.pop("sorter")
-        take = cast("Callable[..., Any]", self.raw_namespace.take)
-        sorted_source = self._call("take", take, args[0], sorter, axis=0)
-        return self._call("searchsorted", function, sorted_source, args[1], **options)
 
     def _asarray_live_sequence(
         self,
@@ -1143,10 +1157,6 @@ class ArrayAPINamespace:
             array_api_version=self._array_api_version,
         )
 
-    @staticmethod
-    def _lift_discrete_composite(namespace: ArrayAPINamespace, value: Any) -> Any:
-        return namespace._advect_materialize_constant(value, None)
-
     def _dynamic_array_api_composite(
         self,
         path: str,
@@ -1163,7 +1173,7 @@ class ArrayAPINamespace:
 
         if path == "nonzero":
             result = raw_function(raw_source)
-            return tuple(self._lift_discrete_composite(namespace, value) for value in result)
+            return tuple(namespace._advect_materialize_constant(value, None) for value in result)
 
         all_result = self.raw_namespace.unique_all(raw_source)
         flattened = namespace.reshape(source, (-1,))
@@ -1185,10 +1195,59 @@ class ArrayAPINamespace:
             raise AssertionError(message)
         return type(result)(
             values,
-            *(self._lift_discrete_composite(namespace, value) for value in metadata),
+            *(namespace._advect_materialize_constant(value, None) for value in metadata),
         )
 
-    def _call(  # noqa: C901, PLR0911 - one closed frontend dispatch
+    def _advect_python_operator(self, path: str, operands: tuple[Any, ...]) -> Any:
+        """Apply Python's operator to weak operands and record a weak result (NEP 50).
+
+        A standard function would require an array operand.
+        """
+        binding = bind_array_api_call(path, operands, {})
+        operator = cast("Callable[..., Any]", python_operator(binding.op, len(operands)))
+        tracers = [operand for operand in operands if isinstance(operand, ArrayAPITracer)]
+        for tracer in tracers:
+            tracer._require_active_recorder()  # noqa: SLF001 - same frontend invariant
+        value = operator(*_unwrap(operands))
+        if type(value) in PYTHON_SCALAR_TYPES:
+            value = self.raw_namespace.asarray(value)
+        (result,) = self._record(
+            binding, _recording_targets(tracers), (value,), (((), value.dtype),), weak=True
+        )
+        return result
+
+    def _record(
+        self,
+        binding: ArrayAPICallBinding,
+        targets: tuple[DynamicTape, ...],
+        outputs: tuple[Any, ...],
+        metadata: tuple[tuple[tuple[int, ...], Any], ...],
+        *,
+        weak: bool = False,
+    ) -> tuple[Any, ...]:
+        """Record one bound call on each target recorder, outermost first."""
+        attrs = dict(binding.attrs)
+        backend = _get_backend_key_from_namespace(self.raw_namespace)
+        if backend is not None:
+            attrs["_advect_backend"] = backend
+        attrs["_advect_array_api_version"] = self._array_api_version
+        result_value: Any = outputs
+        for target_recorder in targets:
+            result_value = _record_array_api_result(
+                recorder=target_recorder,
+                binding=binding,
+                values=cast("tuple[Any, ...]", result_value),
+                attrs=attrs,
+                metadata=metadata,
+                namespace=self.raw_namespace,
+                array_api_version=self._array_api_version,
+                weak=weak,
+            )
+            if binding.num_outputs == 1:
+                result_value = (result_value,)
+        return cast("tuple[Any, ...]", result_value)
+
+    def _call(  # noqa: PLR0911 - one closed frontend dispatch
         self,
         path: str,
         function: Callable[..., Any],
@@ -1203,6 +1262,8 @@ class ArrayAPINamespace:
             namespace=self.raw_namespace,
             array_api_version=self._array_api_version,
         )
+        if self._nests_in_stage:
+            args, kwargs = _as_array_api_nested((args, kwargs), self)
         if path in _ARRAY_API_META_FUNCTIONS:
             return function(
                 *cast("tuple[Any, ...]", _unwrap(args)),
@@ -1218,28 +1279,26 @@ class ArrayAPINamespace:
             return self._dynamic_array_api_composite(path, namespace, args, kwargs)
         if path == "asarray" and isinstance(args[0] if args else None, (tuple, list)):
             return self._asarray_live_sequence(function, args, kwargs)
-        if path == "diff" and any(kwargs.get(name) is not None for name in ("prepend", "append")):
-            return self._diff_with_boundaries(function, args, kwargs)
-        if path == "searchsorted" and kwargs.get("sorter") is not None:
-            return self._searchsorted_with_sorter(function, args, kwargs)
-        if path in {"cumulative_prod", "cumulative_sum"} and bool(
-            kwargs.get("include_initial", False)
-        ):
-            return self._cumulative_with_initial(path, function, args, kwargs)
+        lowered = lower_array_api_call(path, self, args, kwargs)
+        if lowered is not NotImplemented:
+            return lowered
         binding = bind_array_api_call(path, args, kwargs)
         tracers = [operand for operand in binding.operands if isinstance(operand, ArrayAPITracer)]
         if not tracers:
             return function(*args, **kwargs)
+        if binding.op in PYTHON_ATTRIBUTE_OPS and all(
+            literal_is_weak(operand) for operand in binding.operands
+        ):
+            # NumPy's real() and imag() read the attribute, which keeps a weak scalar weak.
+            return self._advect_python_operator(path, binding.operands)
 
+        root_namespace = self.raw_namespace
         for tracer in tracers:
             tracer._require_active_recorder()  # noqa: SLF001 - same frontend invariant
-            if not _same_namespace(tracer.raw_namespace, self.raw_namespace):
+            if not _same_namespace(tracer._namespace, root_namespace):  # noqa: SLF001
                 msg = f"Cannot combine different Array API namespaces in {path}()"
                 raise TypeError(msg)
-        recorder = cast(
-            "DynamicTape",
-            _select_deepest_active_recorder(tracer.recorder for tracer in tracers),
-        )
+        targets = _recording_targets(tracers)
 
         concrete_args = cast("tuple[Any, ...]", _unwrap(args))
         concrete_kwargs = cast("dict[str, Any]", _unwrap(kwargs))
@@ -1248,7 +1307,7 @@ class ArrayAPINamespace:
             materialize_weak_scalar_operands(
                 binding.op,
                 concrete_args,
-                namespace=self.raw_namespace,
+                namespace=root_namespace,
             ),
         )
         result = function(*concrete_args, **concrete_kwargs)
@@ -1258,48 +1317,10 @@ class ArrayAPINamespace:
             num_outputs=binding.num_outputs,
         )
 
-        attrs = dict(binding.attrs)
-        root_namespace = self.raw_namespace
-        backend = _get_backend_key_from_namespace(root_namespace)
-        if backend is not None:
-            attrs["_advect_backend"] = backend
-        attrs["_advect_array_api_version"] = self.__array_api_version__
-
-        result_value: Any = outputs
-        recorder_chain = {
-            nested_recorder
-            for operand in binding.operands
-            for nested_recorder in _tracer_recorders(operand)
-        }
-        target_level = _recorder_trace_level(recorder)
-        enclosing_recorders = sorted(
-            (
-                nested_recorder
-                for nested_recorder in recorder_chain
-                if nested_recorder is not recorder
-                and _recorder_trace_level(nested_recorder) < target_level
-            ),
-            key=_recorder_trace_level,
-        )
-        for target_recorder in (*enclosing_recorders, recorder):
-            result_value = _record_array_api_result(
-                recorder=target_recorder,
-                op=binding.op,
-                operands=binding.operands,
-                values=cast("tuple[Any, ...]", result_value),
-                attrs=attrs,
-                metadata=output_metadata,
-                namespace=root_namespace,
-                array_api_version=self._array_api_version,
-            )
-            if binding.num_outputs == 1:
-                result_value = (result_value,)
+        result_value = self._record(binding, targets, outputs, output_metadata)
         if binding.num_outputs == 1:
-            return cast("tuple[Any, ...]", result_value)[0]
-        return restore_array_api_result(
-            path,
-            cast("tuple[Any, ...]", result_value),
-        )
+            return result_value[0]
+        return restore_array_api_result(path, result_value)
 
 
 class ArrayAPITracer:
@@ -1317,6 +1338,8 @@ class ArrayAPITracer:
 
     __array_priority__ = 100_000
     __advect_namespace_is_instance_specific__ = True
+    # Elementwise `__eq__` is installed below; keep tracers unhashable.
+    __hash__: ClassVar[None] = None
 
     def __init__(
         self,
@@ -1333,10 +1356,7 @@ class ArrayAPITracer:
         self._recorder = recorder
         self._namespace = namespace
         self._array_api_version = array_api_version
-        self._namespace_proxy = ArrayAPINamespace(
-            namespace,
-            array_api_version=array_api_version,
-        )
+        self._namespace_proxy: ArrayAPINamespace | None = None
         self._owned = owned
 
     @property
@@ -1366,6 +1386,22 @@ class ArrayAPITracer:
         """Return one internally validated SSA/value pair."""
         self._require_active_recorder()
         return self._node_id, self._value
+
+    def _advect_adopt(self, value: Any) -> Any:
+        """Rewrap another frontend's tracer on this tape as an Array API tracer."""
+        if (
+            isinstance(value, ArrayAPITracer)
+            or getattr(value, "recorder", None) is not self._recorder
+        ):
+            return value
+        node_id, payload = _snapshot_traced(value)
+        return ArrayAPITracer(
+            payload,
+            node_id,
+            self._recorder,
+            namespace=self._namespace,
+            array_api_version=self._array_api_version,
+        )
 
     @property
     def node_id(self) -> int:
@@ -1423,6 +1459,8 @@ class ArrayAPITracer:
         if api_version is not None and api_version != current:
             msg = f"Array API version {api_version!r} requested, but provider exposes {current!r}"
             raise ValueError(msg)
+        if self._namespace_proxy is None:
+            self._namespace_proxy = ArrayAPINamespace(self._namespace, array_api_version=current)
         return self._namespace_proxy
 
     def __array_ufunc__(
@@ -1476,6 +1514,9 @@ class ArrayAPITracer:
 
     def __getitem__(self, index: Any) -> ArrayAPITracer:
         recorder = self._require_active_recorder()
+        # A traced index array selects by its concrete values, which carry no
+        # derivative; providers also reject a tracer inside an index.
+        index = _unwrap(index)
         result = self._value[index]
         node_id = recorder.record_operation(
             "advect.getitem",
@@ -1505,33 +1546,22 @@ class ArrayAPITracer:
                 "Copy the value before applying an internal functional update."
             )
             raise MutationError(msg)
+        index = _unwrap(index)
         source_id, source_value = self._advect_snapshot()
         replacement_id, replacement_value = _operand_for_recorder(value, recorder=recorder)
         result = _copy_array_value(source_value, self._namespace)
         result[index] = replacement_value
-        attrs = {"index": index, "mode": "set"}
-        if replacement_id is None:
-            node_id = recorder.record_operation_with_literals(
-                "advect.index_update",
-                (source_id,),
-                (0,),
-                (replacement_value,),
-                result,
-                attrs,
-                tuple(int(dimension) for dimension in result.shape),
-                result.dtype,
-                literal_weak=literal_is_weak(value),
-            )
-        else:
-            node_id = recorder.record_operation(
-                "advect.index_update",
-                (source_id, replacement_id),
-                result,
-                attrs,
-                tuple(int(dimension) for dimension in result.shape),
-                result.dtype,
-            )
-        self._node_id = node_id
+        literal = replacement_id is None
+        self._node_id = recorder.record_operation(
+            "advect.index_update",
+            (source_id,) if literal else (source_id, replacement_id),
+            result,
+            {"index": index, "mode": "set"},
+            tuple(int(dimension) for dimension in result.shape),
+            result.dtype,
+            input_positions=(0,) if literal else None,
+            literals=(replacement_value,) if literal else (),
+        )
         self._value = result
 
     def copy(self) -> ArrayAPITracer:
@@ -1575,17 +1605,7 @@ class ArrayAPITracer:
 
     def item(self, *args: object) -> ArrayAPITracer:
         """Return one element as a rank-zero traced value."""
-        index = normalize_item_index(args, ndim=self.ndim)
-        if index is None:
-            if self.size != 1:
-                msg = "can only convert an array of size 1 to a scalar"
-                raise ValueError(msg)
-            if self.shape == ():
-                return self
-            return self[tuple(0 for _dimension in self.shape)]
-        if isinstance(index, tuple):
-            return self[index]
-        return self.reshape((-1,))[index]
+        return cast("ArrayAPITracer", select_item(self, args))
 
     def sum(self, *, axis: Any = None, dtype: Any = None, keepdims: bool = False) -> Any:
         kwargs: dict[str, Any] = {"axis": axis, "keepdims": keepdims}
@@ -1598,11 +1618,11 @@ class ArrayAPITracer:
 
     @property
     def real(self) -> ArrayAPITracer:
-        return cast("ArrayAPITracer", self.__array_namespace__().real(self))
+        return cast("ArrayAPITracer", self._unary("real"))
 
     @property
     def imag(self) -> ArrayAPITracer:
-        return cast("ArrayAPITracer", self.__array_namespace__().imag(self))
+        return cast("ArrayAPITracer", self._unary("imag"))
 
     @property
     def T(self) -> ArrayAPITracer:  # noqa: N802 - standard array spelling
@@ -1614,107 +1634,50 @@ class ArrayAPITracer:
         return cast("ArrayAPITracer", self.__array_namespace__().matrix_transpose(self))
 
     def _binary(self, name: str, other: Any, *, reverse: bool = False) -> Any:
-        if (
-            bool(getattr(type(self._value), "__advect_abstract_array__", False))
-            and getattr(type(other), "__advect_frontend__", None) is not None
-        ):
-            return NotImplemented
+        if bool(getattr(type(self._value), "__advect_abstract_array__", False)):
+            if getattr(type(other), "__advect_frontend__", None) is not None:
+                return NotImplemented
+            # The staged value's frontend decides whether ``**`` squares, as
+            # NumPy squares a boolean array to int8 where its power gives int64.
+            if name == "pow" and not reverse and self._value._squares(other):  # noqa: SLF001
+                return self.__array_namespace__().square(self)
         namespace = self.__array_namespace__()
-        function = getattr(namespace, name)
-        return function(other, self) if reverse else function(self, other)
+        operands = (other, self) if reverse else (self, other)
+        # Python's operator on Python scalars keeps a weak result (NEP 50).
+        if self.shape == () and all(literal_is_weak(operand) for operand in operands):
+            return namespace._advect_python_operator(name, operands)  # noqa: SLF001
+        return getattr(namespace, name)(*operands)
 
-    def __add__(self, other: Any) -> Any:
-        return self._binary("add", other)
-
-    def __radd__(self, other: Any) -> Any:
-        return self._binary("add", other, reverse=True)
-
-    def __sub__(self, other: Any) -> Any:
-        return self._binary("subtract", other)
-
-    def __rsub__(self, other: Any) -> Any:
-        return self._binary("subtract", other, reverse=True)
-
-    def __mul__(self, other: Any) -> Any:
-        return self._binary("multiply", other)
-
-    def __rmul__(self, other: Any) -> Any:
-        return self._binary("multiply", other, reverse=True)
-
-    def __truediv__(self, other: Any) -> Any:
-        return self._binary("divide", other)
-
-    def __rtruediv__(self, other: Any) -> Any:
-        return self._binary("divide", other, reverse=True)
-
-    def __floordiv__(self, other: Any) -> Any:
-        return self._binary("floor_divide", other)
-
-    def __rfloordiv__(self, other: Any) -> Any:
-        return self._binary("floor_divide", other, reverse=True)
-
-    def __mod__(self, other: Any) -> Any:
-        return self._binary("remainder", other)
-
-    def __rmod__(self, other: Any) -> Any:
-        return self._binary("remainder", other, reverse=True)
-
-    def __pow__(self, other: Any) -> Any:
-        return self._binary("pow", other)
-
-    def __rpow__(self, other: Any) -> Any:
-        return self._binary("pow", other, reverse=True)
-
-    def __matmul__(self, other: Any) -> Any:
-        return self._binary("matmul", other)
-
-    def __rmatmul__(self, other: Any) -> Any:
-        return self._binary("matmul", other, reverse=True)
-
-    def __and__(self, other: Any) -> Any:
-        return self._binary("bitwise_and", other)
-
-    def __rand__(self, other: Any) -> Any:
-        return self._binary("bitwise_and", other, reverse=True)
-
-    def __or__(self, other: Any) -> Any:
-        return self._binary("bitwise_or", other)
-
-    def __ror__(self, other: Any) -> Any:
-        return self._binary("bitwise_or", other, reverse=True)
-
-    def __xor__(self, other: Any) -> Any:
-        return self._binary("bitwise_xor", other)
-
-    def __rxor__(self, other: Any) -> Any:
-        return self._binary("bitwise_xor", other, reverse=True)
-
-    def __lt__(self, other: Any) -> Any:
-        return self._binary("less", other)
-
-    def __le__(self, other: Any) -> Any:
-        return self._binary("less_equal", other)
-
-    def __eq__(self, other: object) -> Any:
-        return self._binary("equal", other)
-
-    def __ne__(self, other: object) -> Any:
-        return self._binary("not_equal", other)
-
-    def __gt__(self, other: Any) -> Any:
-        return self._binary("greater", other)
-
-    def __ge__(self, other: Any) -> Any:
-        return self._binary("greater_equal", other)
+    def _unary(self, name: str) -> Any:
+        namespace = self.__array_namespace__()
+        if self.shape == () and self._advect_weak:
+            return namespace._advect_python_operator(name, (self,))  # noqa: SLF001
+        return getattr(namespace, name)(self)
 
     def __neg__(self) -> Any:
-        return self.__array_namespace__().negative(self)
+        return self._unary("negative")
 
     def __pos__(self) -> Any:
-        return self.__array_namespace__().positive(self)
+        return self._unary("positive")
 
     def __abs__(self) -> Any:
-        return self.__array_namespace__().abs(self)
+        return self._unary("abs")
 
     def __invert__(self) -> Any:
-        return self.__array_namespace__().bitwise_invert(self)
+        return self._unary("bitwise_invert")
+
+
+def _tracer_operator(
+    function: str, *, reverse: bool = False
+) -> Callable[[ArrayAPITracer, Any], Any]:
+    def operator(self: ArrayAPITracer, other: Any) -> Any:
+        return self._binary(function, other, reverse=reverse)
+
+    return operator
+
+
+for _stem, _function in _ARITHMETIC_OPERATORS.items():
+    setattr(ArrayAPITracer, f"__{_stem}__", _tracer_operator(_function))
+    setattr(ArrayAPITracer, f"__r{_stem}__", _tracer_operator(_function, reverse=True))
+for _stem, _function in _COMPARISON_OPERATORS.items():
+    setattr(ArrayAPITracer, f"__{_stem}__", _tracer_operator(_function))

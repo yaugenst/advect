@@ -6,6 +6,8 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from advect.numpy._composite_lowering import operand_dtype
+
 if TYPE_CHECKING:
     from collections.abc import Callable
 
@@ -25,13 +27,12 @@ def _materialize(value: object) -> object:
     if isinstance(value, dict):
         return {key: _materialize(item) for key, item in value.items()}
     shape = getattr(value, "shape", None)
-    dtype = getattr(value, "dtype", None)
-    if shape is None or dtype is None or isinstance(value, type):
+    if shape is None or isinstance(value, type):
         return value
     try:
         normalized_shape = tuple(int(size) for size in shape)
-        normalized_dtype = np.dtype(dtype)
-    except (TypeError, ValueError):
+        normalized_dtype = operand_dtype(value)
+    except (AttributeError, TypeError, ValueError):
         return value
     constructor = np.ones if normalized_dtype == np.dtype(bool) else np.zeros
     order = getattr(value, "_advect_layout", None)
@@ -88,10 +89,12 @@ def validate_staged_out(
         if not name.startswith("_advect_")
     }
     kwargs["out"] = out
-    _resolve(raw_name)(
-        *tuple(_materialize(value) for value in raw_args),
-        **kwargs,
-    )
+    # The dummy values are meaningless, so only NumPy's errors may surface here.
+    with np.errstate(all="ignore"):
+        _resolve(raw_name)(
+            *tuple(_materialize(value) for value in raw_args),
+            **kwargs,
+        )
 
 
 __all__ = ["validate_staged_out"]
