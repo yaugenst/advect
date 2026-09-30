@@ -60,6 +60,16 @@ shows that path with ordinary NumPy code.</p>
 serialized, and derivative support remain explicit per callable, so consult the
 generated <a href="../../compatibility/numpy/">NumPy compatibility page</a> rather than
 inferring support from attribute availability.</p>
+<p>Traced and staged <code>numpy.linalg</code> decompositions keep NumPy's field names:
+<code>eig</code>, <code>eigh</code>, <code>qr</code>, <code>svd</code>, and <code>slogdet</code> return named tuples such as
+<code>EighResult</code>. These are Advect's result types rather than <code>numpy.linalg</code>'s own
+classes, and a <a href="../transforms/#advect.vjp"><code>vjp</code></a> or
+<a href="../staging/#advect.vjp_program"><code>vjp_program</code></a> cotangent for such an output
+must have the same container type. Build it from the output, for example with
+<a href="../pytree/#advect.pytree.tree_map"><code>tree_map</code></a><code>(np.ones_like, output)</code> or
+<code>type(output)(...)</code>; a plain tuple is rejected as a structure mismatch. The
+<a href="../interop/">host-framework bridges</a> place host cotangents in this
+structure themselves.</p>
 
 
 <div class="doc doc-object doc-module">

@@ -7,7 +7,7 @@ Any array whose namespace implements the Array API standard reaches Advect throu
 | Provider           | Status                                                                                                                                                        |
 | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | NumPy              | Qualified through its first-class frontend; see [NumPy](https://yaugenst.github.io/advect/dev/compatibility/numpy/index.md) for the minor-to-revision mapping |
-| `array-api-strict` | Qualified through `__array_namespace__()` for all three revisions below                                                                                       |
+| `array-api-strict` | Qualified through `__array_namespace__()` for every revision below                                                                                            |
 | CuPy               | Built-in single-device compatibility path; see [CuPy](https://yaugenst.github.io/advect/dev/compatibility/cupy/index.md)                                      |
 
 The fallback handles raw provider arrays at Advect's input boundary; it does not make an array traceable when its namespace does not implement the standard.
@@ -24,6 +24,8 @@ The `2022.12` revision is the baseline; later revisions extend it. Its callable 
 
 Every listed function works in dynamic transforms. **Stage/save** says whether the same call can appear in a staged and serialized program. **Differentiate** reports user-visible derivative support. **No** means no derivative rule is available; **n/a** marks a structural or mathematically nondifferentiable operation.
 
+A creation function whose `dtype` defaults to the provider's default dtype, such as `zeros` or `arange`, reads **no** under Stage/save because staging cannot know that default; the same call with an explicit `dtype=` stages and serializes.
+
 ## Array API 2022.12 baseline
 
 | Function                  | Stage/save | Differentiate |
@@ -34,7 +36,7 @@ Every listed function works in dynamic transforms. **Stage/save** says whether t
 | `add`                     | yes        | yes           |
 | `all`                     | yes        | n/a           |
 | `any`                     | yes        | n/a           |
-| `arange`                  | yes        | no            |
+| `arange`                  | no         | no            |
 | `argmax`                  | yes        | n/a           |
 | `argmin`                  | yes        | n/a           |
 | `argsort`                 | yes        | n/a           |
@@ -60,15 +62,15 @@ Every listed function works in dynamic transforms. **Stage/save** says whether t
 | `cos`                     | yes        | yes           |
 | `cosh`                    | yes        | yes           |
 | `divide`                  | yes        | yes           |
-| `empty`                   | yes        | no            |
+| `empty`                   | no         | no            |
 | `empty_like`              | yes        | yes           |
 | `equal`                   | yes        | n/a           |
 | `exp`                     | yes        | yes           |
 | `expand_dims`             | yes        | yes           |
 | `expm1`                   | yes        | yes           |
-| `eye`                     | yes        | no            |
+| `eye`                     | no         | no            |
 | `fft.fft`                 | yes        | yes           |
-| `fft.fftfreq`             | yes        | no            |
+| `fft.fftfreq`             | no         | no            |
 | `fft.fftn`                | yes        | yes           |
 | `fft.fftshift`            | yes        | yes           |
 | `fft.hfft`                | yes        | yes           |
@@ -79,7 +81,7 @@ Every listed function works in dynamic transforms. **Stage/save** says whether t
 | `fft.irfft`               | yes        | yes           |
 | `fft.irfftn`              | yes        | yes           |
 | `fft.rfft`                | yes        | yes           |
-| `fft.rfftfreq`            | yes        | no            |
+| `fft.rfftfreq`            | no         | no            |
 | `fft.rfftn`               | yes        | yes           |
 | `finfo`                   | yes        | n/a           |
 | `flip`                    | yes        | yes           |
@@ -120,7 +122,7 @@ Every listed function works in dynamic transforms. **Stage/save** says whether t
 | `linalg.trace`            | yes        | yes           |
 | `linalg.vecdot`           | yes        | yes           |
 | `linalg.vector_norm`      | yes        | yes           |
-| `linspace`                | yes        | yes           |
+| `linspace`                | no         | yes           |
 | `log`                     | yes        | yes           |
 | `log10`                   | yes        | yes           |
 | `log1p`                   | yes        | yes           |
@@ -140,7 +142,7 @@ Every listed function works in dynamic transforms. **Stage/save** says whether t
 | `negative`                | yes        | yes           |
 | `nonzero`                 | no         | n/a           |
 | `not_equal`               | yes        | n/a           |
-| `ones`                    | yes        | no            |
+| `ones`                    | no         | no            |
 | `ones_like`               | yes        | yes           |
 | `permute_dims`            | yes        | yes           |
 | `positive`                | yes        | yes           |
@@ -177,7 +179,7 @@ Every listed function works in dynamic transforms. **Stage/save** says whether t
 | `var`                     | yes        | yes           |
 | `vecdot`                  | yes        | yes           |
 | `where`                   | yes        | yes           |
-| `zeros`                   | yes        | no            |
+| `zeros`                   | no         | no            |
 | `zeros_like`              | yes        | yes           |
 
 ## Added in 2023.12

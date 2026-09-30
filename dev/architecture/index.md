@@ -83,7 +83,9 @@ Abstract tracing is stricter by design. Data-dependent Python branches, ambient 
 
 ## Derivatives and mutation stay composable
 
-Advect prefers JVP rules written as ordinary traceable code. Forward mode uses them directly; reverse mode structurally transposes them when possible. The smaller set of operations that needs a direct real adjoint provides an explicit transpose. Missing rules raise a named error instead of silently substituting a numerical approximation.
+Advect prefers JVP rules written as ordinary traceable code. Forward mode uses them directly. Reverse mode uses an operation's explicit real adjoint when it has one and otherwise structurally transposes its JVP. Explicit adjoints exist where transposition cannot express the adjoint or a measured hot path needs one. Most elementwise operations derive both rules from one table of local partial derivatives, so each formula is written once. Missing rules raise a named error instead of silently substituting a numerical approximation.
+
+Gathers such as `take`, `take_along_axis`, and sorting transpose into one internal scatter-add operation in dynamic, staged, and saved programs alike. Their reverse mode therefore needs memory proportional to the gathered values rather than to their product with the source axis. NumPy and other providers with `add.at` scatter in one pass; any other provider uses only Array API 2022.12 functions to sort the indices and sum each run of equal indices by repeated doubling.
 
 Advect treats every derivative as a real-linear map. This gives complex and non-holomorphic functions one consistent convention: a real loss can use `grad`, while a complex output uses `jvp`, `vjp`, or `linearize`.
 

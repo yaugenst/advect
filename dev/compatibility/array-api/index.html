@@ -66,7 +66,7 @@ var base_url = "../..";
 </tr>
 <tr>
 <td><code>array-api-strict</code></td>
-<td>Qualified through <code>__array_namespace__()</code> for all three revisions below</td>
+<td>Qualified through <code>__array_namespace__()</code> for every revision below</td>
 </tr>
 <tr>
 <td>CuPy</td>
@@ -104,6 +104,7 @@ var base_url = "../..";
 </table>
 <p>The <code>2022.12</code> revision is the baseline; later revisions extend it. Its callable set appears below, followed by additions, changes, and the few official functions with a remaining boundary.</p>
 <p>Every listed function works in dynamic transforms. <strong>Stage/save</strong> says whether the same call can appear in a staged and serialized program. <strong>Differentiate</strong> reports user-visible derivative support. <strong>No</strong> means no derivative rule is available; <strong>n/a</strong> marks a structural or mathematically nondifferentiable operation.</p>
+<p>A creation function whose <code>dtype</code> defaults to the provider's default dtype, such as <code>zeros</code> or <code>arange</code>, reads <strong>no</strong> under Stage/save because staging cannot know that default; the same call with an explicit <code>dtype=</code> stages and serializes.</p>
 <h2 id="array-api-202212-baseline">Array API 2022.12 baseline<a class="headerlink" href="#array-api-202212-baseline" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
@@ -146,7 +147,7 @@ var base_url = "../..";
 </tr>
 <tr>
 <td><code>arange</code></td>
-<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
 <td style="text-align: center;">no</td>
 </tr>
 <tr>
@@ -276,7 +277,7 @@ var base_url = "../..";
 </tr>
 <tr>
 <td><code>empty</code></td>
-<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
 <td style="text-align: center;">no</td>
 </tr>
 <tr>
@@ -306,7 +307,7 @@ var base_url = "../..";
 </tr>
 <tr>
 <td><code>eye</code></td>
-<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
 <td style="text-align: center;">no</td>
 </tr>
 <tr>
@@ -316,7 +317,7 @@ var base_url = "../..";
 </tr>
 <tr>
 <td><code>fft.fftfreq</code></td>
-<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
 <td style="text-align: center;">no</td>
 </tr>
 <tr>
@@ -371,7 +372,7 @@ var base_url = "../..";
 </tr>
 <tr>
 <td><code>fft.rfftfreq</code></td>
-<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
 <td style="text-align: center;">no</td>
 </tr>
 <tr>
@@ -576,7 +577,7 @@ var base_url = "../..";
 </tr>
 <tr>
 <td><code>linspace</code></td>
-<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
@@ -676,7 +677,7 @@ var base_url = "../..";
 </tr>
 <tr>
 <td><code>ones</code></td>
-<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
 <td style="text-align: center;">no</td>
 </tr>
 <tr>
@@ -861,7 +862,7 @@ var base_url = "../..";
 </tr>
 <tr>
 <td><code>zeros</code></td>
-<td style="text-align: center;">yes</td>
+<td style="text-align: center;">no</td>
 <td style="text-align: center;">no</td>
 </tr>
 <tr>

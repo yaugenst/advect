@@ -2,6 +2,8 @@
 
 Most transforms on this page run the callable and trace the path taken by its concrete inputs. [`grad`](https://yaugenst.github.io/advect/dev/api/transforms/#advect.grad) and [`value_and_grad`](https://yaugenst.github.io/advect/dev/api/transforms/#advect.value_and_grad) also accept a [`StagedProgram`](https://yaugenst.github.io/advect/dev/api/staging/#advect.StagedProgram); they return another staged program with the same input signature and Array API revision. [`vjp_program`](https://yaugenst.github.io/advect/dev/api/staging/#advect.vjp_program) builds a reusable staged pullback. The other transforms operate dynamically.
 
+A Python-scalar cotangent for a zero-dimensional output is seeded as `grad` seeds that output, so [`vjp`](https://yaugenst.github.io/advect/dev/api/transforms/#advect.vjp) and [`LinearMap`](https://yaugenst.github.io/advect/dev/api/transforms/#advect.LinearMap) pullbacks return the gradient types that `grad` returns.
+
 The [gradient](https://yaugenst.github.io/advect/dev/tutorials/gradients/index.md), [linear-map](https://yaugenst.github.io/advect/dev/tutorials/linear-maps/index.md), [higher-order](https://yaugenst.github.io/advect/dev/tutorials/advanced-differentiation/index.md), and [implicit-differentiation](https://yaugenst.github.io/advect/dev/tutorials/implicit-differentiation/index.md) tutorials connect these transforms through complete examples.
 
 Library adapters may use `transform_state` for namespaced bookkeeping that lives only while one concrete transform is tracing. Differentiable primitive inputs and backward residuals must remain explicit.
@@ -392,7 +394,7 @@ Parameters:
 
 Returns:
 
-- `Callable` – A function called as transformed(\*args, vectors=vectors, \*\*kwargs) that returns (value, product). The keyword-only vectors value must match the pytree structure and leaf shapes selected by argnums; use None for a static or otherwise untraceable leaf. value preserves the output structure of f, and product preserves the integer-versus-tuple selection structure described above.
+- `Callable` – A function called as transformed(\*args, vectors=vectors, \*\*kwargs) that returns (value, product). The keyword-only vectors value must match the pytree structure and leaf shapes selected by argnums; use None for a static or otherwise untraceable leaf. value preserves the output structure of f, and product preserves the integer-versus-tuple selection structure described above, with None at each static leaf.
 
 Raises:
 
@@ -430,7 +432,7 @@ hessian(
 
 Return a dynamic transform that assembles an exact dense Hessian.
 
-Each selected positional argument is one dense real input block. For selected shapes `S_i`, block `[i][j]` has shape `S_i + S_j`: its rows index coordinates of the gradient with respect to argument `i` and its columns index coordinates of argument `j`.
+Each selected positional argument is one dense real input block. For selected shapes `S_i`, block `[i][j]` has shape `S_i + S_j` and differentiates the gradient with respect to argument `j` by argument `i`: its rows index coordinates of argument `i` and its columns index coordinates of that gradient.
 
 Parameters:
 

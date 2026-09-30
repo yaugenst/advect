@@ -165,7 +165,9 @@ receives an all-ones direction.</p>
           –
           <div class="doc-md-description">
             <p>Non-empty sequence of finite positive central-difference steps. The
-JVP comparison passes when at least one step agrees within tolerance.</p>
+JVP comparison passes when at least one step agrees within tolerance;
+steps are tried in order, and later steps are not evaluated once one
+agrees.</p>
           </div>
         </li>
         <li class="doc-section-item field-body">
@@ -298,6 +300,10 @@ boundaries and therefore omit <code>"nested"</code>. A transpose-only primitive 
 request just <code>"transpose"</code>; the check then compares its explicit rule
 with a central finite difference. The <code>"jvp"</code>, <code>"complex"</code>, and
 <code>"nested"</code> checks require a JVP.</p>
+<p>The abstract check compares each declared output's shape, dtype, and
+weak-scalar category with the concrete call. As for a Python operator, an
+output is weak exactly when the implementation returns a Python scalar and
+every primal is a Python scalar.</p>
 <p>The stage check executes both the compiled and serialized program, compares
 output structure, shape, and dtype exactly, and verifies that inputs remain
 unchanged. Repository-wide support still requires the conformance inventory;

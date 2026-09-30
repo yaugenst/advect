@@ -52,7 +52,7 @@ var base_url = "../..";
 
 <p>NumPy is Advect's first-class frontend, intercepted through NumPy's own protocols (<code>__array_ufunc__</code>, <code>__array_function__</code>, and constructor <code>like=</code> dispatch). The qualified range is NumPy 2.0-2.5. This build uses NumPy 2.5.2 against Advect's Array API 2024.12 target. Only the forms listed below are qualified.</p>
 <p>Every listed function works in dynamic transforms. <strong>Stage/save</strong> says whether the same call can appear in a staged and serialized program. <strong>Differentiate</strong> reports user-visible derivative support. <strong>No</strong> means no derivative rule is available; <strong>n/a</strong> marks a structural or mathematically nondifferentiable operation.
-The nine <code>numpy.lib.scimath</code> rows are dynamic-only because their result dtype can depend on values.</p>
+All <code>numpy.lib.scimath</code> rows are dynamic-only because their result dtype can depend on values.</p>
 <h2 id="limits">Limits<a class="headerlink" href="#limits" title="Permanent link">&para;</a></h2>
 <p>Callable rows are conservative across their executable variants. <code>numpy.round</code> supports staging and serialization when <code>decimals</code> is omitted or zero; nonzero <code>decimals</code> is dynamic-only. <code>numpy.linalg.eig</code> and <code>numpy.linalg.eigvals</code> support all three lifetimes for complex input dtypes, while real input dtypes are dynamic-only.</p>
 <p><code>numpy.linspace</code> is dynamic-only when its endpoints are traced, including the two-output <code>retstep=True</code> form. NumPy accepts array-valued endpoints, whereas the shared Array API primitive has static scalar endpoint attributes, so those NumPy calls cannot be serialized. A constant-only call may be captured as a graph constant; that is not staged <code>numpy.linspace</code> support.</p>
@@ -1314,7 +1314,7 @@ The nine <code>numpy.lib.scimath</code> rows are dynamic-only because their resu
 <tr>
 <td><code>numpy.unique</code></td>
 <td style="text-align: center;">no</td>
-<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>numpy.unique_all</code></td>
@@ -1324,12 +1324,12 @@ The nine <code>numpy.lib.scimath</code> rows are dynamic-only because their resu
 <tr>
 <td><code>numpy.unique_counts</code></td>
 <td style="text-align: center;">no</td>
-<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>numpy.unique_inverse</code></td>
 <td style="text-align: center;">no</td>
-<td style="text-align: center;">n/a</td>
+<td style="text-align: center;">yes</td>
 </tr>
 <tr>
 <td><code>numpy.unique_values</code></td>
@@ -1619,6 +1619,11 @@ The nine <code>numpy.lib.scimath</code> rows are dynamic-only because their resu
 <td style="text-align: center;">yes</td>
 </tr>
 <tr>
+<td><code>numpy.left_shift</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">n/a</td>
+</tr>
+<tr>
 <td><code>numpy.less</code></td>
 <td style="text-align: center;">yes</td>
 <td style="text-align: center;">n/a</td>
@@ -1752,6 +1757,11 @@ The nine <code>numpy.lib.scimath</code> rows are dynamic-only because their resu
 <td><code>numpy.remainder</code></td>
 <td style="text-align: center;">yes</td>
 <td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>numpy.right_shift</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">n/a</td>
 </tr>
 <tr>
 <td><code>numpy.rint</code></td>

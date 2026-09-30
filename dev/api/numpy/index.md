@@ -4,6 +4,8 @@ Most code can keep importing [NumPy](https://numpy.org/doc/stable/) as usual. It
 
 The installed NumPy minor determines exact signatures. Dynamic, staged, serialized, and derivative support remain explicit per callable, so consult the generated [NumPy compatibility page](https://yaugenst.github.io/advect/dev/compatibility/numpy/index.md) rather than inferring support from attribute availability.
 
+Traced and staged `numpy.linalg` decompositions keep NumPy's field names: `eig`, `eigh`, `qr`, `svd`, and `slogdet` return named tuples such as `EighResult`. These are Advect's result types rather than `numpy.linalg`'s own classes, and a [`vjp`](https://yaugenst.github.io/advect/dev/api/transforms/#advect.vjp) or [`vjp_program`](https://yaugenst.github.io/advect/dev/api/staging/#advect.vjp_program) cotangent for such an output must have the same container type. Build it from the output, for example with [`tree_map`](https://yaugenst.github.io/advect/dev/api/pytree/#advect.pytree.tree_map)`(np.ones_like, output)` or `type(output)(...)`; a plain tuple is rejected as a structure mismatch. The [host-framework bridges](https://yaugenst.github.io/advect/dev/api/interop/index.md) place host cotangents in this structure themselves.
+
 ## numpy
 
 NumPy dispatch, tracing, and a transparent compatibility namespace.

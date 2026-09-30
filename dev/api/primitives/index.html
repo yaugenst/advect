@@ -273,6 +273,11 @@ preserves each dynamic argument's pytree while replacing its
 array/scalar leaves with <code>advect.AbstractValue</code>; declared static
 arguments arrive unchanged. Return the concrete output pytree with
 <code>advect.ArraySpec</code> or <code>AbstractValue</code> leaves.</p>
+<p>A leaf that the implementation returns as a Python scalar computed from
+Python-scalar inputs promotes weakly, so declare it weak, for example
+with the <code>spec</code> of a weak input or <code>ArraySpec((), dtype, weak=True)</code>;
+declare every other leaf strong. <code>advect.testing.check_primitive</code>
+checks the declaration.</p>
 <p>The function is returned unchanged so this method can be used as a
 decorator.</p>
 

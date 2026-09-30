@@ -55,6 +55,10 @@ concrete inputs. <a href="./#advect.grad"><code>grad</code></a> and
 program with the same input signature and Array API revision.
 <a href="../staging/#advect.vjp_program"><code>vjp_program</code></a> builds a reusable staged
 pullback. The other transforms operate dynamically.</p>
+<p>A Python-scalar cotangent for a zero-dimensional output is seeded as <code>grad</code>
+seeds that output, so <a href="./#advect.vjp"><code>vjp</code></a> and
+<a href="./#advect.LinearMap"><code>LinearMap</code></a> pullbacks return the gradient
+types that <code>grad</code> returns.</p>
 <p>The <a href="../../tutorials/gradients/">gradient</a>,
 <a href="../../tutorials/linear-maps/">linear-map</a>,
 <a href="../../tutorials/advanced-differentiation/">higher-order</a>, and
@@ -1075,7 +1079,8 @@ that returns <code>(value, product)</code>. The keyword-only <code>vectors</code
 must match the pytree structure and leaf shapes selected by <code>argnums</code>;
 use <code>None</code> for a static or otherwise untraceable leaf. <code>value</code>
 preserves the output structure of <code>f</code>, and <code>product</code> preserves the
-integer-versus-tuple selection structure described above.</p>
+integer-versus-tuple selection structure described above, with
+<code>None</code> at each static leaf.</p>
           </div>
         </li>
     </ul>
@@ -1176,9 +1181,10 @@ explicit dense Hessian over real inputs.</p>
 
         <p>Return a dynamic transform that assembles an exact dense Hessian.</p>
 <p>Each selected positional argument is one dense real input block. For
-selected shapes <code>S_i</code>, block <code>[i][j]</code> has shape <code>S_i + S_j</code>: its rows
-index coordinates of the gradient with respect to argument <code>i</code> and its
-columns index coordinates of argument <code>j</code>.</p>
+selected shapes <code>S_i</code>, block <code>[i][j]</code> has shape <code>S_i + S_j</code> and
+differentiates the gradient with respect to argument <code>j</code> by argument
+<code>i</code>: its rows index coordinates of argument <code>i</code> and its columns index
+coordinates of that gradient.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>

@@ -115,10 +115,32 @@ pages collect the installed signatures and exact API contracts.</p>
 preserve the Python control flow that ran. <a href="staging/#advect.stage"><code>stage</code></a>
 instead compiles one shape-and-dtype signature into an immutable graph; staged
 and serialized support are therefore separate claims from dynamic support.</p>
-<p>Selected real Python scalars are lifted to zero-dimensional <code>float64</code> arrays
-and their derivative results return as Python scalars. Structured inputs and
-outputs use <a href="pytree/">pytrees</a>. Complex differentiation is real-linear; use
-<a href="transforms/#advect.jvp"><code>jvp</code></a>, <a href="transforms/#advect.vjp"><code>vjp</code></a>, or
+<p>Python scalars promote weakly, as in NumPy 2 (NEP 50), in every lifetime:
+eager, traced, staged, and a staged program called inside another trace or
+stage. A value is weak exactly where eager Python holds a Python scalar: a
+Python scalar input, or a Python operator (arithmetic, comparison, bitwise,
+<code>abs</code>, <code>.real</code>, <code>.imag</code>) applied only to weak values; augmented assignment such
+as <code>s += 1.0</code> rebinds a Python scalar, as in Python. The <code>real</code> and <code>imag</code>
+functions read those attributes, and <code>diff</code> with <code>n=0</code> returns its input, so
+they keep a weak value weak, as NumPy's do.
+Other NumPy and Array API functions and array methods return strong values even
+when every argument is weak, so <code>np.sin(s) * x32</code> and <code>xp.multiply(s, s) * x32</code>
+are <code>float64</code> while <code>(s * s) * x32</code> stays <code>float32</code>. Advect's
+<a href="arrays/#advect.array"><code>array</code></a> and <a href="arrays/#advect.asarray"><code>asarray</code></a> are
+strong too, as NumPy's are, while
+<a href="arrays/#advect.stop_gradient"><code>stop_gradient</code></a> keeps a weak value weak, as
+the eager identity does. A Python operator on weak values computes exactly as
+Python does, so <code>1.0 / (s - s)</code> raises <code>ZeroDivisionError</code>; a staged program
+keeps the dtype it declared and rejects a negative weak base raised to a
+fractional power, which Python makes complex.</p>
+<p>Selected real Python scalars are lifted to zero-dimensional <code>float64</code> arrays,
+which also provide the array methods a Python float lacks, such as <code>copy</code>.
+Derivatives with respect to them return as Python scalars, as does a weak
+output. Unlike eager NumPy, <code>item()</code> returns a strong rank-zero value so that
+its derivative stays attached.</p>
+<p>Structured inputs and outputs use <a href="pytree/">pytrees</a>. Complex
+differentiation is real-linear; use <a href="transforms/#advect.jvp"><code>jvp</code></a>,
+<a href="transforms/#advect.vjp"><code>vjp</code></a>, or
 <a href="transforms/#advect.linearize"><code>linearize</code></a> when the output is complex.</p>
 <p>Importing <code>advect</code> is enough for NumPy and Array API code. SciPy, xarray, and
 host-framework integrations use their own optional imports. The generated

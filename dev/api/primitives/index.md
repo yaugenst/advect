@@ -121,6 +121,8 @@ Attach the primitive's abstract staging rule.
 
 The rule has the implementation's fixed named parameters. Advect preserves each dynamic argument's pytree while replacing its array/scalar leaves with `advect.AbstractValue`; declared static arguments arrive unchanged. Return the concrete output pytree with `advect.ArraySpec` or `AbstractValue` leaves.
 
+A leaf that the implementation returns as a Python scalar computed from Python-scalar inputs promotes weakly, so declare it weak, for example with the `spec` of a weak input or `ArraySpec((), dtype, weak=True)`; declare every other leaf strong. `advect.testing.check_primitive` checks the declaration.
+
 The function is returned unchanged so this method can be used as a decorator.
 
 ## def_jvp

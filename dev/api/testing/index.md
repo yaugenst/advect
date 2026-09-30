@@ -38,7 +38,7 @@ Parameters:
 - **`function`** (`Callable[..., Any]`) – Unary function with a real scalar output. This may be a composition of built-in operations and public custom primitives.
 - **`primal`** (`Any`) – Representative input value or pytree at which to check function.
 - **`tangent`** (`Any | None`, default: `None` ) – Direction pytree matching primal. When omitted, every numeric leaf receives an all-ones direction.
-- **`epsilons`** (`Sequence[float]`, default: `(0.01, 0.001, 0.0001, 1e-05)` ) – Non-empty sequence of finite positive central-difference steps. The JVP comparison passes when at least one step agrees within tolerance.
+- **`epsilons`** (`Sequence[float]`, default: `(0.01, 0.001, 0.0001, 1e-05)` ) – Non-empty sequence of finite positive central-difference steps. The JVP comparison passes when at least one step agrees within tolerance; steps are tried in order, and later steps are not evaluated once one agrees.
 - **`atol`** (`float`, default: `1e-05` ) – Absolute tolerance for the finite-difference and real-adjoint checks.
 - **`rtol`** (`float`, default: `0.0001` ) – Relative tolerance for the finite-difference and real-adjoint checks.
 
@@ -82,6 +82,8 @@ check_primitive(
 Run selected author checks for one representative primitive invocation.
 
 The default `("abstract", "jvp", "transpose")` is a first-order smoke check. It does not stage the primitive or check input preservation. Authors of a serializable non-residual primitive should normally run `("abstract", "jvp", "transpose", "nested", "stage")` for every materially different shape, dtype, and static-argument form. Add `"complex"` in a separate call whose primals are complex when the primitive supports complex values. Residual primitives are first-order boundaries and therefore omit `"nested"`. A transpose-only primitive may request just `"transpose"`; the check then compares its explicit rule with a central finite difference. The `"jvp"`, `"complex"`, and `"nested"` checks require a JVP.
+
+The abstract check compares each declared output's shape, dtype, and weak-scalar category with the concrete call. As for a Python operator, an output is weak exactly when the implementation returns a Python scalar and every primal is a Python scalar.
 
 The stage check executes both the compiled and serialized program, compares output structure, shape, and dtype exactly, and verifies that inputs remain unchanged. Repository-wide support still requires the conformance inventory; this helper intentionally does not import Hypothesis or claim exhaustive coverage from one sample.
 

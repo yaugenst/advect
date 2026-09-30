@@ -43,7 +43,7 @@ asarray(
 
 Construct an array without detaching Advect tracers.
 
-Direct tracers and rectangular nested tracer sequences remain differentiable. This is the provider-neutral explicit alternative to NumPy's standard `numpy.asarray(..., like=tracer)` dispatch. Ordinary non-traced values retain their provider when they expose the pinned Array API namespace and otherwise use NumPy.
+Direct tracers and rectangular nested tracer sequences remain differentiable. A traced Python scalar becomes a strong array, as `numpy.asarray` makes one. This is the provider-neutral explicit alternative to NumPy's standard `numpy.asarray(..., like=tracer)` dispatch. Ordinary non-traced values retain their provider when they expose the pinned Array API namespace and otherwise use NumPy.
 
 Examples:
 
@@ -88,7 +88,7 @@ stop_gradient(value: T) -> T
 
 Return a concrete copy of traced leaves, explicitly stopping gradients.
 
-Registered pytree structure is preserved. The operation is available only during concrete dynamic tracing; staging rejects it because an abstract value has no concrete primal to validate or serialize.
+Registered pytree structure is preserved, and a traced Python scalar returns as a Python scalar, so it still promotes weakly. The operation is available only during concrete dynamic tracing; staging rejects it because an abstract value has no concrete primal to validate or serialize.
 
 Examples:
 

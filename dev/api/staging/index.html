@@ -76,9 +76,12 @@ provider, it defaults to <code>2024.12</code>.
 The selected target is stored in the graph, preserved by
 <a href="../transforms/#advect.grad"><code>grad</code></a> and
 <a href="./#advect.vjp_program"><code>vjp_program</code></a>, and enforced before runtime
-graph evaluation. Choosing an older target is the deliberate way to build a
-more portable artifact; Advect does not infer a minimum revision from the
-operations used by the function.</p>
+graph evaluation. Derivative rules emit only functions of that target, so a
+derived program stages again, and forward mode stages, at the same target even
+when a NumPy function itself uses operations newer than the target. Choosing
+an older target is the deliberate way to build a more portable artifact;
+Advect does not infer a minimum revision from the operations used by the
+function.</p>
 
 
 <div class="doc doc-object doc-class">
@@ -107,6 +110,9 @@ operations used by the function.</p>
 
 
         <p>Shape/dtype contract for one staged array input or result.</p>
+<p>Staging stores the canonical name of <code>dtype</code> whichever supported spelling
+declares it, and a function staged from <code>specs</code> alone sees NumPy dtype
+objects.</p>
 
 
 <p><span class="doc-section-title">Examples:</span></p>
@@ -295,9 +301,10 @@ with the positional signature declared by <code>examples</code> or <code>specs</
           <div class="doc-md-description">
             <p>Array API revision to compile and store in the graph. With concrete
 examples and no explicit revision, Advect selects the newest supported
-revision served by their common array provider. With <code>specs</code> alone,
-it selects Advect's latest supported revision. An explicit revision
-must be supported by Advect and by the provider of every array example.</p>
+revision served by their common array provider, which is NumPy when
+every example is a Python scalar. With <code>specs</code> alone, it selects
+Advect's latest supported revision. An explicit revision must be
+supported by Advect and by the provider of every array example.</p>
           </div>
         </li>
     </ul>
@@ -327,8 +334,12 @@ serialized, and never grows a polymorphic cache or retraces.</p>
             <p>If neither <code>examples</code> nor <code>specs</code> is supplied, if both are
 supplied, if an example is neither array-like nor a supported Python
 scalar nor wrapped in <code>StaticSpec</code>, if a specification contains
-another leaf type, or if the concrete array examples cannot use one
-common provider at the selected Array API revision.</p>
+another leaf type, if an example, specification, or computed array has
+a dtype that staging does not support, such as an object or bytes
+dtype, if the staged function reads a dtype that the examples' array
+provider does not define, such as <code>float16</code> on <code>array_api_strict</code>,
+or if the concrete array examples cannot use one common provider at
+the selected Array API revision.</p>
           </div>
         </li>
         <li class="doc-section-item field-body">
@@ -344,7 +355,10 @@ tracing finds incompatible shapes, dtypes, or operation semantics.</p>
 
 <details class="note" open>
   <summary>Notes</summary>
-  <p>A returned program accepts only its compiled call pytree and leaf
+  <p>Inside the staged function, <code>x.dtype</code> is the dtype object of the
+examples' array provider, or a NumPy dtype object when <code>specs</code> alone
+declares the signature.</p>
+<p>A returned program accepts only its compiled call pytree and leaf
 contract. At execution time, a changed call structure, non-array leaf, or
 static value raises <code>TypeError</code>; an incompatible array shape, dtype,
 device, or Python-scalar category raises <code>ValueError</code>.</p>

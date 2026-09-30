@@ -20,7 +20,7 @@ print(program.array_api_version)
 # 2023.12
 ```
 
-When examples are supplied without a target, [`stage`](https://yaugenst.github.io/advect/dev/api/staging/#advect.stage) selects the newest revision every example provider can serve. With [`specs=`](https://yaugenst.github.io/advect/dev/api/staging/#advect.stage) and no concrete provider, it defaults to `2024.12`. The selected target is stored in the graph, preserved by [`grad`](https://yaugenst.github.io/advect/dev/api/transforms/#advect.grad) and [`vjp_program`](https://yaugenst.github.io/advect/dev/api/staging/#advect.vjp_program), and enforced before runtime graph evaluation. Choosing an older target is the deliberate way to build a more portable artifact; Advect does not infer a minimum revision from the operations used by the function.
+When examples are supplied without a target, [`stage`](https://yaugenst.github.io/advect/dev/api/staging/#advect.stage) selects the newest revision every example provider can serve. With [`specs=`](https://yaugenst.github.io/advect/dev/api/staging/#advect.stage) and no concrete provider, it defaults to `2024.12`. The selected target is stored in the graph, preserved by [`grad`](https://yaugenst.github.io/advect/dev/api/transforms/#advect.grad) and [`vjp_program`](https://yaugenst.github.io/advect/dev/api/staging/#advect.vjp_program), and enforced before runtime graph evaluation. Derivative rules emit only functions of that target, so a derived program stages again, and forward mode stages, at the same target even when a NumPy function itself uses operations newer than the target. Choosing an older target is the deliberate way to build a more portable artifact; Advect does not infer a minimum revision from the operations used by the function.
 
 ## ArraySpec
 
@@ -34,6 +34,8 @@ ArraySpec(
 ```
 
 Shape/dtype contract for one staged array input or result.
+
+Staging stores the canonical name of `dtype` whichever supported spelling declares it, and a function staged from `specs` alone sees NumPy dtype objects.
 
 Examples:
 
@@ -87,7 +89,7 @@ Parameters:
 - **`*examples`** (`Any`, default: `()` ) – Concrete positional arguments whose pytree structure, shapes, dtypes, devices, and Python-scalar categories define the compiled signature. Wrap a non-array compile-time leaf in StaticSpec. Mutually exclusive with specs.
 - **`specs`** (`tuple[Any, ...] | None`, default: `None` ) – Positional argument specification tree. Every leaf must be an ArraySpec or StaticSpec. Mutually exclusive with examples.
 - **`kw_specs`** (`dict[str, Any] | None`, default: `None` ) – Mapping from keyword argument names to specification trees whose leaves are ArraySpec or StaticSpec. The mapping is combined with the positional signature declared by examples or specs.
-- **`array_api_version`** (`str | None`, default: `None` ) – Array API revision to compile and store in the graph. With concrete examples and no explicit revision, Advect selects the newest supported revision served by their common array provider. With specs alone, it selects Advect's latest supported revision. An explicit revision must be supported by Advect and by the provider of every array example.
+- **`array_api_version`** (`str | None`, default: `None` ) – Array API revision to compile and store in the graph. With concrete examples and no explicit revision, Advect selects the newest supported revision served by their common array provider, which is NumPy when every example is a Python scalar. With specs alone, it selects Advect's latest supported revision. An explicit revision must be supported by Advect and by the provider of every array example.
 
 Returns:
 
@@ -95,10 +97,12 @@ Returns:
 
 Raises:
 
-- `TypeError` – If neither examples nor specs is supplied, if both are supplied, if an example is neither array-like nor a supported Python scalar nor wrapped in StaticSpec, if a specification contains another leaf type, or if the concrete array examples cannot use one common provider at the selected Array API revision.
+- `TypeError` – If neither examples nor specs is supplied, if both are supplied, if an example is neither array-like nor a supported Python scalar nor wrapped in StaticSpec, if a specification contains another leaf type, if an example, specification, or computed array has a dtype that staging does not support, such as an object or bytes dtype, if the staged function reads a dtype that the examples' array provider does not define, such as float16 on array_api_strict, or if the concrete array examples cannot use one common provider at the selected Array API revision.
 - `ValueError` – If array_api_version is not a supported revision, or if abstract tracing finds incompatible shapes, dtypes, or operation semantics.
 
 Notes
+
+Inside the staged function, `x.dtype` is the dtype object of the examples' array provider, or a NumPy dtype object when `specs` alone declares the signature.
 
 A returned program accepts only its compiled call pytree and leaf contract. At execution time, a changed call structure, non-array leaf, or static value raises `TypeError`; an incompatible array shape, dtype, device, or Python-scalar category raises `ValueError`.
 
