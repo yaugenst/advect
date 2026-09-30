@@ -14,6 +14,7 @@ from advect.core._abstract_helpers import (
     promote_dtype,
     reshape_shape,
     shape_tuple,
+    strong_result_dtype,
 )
 from advect.core._abstract_model import ArraySpec, rule
 
@@ -65,7 +66,7 @@ RULES: dict[str, AbstractRule] = {
     "array.reshape": rule(
         "reshape",
         1,
-        positional=("shape",),
+        positional=("shape", "order"),
         allowed=("shape", "order", "copy"),
         required=("shape",),
     ),
@@ -132,7 +133,7 @@ def _broadcast_to(
     attrs: Mapping[str, Any],
 ) -> tuple[ArraySpec, ...]:
     first = specs[0]
-    shape = shape_tuple(attrs["shape"])
+    shape = attrs["shape"]
     if broadcast_shape(first.shape, shape) != shape:
         raise ValueError(f"Cannot broadcast shape {first.shape!r} to {shape!r}")
     return (ArraySpec(shape, dtype_name(first.dtype)),)
@@ -202,9 +203,9 @@ def _repeat(
     axis_value = attrs.get("axis")
     if axis_value is None:
         return (ArraySpec((math.prod(first.shape) * repeats,), dtype_name(first.dtype)),)
-    axis = normalize_axis(axis_value, len(first.shape))
-    shape = list(first.shape)
-    shape[axis] *= repeats
+    # NumPy repeats a rank-0 source along axis 0 or -1 as a one-element vector.
+    shape = list(first.shape) or [1]
+    shape[normalize_axis(axis_value, len(shape))] *= repeats
     return (ArraySpec(tuple(shape), dtype_name(first.dtype)),)
 
 
@@ -239,7 +240,7 @@ def _concatenate(
     attrs: Mapping[str, Any],
 ) -> tuple[ArraySpec, ...]:
     first = specs[0]
-    dtype = dtype_name(attrs["dtype"]) if attrs.get("dtype") is not None else None
+    dtype = attrs.get("dtype")
     if attrs.get("axis", 0) is None:
         return (
             ArraySpec(
@@ -273,8 +274,7 @@ def _stack(
     axis = normalize_axis(attrs.get("axis", 0), len(first.shape), insertion=True)
     shape = list(first.shape)
     shape.insert(axis, len(specs))
-    dtype = dtype_name(attrs["dtype"]) if attrs.get("dtype") is not None else None
-    return (ArraySpec(tuple(shape), dtype or promote_dtype(specs)),)
+    return (ArraySpec(tuple(shape), attrs.get("dtype") or strong_result_dtype(specs)),)
 
 
 EVALUATORS: dict[str, ResultEvaluator] = {

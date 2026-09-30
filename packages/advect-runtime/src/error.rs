@@ -109,6 +109,12 @@ impl<E> ExecutionError<E> {
     }
 }
 
+impl<E> From<GraphError> for ExecutionError<E> {
+    fn from(error: GraphError) -> Self {
+        Self::Runtime(error.to_string())
+    }
+}
+
 impl<E: Display> Display for ExecutionError<E> {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         match self {

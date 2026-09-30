@@ -5,7 +5,10 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
+from hypothesis import example, given, settings, strategies as st
+from hypothesis.extra import numpy as hnp
 
+import advect as ad
 import advect.numpy._protocol_eval as eval_module
 from advect.core._array_api import providers as array_api_providers
 from advect.core._eval_dispatch import _can_donate_array, bind_native_node_evaluator
@@ -61,6 +64,18 @@ def test_array_output_ownership_is_classified_by_operation_semantics() -> None:
     assert not hasattr(real, "__advect_alias_positions__")
 
 
+def test_attributeless_nodes_share_one_bound_evaluator() -> None:
+    multiply = bind_native_node_evaluator("array.multiply", {})
+    reshape = bind_native_node_evaluator("array.reshape", {"shape": (2,)})
+
+    assert bind_native_node_evaluator("array.multiply", {}) is multiply
+    assert bind_native_node_evaluator("array.add", {}) is not multiply
+    assert bind_native_node_evaluator("array.reshape", {"shape": (2,)}) is not reshape
+    assert multiply.__advect_owned_output__
+    left, right = np.array([2.0, 3.0]), np.array([5.0, 7.0])
+    np.testing.assert_array_equal(multiply((left, right), np, None), [10.0, 21.0])
+
+
 def test_evaluate_op_filters_unknown_kwargs_for_dynamic_callables() -> None:
     runtime = ArrayProtocolEvalRuntime()
     x = np.arange(6, dtype=np.float64)
@@ -77,24 +92,6 @@ def test_evaluate_op_filters_unknown_kwargs_for_dynamic_callables() -> None:
 
     assert isinstance(result, np.ndarray)
     assert result.shape == (2, 3)
-
-
-def test_evaluate_op_allows_var_keyword_kwargs_for_backend_function() -> None:
-    runtime = ArrayProtocolEvalRuntime()
-    x = np.array([1.0, 2.0], dtype=np.float64)
-
-    result = runtime.evaluate_op(
-        "array.pad",
-        (x,),
-        {
-            "pad_width": ((1, 1),),
-            "mode": "constant",
-            "constant_values": 1.5,
-        },
-    )
-
-    assert isinstance(result, np.ndarray)
-    np.testing.assert_allclose(result, np.array([1.5, 1.0, 2.0, 1.5], dtype=np.float64))
 
 
 def test_evaluate_op_var_keyword_kwargs_drop_internal_attrs() -> None:
@@ -204,3 +201,39 @@ def test_bound_ufunc_preserves_static_keyword_arguments_without_out() -> None:
     assert isinstance(result, np.ndarray)
     assert result.dtype == np.dtype(np.float32)
     np.testing.assert_allclose(result, np.array([4.0, 6.0], dtype=np.float32))
+
+
+@st.composite
+def _vecdot_case(draw: st.DrawFn) -> tuple[np.ndarray[Any, Any], np.ndarray[Any, Any], int]:
+    shape = draw(hnp.array_shapes(max_dims=3, max_side=3))
+    # Small integers keep every sum exact.
+    left, right = (
+        draw(hnp.arrays(np.float64, shape, elements=st.integers(-8, 8))) for _ in range(2)
+    )
+    return left, right, draw(st.integers(-len(shape), len(shape) - 1))
+
+
+@settings(deadline=None)
+@given(case=_vecdot_case(), function=st.sampled_from((np.vecdot, np.linalg.vecdot)))
+# Square operands give the last-axis contraction the requested result shape.
+@example(case=(np.arange(9.0).reshape(3, 3), np.eye(3)[::-1], 0), function=np.linalg.vecdot)
+def test_vecdot_contracts_the_requested_axis_in_every_lifetime(
+    case: tuple[np.ndarray[Any, Any], np.ndarray[Any, Any], int],
+    function: Any,
+) -> None:
+    left, right, axis = case
+    tangent = np.ones_like(left)
+
+    def contract(x: Any, y: Any) -> Any:
+        return function(x, y, axis=axis)
+
+    expected = contract(left, right)
+    primal, derivative = ad.jvp(contract, argnums=(0, 1))(left, right, tangents=(tangent, tangent))
+    program = ad.stage(contract, left, right)
+
+    np.testing.assert_array_equal(primal, expected)
+    np.testing.assert_array_equal(derivative, contract(tangent, right) + contract(left, tangent))
+    np.testing.assert_array_equal(program(left, right), expected)
+    np.testing.assert_array_equal(
+        ad.StagedProgram.from_dict(program.to_dict())(left, right), expected
+    )

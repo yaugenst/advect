@@ -5,13 +5,22 @@
 from __future__ import annotations
 
 import math
+import operator
+import sys
 from collections.abc import Iterable
 from typing import TYPE_CHECKING, Any, cast
 
 import numpy as _numpy  # noqa: ICN001 - typed module and dynamic lowering namespace
 
 from advect.core._errors import TracingError
-from advect.core._protocols import _snapshot_traced
+from advect.core._protocols import _innermost, _snapshot_traced
+from advect.numpy._composite_lowering import (
+    lower_average,
+    lower_compress,
+    lower_matrix_power,
+    operand_ndim,
+    operand_shape,
+)
 
 np: Any = _numpy
 
@@ -28,11 +37,6 @@ _BINARY_ARITY = 2
 _MATRIX_RANK = 2
 _NEGATIVE_SPECTRAL_ORDER = -2
 _TERNARY_ARITY = 3
-
-
-def _ndim(value: object) -> int:
-    ndim = getattr(value, "ndim", None)
-    return int(ndim) if ndim is not None else int(np.ndim(value))
 
 
 def _normalize_axes(axis: object, ndim: int) -> tuple[int, ...]:
@@ -53,18 +57,38 @@ def _normalize_axes(axis: object, ndim: int) -> tuple[int, ...]:
     return normalized
 
 
+def _rebuild(template: object, items: list[object]) -> object:
+    """Rebuild a list, tuple or named tuple shaped like ``template``."""
+    if isinstance(template, list):
+        return items
+    if type(template) is tuple:
+        return tuple(items)
+    return cast("Callable[..., object]", type(template))(*items)
+
+
+def _map_tree(function: Callable[[object], object], value: object) -> Any:
+    """Apply ``function`` to each leaf of a list, tuple or dict tree."""
+    if isinstance(value, (tuple, list)):
+        return _rebuild(value, [_map_tree(function, item) for item in value])
+    if isinstance(value, dict):
+        return {key: _map_tree(function, item) for key, item in value.items()}
+    return function(value)
+
+
+def _concrete(value: object) -> Any:
+    """Replace each traced leaf of a list, tuple or dict tree by its concrete payload."""
+    return _map_tree(_innermost, value)
+
+
+def _concrete_array(value: object) -> Any:
+    return np.asarray(_concrete(value))
+
+
 def _finish(
     result: object,
     *,
     traced_type: type[TracedArrayLike],
 ) -> CompositeResult:
-    def rebuild(template: object, items: list[object]) -> object:
-        if isinstance(template, list):
-            return items
-        if type(template) is tuple:
-            return tuple(items)
-        return type(template)(*items)
-
     def snapshot_tree(value: object) -> tuple[object, object]:
         if isinstance(value, traced_type):
             node_id, concrete = _snapshot_traced(value)
@@ -72,8 +96,8 @@ def _finish(
         if isinstance(value, (tuple, list)):
             children = [snapshot_tree(item) for item in value]
             return (
-                rebuild(value, [concrete for concrete, _node_id in children]),
-                rebuild(value, [node_id for _concrete, node_id in children]),
+                _rebuild(value, [concrete for concrete, _node_id in children]),
+                _rebuild(value, [node_id for _concrete, node_id in children]),
             )
         msg = (
             "A composite NumPy lowering did not produce traced array output; "
@@ -149,7 +173,7 @@ def _column_stack_handler(
 ) -> CompositeResult:
     arrays = _sequence_arg("column_stack", args)
     columns = tuple(
-        np.reshape(item, (-1, 1)) if _ndim(item) < _MATRIX_RANK else item for item in arrays
+        np.reshape(item, (-1, 1)) if operand_ndim(item) < _MATRIX_RANK else item for item in arrays
     )
     return _finish(np.concatenate(columns, axis=1), traced_type=traced_type)
 
@@ -212,13 +236,25 @@ def _ediff1d_handler(
     positional_names = ("to_end", "to_begin")
     values = dict(kwargs)
     values.update(zip(positional_names, args[1:], strict=False))
-    pieces: list[object] = []
-    if values.get("to_begin") is not None:
-        pieces.append(np.atleast_1d(values["to_begin"]))
-    pieces.append(np.diff(np.ravel(args[0])))
-    if values.get("to_end") is not None:
-        pieces.append(np.atleast_1d(values["to_end"]))
-    result = pieces[0] if len(pieces) == 1 else np.concatenate(tuple(pieces))
+    array = np.ravel(args[0])
+
+    def boundary(name: str) -> tuple[Any, ...]:
+        value = values.get(name)
+        if value is None:
+            return ()
+        # NumPy ravels each boundary and stores it in the input's dtype.
+        flat = np.ravel(value)
+        if flat.dtype == array.dtype:
+            return (flat,)
+        if not np.can_cast(flat.dtype, array.dtype, casting="same_kind"):
+            msg = (
+                f"dtype of `{name}` must be compatible with input `ary` under the `same_kind` rule."
+            )
+            raise TypeError(msg)
+        return (np.astype(flat, array.dtype),)
+
+    pieces = (*boundary("to_begin"), np.diff(array), *boundary("to_end"))
+    result = pieces[0] if len(pieces) == 1 else np.concatenate(pieces)
     return _finish(result, traced_type=traced_type)
 
 
@@ -243,7 +279,7 @@ def _resize_handler(
     if output_size == 0:
         result = np.reshape(flat[:0], new_shape)
     elif flat.size == 0:
-        result = np.zeros(new_shape, dtype=array.dtype) + np.sum(array) * 0
+        result = _lift_composite_constant(np.zeros(new_shape, dtype=array.dtype), array)
     else:
         repetitions = math.ceil(output_size / int(flat.size))
         result = np.reshape(np.tile(flat, repetitions)[:output_size], new_shape)
@@ -256,9 +292,6 @@ def _meshgrid_handler(
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
 ) -> CompositeResult:
-    if not args:
-        msg = "numpy.meshgrid requires at least one input during tracing"
-        raise TracingError(msg)
     if not bool(kwargs.get("copy", True)):
         msg = "numpy.meshgrid(copy=False) returns aliasing views; use copy=True during tracing"
         raise TracingError(msg)
@@ -269,7 +302,7 @@ def _meshgrid_handler(
     sparse = bool(kwargs.get("sparse", False))
     anchor = next(item for item in args if isinstance(item, traced_type))
     vectors = tuple(
-        np.ravel(item) if isinstance(item, traced_type) else np.ravel(item) + np.sum(anchor) * 0
+        np.ravel(item if isinstance(item, traced_type) else _lift_composite_constant(item, anchor))
         for item in args
     )
     sizes = tuple(int(item.shape[0]) for item in vectors)
@@ -301,51 +334,26 @@ def _average_handler(
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
 ) -> CompositeResult:
-    values = dict(kwargs)
-    values.update(zip(("axis", "weights", "returned"), args[1:], strict=False))
-    array = args[0]
-    axis = values.get("axis")
-    weights = values.get("weights")
-    returned = bool(values.get("returned", False))
-    keepdims = bool(values.get("keepdims", False))
-    if weights is None:
-        result = np.mean(array, axis=axis, keepdims=keepdims)
-        if not returned:
-            return _finish(result, traced_type=traced_type)
-        count = (
-            array.size
-            if axis is None
-            else math.prod(array.shape[item] for item in _normalize_axes(axis, array.ndim))
-        )
-        weight_sum = np.ones_like(result) * count
-        return _finish((result, weight_sum), traced_type=traced_type)
+    values = dict(zip(("axis", "weights", "returned"), args[1:], strict=False)) | kwargs
 
-    normalized_weights = weights
-    weight_shape = tuple(int(size) for size in _concrete_array(weights).shape)
-    array_shape = tuple(int(size) for size in array.shape)
-    if weight_shape != array_shape:
-        if axis is None:
-            msg = "Axis must be specified when shapes of a and weights differ."
-            raise TypeError(msg)
-        axes = _normalize_axes(axis, array.ndim)
-        expected_shape = tuple(array_shape[item] for item in axes)
-        if weight_shape != expected_shape:
-            msg = "Shape of weights must be consistent with shape of a along specified axis."
-            raise ValueError(msg)
-        shape = [1] * array.ndim
-        for weight_axis, array_axis in enumerate(axes):
-            shape[array_axis] = weight_shape[weight_axis]
-        normalized_weights = np.reshape(weights, tuple(shape))
-    concrete_weights = _concrete_array(normalized_weights)
-    if np.any(np.sum(concrete_weights, axis=axis, keepdims=keepdims) == 0):
-        msg = "Weights sum to zero, can't be normalized"
-        raise ZeroDivisionError(msg)
-    numerator = np.sum(array * normalized_weights, axis=axis, keepdims=keepdims)
-    denominator = np.sum(normalized_weights, axis=axis, keepdims=keepdims)
-    result = numerator / denominator
-    if not returned:
-        return _finish(result, traced_type=traced_type)
-    return _finish((result, np.ones_like(result) * denominator), traced_type=traced_type)
+    def reject_zero_weight_sum(weight_sum: object) -> None:
+        concrete = _concrete(weight_sum)
+        if bool(getattr(type(concrete), "__advect_abstract_array__", False)):
+            # A staged weight sum has no value to check, as in staged average.
+            return
+        if np.any(np.asarray(concrete) == 0):
+            msg = "Weights sum to zero, can't be normalized"
+            raise ZeroDivisionError(msg)
+
+    result = lower_average(
+        args[0],
+        values.get("weights"),
+        axis=values.get("axis"),
+        keepdims=bool(values.get("keepdims", False)),
+        returned=bool(values.get("returned", False)),
+        check_weight_sum=reject_zero_weight_sum,
+    )
+    return _finish(result, traced_type=traced_type)
 
 
 def _ptp_handler(
@@ -388,8 +396,8 @@ def _trapezoid_handler(
     if x is None:
         spacing: object = values.get("dx", 1.0)
     else:
-        spacing = np.diff(x, axis=axis if _ndim(x) > 1 else -1)
-        if _ndim(spacing) == 1 and y.ndim > 1:
+        spacing = np.diff(x, axis=axis if operand_ndim(x) > 1 else -1)
+        if operand_ndim(spacing) == 1 and y.ndim > 1:
             shape = [1] * y.ndim
             shape[normalized_axis] = int(spacing.shape[0])
             spacing = np.reshape(spacing, tuple(shape))
@@ -448,8 +456,31 @@ def _round_handler(
     kwargs: dict[str, Any],
 ) -> CompositeResult:
     decimals = int(args[1] if len(args) == _BINARY_ARITY else kwargs.get("decimals", 0))
-    scale = 10.0**decimals
-    return _finish(np.rint(args[0] * scale) / scale, traced_type=traced_type)
+    return _finish(_round_like_numpy(args[0], decimals), traced_type=traced_type)
+
+
+def _round_like_numpy(value: Any, decimals: int) -> Any:
+    """Follow NumPy's round: complex parts separately, integers in float64."""
+    dtype = np.dtype(value.dtype)
+    if dtype.kind == "c":
+        real = _round_like_numpy(np.real(value), decimals)
+        return real + _round_like_numpy(np.imag(value), decimals) * 1j
+    if dtype.kind in "iu" and decimals >= 0:
+        return np.copy(value)
+    if decimals == 0:
+        # NumPy calls rint alone, which rounds bool to float16.
+        return np.rint(value)
+    if dtype.kind == "b":
+        msg = "numpy.round cannot cast a scaled bool array back to bool"
+        raise TypeError(msg)
+    if dtype.kind in "iu":
+        return np.astype(_round_like_numpy(np.astype(value, np.float64), decimals), dtype)
+    # NumPy's power of ten saturates to inf where Python's would overflow.
+    exponent = abs(decimals)
+    scale = 10.0**exponent if exponent <= sys.float_info.max_10_exp else math.inf
+    if decimals > 0:
+        return np.rint(value * scale) / scale
+    return np.rint(value / scale) * scale
 
 
 def _fix_handler(
@@ -466,11 +497,8 @@ def _vdot_handler(
     _graph: DynamicTape,
     traced_type: type[TracedArrayLike],
     args: tuple[Any, ...],
-    kwargs: dict[str, Any],
+    _kwargs: dict[str, Any],
 ) -> CompositeResult:
-    if len(args) != _BINARY_ARITY or kwargs:
-        msg = "numpy.vdot expects two arrays during tracing"
-        raise TracingError(msg)
     return _finish(
         np.vecdot(np.ravel(args[0]), np.ravel(args[1])),
         traced_type=traced_type,
@@ -483,31 +511,19 @@ def _matrix_power_handler(
     args: tuple[Any, ...],
     _kwargs: dict[str, Any],
 ) -> CompositeResult:
-    matrix, exponent_raw = args
-    if isinstance(exponent_raw, traced_type) or not isinstance(
-        exponent_raw,
-        (int, np.integer),
-    ):
-        msg = "numpy.linalg.matrix_power exponent must be a static integer"
+    matrix, exponent = args
+    msg = "numpy.linalg.matrix_power exponent must be a static integer"
+    if isinstance(exponent, traced_type):
         raise TracingError(msg)
-    exponent = int(exponent_raw)
+    try:
+        # NumPy reads the exponent with operator.index, as staging does.
+        power = operator.index(exponent)
+    except TypeError as error:
+        raise TracingError(msg) from error
     if matrix.ndim < _MATRIX_RANK or matrix.shape[-2] != matrix.shape[-1]:
         msg = "numpy.linalg.matrix_power requires square matrices"
         raise TracingError(msg)
-    if exponent == 0:
-        identity = np.eye(int(matrix.shape[-1]), dtype=matrix.dtype)
-        result = np.zeros_like(matrix) + identity
-        return _finish(result, traced_type=traced_type)
-    base = np.linalg.inv(matrix) if exponent < 0 else matrix
-    remaining = abs(exponent)
-    result: object | None = None
-    while remaining:
-        if remaining & 1:
-            result = base if result is None else np.matmul(result, base)
-        remaining >>= 1
-        if remaining:
-            base = np.matmul(base, base)
-    return _finish(cast("object", result), traced_type=traced_type)
+    return _finish(lower_matrix_power(matrix, power), traced_type=traced_type)
 
 
 def _multi_dot_handler(
@@ -604,33 +620,37 @@ def _cond_handler(
     return _finish(result, traced_type=traced_type)
 
 
-def _first_traced(
-    values: object,
-    *,
-    traced_type: type[TracedArrayLike],
-) -> TracedArrayLike | None:
+def _find_traced(values: object, traced_type: type[TracedArrayLike]) -> TracedArrayLike | None:
     if isinstance(values, traced_type):
         return values
     if isinstance(values, (tuple, list)):
         for value in values:
-            found = _first_traced(value, traced_type=traced_type)
+            found = _find_traced(value, traced_type)
             if found is not None:
                 return found
     return None
 
 
+def _first_traced(values: object, *, traced_type: type[TracedArrayLike]) -> TracedArrayLike:
+    """Return the first traced leaf among a dispatched call's relevant operands."""
+    found = _find_traced(values, traced_type)
+    if found is None:
+        # NumPy dispatches only for a traced relevant operand, and the runtime
+        # removes out= before the handler runs, so this is an out=-only call.
+        msg = "This NumPy function needs a traced operand other than out= during tracing"
+        raise TracingError(msg)
+    return found
+
+
 def _lift_composite_constant(value: object, anchor: TracedArrayLike) -> Any:
-    return np.asarray(value) + np.sum(anchor) * 0
+    """Record a concrete constant in the anchor's trace with its own value and dtype."""
+    array = np.asarray(value)
+    return np.zeros_like(anchor, dtype=array.dtype, shape=()) + array
 
 
-def _concrete_array(value: object) -> Any:
-    current = value
-    while callable(getattr(current, "_advect_snapshot", None)):
-        _node_id, nested = _snapshot_traced(current)
-        if nested is current:
-            break
-        current = nested
-    return np.asarray(current)
+def _lift_lapack_rank(rank: int, anchor: TracedArrayLike) -> Any:
+    """Record a numerical rank as NumPy's lstsq reports it: LAPACK's C int."""
+    return _lift_composite_constant(np.int32(rank), anchor)
 
 
 def _broadcast_arrays_handler(
@@ -643,10 +663,7 @@ def _broadcast_arrays_handler(
         msg = "numpy.broadcast_arrays(subok=True) is not supported during tracing"
         raise TracingError(msg)
     anchor = _first_traced(args, traced_type=traced_type)
-    if anchor is None:
-        msg = "numpy.broadcast_arrays requires a traced operand"
-        raise TracingError(msg)
-    shape = np.broadcast_shapes(*(value.shape for value in args))
+    shape = np.broadcast_shapes(*(operand_shape(value) for value in args))
     arrays = tuple(
         value if isinstance(value, traced_type) else _lift_composite_constant(value, anchor)
         for value in args
@@ -672,10 +689,16 @@ def _select_handler(
         raise TracingError(msg)
     default = args[2] if len(args) == _TERNARY_ARITY else kwargs.get("default", 0)
     anchor = _first_traced((conditions, choices, default), traced_type=traced_type)
-    if anchor is None:
-        msg = "numpy.select requires a traced operand"
-        raise TracingError(msg)
-    result: object = (
+
+    def promotion_operand(item: object) -> object:
+        # NumPy promotes the choices and default with Python scalars kept weak.
+        if type(item) in {int, float, complex}:
+            return item
+        # Traced dtypes need no dispatch, so abstract staging keeps them.
+        return item.dtype if isinstance(item, traced_type) else np.asarray(item)
+
+    dtype = np.result_type(*(promotion_operand(item) for item in (*choices, default)))
+    result: Any = (
         default if isinstance(default, traced_type) else _lift_composite_constant(default, anchor)
     )
     for condition, choice in reversed(tuple(zip(conditions, choices, strict=True))):
@@ -683,6 +706,8 @@ def _select_handler(
             choice if isinstance(choice, traced_type) else _lift_composite_constant(choice, anchor)
         )
         result = np.where(condition, selected, result)
+    if result.dtype != dtype:
+        result = np.astype(result, dtype)
     return _finish(result, traced_type=traced_type)
 
 
@@ -702,18 +727,18 @@ def _piecewise_handler(
         raise TracingError(msg)
     default_fn = functions.pop() if len(functions) > len(conditions) else 0
     anchor = _first_traced((x, conditions), traced_type=traced_type)
-    if anchor is None:
-        msg = "numpy.piecewise requires a traced input or condition"
-        raise TracingError(msg)
     masks = tuple(np.broadcast_to(condition, x.shape) for condition in conditions)
 
     def expanded_value(candidate: object, mask: object) -> object:
-        selected = x[mask]
-        value = candidate(selected, *function_args, **kwargs) if callable(candidate) else candidate
+        selected_count = int(np.count_nonzero(_concrete_array(mask)))
+        if callable(candidate) and selected_count:
+            value = candidate(x[mask], *function_args, **kwargs)
+        else:
+            # NumPy never calls a function whose condition selects nothing.
+            value = 0 if callable(candidate) else candidate
         if not isinstance(value, traced_type):
             value = _lift_composite_constant(value, anchor)
         value_size = int(value.size)
-        selected_count = int(np.count_nonzero(_concrete_array(mask)))
         if value_size == 1:
             return np.broadcast_to(value, x.shape)
         if value_size != selected_count:
@@ -730,10 +755,13 @@ def _piecewise_handler(
     for mask in masks:
         occupied = np.logical_or(occupied, mask)
     default_mask = np.logical_not(occupied)
-    result = expanded_value(default_fn, default_mask)
+    result: Any = expanded_value(default_fn, default_mask)
     # NumPy assigns in condlist order, so later overlapping conditions win.
     for mask, function in zip(masks, functions, strict=True):
         result = np.where(mask, expanded_value(function, mask), result)
+    # NumPy assigns every piece into zeros_like(x), so the result keeps x's dtype.
+    if result.dtype != x.dtype:
+        result = np.astype(result, x.dtype)
     return _finish(result, traced_type=traced_type)
 
 
@@ -747,6 +775,8 @@ def _choose_handler(
     if not isinstance(choices, (tuple, list)) or not choices:
         msg = "numpy.choose requires a non-empty choice sequence"
         raise TracingError(msg)
+    if not isinstance(indices, traced_type):
+        indices = np.asarray(indices)
     mode = str(kwargs.get("mode", "raise"))
     if mode == "wrap":
         indices = np.remainder(indices, len(choices))
@@ -761,9 +791,6 @@ def _choose_handler(
         msg = "numpy.choose mode must be raise, wrap, or clip"
         raise TracingError(msg)
     anchor = _first_traced((indices, choices), traced_type=traced_type)
-    if anchor is None:
-        msg = "numpy.choose requires a traced operand"
-        raise TracingError(msg)
     normalized = tuple(
         choice if isinstance(choice, traced_type) else _lift_composite_constant(choice, anchor)
         for choice in choices
@@ -781,19 +808,12 @@ def _compress_handler(
     kwargs: dict[str, Any],
 ) -> CompositeResult:
     condition, array = args[:2]
-    condition_value = (
-        _snapshot_traced(condition)[1]
-        if isinstance(condition, traced_type)
-        else np.asarray(condition)
-    )
-    axis_raw = args[2] if len(args) == _TERNARY_ARITY else kwargs.get("axis")
-    axis = None if axis_raw is None else int(axis_raw)
-    source = np.ravel(array) if axis is None else array
-    source_axis = 0 if axis is None else axis
-    limit = int(source.shape[source_axis])
-    indices = np.flatnonzero(np.ravel(condition_value)[:limit])
+    if not isinstance(array, traced_type):
+        # Only the condition is traced, so the selection is a constant of its trace.
+        array = _lift_composite_constant(array, condition)
+    axis = args[2] if len(args) == _TERNARY_ARITY else kwargs.get("axis")
     return _finish(
-        np.take(source, indices, axis=source_axis),
+        lower_compress(_concrete_array(condition), array, axis),
         traced_type=traced_type,
     )
 
@@ -804,7 +824,9 @@ def _extract_handler(
     args: tuple[Any, ...],
     _kwargs: dict[str, Any],
 ) -> CompositeResult:
-    return _compress_handler(graph, traced_type, args, {"axis": None})
+    condition, array = args
+    # NumPy's extract ravels its condition, where compress requires a vector.
+    return _compress_handler(graph, traced_type, (np.ravel(condition), array), {"axis": None})
 
 
 def _vander_handler(
@@ -827,7 +849,7 @@ def _vander_handler(
         msg = "numpy.vander input must be one-dimensional"
         raise TracingError(msg)
     if columns == 0:
-        result = np.zeros((int(x.shape[0]), 0), dtype=x.dtype) + np.sum(x) * 0
+        result = _lift_composite_constant(np.zeros((int(x.shape[0]), 0), dtype=x.dtype), x)
     else:
         result = np.stack(tuple(x**exponent for exponent in exponents), axis=-1)
     return _finish(result, traced_type=traced_type)
@@ -861,11 +883,11 @@ def _cov_handler(  # noqa: C901, PLR0915 - one closed NumPy signature
         )
 
     data = np.astype(np.atleast_2d(matrix), dtype)
-    if not rowvar and _ndim(matrix) != 1:
+    if not rowvar and operand_ndim(matrix) != 1:
         data = np.transpose(data)
     if additional is not None:
         other = np.astype(np.atleast_2d(additional), dtype)
-        if not rowvar and _ndim(additional) != 1:
+        if not rowvar and operand_ndim(additional) != 1:
             other = np.transpose(other)
         data = np.concatenate((data, other), axis=0)
 
@@ -1003,11 +1025,8 @@ def register_composite_handlers(
     handlers[np.vander] = _vander_handler
     handlers[np.cov] = _cov_handler
     handlers[np.corrcoef] = _corrcoef_handler
-    concat = np.__dict__.get("concat")
     row_stack = np.__dict__.get("row_stack")
     trapz = np.__dict__.get("trapz")
-    if concat is not None:
-        handlers[concat] = handlers[np.concatenate]
     if row_stack is not None:
         handlers[row_stack] = _vstack_handler
     if trapz is not None:

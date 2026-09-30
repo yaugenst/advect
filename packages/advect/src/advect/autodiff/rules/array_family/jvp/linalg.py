@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import cmath
 from typing import Any, cast
 
 from advect.autodiff.rules.array_family._backend_runtime import (
@@ -17,7 +18,6 @@ from advect.autodiff.rules.array_family._transpose_utils import (
     _normalize_uplo,
     _right_solve,
     _uses_standard_linalg_contract,
-    zeros_output_tangent_structure as _zeros_output_tangent_structure,
 )
 from advect.autodiff.rules.array_family.jvp.common import (
     _MATRIX_AXIS_COUNT,
@@ -25,14 +25,15 @@ from advect.autodiff.rules.array_family.jvp.common import (
     _astype_preserving_trace,
     _flatten_reduction_axes,
     _infer_tangent_dtype,
-    _is_traced_leaf,
     _iscomplex_unwrapped,
     _ndim_unwrapped,
     _normalize_axis_tuple,
     _reshape_reduction_result,
     _shape_unwrapped,
     _zeros_output_tangent,
+    product_rule,
 )
+from advect.core._protocols import _is_traced
 
 
 def _hermitian_from_triangle(x: xp.ndarray, *, uplo: str) -> xp.ndarray:
@@ -53,15 +54,12 @@ def _jvp_linalg_cholesky(
     ans: xp.ndarray,
     x: xp.ndarray,
     *rest: xp.ndarray,
-    tangents: tuple[xp.ndarray | None, ...],
+    tangents: tuple[xp.ndarray, ...],
     **attrs: Any,
 ) -> xp.ndarray:
     """Differentiate either triangular Cholesky factor on the Hermitian domain."""
     _ = x, rest
-    tangent = tangents[0] if tangents else None
-    if tangent is None:
-        return _zeros_output_tangent(ans, tangents)
-
+    tangent = tangents[0]
     upper = attrs.get("upper", False)
     if type(upper) is not bool:
         msg = "linalg.cholesky JVP expects upper to be a bool"
@@ -70,7 +68,7 @@ def _jvp_linalg_cholesky(
     tangent_h = _hermitian_from_triangle(tangent, uplo="U" if upper else "L")
     left = xp.linalg.solve(factor, tangent_h)
     middle = _right_solve(_h(factor), left)
-    lower_out = factor @ _lower_triangular_halfdiag(middle)
+    lower_out = xp.matmul(factor, _lower_triangular_halfdiag(middle))
     out = _h(lower_out) if upper else lower_out
     return cast(
         "xp.ndarray",
@@ -82,21 +80,17 @@ def _jvp_linalg_eigh(
     ans: tuple[xp.ndarray, xp.ndarray],
     x: xp.ndarray,
     *rest: xp.ndarray,
-    tangents: tuple[xp.ndarray | None, ...],
+    tangents: tuple[xp.ndarray, ...],
     UPLO: str = "L",  # noqa: N803 - NumPy spells this keyword in uppercase.
     **attrs: Any,
 ) -> tuple[xp.ndarray, xp.ndarray]:
     """Differentiate a Hermitian eigendecomposition with a horizontal gauge."""
     _ = x, rest, attrs
-    tangent = tangents[0] if tangents else None
-    if tangent is None:
-        zeros = _zeros_output_tangent_structure(ans, tangents)
-        return cast("tuple[xp.ndarray, xp.ndarray]", zeros)
-
+    tangent = tangents[0]
     eigenvalues, eigenvectors = ans
     uplo = _normalize_uplo(UPLO)
     tangent_h = _hermitian_from_triangle(tangent, uplo=uplo)
-    local = _h(eigenvectors) @ tangent_h @ eigenvectors
+    local = xp.matmul(_h(eigenvectors), tangent_h) @ eigenvectors
 
     size = _shape_unwrapped(eigenvalues)[-1]
     eye = _array_constructor_like(
@@ -107,10 +101,10 @@ def _jvp_linalg_eigh(
     )
     off_diagonal = xp.ones_like(eye) - eye
     gaps = eigenvalues[..., None, :] - eigenvalues[..., :, None]
-    inverse_gaps = off_diagonal / (gaps + eye)
+    inverse_gaps = off_diagonal / xp.add(gaps, eye)
 
     d_eigenvalues = xp.real(xp.diagonal(local, axis1=-2, axis2=-1))
-    d_eigenvectors = eigenvectors @ (inverse_gaps * local)
+    d_eigenvectors = xp.matmul(eigenvectors, inverse_gaps * local)
     return (
         cast(
             "xp.ndarray",
@@ -133,23 +127,21 @@ def _jvp_linalg_eigvalsh(
     ans: xp.ndarray,
     x: xp.ndarray,
     *rest: xp.ndarray,
-    tangents: tuple[xp.ndarray | None, ...],
+    tangents: tuple[xp.ndarray, ...],
     UPLO: str = "L",  # noqa: N803 - NumPy spells this keyword in uppercase.
     **attrs: Any,
 ) -> xp.ndarray:
     """Differentiate Hermitian eigenvalues without differentiating eigenvectors."""
     _ = rest, attrs
-    tangent = tangents[0] if tangents else None
-    if tangent is None:
-        return _zeros_output_tangent(ans, tangents)
-
+    tangent = tangents[0]
     uplo = _normalize_uplo(UPLO)
     if _uses_standard_linalg_contract():
-        _eigenvalues, eigenvectors = xp.linalg.eigh(x)
+        # A standard eigh takes no UPLO, so it gets the selected triangle's matrix.
+        _eigenvalues, eigenvectors = xp.linalg.eigh(_hermitian_from_triangle(x, uplo=uplo))
     else:
         _eigenvalues, eigenvectors = xp.linalg.eigh(x, UPLO=uplo)
     tangent_h = _hermitian_from_triangle(tangent, uplo=uplo)
-    local = _h(eigenvectors) @ tangent_h @ eigenvectors
+    local = xp.matmul(_h(eigenvectors), tangent_h) @ eigenvectors
     out = xp.real(xp.diagonal(local, axis1=-2, axis2=-1))
     return cast(
         "xp.ndarray",
@@ -161,16 +153,12 @@ def _jvp_linalg_eig(
     ans: tuple[xp.ndarray, xp.ndarray],
     x: xp.ndarray,
     *rest: xp.ndarray,
-    tangents: tuple[xp.ndarray | None, ...],
+    tangents: tuple[xp.ndarray, ...],
     **attrs: Any,
 ) -> tuple[xp.ndarray, xp.ndarray]:
     """Differentiate NumPy's normalized, largest-component-real eigenvectors."""
     _ = rest, attrs
-    tangent = tangents[0] if tangents else None
-    if tangent is None:
-        zeros = _zeros_output_tangent_structure(ans, tangents)
-        return cast("tuple[xp.ndarray, xp.ndarray]", zeros)
-
+    tangent = tangents[0]
     eigenvalues, eigenvectors = ans
     local = xp.linalg.inv(eigenvectors) @ tangent @ eigenvectors
     size = _shape_unwrapped(eigenvalues)[-1]
@@ -236,14 +224,12 @@ def _jvp_linalg_eigvals(
     ans: xp.ndarray,
     x: xp.ndarray,
     *rest: xp.ndarray,
-    tangents: tuple[xp.ndarray | None, ...],
+    tangents: tuple[xp.ndarray, ...],
     **attrs: Any,
 ) -> xp.ndarray:
     """Differentiate simple eigenvalues of a general square matrix."""
     _ = rest, attrs
-    tangent = tangents[0] if tangents else None
-    if tangent is None:
-        return _zeros_output_tangent(ans, tangents)
+    tangent = tangents[0]
     _eigenvalues, eigenvectors = xp.linalg.eig(x)
     local = xp.linalg.inv(eigenvectors) @ tangent @ eigenvectors
     out = xp.diagonal(local, axis1=-2, axis2=-1)
@@ -257,15 +243,16 @@ def _jvp_linalg_svdvals(
     ans: xp.ndarray,
     x: xp.ndarray,
     *rest: xp.ndarray,
-    tangents: tuple[xp.ndarray | None, ...],
+    tangents: tuple[xp.ndarray, ...],
     **attrs: Any,
 ) -> xp.ndarray:
     """Differentiate singular values using a reduced SVD."""
-    _ = rest, attrs
-    tangent = tangents[0] if tangents else None
-    if tangent is None:
-        return _zeros_output_tangent(ans, tangents)
-
+    _ = rest
+    tangent = tangents[0]
+    if attrs.get("hermitian", False):
+        # NumPy reads the Hermitian matrix from the lower triangle.
+        x = _hermitian_from_triangle(x, uplo="L")
+        tangent = _hermitian_from_triangle(tangent, uplo="L")
     if _uses_standard_linalg_contract():
         u, _singular_values, vh = xp.linalg.svd(x, full_matrices=False)
     else:
@@ -275,7 +262,7 @@ def _jvp_linalg_svdvals(
             compute_uv=True,
             hermitian=False,
         )
-    local = _h(u) @ tangent @ _h(vh)
+    local = xp.matmul(_h(u), tangent) @ _h(vh)
     out = xp.real(xp.diagonal(local, axis1=-2, axis2=-1))
     return cast(
         "xp.ndarray",
@@ -287,7 +274,7 @@ def _jvp_linalg_svd(
     ans: tuple[xp.ndarray, xp.ndarray, xp.ndarray],
     x: xp.ndarray,
     *rest: xp.ndarray,
-    tangents: tuple[xp.ndarray | None, ...],
+    tangents: tuple[xp.ndarray, ...],
     full_matrices: bool = True,
     compute_uv: bool = True,
     hermitian: bool = False,
@@ -295,10 +282,7 @@ def _jvp_linalg_svd(
 ) -> tuple[xp.ndarray, xp.ndarray, xp.ndarray]:
     """Differentiate a reduced SVD away from repeated or zero singular values."""
     _ = rest, attrs
-    tangent = tangents[0] if tangents else None
-    if tangent is None:
-        zeros = _zeros_output_tangent_structure(ans, tangents)
-        return cast("tuple[xp.ndarray, xp.ndarray, xp.ndarray]", zeros)
+    tangent = tangents[0]
     if not compute_uv:
         msg = "numpy.linalg.svd JVP expects compute_uv=True; use svdvals otherwise"
         raise NotImplementedError(msg)
@@ -317,7 +301,7 @@ def _jvp_linalg_svd(
         raise NotImplementedError(msg)
 
     v = _h(vh)
-    local = _h(u) @ tangent @ v
+    local = xp.matmul(_h(u), tangent) @ v
     local_h = _h(local)
 
     size = _shape_unwrapped(singular_values)[-1]
@@ -326,12 +310,12 @@ def _jvp_linalg_svd(
     off_diagonal = xp.ones_like(eye) - eye
     squared = singular_values * singular_values
     denominator = squared[..., None, :] - squared[..., :, None]
-    inverse_gaps = off_diagonal / (denominator + eye)
+    inverse_gaps = off_diagonal / xp.add(denominator, eye)
 
     s_rows = singular_values[..., :, None]
     s_columns = singular_values[..., None, :]
-    omega_u = inverse_gaps * (local * s_columns + s_rows * local_h)
-    omega_v = inverse_gaps * (s_rows * local + local_h * s_columns)
+    omega_u = inverse_gaps * (local * s_columns + xp.multiply(s_rows, local_h))
+    omega_v = inverse_gaps * (xp.multiply(s_rows, local) + local_h * s_columns)
 
     if _iscomplex_unwrapped(u):
         gauge = (
@@ -341,8 +325,8 @@ def _jvp_linalg_svd(
         )
         omega_u = omega_u + _diag_matrix(gauge, dtype=dtype)
 
-    d_u = u @ omega_u + (tangent @ v - u @ local) / s_columns
-    d_v = v @ omega_v + (_h(tangent) @ u - v @ local_h) / s_columns
+    d_u = xp.matmul(u, omega_u) + (xp.matmul(tangent, v) - xp.matmul(u, local)) / s_columns
+    d_v = xp.matmul(v, omega_v) + (xp.matmul(_h(tangent), u) - xp.matmul(v, local_h)) / s_columns
     d_s = xp.real(xp.diagonal(local, axis1=-2, axis2=-1))
     d_vh = _h(d_v)
 
@@ -363,21 +347,18 @@ def _jvp_linalg_slogdet(
     ans: tuple[xp.ndarray, xp.ndarray],
     x: xp.ndarray,
     *rest: xp.ndarray,
-    tangents: tuple[xp.ndarray | None, ...],
+    tangents: tuple[xp.ndarray, ...],
     **attrs: Any,
 ) -> tuple[xp.ndarray, xp.ndarray]:
     _ = rest, attrs
-    tangent = tangents[0] if tangents else None
     sign, logabsdet = ans
-    zero_sign = xp.zeros_like(sign, dtype=_infer_tangent_dtype(sign, tangents))
-    if tangent is None:
-        zero_logabs = _zeros_output_tangent(logabsdet, tangents)
-        return (zero_sign, zero_logabs)
-    solved = xp.linalg.solve(x, tangent)
+    solved = xp.linalg.solve(x, tangents[0])
     trace = xp.trace(solved, axis1=-2, axis2=-1)
     d_logabs = xp.real(trace)
     d_sign = (
-        _scalar_like(1j, sign) * sign * xp.imag(trace) if _iscomplex_unwrapped(sign) else zero_sign
+        xp.multiply(_scalar_like(1j, sign) * sign, xp.imag(trace))
+        if _iscomplex_unwrapped(sign)
+        else xp.zeros_like(sign, dtype=_infer_tangent_dtype(sign, tangents))
     )
     return (
         _astype_preserving_trace(d_sign, dtype=_asarray_unwrapped(sign).dtype),
@@ -416,7 +397,7 @@ def _vector_norm_jvp(
         directional_abs = xp.where(
             magnitude == zero_magnitude,
             zero_magnitude,
-            xp.real(xp.conjugate(x_flat) * tangent_flat)
+            xp.real(xp.multiply(xp.conjugate(x_flat), tangent_flat))
             / xp.where(magnitude == zero_magnitude, xp.ones_like(magnitude), magnitude),
         )
         if ord_value in (float("inf"), float("-inf")):
@@ -443,7 +424,7 @@ def _vector_norm_jvp(
             weighted = xp.where(
                 magnitude == zero_magnitude,
                 zero_magnitude,
-                magnitude ** _scalar_like(ord_value - 1.0, magnitude) * directional_abs,
+                xp.multiply(magnitude ** _scalar_like(ord_value - 1.0, magnitude), directional_abs),
             )
             numerator = xp.sum(weighted, axis=-1)
             zero_answer = xp.zeros_like(answer_reduced)
@@ -485,7 +466,7 @@ def _matrix_norm_jvp(
     tangent_moved = _moveaxis(tangent, axes, (-2, -1))
 
     if ord_value == "fro":
-        reduced = xp.real(xp.sum(xp.conjugate(moved) * tangent_moved, axis=(-2, -1)))
+        reduced = xp.real(xp.sum(xp.multiply(xp.conjugate(moved), tangent_moved), axis=(-2, -1)))
         answer_reduced = xp.reshape(
             ans,
             tuple(size for index, size in enumerate(x_shape) if index not in set(axes)),
@@ -507,7 +488,8 @@ def _matrix_norm_jvp(
                 compute_uv=True,
                 hermitian=False,
             )
-        singular_tangent = xp.real(xp.diagonal(_h(u) @ tangent_moved @ _h(vh), axis1=-2, axis2=-1))
+        local = xp.matmul(_h(u), tangent_moved) @ _h(vh)
+        singular_tangent = xp.real(xp.diagonal(local, axis1=-2, axis2=-1))
         if ord_value == "nuc":
             reduced = xp.sum(singular_tangent, axis=-1)
         elif ord_value == _MATRIX_AXIS_COUNT:
@@ -520,7 +502,7 @@ def _matrix_norm_jvp(
         directional_abs = xp.where(
             magnitude == zero_magnitude,
             zero_magnitude,
-            xp.real(xp.conjugate(moved) * tangent_moved)
+            xp.real(xp.multiply(xp.conjugate(moved), tangent_moved))
             / xp.where(magnitude == zero_magnitude, xp.ones_like(magnitude), magnitude),
         )
         sum_axis = -2 if ord_value in {1, -1} else -1
@@ -562,7 +544,7 @@ def _jvp_linalg_norm(
     ans: xp.ndarray,
     x: xp.ndarray,
     *rest: xp.ndarray,
-    tangents: tuple[xp.ndarray | None, ...],
+    tangents: tuple[xp.ndarray, ...],
     ord_value: str | float | None = None,
     axis: int | tuple[int, ...] | None = None,
     keepdims: bool = False,
@@ -571,10 +553,7 @@ def _jvp_linalg_norm(
     if ord_value is None and "ord" in attrs:
         ord_value = cast("str | float | None", attrs["ord"])
     _ = rest
-    tangent = tangents[0] if tangents else None
-    if tangent is None:
-        return _zeros_output_tangent(ans, tangents)
-
+    tangent = tangents[0]
     ndim = _ndim_unwrapped(x)
     if axis is None:
         if ord_value is None and ndim != _MATRIX_AXIS_COUNT:
@@ -637,16 +616,14 @@ def _jvp_linalg_matrix_norm(
     ans: xp.ndarray,
     x: xp.ndarray,
     *rest: xp.ndarray,
-    tangents: tuple[xp.ndarray | None, ...],
+    tangents: tuple[xp.ndarray, ...],
     keepdims: bool = False,
     ord: str | float | None = "fro",  # noqa: A002 - Array API keyword.
     **attrs: Any,
 ) -> xp.ndarray:
     """Differentiate matrix norms over the final two axes."""
     _ = rest, attrs
-    tangent = tangents[0] if tangents else None
-    if tangent is None:
-        return _zeros_output_tangent(ans, tangents)
+    tangent = tangents[0]
     ndim = _ndim_unwrapped(x)
     if ndim < _MATRIX_AXIS_COUNT:
         msg = "linalg.matrix_norm requires an input with at least two dimensions"
@@ -665,7 +642,7 @@ def _jvp_linalg_vector_norm(
     ans: xp.ndarray,
     x: xp.ndarray,
     *rest: xp.ndarray,
-    tangents: tuple[xp.ndarray | None, ...],
+    tangents: tuple[xp.ndarray, ...],
     axis: int | tuple[int, ...] | None = None,
     keepdims: bool = False,
     ord: float = 2,  # noqa: A002 - Array API keyword.
@@ -673,9 +650,7 @@ def _jvp_linalg_vector_norm(
 ) -> xp.ndarray:
     """Differentiate vector p-norms, including flattened inputs."""
     _ = rest, attrs
-    tangent = tangents[0] if tangents else None
-    if tangent is None:
-        return _zeros_output_tangent(ans, tangents)
+    tangent = tangents[0]
     ndim = _ndim_unwrapped(x)
     axes = tuple(range(ndim)) if axis is None else _normalize_axis_tuple(axis, ndim=ndim)
     return _vector_norm_jvp(
@@ -688,23 +663,85 @@ def _jvp_linalg_vector_norm(
     )
 
 
+_REAL_ROOTS_OF_UNITY = (1.0, -1.0)
+
+
+def _has_exactly_singular_element(determinant: xp.ndarray) -> bool:
+    """Return whether a concrete determinant has an exactly zero element.
+
+    A staged determinant has no concrete value; it keeps the ``inv`` formula.
+    """
+    value = _asarray_unwrapped(determinant)
+    if bool(getattr(type(value), "__advect_abstract_array__", False)):
+        return False
+    return bool(xp.any(value == _scalar_like(0, value)))
+
+
+def _shifted_det_jvp(x: xp.ndarray, tangent: xp.ndarray) -> xp.ndarray:
+    """Differentiate ``det`` through adjugates of nonsingular shifted matrices.
+
+    The concrete SVD ``x = u diag(s) vh`` gives a constant rank-``r`` shift
+    ``b`` of the numerically null singular directions of ``x``, always
+    including the smallest, by twice the largest singular value. The adjugate
+    of ``x + w b`` holds minors of order ``n - 1``, so it is a polynomial of
+    degree at most ``min(r, n - 1)`` in ``w``, and its mean over one more roots
+    of unity ``w`` is exactly ``adj(x)``, while every shifted matrix is
+    nonsingular. The identity holds for every ``x`` with
+    ``b`` fixed, so the ``det(y) inv(y)`` adjugates of the shifted matrices
+    also give exact nested derivatives.
+    """
+    u, singular_values, vh = xp.linalg.svd(_asarray_unwrapped(x), full_matrices=False)
+    size = _shape_unwrapped(singular_values)[-1]
+    largest = singular_values[..., :1]
+    tolerance = largest * _scalar_like(size * float(xp.finfo(largest.dtype).eps), largest)
+    null = (singular_values <= tolerance) | (xp.arange(size) == size - 1)
+    shift_scale = xp.where(
+        largest > _scalar_like(0, largest),
+        _scalar_like(2, largest) * largest,
+        _scalar_like(1, largest),
+    )
+    shift_weights = xp.where(null, shift_scale, _scalar_like(0, largest))
+    shift = (u * shift_weights[..., None, :]) @ vh
+    rank = int(xp.max(xp.sum(xp.astype(null, xp.int64), axis=-1)))
+    count = min(rank, size - 1) + 1
+    # Keep the common one or two nodes in real arithmetic.
+    nodes = (
+        _REAL_ROOTS_OF_UNITY[:count]
+        if count <= len(_REAL_ROOTS_OF_UNITY)
+        else tuple(cmath.exp(2j * cmath.pi * k / count) for k in range(count))
+    )
+
+    def shifted_adjugate_product(node: complex) -> xp.ndarray:
+        shifted = x + _scalar_like(node, shift) * shift
+        return cast(
+            "xp.ndarray",
+            xp.multiply(
+                xp.linalg.det(shifted),
+                xp.trace(xp.matmul(xp.linalg.inv(shifted), tangent), axis1=-2, axis2=-1),
+            ),
+        )
+
+    first, *rest = (shifted_adjugate_product(node) for node in nodes)
+    return cast("xp.ndarray", sum(rest, start=first) / _scalar_like(float(count), first))
+
+
 def _jvp_linalg_det(
     ans: xp.ndarray,
     x: xp.ndarray,
     *rest: xp.ndarray,
-    tangents: tuple[xp.ndarray | None, ...],
+    tangents: tuple[xp.ndarray, ...],
     **attrs: Any,
 ) -> xp.ndarray:
     _ = rest, attrs
-    tangent = tangents[0] if tangents else None
-    if tangent is None:
-        return _zeros_output_tangent(ans, tangents)
-    inv_x = xp.linalg.inv(x)
-    trace_term = xp.trace(inv_x @ tangent, axis1=-2, axis2=-1)
-    out = ans * trace_term
+    tangent = tangents[0]
+    if _has_exactly_singular_element(ans):
+        # ``inv`` rejects an exactly singular matrix, whose adjugate exists.
+        out = _shifted_det_jvp(x, tangent)
+    else:
+        out = xp.multiply(ans, xp.trace(xp.matmul(xp.linalg.inv(x), tangent), axis1=-2, axis2=-1))
     if not _iscomplex_unwrapped(x):
         out = xp.real(out)
-    if _is_traced_leaf(out):
+    if _is_traced(out):
         return cast("xp.ndarray[Any, Any]", out)
     return xp.asarray(out, dtype=_asarray_unwrapped(ans).dtype)
 
@@ -713,18 +750,16 @@ def _jvp_linalg_inv(
     ans: xp.ndarray,
     x: xp.ndarray,
     *rest: xp.ndarray,
-    tangents: tuple[xp.ndarray | None, ...],
+    tangents: tuple[xp.ndarray, ...],
     **attrs: Any,
 ) -> xp.ndarray:
     _ = x, rest, attrs
-    tangent = tangents[0] if tangents else None
-    if tangent is None:
-        return _zeros_output_tangent(ans, tangents)
+    tangent = tangents[0]
     inv_x = ans
-    dx = -(inv_x @ tangent @ inv_x)
+    dx = -(xp.matmul(inv_x, tangent) @ inv_x)
     if not _iscomplex_unwrapped(inv_x):
         dx = xp.real(dx)
-    if _is_traced_leaf(dx):
+    if _is_traced(dx):
         return cast("xp.ndarray[Any, Any]", dx)
     return xp.asarray(dx, dtype=_asarray_unwrapped(inv_x).dtype)
 
@@ -737,10 +772,16 @@ def _jvp_linalg_pinv(
     **attrs: Any,
 ) -> xp.ndarray:
     """Differentiate the Moore-Penrose inverse on a constant-rank stratum."""
-    _ = rest, attrs
-    tangent = tangents[0] if tangents else None
+    _ = rest
+    # A traced rtol or rcond is a second operand. The result is locally
+    # constant in it, so only the matrix tangent contributes.
+    tangent = tangents[0]
     if tangent is None:
         return _zeros_output_tangent(ans, tangents)
+    if attrs.get("hermitian", False):
+        # NumPy reads the Hermitian matrix from the lower triangle.
+        x = _hermitian_from_triangle(x, uplo="L")
+        tangent = _hermitian_from_triangle(tangent, uplo="L")
 
     rows, columns = _shape_unwrapped(x)[-2:]
     batch_ndim = _ndim_unwrapped(x) - 2
@@ -754,9 +795,12 @@ def _jvp_linalg_pinv(
         (1,) * batch_ndim + (columns, columns),
     )
     tangent_h = _h(tangent)
-    term1 = -(ans @ tangent @ ans)
-    term2 = (ans @ _h(ans) @ tangent_h) @ (identity_rows - x @ ans)
-    term3 = (identity_columns - ans @ x) @ (tangent_h @ _h(ans) @ ans)
+    term1 = -(xp.matmul(ans, tangent) @ ans)
+    term2 = xp.matmul(ans @ _h(ans), tangent_h) @ xp.subtract(identity_rows, x @ ans)
+    term3 = xp.matmul(
+        xp.subtract(identity_columns, ans @ x),
+        xp.matmul(tangent_h, _h(ans)) @ ans,
+    )
     out = term1 + term2 + term3
     return cast(
         "xp.ndarray",
@@ -778,17 +822,13 @@ def _jvp_linalg_qr(
     ans: tuple[xp.ndarray, xp.ndarray],
     x: xp.ndarray,
     *rest: xp.ndarray,
-    tangents: tuple[xp.ndarray | None, ...],
+    tangents: tuple[xp.ndarray, ...],
     mode: str = "reduced",
     **attrs: Any,
 ) -> tuple[xp.ndarray, xp.ndarray]:
     """Differentiate full-rank reduced QR factorizations."""
     _ = rest, attrs
-    tangent = tangents[0] if tangents else None
-    if tangent is None:
-        zeros = _zeros_output_tangent_structure(ans, tangents)
-        return cast("tuple[xp.ndarray, xp.ndarray]", zeros)
-
+    tangent = tangents[0]
     q, r = ans
     rows, columns = _shape_unwrapped(x)[-2:]
     if mode not in {"complete", "reduced"}:
@@ -808,10 +848,10 @@ def _jvp_linalg_qr(
         leading_r = r[..., :, :rows]
         leading_tangent = tangent[..., :, :rows]
         tangent_r_inverse = _right_solve(leading_r, leading_tangent)
-        local = _h(q) @ tangent_r_inverse
+        local = xp.matmul(_h(q), tangent_r_inverse)
         omega = _qr_skew(local)
-        d_q = q @ omega
-        d_r = _h(q) @ tangent - omega @ r
+        d_q = xp.matmul(q, omega)
+        d_r = xp.matmul(_h(q), tangent) - omega @ r
         return (
             cast(
                 "xp.ndarray",
@@ -824,9 +864,9 @@ def _jvp_linalg_qr(
         )
 
     tangent_r_inverse = _right_solve(r, tangent)
-    local = _h(q) @ tangent_r_inverse
+    local = xp.matmul(_h(q), tangent_r_inverse)
     omega = _qr_skew(local)
-    d_q = tangent_r_inverse - q @ local + q @ omega
+    d_q = tangent_r_inverse - xp.matmul(q, local) + xp.matmul(q, omega)
     d_r = (local - omega) @ r
     return (
         cast(
@@ -844,14 +884,12 @@ def _jvp_linalg_qr_r(
     ans: xp.ndarray,
     x: xp.ndarray,
     *rest: xp.ndarray,
-    tangents: tuple[xp.ndarray | None, ...],
+    tangents: tuple[xp.ndarray, ...],
     **attrs: Any,
 ) -> xp.ndarray:
     """Differentiate the R-only QR result using the reduced factorization."""
     _ = rest, attrs
-    tangent = tangents[0] if tangents else None
-    if tangent is None:
-        return _zeros_output_tangent(ans, tangents)
+    tangent = tangents[0]
     q, r = xp.linalg.qr(x, mode="reduced")
     _d_q, d_r = _jvp_linalg_qr(
         (q, r),
@@ -876,18 +914,10 @@ def _jvp_vecdot(
 ) -> xp.ndarray:
     """Differentiate the Array API conjugating vector product."""
     _ = rest, attrs
-    tangent1 = tangents[0] if tangents else None
-    tangent2 = tangents[1] if len(tangents) > 1 else None
-    if tangent1 is None and tangent2 is None:
-        return _zeros_output_tangent(ans, tangents)
     vecdot = cast("Any", xp.linalg.vecdot)
-    result: Any | None = None
-    if tangent1 is not None:
-        result = vecdot(tangent1, x2, axis=axis)
-    if tangent2 is not None:
-        contribution = vecdot(x1, tangent2, axis=axis)
-        result = contribution if result is None else result + contribution
-    return cast("xp.ndarray", result)
+    return product_rule(
+        ans, tangents, lambda d: vecdot(d, x2, axis=axis), lambda d: vecdot(x1, d, axis=axis)
+    )
 
 
 def _jvp_linalg_solve(
@@ -901,17 +931,15 @@ def _jvp_linalg_solve(
     _ = rest, attrs
     da = tangents[0] if len(tangents) > 0 else None
     db = tangents[1] if len(tangents) > 1 else None
-    if da is None and db is None:
-        return _zeros_output_tangent(ans, tangents)
     rhs_dtype = _infer_tangent_dtype(ans, tangents)
     rhs = xp.zeros_like(ans, dtype=rhs_dtype)
     if db is not None:
-        rhs = rhs + db
+        rhs = xp.add(rhs, db)
     if da is not None:
         if len(_shape_unwrapped(ans)) == len(_shape_unwrapped(a)) - 1:
             matrix_product = xp.matmul(da, xp.expand_dims(ans, axis=-1))
-            rhs = rhs - xp.squeeze(matrix_product, axis=-1)
+            rhs = xp.subtract(rhs, xp.squeeze(matrix_product, axis=-1))
         else:
-            rhs = rhs - xp.matmul(da, ans)
+            rhs = xp.subtract(rhs, xp.matmul(da, ans))
     out = xp.linalg.solve(a, rhs)
     return cast("xp.ndarray[Any, Any]", _astype_preserving_trace(out, dtype=rhs_dtype))

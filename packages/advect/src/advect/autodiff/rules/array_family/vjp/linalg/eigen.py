@@ -4,18 +4,19 @@ from __future__ import annotations
 
 from typing import Any
 
-from advect.autodiff.rules.array_family._backend_runtime import xp
+from advect.autodiff.rules.array_family._backend_runtime import _array_constructor_like, xp
 from advect.autodiff.rules.array_family._transpose_utils import (
     _diagonal_matrix as _diag_matrix,
+    _dtype_of,
     _normalize_uplo,
+    _shape_of,
     _uses_standard_linalg_contract,
 )
+from advect.autodiff.rules.array_family.jvp.linalg import _hermitian_from_triangle
 from advect.autodiff.rules.array_family.vjp.linalg.common import (
-    _dtype_of,
     _h,
     _hermitian_triangle_adjoint,
     _merge_multioutput_cotangent,
-    _shape_of,
 )
 
 _EIGH_OUTPUT_COUNT = 2
@@ -33,11 +34,12 @@ def _vjp_eigvalsh(
     _ = ans, rest, attrs
     uplo = _normalize_uplo(UPLO)
     if _uses_standard_linalg_contract():
-        _eigenvalues, eigenvectors = xp.linalg.eigh(x)
+        # A standard eigh takes no UPLO, so it gets the selected triangle's matrix.
+        _eigenvalues, eigenvectors = xp.linalg.eigh(_hermitian_from_triangle(x, uplo=uplo))
     else:
         _eigenvalues, eigenvectors = xp.linalg.eigh(x, UPLO=uplo)
     local = _diag_matrix(g, dtype=_dtype_of(eigenvectors))
-    natural = eigenvectors @ local @ _h(eigenvectors)
+    natural = xp.matmul(eigenvectors, local) @ _h(eigenvectors)
     return (_hermitian_triangle_adjoint(natural, uplo=uplo),)
 
 
@@ -67,11 +69,11 @@ def _vjp_eigh(
     local = _diag_matrix(values_cotangent, dtype=dtype)
 
     if g_eigenvectors is not None:
-        eye = xp.eye(size, dtype=dtype)
+        eye = _array_constructor_like((eigenvectors, g_eigenvectors), "eye", size, dtype=dtype)
         off_diagonal = xp.ones_like(eye) - eye
         gaps = eigenvalues[..., None, :] - eigenvalues[..., :, None]
-        inverse_gaps = off_diagonal / (gaps + eye)
-        local = local + inverse_gaps * (_h(eigenvectors) @ g_eigenvectors)
+        inverse_gaps = off_diagonal / xp.add(gaps, eye)
+        local = xp.add(local, inverse_gaps * xp.matmul(_h(eigenvectors), g_eigenvectors))
 
-    natural = eigenvectors @ local @ _h(eigenvectors)
+    natural = xp.matmul(eigenvectors, local) @ _h(eigenvectors)
     return (_hermitian_triangle_adjoint(natural, uplo=uplo),)

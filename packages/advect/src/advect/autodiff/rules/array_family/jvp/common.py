@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable
-from typing import Any, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from advect.autodiff.rules.array_family._backend_runtime import (
     _array_constructor_like,
@@ -13,17 +13,18 @@ from advect.autodiff.rules.array_family._backend_runtime import (
     xp,
 )
 from advect.autodiff.rules.array_family._transpose_utils import (
-    _is_traced_leaf,
-    _unwrap_traced_leaf,
+    _normalize_axis,
     infer_tangent_dtype as _infer_tangent_dtype,
     zeros_output_tangent as _zeros_output_tangent,
 )
+from advect.core._protocols import _innermost, _is_traced
 
-_JVPReturn = xp.ndarray | tuple[xp.ndarray, ...]
+if TYPE_CHECKING:
+    from advect.autodiff.rules.array_family.jvp.elementwise_partials import (
+        ElementwisePartials,
+    )
 
-_JVPFn = Callable[..., _JVPReturn]
-
-_ElementwisePartialsFn = Callable[..., tuple[Any | None, ...]]
+_JVPFn = Callable[..., Any]
 
 SortKind = Literal[
     "Q",
@@ -44,17 +45,11 @@ PartitionKind = Literal["introselect"]
 
 _WHERE_INPUT_ARITY = 3
 
-_INTERP_FP_TANGENT_INDEX = 2
-
-_VECTOR_AXIS_COUNT = 1
-
 _MATRIX_AXIS_COUNT = 2
-
-_L2_NORM_ORD = 2
 
 
 def _asarray_unwrapped(value: Any) -> xp.ndarray[Any, Any]:
-    return xp.asarray(_unwrap_traced_leaf(value))
+    return xp.asarray(_innermost(value))
 
 
 def _shape_unwrapped(value: Any) -> tuple[int, ...]:
@@ -69,62 +64,6 @@ def _iscomplex_unwrapped(value: Any) -> bool:
     return xp.iscomplexobj(_asarray_unwrapped(value))
 
 
-def _positive_domain_mask(value: Any) -> xp.ndarray[Any, Any]:
-    return xp.asarray(_asarray_unwrapped(value) > 0, dtype=xp.bool)
-
-
-def _maximum_choice_mask(x: Any, y: Any) -> xp.ndarray[Any, Any]:
-    return cast(
-        "xp.ndarray[Any, Any]",
-        _asarray_preserving_trace(x) >= _asarray_preserving_trace(y),
-    )
-
-
-def _minimum_choice_mask(x: Any, y: Any) -> xp.ndarray[Any, Any]:
-    return cast(
-        "xp.ndarray[Any, Any]",
-        _asarray_preserving_trace(x) <= _asarray_preserving_trace(y),
-    )
-
-
-def _fmax_choice_mask(x: Any, y: Any) -> xp.ndarray[Any, Any]:
-    x_arr = _asarray_preserving_trace(x)
-    y_arr = _asarray_preserving_trace(y)
-    x_nan = xp.isnan(x_arr)
-    y_nan = xp.isnan(y_arr)
-    choose_x = x_arr >= y_arr
-    choose_x = xp.where(
-        x_nan & xp.logical_not(y_nan),
-        xp.zeros_like(choose_x, dtype=xp.bool),
-        choose_x,
-    )
-    choose_x = xp.where(
-        y_nan & xp.logical_not(x_nan),
-        xp.ones_like(choose_x, dtype=xp.bool),
-        choose_x,
-    )
-    return cast("xp.ndarray[Any, Any]", choose_x)
-
-
-def _fmin_choice_mask(x: Any, y: Any) -> xp.ndarray[Any, Any]:
-    x_arr = _asarray_preserving_trace(x)
-    y_arr = _asarray_preserving_trace(y)
-    x_nan = xp.isnan(x_arr)
-    y_nan = xp.isnan(y_arr)
-    choose_x = x_arr <= y_arr
-    choose_x = xp.where(
-        x_nan & xp.logical_not(y_nan),
-        xp.zeros_like(choose_x, dtype=xp.bool),
-        choose_x,
-    )
-    choose_x = xp.where(
-        y_nan & xp.logical_not(x_nan),
-        xp.ones_like(choose_x, dtype=xp.bool),
-        choose_x,
-    )
-    return cast("xp.ndarray[Any, Any]", choose_x)
-
-
 def _coerce_tangent_or_zeros(
     tangent: Any | None,
     *,
@@ -132,9 +71,9 @@ def _coerce_tangent_or_zeros(
     dtype: xp.dtype[Any],
 ) -> Any:
     if tangent is None:
-        primal_value = _unwrap_traced_leaf(primal)
+        primal_value = _innermost(primal)
         return xp.zeros_like(xp.asarray(primal_value), dtype=dtype)
-    if _is_traced_leaf(tangent):
+    if _is_traced(tangent):
         return tangent
     return xp.asarray(tangent, dtype=dtype)
 
@@ -147,7 +86,7 @@ def _astype_preserving_trace(value: Any, *, dtype: xp.dtype[Any]) -> Any:
     target_dtype = xp.dtype(dtype)
     if value_dtype is not None and value_dtype == target_dtype:
         return value
-    if _is_traced_leaf(value):
+    if _is_traced(value):
         if (
             value_dtype is not None
             and xp.issubdtype(
@@ -172,7 +111,7 @@ def _asarray_preserving_trace(
     """Coerce concrete values without detaching an active tangent tracer."""
     if dtype is not None:
         return _astype_preserving_trace(value, dtype=dtype)
-    if _is_traced_leaf(value):
+    if _is_traced(value):
         return value
     return xp.asarray(value)
 
@@ -181,14 +120,23 @@ def _normalize_output_tangent(
     ans: Any,
     tangents: tuple[Any | None, ...],
     contribution: Any,
-    *,
-    target_dtype: xp.dtype[Any] | None = None,
 ) -> xp.ndarray[Any, Any]:
     """Cast and broadcast a local tangent to the primal output contract."""
+    # Most calls need neither: a contribution that already has the answer's
+    # dtype and shape, from tangents of that same dtype, is its own result.
+    dtype = getattr(ans, "dtype", None)
+    shape = getattr(ans, "shape", None)
+    if (
+        dtype is not None
+        and shape is not None
+        and getattr(contribution, "dtype", None) == dtype
+        and getattr(contribution, "shape", None) == shape
+        and all(tangent is None or getattr(tangent, "dtype", None) == dtype for tangent in tangents)
+    ):
+        return cast("xp.ndarray[Any, Any]", contribution)
     answer = _asarray_unwrapped(ans)
     contribution_value = _asarray_unwrapped(contribution)
-    if target_dtype is None:
-        target_dtype = _infer_tangent_dtype(ans, tangents)
+    target_dtype = _infer_tangent_dtype(ans, tangents)
 
     result = contribution
     if contribution_value.dtype != target_dtype:
@@ -199,7 +147,7 @@ def _normalize_output_tangent(
 
 
 def _copy_if_untraced_array(value: Any) -> Any:
-    if _is_traced_leaf(value):
+    if _is_traced(value):
         return value
     return xp.asarray(value, copy=True)
 
@@ -215,11 +163,12 @@ def _validate_tangent_arity(
         raise RuntimeError(msg)
 
 
-def make_diagonal_jvp_from_partials(
-    op_name: str,
-    partials_fn: _ElementwisePartialsFn,
-) -> _JVPFn:
-    """Create a diagonal-style JVP from explicit local partial formulas."""
+def linear_jvp(apply: Callable[..., Any]) -> _JVPFn:
+    """Make ``apply(tangent, **attrs)`` the JVP of a one-input linear operation.
+
+    The tape calls a JVP only when an operand's tangent is active, so the one
+    tangent of a single-input rule is never ``None``.
+    """
 
     def jvp(
         ans: Any,
@@ -227,52 +176,78 @@ def make_diagonal_jvp_from_partials(
         tangents: tuple[Any | None, ...],
         **attrs: Any,
     ) -> Any:
-        _validate_tangent_arity(op_name=op_name, inputs=inputs, tangents=tangents)
-        if len(inputs) == 1:
-            tangent = tangents[0]
-            if tangent is None:
-                return _zeros_output_tangent(ans, tangents)
-            partials = partials_fn(ans, inputs[0], **attrs)
-            if len(partials) != 1:
-                msg = (
-                    f"{op_name} JVP partial arity mismatch: expected 1 partials, "
-                    f"got {len(partials)}"
-                )
-                raise RuntimeError(msg)
-            partial = partials[0]
-            if partial is None:
-                return _zeros_output_tangent(ans, tangents)
-            if isinstance(partial, (bool, int, float, complex)):
-                partial = _scalar_like(partial, ans)
-            return partial * tangent
+        del ans, inputs
+        return apply(_asarray_preserving_trace(tangents[0]), **attrs)
 
-        if all(tangent is None for tangent in tangents):
-            return _zeros_output_tangent(ans, tangents)
+    jvp.__name__ = jvp.__qualname__ = apply.__name__
+    jvp.__doc__ = apply.__doc__
+    return jvp
 
-        partials = partials_fn(ans, *inputs, **attrs)
-        if len(partials) != len(inputs):
+
+def product_rule(ans: Any, tangents: tuple[Any | None, ...], *terms: Callable[[Any], Any]) -> Any:
+    """Sum ``term(tangent)`` over the active tangents of a multilinear operation.
+
+    Each term applies the operation with one operand replaced by its tangent.
+    The tape calls a JVP only when some tangent is active, so the sum is never
+    empty; it is cast and broadcast to the output tangent contract.
+    """
+    out: Any = None
+    for tangent, term in zip(tangents, terms, strict=False):
+        if tangent is not None:
+            contribution = term(_asarray_preserving_trace(tangent))
+            out = contribution if out is None else xp.add(out, contribution)
+    return _normalize_output_tangent(ans, tangents, out)
+
+
+def scale_by_constant(value: Any, constant: float, like: Any) -> Any:
+    """Multiply ``value`` by a constant partial in the dtype of ``like``."""
+    if constant == 1:
+        return value
+    if constant == -1:
+        return -value
+    if type(constant) in {int, float}:
+        # A weak Python scalar takes value's dtype through the operator in every
+        # Array API revision, and staging reuses its one constant node instead
+        # of recording a fresh literal and cast for each rule application.
+        return value * constant
+    return xp.multiply(_scalar_like(constant, like), value)
+
+
+def make_diagonal_jvp_from_partials(
+    op_name: str,
+    entry: ElementwisePartials,
+) -> _JVPFn:
+    """Create the JVP ``sum_i p_i * t_i`` of one diagonal elementwise operation."""
+    arity = len(entry.partials)
+
+    def jvp(
+        ans: Any,
+        *inputs: Any,
+        tangents: tuple[Any | None, ...],
+        **attrs: Any,
+    ) -> Any:
+        del attrs
+        if len(inputs) != arity or len(tangents) != arity:
             msg = (
-                f"{op_name} JVP partial arity mismatch: expected {len(inputs)} partials, "
-                f"got {len(partials)}"
+                f"{op_name} JVP expected {arity} operands and tangents, "
+                f"got {len(inputs)} and {len(tangents)}"
             )
             raise RuntimeError(msg)
-
         out: Any | None = None
-        for partial, tangent in zip(partials, tangents, strict=True):
-            if partial is None or tangent is None:
+        at = entry.bind(ans, inputs)
+        for index, tangent in enumerate(tangents):
+            local = None if tangent is None else at(index)
+            if tangent is None or local is None:
                 continue
-            resolved_partial = (
-                _scalar_like(partial, ans)
-                if isinstance(partial, (bool, int, float, complex))
-                else partial
+            term = (
+                scale_by_constant(tangent, local, ans)
+                if isinstance(local, (int, float))
+                else xp.multiply(local, tangent)
             )
-            term = resolved_partial * tangent
-            out = term if out is None else out + term
-        return (
-            _zeros_output_tangent(ans, tangents)
-            if out is None
-            else _normalize_output_tangent(ans, tangents, out)
-        )
+            out = term if out is None else xp.add(out, term)
+        if out is None:
+            return _zeros_output_tangent(ans, tangents)
+        return out if arity == 1 else _normalize_output_tangent(ans, tangents, out)
 
     jvp.__name__ = f"_jvp_{op_name.replace('.', '_')}"
     return jvp
@@ -283,13 +258,14 @@ def _normalize_axis_tuple(
     *,
     ndim: int,
 ) -> tuple[int, ...]:
+    """Map a reduction axis to distinct in-bounds axes; ``None`` selects every axis."""
     if axis is None:
         return tuple(range(ndim))
-    axis_items = (axis,) if isinstance(axis, int) else axis
-    normalized = tuple(item % ndim for item in axis_items)
+    axis_items = axis if isinstance(axis, (tuple, list)) else (axis,)
+    normalized = tuple(_normalize_axis(item, ndim=ndim, op_name="reduction") for item in axis_items)
     if len(set(normalized)) != len(normalized):
-        msg = f"Repeated axes are not supported (axis={axis!r})"
-        raise NotImplementedError(msg)
+        msg = f"reduction axis {axis!r} repeats an axis"
+        raise ValueError(msg)
     return normalized
 
 
@@ -378,7 +354,7 @@ def _prod_jvp_last_axis(x: Any, dx: Any) -> Any:
             axis=-1,
         )
 
-    return xp.sum(partials * dx_work, axis=-1)
+    return xp.sum(xp.multiply(partials, dx_work), axis=-1)
 
 
 def _maxmin_tangent(
@@ -388,44 +364,19 @@ def _maxmin_tangent(
     axis: int | tuple[int, ...] | None,
     keepdims: bool,
     reduce_kind: Literal["max", "min"],
+    ignore_nan: bool = False,
 ) -> Any:
-    x_arr = _asarray_preserving_trace(x)
-    axes = _normalize_axis_tuple(axis, ndim=x_arr.ndim)
-    x_flat, _ = _flatten_reduction_axes(x_arr, axes=axes)
-    dx_flat, _ = _flatten_reduction_axes(dx, axes=axes)
-    winner = xp.argmax(x_flat, axis=-1) if reduce_kind == "max" else xp.argmin(x_flat, axis=-1)
-    winner_mask = xp.equal(
-        _array_constructor_like(dx_flat, "arange", x_flat.shape[-1], dtype=xp.int64),
-        winner[..., None],
-    )
-    gathered = xp.sum(
-        xp.where(winner_mask, dx_flat, xp.zeros_like(dx_flat)),
-        axis=-1,
-    )
-    return _reshape_reduction_result(
-        gathered,
-        input_shape=x_arr.shape,
-        axes=axes,
-        keepdims=keepdims,
-    )
-
-
-def _nan_maxmin_tangent(
-    x: Any,
-    dx: Any,
-    *,
-    axis: int | tuple[int, ...] | None,
-    keepdims: bool,
-    reduce_kind: Literal["max", "min"],
-) -> Any:
+    """Select the tangent of the reduction winner; NaN loses under ``ignore_nan``."""
     x_arr = _asarray_preserving_trace(x)
     axes = _normalize_axis_tuple(axis, ndim=x_arr.ndim)
     x_flat, _ = _flatten_reduction_axes(x_arr, axes=axes)
     dx_flat, _ = _flatten_reduction_axes(dx, axes=axes)
 
-    valid = xp.logical_not(xp.isnan(x_flat))
-    fill_value = -float("inf") if reduce_kind == "max" else float("inf")
-    candidate = xp.where(valid, x_flat, xp.full_like(x_flat, fill_value))
+    valid = xp.logical_not(xp.isnan(x_flat)) if ignore_nan else None
+    candidate = x_flat
+    if valid is not None:
+        fill_value = -float("inf") if reduce_kind == "max" else float("inf")
+        candidate = xp.where(valid, x_flat, xp.full_like(x_flat, fill_value))
     winner = (
         xp.argmax(candidate, axis=-1) if reduce_kind == "max" else xp.argmin(candidate, axis=-1)
     )
@@ -437,8 +388,8 @@ def _nan_maxmin_tangent(
         xp.where(winner_mask, dx_flat, xp.zeros_like(dx_flat)),
         axis=-1,
     )
-    has_valid = xp.any(valid, axis=-1)
-    gathered = xp.where(has_valid, gathered, xp.zeros_like(gathered))
+    if valid is not None:
+        gathered = xp.where(xp.any(valid, axis=-1), gathered, xp.zeros_like(gathered))
     return _reshape_reduction_result(
         gathered,
         input_shape=x_arr.shape,

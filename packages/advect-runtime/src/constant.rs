@@ -83,6 +83,23 @@ pub enum NumericDType {
 }
 
 impl NumericDType {
+    const ALL: [Self; 14] = [
+        Self::Bool,
+        Self::Int8,
+        Self::Int16,
+        Self::Int32,
+        Self::Int64,
+        Self::Uint8,
+        Self::Uint16,
+        Self::Uint32,
+        Self::Uint64,
+        Self::Float16,
+        Self::Float32,
+        Self::Float64,
+        Self::Complex64,
+        Self::Complex128,
+    ];
+
     /// Canonical logical dtype name.
     #[must_use]
     pub const fn name(self) -> &'static str {
@@ -121,25 +138,12 @@ impl FromStr for NumericDType {
     type Err = ConstantError;
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
-        match value {
-            "bool" => Ok(Self::Bool),
-            "int8" => Ok(Self::Int8),
-            "int16" => Ok(Self::Int16),
-            "int32" => Ok(Self::Int32),
-            "int64" => Ok(Self::Int64),
-            "uint8" => Ok(Self::Uint8),
-            "uint16" => Ok(Self::Uint16),
-            "uint32" => Ok(Self::Uint32),
-            "uint64" => Ok(Self::Uint64),
-            "float16" => Ok(Self::Float16),
-            "float32" => Ok(Self::Float32),
-            "float64" => Ok(Self::Float64),
-            "complex64" => Ok(Self::Complex64),
-            "complex128" => Ok(Self::Complex128),
-            _ => Err(ConstantError::new(format!(
-                "unsupported staged constant dtype {value:?}"
-            ))),
-        }
+        Self::ALL
+            .into_iter()
+            .find(|dtype| dtype.name() == value)
+            .ok_or_else(|| {
+                ConstantError::new(format!("unsupported staged constant dtype {value:?}"))
+            })
     }
 }
 
@@ -163,8 +167,7 @@ impl PortableConstant {
     ) -> Result<Self, ArtifactError> {
         validate_shape_and_bytes(kind, dtype, &shape, &data)
             .map_err(|error| ArtifactError::new(error.to_string()))?;
-        let digest = digest_body(kind, dtype, &shape, &data)
-            .map_err(|error| ArtifactError::new(error.to_string()))?;
+        let digest = digest_body(kind, dtype, &shape, &data);
         Ok(Self {
             kind,
             dtype,
@@ -302,19 +305,7 @@ impl<'de> Deserialize<'de> for PortableConstant {
         })?;
         validate_shape_and_bytes(kind, dtype, &wire.shape, &data)
             .map_err(serde::de::Error::custom)?;
-        if wire.digest.len() != 64
-            || !wire
-                .digest
-                .bytes()
-                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-        {
-            return Err(serde::de::Error::custom(
-                "staged constant digest must be lowercase SHA-256 hex",
-            ));
-        }
-        let expected =
-            digest_body(kind, dtype, &wire.shape, &data).map_err(serde::de::Error::custom)?;
-        if wire.digest != expected {
+        if wire.digest != digest_body(kind, dtype, &wire.shape, &data) {
             return Err(serde::de::Error::custom(
                 "staged constant digest does not match its contents",
             ));
@@ -362,39 +353,26 @@ fn validate_shape_and_bytes(
     Ok(())
 }
 
-fn digest_body(
-    kind: ConstantKind,
-    dtype: NumericDType,
-    shape: &[usize],
-    data: &[u8],
-) -> Result<String, ConstantError> {
+fn digest_body(kind: ConstantKind, dtype: NumericDType, shape: &[usize], data: &[u8]) -> String {
     let mut digest = Sha256::new();
     digest.update(br#"{"byte_order":"little","data":""#);
-    let mut hex_buffer = [0_u8; 8192];
-    for chunk in data.chunks(hex_buffer.len() / 2) {
-        for (encoded, &byte) in hex_buffer.as_chunks_mut::<2>().0.iter_mut().zip(chunk) {
-            encoded
-                .copy_from_slice(&[crate::hex::digit(byte >> 4), crate::hex::digit(byte & 0x0f)]);
-        }
-        let encoded_len = chunk
-            .len()
-            .checked_mul(2)
-            .ok_or_else(|| ConstantError::new("constant digest byte count overflows"))?;
-        let encoded = hex_buffer
-            .get(..encoded_len)
-            .ok_or_else(|| ConstantError::new("constant digest buffer is inconsistent"))?;
-        digest.update(encoded);
+    // Hash the hex text in bounded chunks rather than encoding all data at once.
+    for chunk in data.chunks(4096) {
+        digest.update(crate::hex::encode(chunk));
     }
-    let shape = serde_json::to_string(shape)
-        .map_err(|error| ConstantError::new(format!("constant digest encoding failed: {error}")))?;
+    let shape = shape
+        .iter()
+        .map(usize::to_string)
+        .collect::<Vec<_>>()
+        .join(",");
     let suffix = format!(
         "\",\"dtype\":\"{}\",\"format\":\"{CONSTANT_FORMAT}\",\"kind\":\"{}\",\
-         \"layout\":\"{CONSTANT_LAYOUT}\",\"shape\":{shape},\"version\":{CONSTANT_VERSION}}}",
+         \"layout\":\"{CONSTANT_LAYOUT}\",\"shape\":[{shape}],\"version\":{CONSTANT_VERSION}}}",
         dtype.name(),
         kind.name(),
     );
     digest.update(suffix.as_bytes());
-    Ok(crate::hex::encode(&digest.finalize()))
+    crate::hex::encode(&digest.finalize())
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

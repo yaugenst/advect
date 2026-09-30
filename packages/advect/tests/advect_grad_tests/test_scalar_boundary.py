@@ -31,30 +31,111 @@ def test_real_scalar_primal_uses_rank_zero_float64_array_tracing() -> None:
     assert dtype == np.dtype("float64")
 
 
-def test_scalar_values_tangents_and_cotangents_unlift_at_public_boundaries() -> None:
-    def function(value: Any) -> Any:
-        return value * value
+def _square(value: Any) -> Any:
+    return value * value
 
-    value, gradient = ad.value_and_grad(function)(3.0)
-    assert (value, gradient) == pytest.approx((9.0, 6.0))
-    assert type(value) is type(gradient) is float
 
-    value, tangent = ad.jvp(function)(3.0, tangents=2)
-    assert (value, tangent) == pytest.approx((9.0, 12.0))
-    assert type(value) is type(tangent) is float
+def _augmented_square(value: Any) -> Any:
+    value = value.copy()
+    value += 1.0
+    return value * value
 
-    value, pullback = ad.vjp(function)(3.0)
-    assert type(value) is float
-    gradient = pullback(1)
-    assert type(gradient) is float
-    assert gradient == pytest.approx(6.0)
 
-    value, linear = ad.linearize(function, 3.0)
+def _indexed_augmented_square(value: Any) -> Any:
+    value = value.copy()
+    value[...] += 1.0
+    return value * value
+
+
+def _indexed_set_square(value: Any) -> Any:
+    value = value.copy()
+    value[...] = value * value
+    return value + 1.0
+
+
+def _numpy_function(value: Any) -> Any:
+    return np.square(value) + value
+
+
+def _serialized_square() -> Any:
+    program = ad.stage(_square, specs=(ad.ArraySpec((), "float64", weak=True),))
+    return ad.StagedProgram.from_dict(program.to_dict())
+
+
+def _implicit_identity() -> Any:
+    root = ad.implicit_root(
+        lambda solution, parameter: solution - parameter,
+        solve=lambda residual, initial: initial - residual(initial),
+        linear_solve=lambda _operator, rhs: rhs,
+    )
+    return lambda parameter: root(parameter, initial=0.0)
+
+
+def _scalar_category(value: object) -> str:
+    """Return ``"weak"`` for a Python float, else a rank-zero value's strong dtype."""
+    if type(value) is float:
+        return "weak"
+    assert isinstance(value, np.ndarray | np.generic)
+    assert value.shape == ()
+    return str(value.dtype)
+
+
+# Python operators keep a Python scalar weak; a NumPy function or an array method
+# such as copy(), which a Python float lacks, returns a strong NumPy value.
+@pytest.mark.parametrize(
+    ("make_function", "x", "expected", "output_category"),
+    [
+        pytest.param(lambda: _square, 3.0, (9.0, 6.0, 2.0), "weak", id="square"),
+        pytest.param(lambda: lambda value: value**3, 2.0, (8.0, 12.0, 12.0), "weak", id="cube"),
+        pytest.param(lambda: _numpy_function, 3.0, (12.0, 7.0, 2.0), "float64", id="numpy"),
+        pytest.param(lambda: _augmented_square, 3.0, (16.0, 8.0, 2.0), "float64", id="augmented"),
+        pytest.param(
+            lambda: _indexed_augmented_square, 3.0, (16.0, 8.0, 2.0), "float64", id="indexed-add"
+        ),
+        pytest.param(
+            lambda: _indexed_set_square, 3.0, (10.0, 6.0, 2.0), "float64", id="indexed-set"
+        ),
+        pytest.param(_serialized_square, 3.0, (9.0, 6.0, 2.0), "weak", id="serialized-program"),
+        pytest.param(lambda: ad.checkpoint(_square), 3.0, (9.0, 6.0, 2.0), "weak", id="checkpoint"),
+        pytest.param(_implicit_identity, 3.0, (3.0, 1.0, 0.0), "weak", id="implicit-root"),
+    ],
+)
+def test_every_scalar_transform_returns_python_float_derivatives(
+    make_function: Any,
+    x: float,
+    expected: tuple[float, float, float],
+    output_category: str,
+) -> None:
+    function = make_function()
+    value, gradient, second = expected
+    # Python int and float tangents and cotangents are both accepted.
+    value_and_gradient = ad.value_and_grad(function)(x)
+    primal, tangent = ad.jvp(function)(x, tangents=2)
+    vjp_value, pullback = ad.vjp(function)(x)
+    linear_value, linear = ad.linearize(function, x)
     with linear:
-        first = linear(1)
-        second = linear(2.0)
-    assert type(value) is type(first) is type(second) is float
-    assert (value, first, second) == pytest.approx((9.0, 6.0, 12.0))
+        linear_tangent, linear_gradient = linear(2.0), linear.pullback(1)
+    hvp_value, hvp_product = ad.hvp(function)(x, vectors=1.5)
+
+    # Values and forward tangents keep the output's scalar category ...
+    outputs = (value_and_gradient[0], primal, tangent, vjp_value, linear_value, linear_tangent)
+    assert [_scalar_category(result) for result in (*outputs, hvp_value)] == [output_category] * 7
+    assert (*outputs, hvp_value) == pytest.approx(
+        (value, value, 2 * gradient, value, value, 2 * gradient, value)
+    )
+    # ... and derivatives with respect to a Python-scalar input are Python floats.
+    derivatives = (
+        value_and_gradient[1],
+        pullback(1.0),
+        linear_gradient,
+        ad.jacobian(function)(x),
+        ad.grad(ad.grad(function))(x),
+        hvp_product,
+        ad.hessian(function)(x),
+        ad.hessian_diag(function)(x),
+    )
+    assert [type(result) for result in derivatives] == [float] * 8
+    assert derivatives == pytest.approx((gradient,) * 4 + (second, 1.5 * second, second, second))
 
 
 def test_scalar_output_pytrees_unlift_without_changing_structure() -> None:
@@ -158,50 +239,13 @@ def test_weak_scalar_auxiliary_outputs_match_dynamic_and_staged_transforms() -> 
     assert results == pytest.approx((6.0, 4.0, 9.0, 6.0, 4.0) * 2)
 
 
-def _copy_add_and_square(value: Any) -> Any:
-    value = value.copy()
-    value += 1.0
-    return value * value
-
-
-def _copy_index_add_and_square(value: Any) -> Any:
-    value = value.copy()
-    value[...] += 1.0
-    return value * value
-
-
-@pytest.mark.parametrize(
-    "function",
-    [
-        pytest.param(_copy_add_and_square, id="augmented-assignment"),
-        pytest.param(_copy_index_add_and_square, id="indexed-augmented-assignment"),
-    ],
-)
-def test_weak_scalar_category_survives_functionalized_mutation(function: Any) -> None:
-    value, tangent = ad.jvp(function)(3.0, tangents=2.0)
-    grad_value, gradient = ad.value_and_grad(function)(3.0)
-    vjp_value, pullback = ad.vjp(function)(3.0)
-    pullback_gradient = pullback(1.0)
-    linear_value, linear = ad.linearize(function, 3.0)
-    with linear:
-        linear_tangent = linear(2.0)
-
-    results = (
-        value,
-        tangent,
-        grad_value,
-        gradient,
-        vjp_value,
-        pullback_gradient,
-        linear_value,
-        linear_tangent,
-    )
-    assert all(type(result) is float for result in results)
-    assert results == pytest.approx((16.0, 16.0, 16.0, 8.0, 16.0, 8.0, 16.0, 16.0))
-
-
 def test_scalar_boundary_composes_across_nesting_and_argument_selection() -> None:
+    def directional(x: Any) -> Any:
+        return ad.jvp(lambda v: v * v)(x, tangents=1.0)[1]
+
     third = ad.grad(ad.grad(ad.grad(lambda x: x**4)))(2.0)
+    forward_of_forward = ad.jvp(directional)(3.0, tangents=2.0)
+    forward_of_reverse = ad.jvp(ad.grad(lambda x: x**3))(3.0, tangents=1.0)
     positional = ad.grad(lambda x, y: x * y, argnums=(0, 1))(3.0, 4.0)
     named = ad.grad(
         lambda x, *, scale: x * scale,
@@ -209,27 +253,51 @@ def test_scalar_boundary_composes_across_nesting_and_argument_selection() -> Non
         argnames=("scale",),
     )(3.0, scale=4.0)
 
-    assert type(third) is float
+    assert all(
+        type(result) is float for result in (third, *forward_of_forward, *forward_of_reverse)
+    )
     assert third == pytest.approx(48.0)
+    assert forward_of_forward == pytest.approx((6.0, 4.0))
+    assert forward_of_reverse == pytest.approx((27.0, 18.0))
     assert positional == pytest.approx((4.0, 3.0))
     assert named == pytest.approx((4.0, {"scale": 3.0}))
 
 
-def test_scalar_boundary_covers_dense_derivative_helpers() -> None:
-    def function(x: Any) -> Any:
-        return x**3
+@pytest.mark.parametrize("xp", [np, strict], ids=["numpy", "array_api_strict"])
+def test_nested_scalar_pullback_keeps_the_callers_cotangent_strong(xp: Any) -> None:
+    # The pullback of a Python-float primal returns a weak scalar; the caller's
+    # own cotangent that it passes through stays strong for every later use.
+    single = xp.asarray(2.0, dtype=xp.float32)
 
-    jacobian = ad.jacobian(function)(2.0)
-    value, product = ad.hvp(function)(2.0, vectors=1.5)
-    hessian = ad.hessian(function)(2.0)
-    diagonal = ad.hessian_diag(function)(2.0)
+    def outer(c: Any) -> Any:
+        passed = ad.vjp(lambda v: v)(3.0)[1](c)
+        shifted = ad.vjp(lambda v: v + 2.0)(3.0)[1](c)
+        return c * single, passed, shifted
 
-    assert type(jacobian) is type(value) is type(product) is float
-    assert type(hessian) is type(diagonal) is float
-    assert jacobian == pytest.approx(12.0)
-    assert (value, product) == pytest.approx((8.0, 18.0))
-    assert hessian == pytest.approx(12.0)
-    assert diagonal == pytest.approx(12.0)
+    c = xp.asarray(2.0)
+    (own, passed, shifted), _tangents = ad.jvp(outer)(c, tangents=xp.asarray(1.0))
+    gradient = ad.grad(lambda value: outer(value)[0])(c)
+    staged_own, _staged_passed, _staged_shifted = ad.stage(outer, c)(c)
+
+    assert own.dtype == gradient.dtype == staged_own.dtype == xp.float64
+    assert type(passed) is type(shifted) is float
+    assert (float(own), passed, shifted) == (4.0, 2.0, 2.0)
+    assert (float(gradient), float(staged_own)) == (2.0, 4.0)
+
+
+@pytest.mark.parametrize(
+    "inner",
+    [
+        pytest.param(ad.grad(lambda v: v * v), id="grad"),
+        pytest.param(lambda x: ad.jvp(lambda v: v * v)(x, tangents=1.0)[1], id="jvp"),
+    ],
+)
+def test_staged_nested_scalar_derivatives_execute(inner: Any) -> None:
+    # Staged execution represents only Python-scalar inputs and the values
+    # derived from them as weak scalars, so a staged value is never re-marked.
+    staged = ad.stage(lambda x: inner(x) * np.float32(2), 3.0)
+
+    assert float(staged(3.0)) == 12.0
 
 
 @pytest.mark.parametrize("transform", [ad.hessian, ad.hessian_diag])
@@ -277,8 +345,9 @@ def test_staged_scalar_programs_and_derivatives_use_the_same_array_boundary() ->
 
     expected_value = np.sin(3.0) + 9.0
     expected_derivative = np.cos(3.0) + 6.0
-    assert type(primal) is type(derivative) is float
-    assert type(value) is type(derivative_with_value) is float
+    # np.sin of a Python float is a strong NumPy scalar; derivatives stay Python floats.
+    assert type(primal) is type(value) is type(expected_value) is np.float64
+    assert type(derivative) is type(derivative_with_value) is float
     assert (primal, value) == pytest.approx((expected_value, expected_value))
     assert (derivative, derivative_with_value) == pytest.approx(
         (expected_derivative, expected_derivative)
@@ -318,47 +387,39 @@ def test_numpy_scalars_remain_strong_provider_scalars() -> None:
     assert isinstance(tangent, np.float64)
 
 
-@pytest.mark.parametrize(
-    ("primal", "message"),
-    [
-        pytest.param(True, "Boolean", id="bool"),
-        pytest.param(1.0 + 2.0j, "complex", id="complex"),
-    ],
-)
-def test_unsupported_python_scalar_primals_fail_at_the_boundary(
-    primal: object,
-    message: str,
-) -> None:
-    with pytest.raises(TypeError, match=message):
-        ad.grad(lambda value: value)(primal)
+def _complex_sum(value: Any) -> Any:
+    namespace = value.__array_namespace__()
+    return namespace.sum(namespace.astype(value, namespace.complex128))
 
 
-@pytest.mark.parametrize("transform_name", ["grad", "value_and_grad"])
-def test_nonscalar_output_error_names_the_public_transform(transform_name: str) -> None:
-    transform = getattr(ad, transform_name)
-
-    with pytest.raises(ValueError, match=rf"^{transform_name} requires a scalar-valued function"):
-        transform(lambda value: np.stack((value, value)))(np.array(1.0))
-
-
-def test_grad_rejects_a_multi_leaf_output() -> None:
+def test_grad_rejects_invalid_primals_and_outputs() -> None:
+    # Python complex primals are rejected in test_complex_convention.py.
+    with pytest.raises(TypeError, match="Boolean"):
+        ad.grad(lambda value: value)(True)  # noqa: FBT003 - the rejected primal
+    for transform in (ad.grad, ad.value_and_grad):
+        with pytest.raises(ValueError, match=rf"^{transform.__name__} requires a scalar-valued"):
+            transform(lambda value: np.stack((value, value)))(np.array(1.0))
     with pytest.raises(ValueError, match="output pytree has 2 leaves"):
         ad.grad(lambda value: (value, value))(2.0)
+    with pytest.raises(TypeError, match="got str"):
+        ad.grad(lambda _value: "not numeric")(2.0)
+    # An integer argnums takes the unary fast path; a tuple the general one.
+    for argnums in (0, (0,)):
+        with pytest.raises(ValueError, match="real scalar output"):
+            ad.grad(_complex_sum, argnums=argnums)(strict.asarray([1.0, 2.0]))
 
 
-@pytest.mark.parametrize(
-    "tangent",
-    [
-        pytest.param(True, id="bool"),
-        pytest.param(1.0 + 1.0j, id="complex"),
-        pytest.param(np.ones((), dtype=bool), id="rank-zero-bool-array"),
-        pytest.param(np.asarray(1.0 + 1.0j), id="rank-zero-complex-array"),
-        pytest.param(np.ones(2), id="non-scalar"),
-    ],
-)
-def test_scalar_jvp_rejects_invalid_tangents(tangent: object) -> None:
-    with pytest.raises((TypeError, ValueError), match="Scalar JVP tangent"):
-        ad.jvp(lambda value: value * value)(2.0, tangents=tangent)
+def test_grad_accepts_a_one_leaf_scalar_output_pytree() -> None:
+    gradient = ad.grad(lambda value: {"loss": value * value})(np.array(2.0))
+
+    assert_allclose(gradient, 4.0)
+
+
+def test_grad_preserves_none_for_an_untraceable_input_leaf() -> None:
+    gradient = ad.grad(lambda tree: np.sum(tree["value"]))({"value": np.ones(2), "label": "fixed"})
+
+    assert_allclose(gradient["value"], np.ones(2))
+    assert gradient["label"] is None
 
 
 @pytest.mark.parametrize(
@@ -579,14 +640,16 @@ def test_staged_mixed_scalar_outputs_and_derivatives_round_trip_leaf_categories(
 
 
 def test_staged_weak_scalar_execution_normalizes_ints_and_array_only_operations() -> None:
+    # A Python float has no astype: the lifted scalar casts as a 0-d float64 array.
     program = ad.stage(
         lambda value: np.astype(value, np.float32),
         specs=(ad.ArraySpec((), "float64", weak=True),),
     )
 
-    assert type(program(2)) is float
-    assert type(program(2.0)) is float
-    assert program(2) == pytest.approx(2.0)
+    for result in (program(2), program(2.0)):
+        assert type(result) is np.ndarray
+        assert (result.shape, result.dtype) == ((), np.dtype("float32"))
+        assert result == pytest.approx(2.0)
 
 
 def test_staged_vjp_program_accepts_python_cotangent_for_weak_scalar_output() -> None:
@@ -602,28 +665,19 @@ def test_staged_vjp_program_accepts_python_cotangent_for_weak_scalar_output() ->
     assert gradient == pytest.approx(6.0)
 
 
-def test_dynamic_transforms_compose_around_serialized_weak_scalar_program() -> None:
-    program = ad.StagedProgram.from_dict(
-        ad.stage(
-            lambda value: value * value,
-            specs=(ad.ArraySpec((), "float64", weak=True),),
-        ).to_dict()
+@pytest.mark.parametrize("dtype", [np.float64, np.dtype("float64"), "float64"])
+def test_staged_gradient_selects_a_weak_scalar_declared_with_any_dtype_spelling(
+    dtype: object,
+) -> None:
+    program = ad.stage(
+        lambda array, scale: np.sum(array * scale),
+        specs=(ad.ArraySpec((3,), "float64"), ad.ArraySpec((), dtype, weak=True)),
     )
 
-    value, tangent = ad.jvp(program)(3.0, tangents=2.0)
-    vjp_value, pullback = ad.vjp(program)(3.0)
-    vjp_gradient = pullback(1.0)
-    linear_value, linear = ad.linearize(program, 3.0)
-    with linear:
-        linear_tangent = linear(2.0)
+    gradient = ad.grad(program, argnums=1)(np.array([1.0, 2.0, 3.0]), 2.0)
 
-    assert all(
-        type(result) is float
-        for result in (value, tangent, vjp_value, vjp_gradient, linear_value, linear_tangent)
-    )
-    assert (value, tangent, vjp_value, vjp_gradient) == pytest.approx((9.0, 12.0, 9.0, 6.0))
-    assert type(ad.jacobian(program)(3.0)) is float
-    assert type(ad.hessian(program)(3.0)) is float
+    assert type(gradient) is float
+    assert gradient == pytest.approx(6.0)
 
 
 @pytest.mark.parametrize("dtype", ["bool", "int64", "complex128"])
@@ -745,44 +799,3 @@ def test_array_api_strict_mixed_scalar_staged_composition_preserves_dtype() -> N
     assert value.dtype == tangent.dtype == strict.float32
     assert vjp_value.dtype == gradients[0].dtype == strict.float32
     assert type(gradients[1]) is float
-
-
-def test_scalar_boundary_composes_through_checkpoint() -> None:
-    function = ad.checkpoint(lambda value: value * value)
-
-    gradient = ad.grad(function)(3.0)
-    value, tangent = ad.jvp(function)(3.0, tangents=2.0)
-    vjp_value, pullback = ad.vjp(function)(3.0)
-    vjp_gradient = pullback(1.0)
-    second = ad.grad(ad.grad(function))(3.0)
-
-    assert all(
-        type(result) is float
-        for result in (gradient, value, tangent, vjp_value, vjp_gradient, second)
-    )
-    assert (gradient, value, tangent, vjp_value, vjp_gradient, second) == pytest.approx(
-        (6.0, 9.0, 12.0, 9.0, 6.0, 2.0)
-    )
-
-
-def test_scalar_boundary_composes_through_implicit_root() -> None:
-    root = ad.implicit_root(
-        lambda solution, parameter: solution - parameter,
-        solve=lambda residual, initial: initial - residual(initial),
-        linear_solve=lambda _operator, rhs: rhs,
-    )
-
-    def function(parameter: Any) -> Any:
-        return root(parameter, initial=0.0)
-
-    gradient = ad.grad(function)(3.0)
-    value, tangent = ad.jvp(function)(3.0, tangents=2.0)
-    vjp_value, pullback = ad.vjp(function)(3.0)
-    vjp_gradient = pullback(1.0)
-
-    assert all(
-        type(result) is float for result in (gradient, value, tangent, vjp_value, vjp_gradient)
-    )
-    assert (gradient, value, tangent, vjp_value, vjp_gradient) == pytest.approx(
-        (1.0, 3.0, 2.0, 3.0, 1.0)
-    )

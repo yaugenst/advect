@@ -52,6 +52,12 @@ class _ImplicitRootConfig[ParamsT, SolutionT]:
     initial_treedef: TreeDef
 
 
+def _leaf_namespace(value: object) -> object | None:
+    # A leaf's provider does not depend on the active revision: NumPy before 2.3
+    # serves no namespace at the latest one, and NumPy 2.0 scalars none at all.
+    return _get_array_namespace(value, api_version=None)
+
+
 def _leaf_spec(value: object) -> tuple[tuple[int, ...], str, str, str | None]:
     shape = tuple(int(dimension) for dimension in getattr(value, "shape", ()))
     dtype = getattr(value, "dtype", None)
@@ -67,7 +73,7 @@ def _leaf_spec(value: object) -> tuple[tuple[int, ...], str, str, str | None]:
             dtype = "complex128"
         else:
             dtype = value_type.__name__
-    namespace = _get_array_namespace(value)
+    namespace = _leaf_namespace(value)
     provider = (
         "python"
         if namespace is None
@@ -116,7 +122,7 @@ def _validate_same_spec(
 
 
 def _zero_like(value: object) -> object:
-    namespace = _get_array_namespace(value)
+    namespace = _leaf_namespace(value)
     zeros_like = getattr(namespace, "zeros_like", None) if namespace is not None else None
     if callable(zeros_like):
         return zeros_like(value)
@@ -172,11 +178,7 @@ def _normalize_scalar_solution_provider(solution: object, params: object) -> obj
     """Move Python scalar roots onto the differentiable parameter provider."""
     params_leaves, _params_treedef = tree_flatten(params)
     namespace = next(
-        (
-            candidate
-            for leaf in params_leaves
-            if (candidate := _get_array_namespace(leaf)) is not None
-        ),
+        (candidate for leaf in params_leaves if (candidate := _leaf_namespace(leaf)) is not None),
         None,
     )
     if namespace is None:

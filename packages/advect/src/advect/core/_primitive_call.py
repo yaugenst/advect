@@ -10,10 +10,7 @@ from advect.core._array_api.providers import (
     _get_array_namespace,
     _get_backend_key_from_namespace,
 )
-from advect.core._array_protocol_helpers import (
-    literals_are_weak,
-    weak_scalar_runtime_value,
-)
+from advect.core._array_protocol_helpers import literal_is_weak, weak_scalar_runtime_value
 from advect.core._backends import get_hook
 from advect.core._context import (
     _is_recorder_in_active_trace_stack,
@@ -24,7 +21,7 @@ from advect.core._context import (
 )
 from advect.core._errors import TracingError
 from advect.core._graph_attrs import _PRIMITIVE_CALL_KEY
-from advect.core._protocols import ArrayLike, _snapshot_traced
+from advect.core._protocols import ArrayLike, _is_traced, _snapshot_traced
 from advect.core._pytree import (
     DictKey,
     SequenceKey,
@@ -161,15 +158,11 @@ def _split_primitive_attrs(
     return meta, node_attrs
 
 
-def _is_traced_leaf(value: Any) -> bool:
-    return callable(getattr(value, "_advect_snapshot", None))
-
-
 def _leaf_to_dynamic_operand(
     recorder: DynamicTape,
     leaf: Any,
 ) -> tuple[int | None, Any] | None:
-    if _is_traced_leaf(leaf):
+    if _is_traced(leaf):
         leaf_recorder = getattr(leaf, "recorder", None)
         if leaf_recorder is recorder:
             node_id, value = _snapshot_traced(leaf)
@@ -190,7 +183,7 @@ def _leaf_to_dynamic_operand(
 
 
 def _normalize_output_leaf(value: Any, *, namespace: Any | None) -> Any:
-    if _is_traced_leaf(value):
+    if _is_traced(value):
         # An inner transform may execute the atomic primal with outer tracers.
         return value
     if isinstance(value, ArrayLike):
@@ -210,20 +203,24 @@ def _normalize_output_pytree(
     *,
     namespace: Any | None,
 ) -> tuple[list[Any], TreeDef]:
-    paths, leaves, treedef = tree_flatten_with_paths(value)
+    leaves, treedef = tree_flatten(value)
     if treedef.num_leaves < 1:
         msg = "Primitives must return at least one scalar/array leaf"
         raise TypeError(msg)
 
     normalized: list[Any] = []
-    invalid: list[tuple[TreePath, Any]] = []
-    for path, leaf in zip(paths, leaves, strict=True):
+    invalid: list[int] = []
+    for index, leaf in enumerate(leaves):
         try:
             normalized.append(_normalize_output_leaf(leaf, namespace=namespace))
         except TypeError:
-            invalid.append((path, leaf))
+            invalid.append(index)
     if invalid:
-        labels = ", ".join(f"{format_path(path)} ({type(leaf).__name__})" for path, leaf in invalid)
+        # Paths are only needed to report the failure.
+        paths, _leaves, _treedef = tree_flatten_with_paths(value)
+        labels = ", ".join(
+            f"{format_path(paths[index])} ({type(leaves[index]).__name__})" for index in invalid
+        )
         msg = f"Primitive returned invalid output leaf/leaves: {labels}"
         raise TypeError(msg)
     return normalized, treedef
@@ -359,76 +356,83 @@ def _keyword_parameter(path: TreePath) -> str | None:
     return parameter.key
 
 
+@dataclass(frozen=True, slots=True)
+class _TracedCall:
+    """Dynamic operands of one primitive call on its recording tape."""
+
+    node_ids: tuple[int, ...]
+    parent_positions: tuple[int, ...]
+    literals: tuple[Any, ...]
+    call_treedef: TreeDef
+    nondiff_mask: tuple[bool, ...]
+    kwargs: dict[str, Any]
+    namespace: Any | None
+    outer_recorders: tuple[object, ...]
+
+
 def _trace_call_arguments(
     recorder: DynamicTape,
     *,
     op_name: str,
-    args: tuple[Any, ...],
     kwargs: dict[str, Any],
     nondiff_argnames: frozenset[str],
-    dynamic_argnames: frozenset[str],
-) -> tuple[
-    tuple[int, ...],
-    tuple[int, ...],
-    tuple[Any, ...],
-    TreeDef,
-    tuple[bool, ...],
-    tuple[Any, ...],
-    tuple[bool, ...],
-    tuple[Any, ...],
-    dict[str, Any],
-    Any | None,
-]:
-    paths, leaves, treedef = tree_flatten_with_paths((args, kwargs))
+) -> _TracedCall:
+    """Substitute every dynamic-argument leaf with its operand on ``recorder``.
+
+    The durable call tree keeps its ``(args, kwargs)`` root with empty
+    positional arguments. Every leaf belongs to a dynamic argument, so a leaf
+    that is not an array, scalar, or tracer is rejected.
+    """
+    leaves, call_treedef = tree_flatten(((), kwargs))
+    # Name leaves by the flattened keys: a re-registered dict node may reorder them.
+    kwargs_def = call_treedef.children[1]
+    parameters = (
+        name
+        for name, argument_def in zip(kwargs_def.aux_data, kwargs_def.children, strict=True)
+        for _ in range(argument_def.num_leaves)
+    )
     node_ids: list[int] = []
     parent_positions: list[int] = []
     literals: list[Any] = []
-    input_mask: list[bool] = []
-    static_leaves: list[Any] = []
     nondiff_mask: list[bool] = []
-    call_leaves: list[Any] = []
-    input_values: list[Any] = []
-    namespace_values: list[Any] = []
+    values: list[Any] = []
+    outer_recorders: list[object] = []
 
-    for path, leaf in zip(paths, leaves, strict=True):
-        parameter = _keyword_parameter(path)
+    for parameter, leaf in zip(parameters, leaves, strict=True):
         dynamic_operand = _leaf_to_dynamic_operand(recorder, leaf)
-        if dynamic_operand is not None:
-            node_id, value = dynamic_operand
-            operand_position = len(input_values)
-            if node_id is None:
-                literals.append(value)
-            else:
-                node_ids.append(node_id)
-                parent_positions.append(operand_position)
-            input_mask.append(True)
-            nondiff_mask.append(parameter in nondiff_argnames)
-            call_leaves.append(value)
-            input_values.append(value)
-            namespace_values.append(leaf)
-            continue
-        if parameter in dynamic_argnames:
+        if dynamic_operand is None:
             msg = (
                 f"Primitive '{op_name.removeprefix('custom.')}' argument '{parameter}' "
                 "is not traceable; declare it in static_argnames or pass an array/scalar"
             )
             raise TypeError(msg)
-        input_mask.append(False)
-        static_leaves.append(leaf)
-        call_leaves.append(leaf)
+        node_id, value = dynamic_operand
+        if node_id is None:
+            literals.append(value)
+        else:
+            node_ids.append(node_id)
+            parent_positions.append(len(values))
+        nondiff_mask.append(parameter in nondiff_argnames)
+        values.append(value)
+        # An enclosing tracer, passed directly or as an inner tracer's payload,
+        # routes execution through the enclosing recorder.
+        if (
+            _is_traced(value)
+            and (value_recorder := getattr(value, "recorder", None)) is not None
+            and value_recorder is not recorder
+        ):
+            outer_recorders.append(value_recorder)
 
-    call_args, call_kwargs = _unflatten_call_tree(treedef, call_leaves)
-    return (
-        tuple(node_ids),
-        tuple(parent_positions),
-        tuple(literals),
-        treedef,
-        tuple(input_mask),
-        tuple(static_leaves),
-        tuple(nondiff_mask),
-        call_args,
-        call_kwargs,
-        _infer_namespace(namespace_values),
+    _call_args, call_kwargs = _unflatten_call_tree(call_treedef, values)
+    return _TracedCall(
+        node_ids=tuple(node_ids),
+        parent_positions=tuple(parent_positions),
+        literals=tuple(literals),
+        call_treedef=call_treedef,
+        nondiff_mask=tuple(nondiff_mask),
+        kwargs=call_kwargs,
+        namespace=_infer_namespace(leaves),
+        outer_recorders=tuple(outer_recorders),
     )
 
 
@@ -476,64 +480,17 @@ def _attach_residual(
         raise
 
 
-def _record_primitive_node(  # noqa: PLR0913 - mirrors the native recording contract
-    recorder: DynamicTape,
-    *,
-    op: str,
-    parents: tuple[int, ...],
-    parent_positions: tuple[int, ...],
-    literals: tuple[Any, ...],
-    value: Any,
-    attrs: Mapping[str, Any],
-    shape: tuple[int, ...],
-    dtype: Any,
-    schema_version: int,
-    source_location: str | None,
-) -> int:
-    if literals:
-        return recorder.record_operation_with_literals(
-            op,
-            parents,
-            parent_positions,
-            literals,
-            value,
-            dict(attrs),
-            shape,
-            dtype,
-            schema_version=schema_version,
-            source_location=source_location,
-            literal_weak=literals_are_weak(list(literals)),
-        )
-    return recorder.record_operation(
-        op,
-        parents,
-        value,
-        dict(attrs),
-        shape,
-        dtype,
-        schema_version=schema_version,
-        source_location=source_location,
-    )
+def _weak_output_leaves(recorder: DynamicTape, call: _TracedCall, output: Any) -> list[bool]:
+    """Return which output leaves are weak scalars (NEP 50).
 
-
-def _outer_tracer_recorder(
-    args: tuple[Any, ...],
-    kwargs: dict[str, Any],
-    *,
-    current_recorder: object,
-) -> object | None:
-    """Return the nearest enclosing recorder represented by primitive operands."""
-    leaves, _treedef = tree_flatten((args, kwargs))
-    recorders = tuple(
-        recorder
-        for leaf in leaves
-        if _is_traced_leaf(leaf)
-        and (recorder := getattr(leaf, "recorder", None)) is not None
-        and recorder is not current_recorder
+    As a Python operator does, an implementation that returns a Python scalar
+    from weak operands returns a weak scalar; in a nested trace the enclosing
+    trace's value already carries that category.
+    """
+    weak_operands = all(recorder.is_weak(node_id) for node_id in call.node_ids) and all(
+        literal_is_weak(literal) for literal in call.literals
     )
-    if not recorders:
-        return None
-    return _select_deepest_active_recorder(recorders)
+    return [weak_operands and literal_is_weak(leaf) for leaf in tree_flatten(output)[0]]
 
 
 def trace_primitive_call(  # noqa: PLR0913 - one call carries the complete primitive contract
@@ -543,41 +500,29 @@ def trace_primitive_call(  # noqa: PLR0913 - one call carries the complete primi
     op_name: str,
     schema_version: int,
     recorder: DynamicTape,
-    args: tuple[Any, ...],
     kwargs: dict[str, Any],
     node_attrs: Mapping[str, Any],
     nondiff_argnames: frozenset[str],
-    dynamic_argnames: frozenset[str],
     has_residual: bool,
     track_output_arity: bool = True,
 ) -> Any:
-    """Execute one concrete primitive call and append its atomic tape node."""
+    """Execute one concrete primitive call and append its atomic tape node.
+
+    ``kwargs`` holds exactly the call's dynamic arguments by name.
+    """
     if _PRIMITIVE_CALL_KEY in kwargs:
         msg = f"Keyword argument '{_PRIMITIVE_CALL_KEY}' is reserved for Advect internals"
         raise TypeError(msg)
-    (
-        input_node_ids,
-        input_positions,
-        literals,
-        call_treedef,
-        input_leaf_mask,
-        static_leaves,
-        nondiff_input_mask,
-        call_args,
-        call_kwargs,
-        namespace,
-    ) = _trace_call_arguments(
+    call = _trace_call_arguments(
         recorder,
         op_name=op_name,
-        args=args,
         kwargs=kwargs,
         nondiff_argnames=nondiff_argnames,
-        dynamic_argnames=dynamic_argnames,
     )
-    outer_recorder = _outer_tracer_recorder(
-        call_args,
-        call_kwargs,
-        current_recorder=recorder,
+    call_kwargs = call.kwargs
+    namespace = call.namespace
+    outer_recorder = (
+        _select_deepest_active_recorder(call.outer_recorders) if call.outer_recorders else None
     )
     if has_residual and outer_recorder is not None:
         msg = (
@@ -590,7 +535,7 @@ def trace_primitive_call(  # noqa: PLR0913 - one call carries the complete primi
     direct_execution = outer_recorder is None
     if direct_execution:
         with _suspend_tracing():
-            execution = function(*call_args, **call_kwargs)
+            execution = function(**call_kwargs)
     else:
         outer_frame = _trace_frame_for_recorder(outer_recorder)
         if outer_frame is None:
@@ -603,7 +548,7 @@ def trace_primitive_call(  # noqa: PLR0913 - one call carries the complete primi
                     "preserved in an enclosing staged trace without abstract evaluation"
                 )
                 raise TracingError(msg)
-            nested_output = abstract_function(*call_args, **call_kwargs)
+            nested_output = abstract_function(**call_kwargs)
         else:
             nested_output = trace_primitive_call(
                 function,
@@ -611,11 +556,9 @@ def trace_primitive_call(  # noqa: PLR0913 - one call carries the complete primi
                 op_name=op_name,
                 schema_version=schema_version,
                 recorder=cast("DynamicTape", outer_recorder),
-                args=call_args,
                 kwargs=call_kwargs,
                 node_attrs=node_attrs,
                 nondiff_argnames=nondiff_argnames,
-                dynamic_argnames=dynamic_argnames,
                 has_residual=has_residual,
                 track_output_arity=track_output_arity,
             )
@@ -631,16 +574,21 @@ def trace_primitive_call(  # noqa: PLR0913 - one call carries the complete primi
                 "dependency as an explicit primitive argument."
             )
             raise TracingError(msg)
+        weak_leaves = _weak_output_leaves(recorder, call, execution.output)
         result_leaves, output_treedef = _normalize_output_pytree(
             execution.output,
             namespace=namespace,
         )
+        if direct_execution and not call.node_ids and all(weak_leaves):
+            # Weak scalars computed from weak constants have no array provider
+            # to trace them; they are constants of the trace, as eagerly.
+            return execution.output
         meta = _PrimitiveCallMeta(
-            call_treedef=call_treedef,
-            input_leaf_mask=input_leaf_mask,
-            static_leaves=static_leaves,
+            call_treedef=call.call_treedef,
+            input_leaf_mask=(True,) * len(call.nondiff_mask),
+            static_leaves=(),
             output_treedef=output_treedef,
-            nondiff_input_mask=nondiff_input_mask,
+            nondiff_input_mask=call.nondiff_mask,
         )
         attrs = dict(node_attrs)
         attrs[_PRIMITIVE_CALL_KEY] = meta
@@ -648,24 +596,23 @@ def trace_primitive_call(  # noqa: PLR0913 - one call carries the complete primi
         if track_output_arity:
             _record_primitive_output_count(op_name, len(result_leaves))
 
-        if len(result_leaves) == 1:
-            result_value = result_leaves[0]
-            shape, dtype = _output_shape_and_dtype(result_value)
-            node_id = _record_primitive_node(
-                recorder,
-                op=op_name,
-                parents=input_node_ids,
-                parent_positions=input_positions,
-                literals=literals,
-                value=result_value,
-                attrs=attrs,
-                shape=shape,
-                dtype=dtype,
-                schema_version=schema_version,
-                source_location=source_location,
-            )
+        single_output = len(result_leaves) == 1
+        shapes_dtypes = [_output_shape_and_dtype(leaf) for leaf in result_leaves]
+        node_id = recorder.record_operation(
+            op_name,
+            call.node_ids,
+            result_leaves[0] if single_output else tuple(result_leaves),
+            attrs,
+            *shapes_dtypes[0],
+            input_positions=call.parent_positions,
+            literals=call.literals,
+            weak=single_output and weak_leaves[0],
+            schema_version=schema_version,
+            source_location=source_location,
+        )
+        if single_output:
             traced = _wrap_traced_output(
-                result_value,
+                result_leaves[0],
                 node_id=node_id,
                 recorder=recorder,
                 namespace=namespace,
@@ -673,20 +620,6 @@ def trace_primitive_call(  # noqa: PLR0913 - one call carries the complete primi
             _attach_residual(recorder, node_id, execution)
             return tree_unflatten(output_treedef, [traced])
 
-        shapes_dtypes = [_output_shape_and_dtype(leaf) for leaf in result_leaves]
-        node_id = _record_primitive_node(
-            recorder,
-            op=op_name,
-            parents=input_node_ids,
-            parent_positions=input_positions,
-            literals=literals,
-            value=tuple(result_leaves),
-            attrs=attrs,
-            shape=shapes_dtypes[0][0],
-            dtype=shapes_dtypes[0][1],
-            schema_version=schema_version,
-            source_location=source_location,
-        )
         traced_leaves: list[Any] = []
         for index, (leaf, (shape, dtype)) in enumerate(
             zip(result_leaves, shapes_dtypes, strict=True)
@@ -698,6 +631,7 @@ def trace_primitive_call(  # noqa: PLR0913 - one call carries the complete primi
                 {"index": index, "num_outputs": len(result_leaves)},
                 shape,
                 dtype,
+                weak=weak_leaves[index],
                 source_location=source_location,
             )
             traced_leaves.append(

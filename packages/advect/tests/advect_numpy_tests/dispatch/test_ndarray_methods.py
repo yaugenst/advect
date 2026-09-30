@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import copy
 from typing import Any
 
 import numpy as np
 import pytest
 
 import advect as ad
+from advect_numpy_tests._assertions import assert_staged_round_trip, assert_tree_close
 
 
 @pytest.mark.parametrize("order", ["A", "C", "F", "K", "a", "c", "f", "k", None])
@@ -68,8 +70,7 @@ def test_reshape_copy_keyword_matches_numpy_2_3() -> None:
     np.testing.assert_array_equal(primal, value.reshape((3, 2), copy=True))
     np.testing.assert_array_equal(tangent, direction.reshape((3, 2), copy=True))
 
-    program = ad.stage(apply, specs=(ad.ArraySpec(value.shape, value.dtype),))
-    np.testing.assert_array_equal(program(value), value.reshape((3, 2), copy=True))
+    assert_staged_round_trip(apply, value, rtol=0.0)
 
 
 def test_reshape_without_shape_matches_numpy_type_error_in_both_modes() -> None:
@@ -101,16 +102,7 @@ def test_sum_initial_is_a_live_differentiable_operand_in_both_modes() -> None:
     np.testing.assert_allclose(primal, np.sum(value, axis=1, initial=initial))
     np.testing.assert_allclose(tangent, np.full(2, 5.0))
 
-    program = ad.stage(
-        apply,
-        specs=(
-            ad.ArraySpec(value.shape, value.dtype),
-            ad.ArraySpec(initial.shape, initial.dtype),
-        ),
-    )
-    restored = ad.StagedProgram.from_dict(program.to_dict())
-    for staged in (program, restored):
-        np.testing.assert_allclose(staged(value, initial), primal)
+    assert_staged_round_trip(apply, value, initial)
 
 
 def test_mean_where_remains_a_numpy_owned_staged_method() -> None:
@@ -120,11 +112,56 @@ def test_mean_where_remains_a_numpy_owned_staged_method() -> None:
     def apply(x: Any) -> Any:
         return x.mean(axis=1, where=mask)
 
-    program = ad.stage(apply, specs=(ad.ArraySpec(value.shape, value.dtype),))
-    restored = ad.StagedProgram.from_dict(program.to_dict())
-    expected = np.mean(value, axis=1, where=mask)
-    for staged in (program, restored):
-        np.testing.assert_allclose(staged(value), expected)
+    assert_staged_round_trip(apply, value)
+
+
+def test_properties_copy_protocols_and_transpose_forms_preserve_tangents() -> None:
+    value = np.asarray([[1 + 2j, 3 - 1j], [-2 + 0.5j, 4 + 3j]])
+    direction = np.asarray([[0.2 - 0.1j, -0.3 + 0.4j], [0.5 + 0.2j, -0.1 - 0.6j]])
+
+    def operation(array: Any) -> tuple[Any, ...]:
+        return (
+            array.real,
+            array.imag,
+            copy.copy(array),
+            copy.deepcopy(array),
+            array.transpose((1, 0)),
+            array.transpose(1, 0),
+        )
+
+    primal, tangent = ad.jvp(operation)(value, tangents=direction)
+
+    assert_tree_close(primal, operation(value))
+    assert_tree_close(tangent, operation(direction))
+
+
+@pytest.mark.parametrize(
+    "exponent",
+    [
+        2,
+        3,
+        True,
+        pytest.param(
+            2.0,
+            marks=pytest.mark.skipif(
+                np.lib.NumpyVersion(np.__version__) < "2.3.0",
+                reason="NumPy before 2.3 squares an array for any scalar exponent of 2",
+            ),
+        ),
+    ],
+    ids=repr,
+)
+def test_power_operator_on_a_bool_array_matches_ndarray(exponent: object) -> None:
+    # ndarray squares an array raised to the Python int 2, so a bool array
+    # gives int8 where np.power gives int64; a NumPy bool scalar does not.
+    def apply(array: Any) -> tuple[Any, Any, Any]:
+        mask = (array > 0) ** exponent
+        return mask, array * mask, (np.sum(array) > 0) ** exponent
+
+    value = np.asarray([1.5, -2.0, 0.0], dtype=np.float32)
+    primal, _tangent = ad.jvp(apply)(value, tangents=np.ones_like(value))
+    assert_tree_close(primal, apply(value), rtol=0.0)
+    assert_staged_round_trip(apply, value, rtol=0.0)
 
 
 def test_astype_default_preserves_ndarray_subclasses() -> None:

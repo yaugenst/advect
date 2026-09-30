@@ -10,7 +10,10 @@ The core is stdlib-only and backend-agnostic.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Protocol, overload
+from typing import TYPE_CHECKING, Any, Protocol, overload
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 __all__ = [
     "DictKey",
@@ -42,17 +45,19 @@ _INHERITED_REGISTRY: set[type[Any]] = set()
 _PROTOCOL_RESULT_ARITY = 2
 
 
-def _tree_contains_tracer(value: Any, _seen: set[int] | None = None) -> bool:
+def _tree_contains_tracer(value: Any, _seen: dict[int, Any] | None = None) -> bool:
     """Return whether leaves or registered-node metadata contain an Advect tracer."""
     if callable(getattr(value, "_advect_snapshot", None)):
         return True
     if type(value) in (type(None), bool, int, float, complex, str, bytes, bytearray):
         return False
-    seen = set() if _seen is None else _seen
+    # Keep every visited value alive: a flatten function may build fresh child
+    # containers whose addresses CPython would otherwise reuse mid-scan.
+    seen = {} if _seen is None else _seen
     identity = id(value)
     if identity in seen:
         return False
-    seen.add(identity)
+    seen[identity] = value
 
     impl = _get_node_impl(type(value))
     if impl is not None:
@@ -298,6 +303,47 @@ def _get_node_impl(node_type: type[Any]) -> tuple[_FlattenFn, _UnflattenFn] | No
     return None
 
 
+_LEAF_TREEDEF = TreeDef(node_type=None, aux_data=None, children=(), num_leaves=1)
+_MISSING_LEAF = object()
+
+
+def _flatten(
+    tree: Any,
+    leaves: list[Any],
+    paths: list[TreePath] | None,
+    path: TreePath,
+) -> TreeDef:
+    """Append ``tree``'s leaves, and their paths when requested, in pytree order."""
+    node_type = type(tree)
+    impl = _get_node_impl(node_type)
+    if impl is None:
+        leaves.append(tree)
+        if paths is not None:
+            paths.append(path)
+        return _LEAF_TREEDEF
+
+    children, aux_data = impl[0](tree)
+    if paths is None:
+        child_defs = [_flatten(child, leaves, None, path) for child in children]
+    elif node_type is dict:
+        if not isinstance(aux_data, tuple) or len(aux_data) != len(children):
+            msg = "Invalid dict pytree aux_data: expected tuple of keys matching children"
+            raise TypeError(msg)
+        child_defs = [
+            _flatten(child, leaves, paths, (*path, DictKey(key)))
+            for key, child in zip(aux_data, children, strict=True)
+        ]
+    else:
+        child_defs = [
+            _flatten(child, leaves, paths, (*path, SequenceKey(index)))
+            for index, child in enumerate(children)
+        ]
+    num_leaves = 0
+    for child_def in child_defs:
+        num_leaves += child_def.num_leaves
+    return TreeDef(node_type, aux_data, tuple(child_defs), num_leaves)
+
+
 def tree_flatten(tree: Any) -> tuple[list[Any], TreeDef]:
     """Flatten a pytree into a list of leaves and a TreeDef.
 
@@ -308,31 +354,8 @@ def tree_flatten(tree: Any) -> tuple[list[Any], TreeDef]:
     >>> leaves, treedef.num_leaves
     ([1, 2], 2)
     """
-    root_impl = _get_node_impl(type(tree))
-    if root_impl is None:
-        return [tree], TreeDef(node_type=None, aux_data=None, children=(), num_leaves=1)
-
     leaves: list[Any] = []
-
-    def rec(subtree: Any) -> TreeDef:
-        node_type = type(subtree)
-        impl = _get_node_impl(node_type)
-        if impl is None:
-            leaves.append(subtree)
-            return TreeDef(node_type=None, aux_data=None, children=(), num_leaves=1)
-
-        flatten_fn, _unflatten_fn = impl
-        children, aux_data = flatten_fn(subtree)
-
-        child_defs = tuple(rec(child) for child in children)
-        return TreeDef(
-            node_type=node_type,
-            aux_data=aux_data,
-            children=child_defs,
-            num_leaves=sum(cd.num_leaves for cd in child_defs),
-        )
-
-    treedef = rec(tree)
+    treedef = _flatten(tree, leaves, None, ())
     return leaves, treedef
 
 
@@ -351,46 +374,27 @@ def tree_flatten_with_paths(tree: Any) -> tuple[list[TreePath], list[Any], TreeD
     >>> leaves
     [1, 2]
     """
-    root_impl = _get_node_impl(type(tree))
-    if root_impl is None:
-        leaf_treedef = TreeDef(node_type=None, aux_data=None, children=(), num_leaves=1)
-        return [()], [tree], leaf_treedef
-
     paths: list[TreePath] = []
     leaves: list[Any] = []
-
-    def rec(subtree: Any, *, path: TreePath) -> TreeDef:
-        node_type = type(subtree)
-        impl = _get_node_impl(node_type)
-        if impl is None:
-            paths.append(path)
-            leaves.append(subtree)
-            return TreeDef(node_type=None, aux_data=None, children=(), num_leaves=1)
-
-        flatten_fn, _unflatten_fn = impl
-        children, aux_data = flatten_fn(subtree)
-
-        child_defs: list[TreeDef] = []
-        if node_type is dict:
-            keys = aux_data
-            if not isinstance(keys, tuple) or len(keys) != len(children):
-                msg = "Invalid dict pytree aux_data: expected tuple of keys matching children"
-                raise TypeError(msg)
-            for key, child in zip(keys, children, strict=True):
-                child_defs.append(rec(child, path=(*path, DictKey(key))))
-        else:
-            for i, child in enumerate(children):
-                child_defs.append(rec(child, path=(*path, SequenceKey(i))))
-
-        return TreeDef(
-            node_type=node_type,
-            aux_data=aux_data,
-            children=tuple(child_defs),
-            num_leaves=sum(cd.num_leaves for cd in child_defs),
-        )
-
-    treedef = rec(tree, path=())
+    treedef = _flatten(tree, leaves, paths, ())
     return paths, leaves, treedef
+
+
+def _unflatten(treedef: TreeDef, leaves: Iterator[Any]) -> Any:
+    node_type = treedef.node_type
+    if node_type is None:
+        leaf = next(leaves, _MISSING_LEAF)
+        if leaf is _MISSING_LEAF:
+            # Only a hand-built TreeDef can undercount its children's leaves.
+            msg = "Unflatten needs more leaves than its treedef declares"
+            raise ValueError(msg)
+        return leaf
+    impl = _get_node_impl(node_type)
+    if impl is None:
+        msg = f"Unregistered pytree node type: {node_type.__name__}"
+        raise TypeError(msg)
+    children = [_unflatten(child_def, leaves) for child_def in treedef.children]
+    return impl[1](treedef.aux_data, tuple(children))
 
 
 def tree_unflatten(treedef: TreeDef, leaves: list[Any]) -> Any:
@@ -409,26 +413,12 @@ def tree_unflatten(treedef: TreeDef, leaves: list[Any]) -> Any:
     if treedef.node_type is None:
         return leaves[0]
 
-    def rec(defn: TreeDef, *, index: int) -> tuple[Any, int]:
-        if defn.node_type is None:
-            return leaves[index], index + 1
-
-        impl = _get_node_impl(defn.node_type)
-        if impl is None:
-            msg = f"Unregistered pytree node type: {defn.node_type.__name__}"
-            raise TypeError(msg)
-        _flatten_fn, unflatten_fn = impl
-
-        out_children: list[Any] = []
-        for child_def in defn.children:
-            child, index = rec(child_def, index=index)
-            out_children.append(child)
-
-        return unflatten_fn(defn.aux_data, tuple(out_children)), index
-
-    result, end = rec(treedef, index=0)
-    if end != len(leaves):
-        msg = f"Unflatten did not consume all leaves: consumed {end}, total {len(leaves)}"
+    remaining = iter(leaves)
+    result = _unflatten(treedef, remaining)
+    unused = sum(1 for _leaf in remaining)
+    if unused:
+        consumed = len(leaves) - unused
+        msg = f"Unflatten did not consume all leaves: consumed {consumed}, total {len(leaves)}"
         raise ValueError(msg)
     return result
 

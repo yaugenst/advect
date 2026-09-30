@@ -1,21 +1,22 @@
 """Executable NumPy support cases used only by qualification tests.
 
 Each case names one foreign NumPy call and contains only portable Python data.
-Runtime declarations live in :mod:`advect.numpy._support_contract`.  These
-sample inputs and invocation recipes prove those declarations without shipping
-test specimens in the installed package.
+Runtime declarations live in :mod:`advect.numpy._support_contract` and supply
+each form's lifetimes and derivative availability. These sample inputs and
+invocation recipes prove those declarations without shipping test specimens in
+the installed package.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Literal
+
+from advect.numpy._support_contract import numpy_support_declarations
 
 type NumpyCallableKind = Literal["array_method", "function", "ufunc_call", "ufunc_method"]
 type DerivativeArgnums = tuple[tuple[int, ...], ...]
-
-_ALL_MODES = ("dynamic", "staged", "serialized")
-_DYNAMIC_ONLY = ("dynamic",)
+type ResultAdapter = Literal["identity", "array", "dtype_num", "fields"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,30 +50,29 @@ class Function:
 
 @dataclass(frozen=True, slots=True)
 class NumpySupportCase:
-    """One executable public spelling, input-role, and lifetime contract."""
+    """One executable public spelling and input-role contract.
+
+    The form's declaration supplies its lifetimes and whether it has
+    derivatives. A differentiable case differentiates each floating input alone
+    and all of them together unless ``derivative_argnums`` names the exact
+    independently active input-role groups. ``stages`` marks a documented
+    spelling that also stages although its form is declared dynamic-only.
+    """
 
     callable: str
     kind: NumpyCallableKind
     inputs: tuple[ArrayInput, ...]
     args: tuple[object, ...]
-    derivative_argnums: DerivativeArgnums | None
     kwargs: tuple[tuple[str, object], ...] = ()
-    modes: tuple[str, ...] = _ALL_MODES
     variant: str = "baseline"
+    derivative_argnums: DerivativeArgnums | None = None
+    stages: bool = False
     compare_values: bool = True
-    trace_argnums: tuple[int, ...] | None = None
     return_input: int | None = None
-    result_adapter: Literal["identity", "array", "dtype_num", "tuple"] = "identity"
+    result_adapter: ResultAdapter = "identity"
     expected_deprecation: str | None = None
 
     def __post_init__(self) -> None:
-        if self.trace_argnums is not None and (
-            not self.trace_argnums
-            or self.trace_argnums != tuple(sorted(set(self.trace_argnums)))
-            or any(index < 0 or index >= len(self.inputs) for index in self.trace_argnums)
-        ):
-            message = f"{self.identifier}: invalid trace argument indices: {self.trace_argnums}"
-            raise ValueError(message)
         if self.return_input is not None and not 0 <= self.return_input < len(self.inputs):
             message = f"{self.identifier}: invalid returned input index: {self.return_input}"
             raise ValueError(message)
@@ -99,11 +99,11 @@ class NumpySupportCase:
         return f"{self.kind}:{self.callable}[{self.variant}]"
 
 
-_REAL = ArrayInput([-1.5, -0.25, 0.5, 2.0], "float64")
-_RIGHT = ArrayInput([0.75, 1.5, 2.0, 0.5], "float64")
-_POSITIVE = ArrayInput([0.25, 0.5, 1.5, 3.0], "float64")
+_REAL = ArrayInput([-1.4, -0.3, 0.6, 1.7], "float64")
+_RIGHT = ArrayInput([0.8, 1.3, 2.2, 0.45], "float64")
+_POSITIVE = ArrayInput([0.3, 0.7, 1.6, 3.1], "float64")
 _UNIT = ArrayInput([-0.75, -0.25, 0.25, 0.75], "float64")
-_NONZERO = ArrayInput([-1.5, -0.5, 0.5, 2.0], "float64")
+_NONZERO = ArrayInput([-1.3, -0.45, 0.55, 2.1], "float64")
 _COMPLEX = ArrayInput([1.0 + 0.5j, -2.0 + 1.0j, 0.25 - 0.75j], "complex128")
 _MATRIX = ArrayInput([[4.0, 1.0], [1.0, 3.0]], "float64")
 _RECTANGULAR = ArrayInput([[1.0, 2.0], [3.0, 5.0], [7.0, 11.0]], "float64")
@@ -112,82 +112,54 @@ _INDEX = ArrayInput([2, 0, 2, 1], "int64")
 _BOOL = ArrayInput([[True, False], [False, True]], "bool")
 _INT_LEFT = ArrayInput([[1, 2], [3, 4]], "int64")
 _INT_RIGHT = ArrayInput([[4, 1], [2, 3]], "int64")
-
-_NOT_APPLICABLE_DERIVATIVE_FORMS = frozenset(
-    {
-        "numpy.all",
-        "numpy.any",
-        "numpy.argmax",
-        "numpy.argmin",
-        "numpy.bitwise_and",
-        "numpy.bitwise_or",
-        "numpy.bitwise_xor",
-        "numpy.argsort",
-        "numpy.count_nonzero",
-        "numpy.equal",
-        "numpy.greater",
-        "numpy.greater_equal",
-        "numpy.invert",
-        "numpy.in1d",
-        "numpy.isfinite",
-        "numpy.isinf",
-        "numpy.isnan",
-        "numpy.less",
-        "numpy.less_equal",
-        "numpy.logical_and",
-        "numpy.logical_not",
-        "numpy.logical_or",
-        "numpy.logical_xor",
-        "numpy.not_equal",
-        "numpy.searchsorted",
-        "numpy.signbit",
-    }
-)
-_UNSUPPORTED_DERIVATIVE_FORMS = frozenset(
-    {
-        "numpy.empty",
-        "numpy.eye",
-        "numpy.ones",
-        "numpy.zeros",
-    }
-)
-_DERIVATIVE_ARGNUM_OVERRIDES: dict[str, DerivativeArgnums] = {
-    "numpy.copysign": ((0,),),
-    # The template anchors NumPy dispatch while the fill carries its value derivative.
-    "numpy.full_like": ((0, 1),),
-}
+# A mutation must trace its destination, so replacement values join it.
+_UPDATE_GROUPS: DerivativeArgnums = ((0,), (0, 1))
+_MASKED_UPDATE_GROUPS: DerivativeArgnums = ((0,), (0, 2))
 
 
-def _derivative_argnums(
-    callable_name: str,
+def _function(
+    path: str,
     inputs: tuple[ArrayInput, ...],
-) -> DerivativeArgnums | None:
-    if callable_name in _NOT_APPLICABLE_DERIVATIVE_FORMS | _UNSUPPORTED_DERIVATIVE_FORMS:
-        return None
-    indices = tuple(
-        index for index, value in enumerate(inputs) if value.dtype.startswith(("float", "complex"))
-    )
-    if not indices:
-        return None
-    individual = tuple((index,) for index in indices)
-    default = (*individual, indices) if len(indices) > 1 else individual
-    return _DERIVATIVE_ARGNUM_OVERRIDES.get(callable_name, default)
-
-
-def _ufunc(
-    name: str,
-    *inputs: ArrayInput,
-    modes: tuple[str, ...] = _ALL_MODES,
+    args: tuple[object, ...],
+    kwargs: tuple[tuple[str, object], ...] = (),
+    **options: object,
 ) -> NumpySupportCase:
-    callable_name = f"numpy.{name}"
-    return NumpySupportCase(
-        callable=callable_name,
-        kind="ufunc_call",
-        inputs=inputs,
-        args=tuple(Input(index) for index in range(len(inputs))),
-        derivative_argnums=_derivative_argnums(callable_name, inputs),
-        modes=modes,
-    )
+    return NumpySupportCase(f"numpy.{path}", "function", inputs, args, kwargs, **options)
+
+
+def _unary(
+    path: str,
+    value: ArrayInput = _REAL,
+    kwargs: tuple[tuple[str, object], ...] = (),
+    **options: object,
+) -> NumpySupportCase:
+    return _function(path, (value,), (Input(0),), kwargs, **options)
+
+
+def _binary(
+    path: str,
+    left: ArrayInput = _REAL,
+    right: ArrayInput = _RIGHT,
+    kwargs: tuple[tuple[str, object], ...] = (),
+    **options: object,
+) -> NumpySupportCase:
+    return _function(path, (left, right), (Input(0), Input(1)), kwargs, **options)
+
+
+def _method(
+    path: str,
+    inputs: tuple[ArrayInput, ...],
+    args: tuple[object, ...] = (),
+    kwargs: tuple[tuple[str, object], ...] = (),
+    **options: object,
+) -> NumpySupportCase:
+    kind = "array_method" if path.startswith("ndarray.") else "ufunc_method"
+    return NumpySupportCase(f"numpy.{path}", kind, inputs, args, kwargs, **options)
+
+
+def _ufunc(name: str, *inputs: ArrayInput, **options: object) -> NumpySupportCase:
+    arguments = tuple(Input(index) for index in range(len(inputs)))
+    return NumpySupportCase(f"numpy.{name}", "ufunc_call", inputs, arguments, **options)
 
 
 def _ufunc_cases() -> tuple[NumpySupportCase, ...]:
@@ -212,6 +184,7 @@ def _ufunc_cases() -> tuple[NumpySupportCase, ...]:
         "fabs": _NONZERO,
         "floor": _REAL,
         "frexp": _POSITIVE,
+        "invert": _INT_LEFT,
         "isfinite": _REAL,
         "isinf": _REAL,
         "isnan": _REAL,
@@ -219,6 +192,7 @@ def _ufunc_cases() -> tuple[NumpySupportCase, ...]:
         "log10": _POSITIVE,
         "log1p": _UNIT,
         "log2": _POSITIVE,
+        "logical_not": _BOOL,
         "modf": _REAL,
         "negative": _REAL,
         "positive": _REAL,
@@ -237,120 +211,73 @@ def _ufunc_cases() -> tuple[NumpySupportCase, ...]:
         "tanh": _REAL,
         "trunc": _REAL,
     }
-    dynamic_only = {
-        "cbrt",
-        "deg2rad",
-        "degrees",
-        "exp2",
-        "fabs",
-        "frexp",
-        "modf",
-        "rad2deg",
-        "radians",
-    }
-    cases = [
-        _ufunc(name, domain, modes=_DYNAMIC_ONLY if name in dynamic_only else _ALL_MODES)
-        for name, domain in unary_domains.items()
-    ]
     binary_domains = {
         "add": (_REAL, _RIGHT),
         "arctan2": (_NONZERO, _NONZERO),
+        "bitwise_and": (_INT_LEFT, _INT_RIGHT),
+        "bitwise_or": (_INT_LEFT, _INT_RIGHT),
+        "bitwise_xor": (_INT_LEFT, _INT_RIGHT),
         "copysign": (_NONZERO, _NONZERO),
         "divide": (_REAL, _NONZERO),
         "divmod": (_POSITIVE, _NONZERO),
+        "equal": (_REAL, _RIGHT),
         "float_power": (_POSITIVE, _RIGHT),
         "floor_divide": (_POSITIVE, _NONZERO),
         "fmax": (_REAL, _RIGHT),
         "fmin": (_REAL, _RIGHT),
         "fmod": (_POSITIVE, _NONZERO),
+        "greater": (_REAL, _RIGHT),
+        "greater_equal": (_REAL, _RIGHT),
         "heaviside": (_NONZERO, _RIGHT),
         "hypot": (_NONZERO, _NONZERO),
+        "ldexp": (_REAL, ArrayInput([1, 2, -1, 0], "int32")),
+        "left_shift": (_INT_LEFT, _INT_RIGHT),
+        "less": (_REAL, _RIGHT),
+        "less_equal": (_REAL, _RIGHT),
         "logaddexp": (_REAL, _RIGHT),
         "logaddexp2": (_REAL, _RIGHT),
+        "logical_and": (_BOOL, _BOOL),
+        "logical_or": (_BOOL, _BOOL),
+        "logical_xor": (_BOOL, _BOOL),
+        "matmul": (_MATRIX, _MATRIX),
+        "matvec": (_MATRIX, _VECTOR),
         "maximum": (_REAL, _RIGHT),
         "minimum": (_REAL, _RIGHT),
         "multiply": (_REAL, _RIGHT),
         "nextafter": (_REAL, _RIGHT),
+        "not_equal": (_REAL, _RIGHT),
         "power": (_POSITIVE, _RIGHT),
         "remainder": (_POSITIVE, _NONZERO),
+        "right_shift": (_INT_LEFT, _INT_RIGHT),
         "subtract": (_REAL, _RIGHT),
+        "vecdot": (_VECTOR, _VECTOR),
+        "vecmat": (_VECTOR, _MATRIX),
     }
-    dynamic_only.update({"divmod", "float_power", "fmax", "fmin", "fmod", "logaddexp2"})
-    cases.extend(
-        _ufunc(name, *domains, modes=_DYNAMIC_ONLY if name in dynamic_only else _ALL_MODES)
-        for name, domains in binary_domains.items()
+    return (
+        *(_ufunc(name, domain) for name, domain in unary_domains.items()),
+        *(
+            _ufunc(name, *domains, derivative_argnums=((0,),) if name == "copysign" else None)
+            for name, domains in binary_domains.items()
+        ),
     )
-    cases.extend(
-        (
-            _ufunc("ldexp", _REAL, ArrayInput([1, 2, -1, 0], "int32")),
-            _ufunc("matmul", _MATRIX, _MATRIX),
-            _ufunc("matvec", _MATRIX, _VECTOR),
-            _ufunc("vecdot", _VECTOR, _VECTOR),
-            _ufunc("vecmat", _VECTOR, _MATRIX),
-        )
-    )
-    cases.extend(
-        (
-            _ufunc("bitwise_and", _INT_LEFT, _INT_RIGHT),
-            _ufunc("bitwise_or", _INT_LEFT, _INT_RIGHT),
-            _ufunc("bitwise_xor", _INT_LEFT, _INT_RIGHT),
-            _ufunc("equal", _REAL, _RIGHT),
-            _ufunc("greater", _REAL, _RIGHT),
-            _ufunc("greater_equal", _REAL, _RIGHT),
-            _ufunc("invert", _INT_LEFT),
-            _ufunc("less", _REAL, _RIGHT),
-            _ufunc("less_equal", _REAL, _RIGHT),
-            _ufunc("logical_and", _BOOL, _BOOL),
-            _ufunc("logical_not", _BOOL),
-            _ufunc("logical_or", _BOOL, _BOOL),
-            _ufunc("logical_xor", _BOOL, _BOOL),
-            _ufunc("not_equal", _REAL, _RIGHT),
-        )
-    )
-    return tuple(cases)
 
 
-def _function(
-    path: str,
-    inputs: tuple[ArrayInput, ...],
-    args: tuple[object, ...],
-    kwargs: tuple[tuple[str, object], ...] = (),
-    *,
-    modes: tuple[str, ...] = _ALL_MODES,
-    variant: str = "baseline",
-    compare_values: bool = True,
-    derivative_argnums: DerivativeArgnums | Literal["auto"] | None = "auto",
-    trace_argnums: tuple[int, ...] | None = None,
-    return_input: int | None = None,
-    result_adapter: Literal["identity", "array", "dtype_num", "tuple"] = "identity",
-    expected_deprecation: str | None = None,
-) -> NumpySupportCase:
-    callable_name = f"numpy.{path}"
-    resolved_derivative_argnums = (
-        _derivative_argnums(callable_name, inputs)
-        if derivative_argnums == "auto"
-        else derivative_argnums
-    )
-    return NumpySupportCase(
-        callable=callable_name,
-        kind="function",
-        inputs=inputs,
-        args=args,
-        derivative_argnums=resolved_derivative_argnums,
-        kwargs=kwargs,
-        modes=modes,
-        variant=variant,
-        compare_values=compare_values,
-        trace_argnums=trace_argnums,
-        return_input=return_input,
-        result_adapter=result_adapter,
-        expected_deprecation=expected_deprecation,
+def _outer_cases(calls: tuple[NumpySupportCase, ...]) -> tuple[NumpySupportCase, ...]:
+    """Qualify each declared ``ufunc.outer`` form on its binary call's inputs."""
+    declared = {
+        declaration.callable
+        for declaration in numpy_support_declarations()
+        if declaration.kind == "ufunc_method"
+    }
+    return tuple(
+        replace(case, kind="ufunc_method", callable=f"{case.callable}.outer", args=(Input(1),))
+        for case in calls
+        if f"{case.callable}.outer" in declared
     )
 
 
 def _function_cases() -> tuple[NumpySupportCase, ...]:
-    cases: list[NumpySupportCase] = []
-    for name in (
+    reductions = [
         "max",
         "mean",
         "min",
@@ -365,18 +292,17 @@ def _function_cases() -> tuple[NumpySupportCase, ...]:
         "std",
         "sum",
         "var",
-    ):
-        domain = _POSITIVE if name in {"nanprod", "prod"} else _REAL
-        cases.append(
-            _function(
+    ]
+    return (
+        *(
+            _unary(
                 name,
-                (domain,),
-                (Input(0),),
+                _POSITIVE if name in {"nanprod", "prod"} else _REAL,
                 (("axis", 0), ("keepdims", True)),
             )
-        )
-    for name, initial in (("max", -10.0), ("min", 10.0), ("sum", 2.0)):
-        cases.append(
+            for name in reductions
+        ),
+        *(
             _function(
                 name,
                 (_MATRIX, _BOOL),
@@ -384,142 +310,84 @@ def _function_cases() -> tuple[NumpySupportCase, ...]:
                 (("axis", 0), ("keepdims", True), ("initial", initial), ("where", Input(1))),
                 variant="where-initial",
             )
-        )
-    cases.extend(
+            for name, initial in (("max", -10.0), ("min", 10.0), ("sum", 2.0))
+        ),
+        _unary("cumprod", _POSITIVE, (("axis", 0),)),
+        _unary("cumsum", _REAL, (("axis", 0),)),
+        _unary("all", _MATRIX, (("axis", 0),)),
+        _unary("any", _MATRIX, (("axis", 1),)),
+        _unary("argsort"),
+        _unary("count_nonzero", _REAL, (("axis", 0),)),
+        _binary("searchsorted", ArrayInput([1.0, 3.0, 5.0, 7.0], "float64")),
+        _function("reshape", (_REAL,), (Input(0), (2, 2))),
+        _unary("transpose", _MATRIX),
+        _function("moveaxis", (_MATRIX,), (Input(0), 0, 1)),
+        _function("swapaxes", (_MATRIX,), (Input(0), 0, 1)),
+        _unary("ravel", _MATRIX),
+        _unary("flip", _MATRIX, (("axis", 0),)),
+        _unary("fliplr", _MATRIX),
+        _unary("flipud", _MATRIX),
+        _function("roll", (_REAL,), (Input(0), 1)),
+        _unary("rot90", _MATRIX),
+        _unary("squeeze", ArrayInput([[[1.0, 2.0]]], "float64")),
+        _function("expand_dims", (_REAL,), (Input(0), 0)),
+        _function("broadcast_to", (_VECTOR,), (Input(0), (2, 2))),
+        _function("concatenate", (_REAL, _RIGHT), ((Input(0), Input(1)),)),
+        _function("stack", (_REAL, _RIGHT), ((Input(0), Input(1)),), (("axis", 0),)),
+        _unary("diff", _REAL, (("n", 1),)),
+        _unary("gradient"),
+        _unary("nan_to_num"),
+        _binary("dot", _MATRIX, _MATRIX),
+        _binary("inner"),
+        _binary("outer"),
+        _binary("kron", _MATRIX, _MATRIX),
+        _binary("cross", *(ArrayInput([[1.0, 2.0, 3.0]], "float64"),) * 2),
+        _binary("tensordot", _MATRIX, _MATRIX, (("axes", 1),)),
+        _function("where", (_BOOL, _MATRIX, _MATRIX), (Input(0), Input(1), Input(2))),
+        _function("clip", (_REAL,), (Input(0), -0.5, 1.5)),
+        _unary("sort"),
+        _function("partition", (_REAL,), (Input(0), 2)),
+        _binary("take", _REAL, _INDEX),
+        _binary("take_along_axis", _REAL, _INDEX, (("axis", 0),)),
+        _unary("copy", _MATRIX),
+        _function("full", (ArrayInput(2.5, "float32"),), ((2, 3), Input(0)), (("like", Input(0)),)),
+        _function("eye", (_REAL,), (3,), (("like", Input(0)),)),
+        *(
+            _function(name, (_REAL,), ((2, 3),), (("dtype", DType("float32")), ("like", Input(0))))
+            for name in ("zeros", "ones")
+        ),
         _function(
-            name,
-            (_POSITIVE if name == "cumprod" else _REAL,),
-            (Input(0),),
-            (("axis", 0),),
-        )
-        for name in ("cumprod", "cumsum")
+            "empty",
+            (_REAL,),
+            ((2, 3),),
+            (("dtype", DType("float32")), ("like", Input(0))),
+            compare_values=False,
+        ),
+        _unary("zeros_like", _MATRIX),
+        _unary("ones_like", _MATRIX),
+        # The template anchors NumPy dispatch while the fill carries its value derivative.
+        _binary("full_like", _MATRIX, ArrayInput(2.5, "float64"), derivative_argnums=((0, 1),)),
     )
-    cases.extend(
-        (
-            _function("all", (_MATRIX,), (Input(0),), (("axis", 0),)),
-            _function("any", (_MATRIX,), (Input(0),), (("axis", 1),)),
-            _function("argsort", (_REAL,), (Input(0),)),
-            _function("count_nonzero", (_REAL,), (Input(0),), (("axis", 0),)),
-            _function(
-                "searchsorted",
-                (ArrayInput([1.0, 3.0, 5.0, 7.0], "float64"), _RIGHT),
-                (Input(0), Input(1)),
-            ),
-            _function("reshape", (_REAL,), (Input(0), (2, 2))),
-            _function("transpose", (_MATRIX,), (Input(0),)),
-            _function("moveaxis", (_MATRIX,), (Input(0), 0, 1)),
-            _function("swapaxes", (_MATRIX,), (Input(0), 0, 1), modes=_DYNAMIC_ONLY),
-            _function("ravel", (_MATRIX,), (Input(0),), modes=_DYNAMIC_ONLY),
-            _function("flip", (_MATRIX,), (Input(0),), (("axis", 0),)),
-            _function("fliplr", (_MATRIX,), (Input(0),), modes=_DYNAMIC_ONLY),
-            _function("flipud", (_MATRIX,), (Input(0),), modes=_DYNAMIC_ONLY),
-            _function("roll", (_REAL,), (Input(0), 1)),
-            _function("rot90", (_MATRIX,), (Input(0),), modes=_DYNAMIC_ONLY),
-            _function("squeeze", (ArrayInput([[[1.0, 2.0]]], "float64"),), (Input(0),)),
-            _function("expand_dims", (_REAL,), (Input(0), 0)),
-            _function("broadcast_to", (_VECTOR,), (Input(0), (2, 2))),
-            _function("concatenate", (_REAL, _RIGHT), ((Input(0), Input(1)),)),
-            _function("stack", (_REAL, _RIGHT), ((Input(0), Input(1)),), (("axis", 0),)),
-            _function("diff", (_REAL,), (Input(0),), (("n", 1),)),
-            _function("gradient", (_REAL,), (Input(0),)),
-            _function("nan_to_num", (_REAL,), (Input(0),), modes=_DYNAMIC_ONLY),
-            _function("dot", (_MATRIX, _MATRIX), (Input(0), Input(1))),
-            _function("inner", (_REAL, _RIGHT), (Input(0), Input(1)), modes=_DYNAMIC_ONLY),
-            _function("outer", (_REAL, _RIGHT), (Input(0), Input(1))),
-            _function("kron", (_MATRIX, _MATRIX), (Input(0), Input(1)), modes=_DYNAMIC_ONLY),
-            _function(
-                "cross", (ArrayInput([[1.0, 2.0, 3.0]], "float64"),) * 2, (Input(0), Input(1))
-            ),
-            _function("tensordot", (_MATRIX, _MATRIX), (Input(0), Input(1)), (("axes", 1),)),
-            _function("where", (_BOOL, _MATRIX, _MATRIX), (Input(0), Input(1), Input(2))),
-            _function("clip", (_REAL,), (Input(0), -0.5, 1.5)),
-            _function("sort", (_REAL,), (Input(0),)),
-            _function("partition", (_REAL,), (Input(0), 2), modes=_DYNAMIC_ONLY),
-            _function("take", (_REAL, _INDEX), (Input(0), Input(1))),
-            _function(
-                "take_along_axis",
-                (_REAL, _INDEX),
-                (Input(0), Input(1)),
-                (("axis", 0),),
-            ),
-            _function("copy", (_MATRIX,), (Input(0),)),
-            _function(
-                "full", (ArrayInput(2.5, "float32"),), ((2, 3), Input(0)), (("like", Input(0)),)
-            ),
-            _function("eye", (_REAL,), (3,), (("like", Input(0)),)),
-            _function(
-                "zeros",
-                (_REAL,),
-                ((2, 3),),
-                (("dtype", DType("float32")), ("like", Input(0))),
-            ),
-            _function(
-                "ones",
-                (_REAL,),
-                ((2, 3),),
-                (("dtype", DType("float32")), ("like", Input(0))),
-            ),
-            _function(
-                "empty",
-                (_REAL,),
-                ((2, 3),),
-                (("dtype", DType("float32")), ("like", Input(0))),
-                compare_values=False,
-            ),
-            _function("zeros_like", (_MATRIX,), (Input(0),)),
-            _function("ones_like", (_MATRIX,), (Input(0),)),
-            _function("full_like", (_MATRIX, ArrayInput(2.5, "float64")), (Input(0), Input(1))),
-        )
-    )
-    return tuple(cases)
 
 
 def _linalg_cases() -> tuple[NumpySupportCase, ...]:
-    unary = (
-        "cholesky",
-        "det",
-        "eigvalsh",
-        "inv",
-        "norm",
-        "pinv",
-        "svdvals",
+    return (
+        *(
+            _unary(f"linalg.{name}", _MATRIX)
+            for name in ("cholesky", "det", "eigvalsh", "inv", "norm", "diagonal", "trace")
+        ),
+        *(_unary(f"linalg.{name}", _RECTANGULAR) for name in ("pinv", "svdvals")),
+        _binary("linalg.solve", _MATRIX, _VECTOR),
+        _function("linalg.matrix_power", (_MATRIX,), (Input(0), 3)),
+        _unary("linalg.eigh", _MATRIX, result_adapter="fields"),
+        _unary(
+            "linalg.svd",
+            _RECTANGULAR,
+            (("full_matrices", False),),
+            result_adapter="fields",
+        ),
+        _binary("linalg.vecdot", _RECTANGULAR, _RECTANGULAR, (("axis", -1),)),
     )
-    cases = [
-        _function(
-            f"linalg.{name}",
-            (_RECTANGULAR if name in {"pinv", "qr", "svd", "svdvals"} else _MATRIX,),
-            (Input(0),),
-        )
-        for name in unary
-    ]
-    cases.extend(
-        (
-            _function("linalg.solve", (_MATRIX, _VECTOR), (Input(0), Input(1))),
-            _function("linalg.matrix_power", (_MATRIX,), (Input(0), 3)),
-            _function("linalg.diagonal", (_MATRIX,), (Input(0),)),
-            _function("linalg.trace", (_MATRIX,), (Input(0),)),
-            _function(
-                "linalg.eigh",
-                (_MATRIX,),
-                (Input(0),),
-                result_adapter="tuple",
-            ),
-            _function(
-                "linalg.svd",
-                (_RECTANGULAR,),
-                (Input(0),),
-                (("full_matrices", False),),
-                result_adapter="tuple",
-            ),
-            _function(
-                "linalg.vecdot",
-                (_RECTANGULAR, _RECTANGULAR),
-                (Input(0), Input(1)),
-                (("axis", -1),),
-            ),
-        )
-    )
-    return tuple(cases)
 
 
 def _fft_cases() -> tuple[NumpySupportCase, ...]:
@@ -540,212 +408,81 @@ def _fft_cases() -> tuple[NumpySupportCase, ...]:
         "rfft": real,
         "rfftn": real,
     }
-    return tuple(_function(f"fft.{name}", (value,), (Input(0),)) for name, value in inputs.items())
+    return tuple(_unary(f"fft.{name}", value) for name, value in inputs.items())
 
 
 def _method_cases() -> tuple[NumpySupportCase, ...]:
-    array_methods = (
-        NumpySupportCase(
-            "numpy.ndarray.astype", "array_method", (_REAL,), (DType("float32"),), ((0,),)
-        ),
-        NumpySupportCase("numpy.ndarray.copy", "array_method", (_REAL,), (), ((0,),)),
-        NumpySupportCase(
-            "numpy.ndarray.item",
-            "array_method",
-            (ArrayInput([2.0], "float64"),),
-            (),
-            ((0,),),
-        ),
-        NumpySupportCase("numpy.ndarray.reshape", "array_method", (_REAL,), ((2, 2),), ((0,),)),
-        NumpySupportCase("numpy.ndarray.sum", "array_method", (_REAL,), (), ((0,),)),
-        NumpySupportCase(
-            "numpy.ndarray.transpose",
-            "array_method",
-            (_MATRIX,),
-            (),
-            ((0,),),
-            modes=_DYNAMIC_ONLY,
-        ),
+    return (
+        _method("ndarray.astype", (_REAL,), (DType("float32"),)),
+        _method("ndarray.copy", (_REAL,)),
+        _method("ndarray.item", (ArrayInput([2.0], "float64"),)),
+        _method("ndarray.reshape", (_REAL,), ((2, 2),)),
+        _method("ndarray.sum", (_REAL,)),
+        _method("ndarray.transpose", (_MATRIX,)),
+        _method("add.reduce", (_REAL,)),
+        _method("multiply.reduce", (_POSITIVE,)),
+        _method("add.accumulate", (_REAL,)),
+        _method("multiply.accumulate", (_POSITIVE,)),
     )
-    methods = [
-        NumpySupportCase("numpy.add.reduce", "ufunc_method", (_REAL,), (), ((0,),)),
-        NumpySupportCase("numpy.multiply.reduce", "ufunc_method", (_POSITIVE,), (), ((0,),)),
-        NumpySupportCase("numpy.add.accumulate", "ufunc_method", (_REAL,), (), ((0,),)),
-        NumpySupportCase("numpy.multiply.accumulate", "ufunc_method", (_POSITIVE,), (), ((0,),)),
-    ]
-    for name in (
-        "add",
-        "arctan2",
-        "divide",
-        "floor_divide",
-        "hypot",
-        "logaddexp",
-        "maximum",
-        "minimum",
-        "multiply",
-        "power",
-        "remainder",
-        "subtract",
-    ):
-        left, right = (
-            (_POSITIVE, _NONZERO)
-            if name in {"divide", "floor_divide", "remainder"}
-            else (_POSITIVE, _RIGHT)
-        )
-        methods.append(
-            NumpySupportCase(
-                f"numpy.{name}.outer",
-                "ufunc_method",
-                (left, right),
-                (Input(1),),
-                ((0,), (1,), (0, 1)),
-            )
-        )
-    return (*array_methods, *methods)
 
 
 def _additional_existing_function_cases() -> tuple[NumpySupportCase, ...]:
     """Qualify forms whose concrete runtime implementation was never deleted."""
     metadata_cases = (
-        _function(
-            "can_cast",
-            (_REAL,),
-            (Input(0), DType("complex128")),
-            modes=_DYNAMIC_ONLY,
-            derivative_argnums=None,
-            result_adapter="array",
+        _function("can_cast", (_REAL,), (Input(0), DType("complex128")), result_adapter="array"),
+        _binary("common_type", _REAL, _INDEX, result_adapter="dtype_num"),
+        *(
+            _unary(name, value, result_adapter="array")
+            for name, value in (
+                ("iscomplexobj", _COMPLEX),
+                ("isrealobj", _REAL),
+                ("ndim", _MATRIX),
+                ("shape", _MATRIX),
+                ("size", _MATRIX),
+            )
         ),
         _function(
-            "common_type",
-            (_REAL, _INDEX),
-            (Input(0), Input(1)),
-            modes=_DYNAMIC_ONLY,
-            compare_values=False,
-            derivative_argnums=None,
-            result_adapter="dtype_num",
-        ),
-        _function(
-            "iscomplexobj",
-            (_COMPLEX,),
-            (Input(0),),
-            modes=_DYNAMIC_ONLY,
-            derivative_argnums=None,
-            result_adapter="array",
-        ),
-        _function(
-            "isrealobj",
-            (_REAL,),
-            (Input(0),),
-            modes=_DYNAMIC_ONLY,
-            derivative_argnums=None,
-            result_adapter="array",
-        ),
-        _function(
-            "ndim",
-            (_MATRIX,),
-            (Input(0),),
-            modes=_DYNAMIC_ONLY,
-            derivative_argnums=None,
-            result_adapter="array",
-        ),
-        _function(
-            "result_type",
-            (_REAL,),
-            (Input(0), DType("float32")),
-            modes=_DYNAMIC_ONLY,
-            compare_values=False,
-            derivative_argnums=None,
-            result_adapter="dtype_num",
-        ),
-        _function(
-            "shape",
-            (_MATRIX,),
-            (Input(0),),
-            modes=_DYNAMIC_ONLY,
-            derivative_argnums=None,
-            result_adapter="array",
-        ),
-        _function(
-            "size",
-            (_MATRIX,),
-            (Input(0),),
-            derivative_argnums=None,
-            result_adapter="array",
+            "result_type", (_REAL,), (Input(0), DType("float32")), result_adapter="dtype_num"
         ),
     )
+    replacement = ArrayInput([[5.0, 6.0], [7.0, 8.0]], "float64")
     mutation_cases = (
-        _function(
-            "copyto",
-            (_MATRIX, ArrayInput([[5.0, 6.0], [7.0, 8.0]], "float64")),
-            (Input(0), Input(1)),
-            modes=_DYNAMIC_ONLY,
-            return_input=0,
-            derivative_argnums=((0,), (0, 1)),
+        _binary("copyto", _MATRIX, replacement, return_input=0, derivative_argnums=_UPDATE_GROUPS),
+        _binary(
+            "fill_diagonal", _MATRIX, _VECTOR, return_input=0, derivative_argnums=_UPDATE_GROUPS
         ),
-        _function(
-            "fill_diagonal",
-            (_MATRIX, _VECTOR),
-            (Input(0), Input(1)),
-            modes=_DYNAMIC_ONLY,
-            return_input=0,
-            derivative_argnums=((0,), (0, 1)),
-        ),
-        _function(
-            "place",
-            (_MATRIX, _BOOL, _VECTOR),
-            (Input(0), Input(1), Input(2)),
-            modes=_DYNAMIC_ONLY,
-            return_input=0,
-            derivative_argnums=((0,), (0, 2)),
+        *(
+            _function(
+                name,
+                (_MATRIX, _BOOL, _VECTOR),
+                (Input(0), Input(1), Input(2)),
+                return_input=0,
+                derivative_argnums=_MASKED_UPDATE_GROUPS,
+            )
+            for name in ("place", "putmask")
         ),
         _function(
             "put",
             (_REAL, _INDEX, _RIGHT),
             (Input(0), Input(1), Input(2)),
-            modes=_DYNAMIC_ONLY,
             return_input=0,
-            derivative_argnums=((0,), (0, 2)),
+            derivative_argnums=_MASKED_UPDATE_GROUPS,
         ),
         _function(
             "put_along_axis",
-            (
-                _MATRIX,
-                ArrayInput([[1, 0], [0, 1]], "int64"),
-                _MATRIX,
-            ),
+            (_MATRIX, ArrayInput([[1, 0], [0, 1]], "int64"), _MATRIX),
             (Input(0), Input(1), Input(2), 1),
-            modes=_DYNAMIC_ONLY,
             return_input=0,
-            derivative_argnums=((0,), (0, 2)),
-        ),
-        _function(
-            "putmask",
-            (_MATRIX, _BOOL, _VECTOR),
-            (Input(0), Input(1), Input(2)),
-            modes=_DYNAMIC_ONLY,
-            return_input=0,
-            derivative_argnums=((0,), (0, 2)),
+            derivative_argnums=_MASKED_UPDATE_GROUPS,
         ),
     )
     return (
-        _function(
-            "argmax",
-            (_MATRIX,),
-            (Input(0),),
-            (("axis", 1),),
-            derivative_argnums=None,
-        ),
-        _function(
-            "argmin",
-            (_MATRIX,),
-            (Input(0),),
-            (("axis", 1),),
-            derivative_argnums=None,
-        ),
+        _unary("argmax", _MATRIX, (("axis", 1),)),
+        _unary("argmin", _MATRIX, (("axis", 1),)),
         _function("astype", (_REAL,), (Input(0), DType("float32"))),
-        _function("real", (_COMPLEX,), (Input(0),)),
-        _function("trace", (_MATRIX,), (Input(0),)),
-        _function("tril", (_MATRIX,), (Input(0),)),
+        _unary("real", _COMPLEX),
+        _unary("trace", _MATRIX),
+        _unary("tril", _MATRIX),
         *metadata_cases,
         *mutation_cases,
     )
@@ -754,75 +491,8 @@ def _additional_existing_function_cases() -> tuple[NumpySupportCase, ...]:
 def _version_conditional_function_cases() -> tuple[NumpySupportCase, ...]:
     """Qualify aliases only on the NumPy minors that still expose them."""
     return (
-        _function(
-            "in1d",
-            (_REAL, _RIGHT),
-            (Input(0), Input(1)),
-            modes=_DYNAMIC_ONLY,
-            derivative_argnums=None,
-            expected_deprecation=r"`in1d` is deprecated",
-        ),
-        _function(
-            "trapz",
-            (_REAL,),
-            (Input(0),),
-            modes=_DYNAMIC_ONLY,
-            expected_deprecation=r"`trapz` is deprecated",
-        ),
-    )
-
-
-def _additional_outer_cases() -> tuple[NumpySupportCase, ...]:
-    """Qualify omitted ordinary ufunc outer spellings."""
-
-    def outer(
-        name: str,
-        left: ArrayInput,
-        right: ArrayInput,
-        *,
-        modes: tuple[str, ...] = _ALL_MODES,
-        derivative_argnums: DerivativeArgnums | Literal["auto"] | None = "auto",
-    ) -> NumpySupportCase:
-        callable_name = f"numpy.{name}.outer"
-        groups = (
-            _derivative_argnums(callable_name, (left, right))
-            if derivative_argnums == "auto"
-            else derivative_argnums
-        )
-        return NumpySupportCase(
-            callable=callable_name,
-            kind="ufunc_method",
-            inputs=(left, right),
-            args=(Input(1),),
-            derivative_argnums=groups,
-            modes=modes,
-        )
-
-    nondifferentiable = (
-        outer("bitwise_and", _INT_LEFT, _INT_RIGHT, derivative_argnums=None),
-        outer("bitwise_or", _INT_LEFT, _INT_RIGHT, derivative_argnums=None),
-        outer("bitwise_xor", _INT_LEFT, _INT_RIGHT, derivative_argnums=None),
-        outer("equal", _REAL, _RIGHT, derivative_argnums=None),
-        outer("greater", _REAL, _RIGHT, derivative_argnums=None),
-        outer("greater_equal", _REAL, _RIGHT, derivative_argnums=None),
-        outer("less", _REAL, _RIGHT, derivative_argnums=None),
-        outer("less_equal", _REAL, _RIGHT, derivative_argnums=None),
-        outer("logical_and", _BOOL, _BOOL, derivative_argnums=None),
-        outer("logical_or", _BOOL, _BOOL, derivative_argnums=None),
-        outer("logical_xor", _BOOL, _BOOL, derivative_argnums=None),
-        outer("not_equal", _REAL, _RIGHT, derivative_argnums=None),
-    )
-    return (
-        *nondifferentiable,
-        outer("copysign", _NONZERO, _NONZERO, derivative_argnums=((0,),)),
-        outer("float_power", _POSITIVE, _RIGHT, modes=_DYNAMIC_ONLY),
-        outer("fmax", _REAL, _RIGHT, modes=_DYNAMIC_ONLY),
-        outer("fmin", _REAL, _RIGHT, modes=_DYNAMIC_ONLY),
-        outer("fmod", _POSITIVE, _NONZERO, modes=_DYNAMIC_ONLY),
-        outer("heaviside", _NONZERO, _RIGHT),
-        outer("ldexp", _REAL, ArrayInput([1, 2, -1, 0], "int32")),
-        outer("logaddexp2", _REAL, _RIGHT, modes=_DYNAMIC_ONLY),
-        outer("nextafter", _REAL, _RIGHT),
+        _binary("in1d", expected_deprecation=r"`in1d` is deprecated"),
+        _unary("trapz", expected_deprecation=r"`trapz` is deprecated"),
     )
 
 
@@ -839,11 +509,7 @@ def _material_variant_cases() -> tuple[NumpySupportCase, ...]:
             "nanmean",
             (nan_matrix, _BOOL),
             (Input(0),),
-            (
-                ("axis", 0),
-                ("keepdims", True),
-                ("where", Input(1)),
-            ),
+            (("axis", 0), ("keepdims", True), ("where", Input(1))),
             variant="where",
         ),
         _function(
@@ -902,25 +568,18 @@ def _material_variant_cases() -> tuple[NumpySupportCase, ...]:
                 ("like", Input(0)),
                 ("order", "F"),
             ),
-            derivative_argnums=None,
             variant="metadata",
         ),
-        _function(
+        _unary(
             "zeros_like",
-            (_MATRIX,),
-            (Input(0),),
-            (
-                ("device", "cpu"),
-                ("order", "C"),
-                ("shape", (4,)),
-                ("subok", False),
-            ),
+            _MATRIX,
+            (("device", "cpu"), ("order", "C"), ("shape", (4,)), ("subok", False)),
             variant="metadata",
         ),
-        _function(
+        _binary(
             "full_like",
-            (_MATRIX, ArrayInput(2.5, "float64")),
-            (Input(0), Input(1)),
+            _MATRIX,
+            ArrayInput(2.5, "float64"),
             (
                 ("device", "cpu"),
                 ("dtype", DType("float32")),
@@ -929,6 +588,7 @@ def _material_variant_cases() -> tuple[NumpySupportCase, ...]:
                 ("subok", False),
             ),
             variant="metadata",
+            derivative_argnums=((0, 1),),
         ),
         _function(
             "eye",
@@ -942,75 +602,38 @@ def _material_variant_cases() -> tuple[NumpySupportCase, ...]:
                 ("like", Input(0)),
                 ("order", "C"),
             ),
-            derivative_argnums=None,
             variant="metadata",
         ),
+        _function("reshape", (_REAL,), (Input(0), (2, 2)), (("order", "F"),), variant="order"),
+        _unary("transpose", _MATRIX, (("axes", (1, 0)),), variant="axes"),
         _function(
-            "reshape",
-            (_REAL,),
-            (Input(0), (2, 2)),
-            (("order", "F"),),
-            variant="order",
+            "roll", (_MATRIX,), (Input(0), (1, -1)), (("axis", (0, 1)),), variant="paired-axes"
         ),
+        _unary("diagonal", _MATRIX, (("offset", 1),), variant="offset"),
+        _unary("trace", _MATRIX, (("offset", 1),), variant="offset"),
+        _function("diagonal", (_MATRIX,), (Input(0), 1, 1, 0), variant="positional"),
         _function(
-            "transpose",
-            (_MATRIX,),
-            (Input(0),),
-            (("axes", (1, 0)),),
-            variant="axes",
+            "trace", (_MATRIX,), (Input(0), -1, 1, 0, DType("float32")), variant="positional"
         ),
-        _function(
-            "roll",
-            (_MATRIX,),
-            (Input(0), (1, -1)),
-            (("axis", (0, 1)),),
-            variant="paired-axes",
-        ),
-        _function(
-            "diagonal",
-            (_MATRIX,),
-            (Input(0),),
-            (("offset", 1),),
-            variant="offset",
-        ),
-        _function(
-            "trace",
-            (_MATRIX,),
-            (Input(0),),
-            (("offset", 1),),
-            variant="offset",
-        ),
-        _function(
-            "repeat",
-            (_MATRIX,),
-            (Input(0),),
-            (("axis", 1), ("repeats", 2)),
-            variant="axis",
-        ),
-        _function(
-            "diff",
-            (_REAL,),
-            (Input(0),),
-            (("append", (4.0,)), ("axis", 0), ("prepend", 0.0)),
-            variant="boundaries",
+        _unary("repeat", _MATRIX, (("axis", 1), ("repeats", 2)), variant="axis"),
+        _unary(
+            "diff", _REAL, (("append", (4.0,)), ("axis", 0), ("prepend", 0.0)), variant="boundaries"
         ),
         _function(
             "copyto",
             (_MATRIX, _MATRIX, _BOOL),
             (Input(0), Input(1)),
             (("casting", "unsafe"), ("where", Input(2))),
-            modes=_DYNAMIC_ONLY,
-            derivative_argnums=((0,), (0, 1)),
+            derivative_argnums=_UPDATE_GROUPS,
             return_input=0,
             variant="where-casting",
         ),
-        _function(
+        _binary(
             "fill_diagonal",
-            (tall_matrix, _VECTOR),
-            (Input(0), Input(1)),
+            tall_matrix,
+            _VECTOR,
             (("wrap", True),),
-            modes=_DYNAMIC_ONLY,
-            derivative_argnums=((0,), (0, 1)),
+            derivative_argnums=_UPDATE_GROUPS,
             return_input=0,
             variant="wrap",
         ),
@@ -1019,69 +642,61 @@ def _material_variant_cases() -> tuple[NumpySupportCase, ...]:
             (_REAL, ArrayInput([-1, 4, 5], "int64"), _RIGHT),
             (Input(0), Input(1), Input(2)),
             (("mode", "wrap"),),
-            modes=_DYNAMIC_ONLY,
-            derivative_argnums=((0,), (0, 2)),
+            derivative_argnums=_MASKED_UPDATE_GROUPS,
             return_input=0,
             variant="wrap",
+        ),
+        _function(
+            "take",
+            (_MATRIX, ArrayInput([-1, 3, 4], "int64")),
+            (Input(0), Input(1), 1),
+            (("mode", "wrap"),),
+            variant="wrap",
+        ),
+        _function(
+            "take",
+            (_MATRIX, ArrayInput([-1, 3, 4], "int64")),
+            (Input(0), Input(1)),
+            (("mode", "clip"),),
+            variant="clip",
         ),
         _function(
             "put_along_axis",
             (_REAL, _INDEX, _RIGHT),
             (Input(0), Input(1), Input(2), None),
-            modes=_DYNAMIC_ONLY,
-            derivative_argnums=((0,), (0, 2)),
+            derivative_argnums=_MASKED_UPDATE_GROUPS,
             return_input=0,
             variant="axis-none",
         ),
-        _function(
-            "argsort",
-            (_MATRIX,),
-            (Input(0),),
-            (("axis", 0), ("stable", True)),
-            derivative_argnums=None,
-            variant="stable-axis",
-        ),
-        _function(
+        _unary("argsort", _MATRIX, (("axis", 0), ("stable", True)), variant="stable-axis"),
+        _binary(
             "searchsorted",
-            (ArrayInput([1.0, 3.0, 5.0, 7.0], "float64"), _RIGHT),
-            (Input(0), Input(1)),
+            ArrayInput([1.0, 3.0, 5.0, 7.0], "float64"),
+            _RIGHT,
             (("side", "right"), ("sorter", (0, 1, 2, 3))),
-            derivative_argnums=None,
             variant="side-sorter",
         ),
-        _function(
+        _binary(
             "isin",
-            (_REAL, _RIGHT),
-            (Input(0), Input(1)),
-            (("assume_unique", True), ("invert", True), ("kind", "sort")),
-            modes=_DYNAMIC_ONLY,
-            derivative_argnums=None,
+            kwargs=(("assume_unique", True), ("invert", True), ("kind", "sort")),
             variant="options",
         ),
-        _function(
+        _binary(
             "intersect1d",
-            (_REAL, _RIGHT),
-            (Input(0), Input(1)),
-            (("assume_unique", True), ("return_indices", True)),
-            modes=_DYNAMIC_ONLY,
+            kwargs=(("assume_unique", True), ("return_indices", True)),
             variant="indices",
-            result_adapter="tuple",
         ),
-        NumpySupportCase(
-            "numpy.ndarray.astype",
-            "array_method",
+        _method(
+            "ndarray.astype",
             (_REAL,),
             (DType("float32"),),
-            ((0,),),
             (("casting", "unsafe"), ("copy", True), ("order", "F"), ("subok", False)),
             variant="controls",
         ),
-        NumpySupportCase(
-            "numpy.ndarray.sum",
-            "array_method",
+        _method(
+            "ndarray.sum",
             (_MATRIX, _BOOL),
             (),
-            ((0,),),
             (
                 ("axis", 0),
                 ("dtype", DType("float32")),
@@ -1091,12 +706,11 @@ def _material_variant_cases() -> tuple[NumpySupportCase, ...]:
             ),
             variant="controls",
         ),
-        NumpySupportCase(
-            "numpy.add.reduce",
-            "ufunc_method",
+        _method("ndarray.sum", (_MATRIX,), (0,), variant="positional-axis"),
+        _method(
+            "add.reduce",
             (_MATRIX, _BOOL),
             (),
-            ((0,),),
             (
                 ("axis", 1),
                 ("dtype", DType("float32")),
@@ -1106,44 +720,24 @@ def _material_variant_cases() -> tuple[NumpySupportCase, ...]:
             ),
             variant="controls",
         ),
-        NumpySupportCase(
-            "numpy.multiply.accumulate",
-            "ufunc_method",
-            (_MATRIX,),
-            (),
-            ((0,),),
-            (("axis", 1),),
-            variant="axis-one",
-        ),
+        _method("multiply.accumulate", (_MATRIX,), (), (("axis", 1),), variant="axis-one"),
     )
 
 
-def support_cases() -> tuple[NumpySupportCase, ...]:
-    """Return the complete executable NumPy lifetime contract."""
-    from advect_numpy_tests._support_case_families import (  # noqa: PLC0415
-        function_family_cases,
-    )
-
-    cases = (
-        *_ufunc_cases(),
+def base_cases() -> tuple[NumpySupportCase, ...]:
+    """Return the ufunc, method, and core function cases."""
+    calls = _ufunc_cases()
+    return (
+        *calls,
+        *_outer_cases(calls),
         *_function_cases(),
         *_linalg_cases(),
         *_fft_cases(),
         *_method_cases(),
         *_additional_existing_function_cases(),
         *_version_conditional_function_cases(),
-        *_additional_outer_cases(),
         *_material_variant_cases(),
-        *function_family_cases(),
     )
-    identifiers = [case.identifier for case in cases]
-    if len(identifiers) != len(set(identifiers)):
-        duplicates = sorted(
-            identifier for identifier in set(identifiers) if identifiers.count(identifier) > 1
-        )
-        message = f"duplicate NumPy support cases: {duplicates}"
-        raise RuntimeError(message)
-    return tuple(sorted(cases, key=lambda case: case.identifier))
 
 
 __all__ = [
@@ -1152,5 +746,5 @@ __all__ = [
     "Function",
     "Input",
     "NumpySupportCase",
-    "support_cases",
+    "base_cases",
 ]

@@ -6,14 +6,15 @@ import math
 from typing import Any, cast
 
 from advect.autodiff.rules.array_family._backend_runtime import _moveaxis, xp
+from advect.autodiff.rules.array_family._transpose_utils import (
+    _conjugate_if_complex,
+    _normalize_axis,
+    _shape_of,
+)
 from advect.autodiff.rules.array_family.vjp.linalg.common import (
-    _EINSUM_ELLIPSIS,
-    _EINSUM_FALLBACK_SUBSTRING,
     _MIN_MATRIX_NDIM,
     _h,
-    _normalize_axis,
     _normalize_tensordot_axes,
-    _shape_of,
 )
 
 
@@ -30,19 +31,17 @@ def _contraction_vjp(
     active_inputs = (
         frozenset((0, 1)) if active_input_indices is None else frozenset(active_input_indices)
     )
-    a_free_axes = tuple(axis for axis in range(a.ndim) if axis not in a_axes)
-    b_free_axes = tuple(axis for axis in range(b.ndim) if axis not in b_axes)
-
-    expected_output_shape = tuple(a.shape[axis] for axis in a_free_axes) + tuple(
-        b.shape[axis] for axis in b_free_axes
-    )
+    a_shape = _shape_of(a)
+    b_shape = _shape_of(b)
+    a_free_axes = tuple(axis for axis in range(len(a_shape)) if axis not in a_axes)
+    b_free_axes = tuple(axis for axis in range(len(b_shape)) if axis not in b_axes)
+    contract_shape = tuple(a_shape[axis] for axis in a_axes)
+    a_free_shape = tuple(a_shape[axis] for axis in a_free_axes)
+    b_free_shape = tuple(b_shape[axis] for axis in b_free_axes)
+    expected_output_shape = a_free_shape + b_free_shape
     if tuple(g.shape) != expected_output_shape:
         msg = f"{op_name} expects cotangent shape {expected_output_shape}, got {tuple(g.shape)}"
         raise TypeError(msg)
-
-    contract_shape = tuple(a.shape[axis] for axis in a_axes)
-    a_free_shape = tuple(a.shape[axis] for axis in a_free_axes)
-    b_free_shape = tuple(b.shape[axis] for axis in b_free_axes)
 
     a_free_size = math.prod(a_free_shape)
     b_free_size = math.prod(b_free_shape)
@@ -53,7 +52,7 @@ def _contraction_vjp(
     if 0 in active_inputs:
         b_perm = b_axes + b_free_axes
         b_mat = xp.reshape(xp.transpose(b, b_perm), (contract_size, b_free_size))
-        grad_a_mat = g_mat @ _h(b_mat)
+        grad_a_mat = xp.matmul(g_mat, _h(b_mat))
         grad_a_perm = xp.reshape(grad_a_mat, a_free_shape + contract_shape)
         a_perm = a_free_axes + a_axes
         inverse_a_perm = tuple(sorted(range(len(a_perm)), key=a_perm.__getitem__))
@@ -63,18 +62,12 @@ def _contraction_vjp(
     if 1 in active_inputs:
         a_perm = a_free_axes + a_axes
         a_mat = xp.reshape(xp.transpose(a, a_perm), (a_free_size, contract_size))
-        grad_b_mat = _h(a_mat) @ g_mat
+        grad_b_mat = xp.matmul(_h(a_mat), g_mat)
         grad_b_perm = xp.reshape(grad_b_mat, contract_shape + b_free_shape)
         b_perm = b_axes + b_free_axes
         inverse_b_perm = tuple(sorted(range(len(b_perm)), key=b_perm.__getitem__))
         grad_b = xp.transpose(grad_b_perm, inverse_b_perm)
     return grad_a, grad_b
-
-
-def _conjugate_if_complex(value: xp.ndarray) -> xp.ndarray:
-    if isinstance(value, complex):
-        return cast("xp.ndarray", value.conjugate())
-    return xp.conj(value) if xp.iscomplexobj(value) else value
 
 
 def _vjp_matmul(
@@ -88,10 +81,6 @@ def _vjp_matmul(
 ) -> tuple[xp.ndarray | None, xp.ndarray | None]:
     """Apply the real adjoint of ``matmul`` for vectors, matrices, and batches."""
     _ = rest, attrs
-    if _shape_of(g) != _shape_of(ans):
-        msg = f"numpy.matmul expects cotangent shape {_shape_of(ans)}, got {_shape_of(g)}"
-        raise TypeError(msg)
-
     x_shape = _shape_of(x)
     y_shape = _shape_of(y)
     if not x_shape or not y_shape:
@@ -107,21 +96,24 @@ def _vjp_matmul(
     grad_x: xp.ndarray | None = None
     if 0 in active:
         if x_vector and y_vector:
-            grad_x = g * _conjugate_if_complex(y)
+            grad_x = xp.multiply(g, _conjugate_if_complex(y))
         elif x_vector:
             product = xp.matmul(xp.expand_dims(g, axis=-2), _h(y))
             grad_x = xp.squeeze(product, axis=-2)
         elif y_vector:
-            grad_x = xp.expand_dims(g, axis=-1) * _conjugate_if_complex(y)
+            grad_x = xp.multiply(xp.expand_dims(g, axis=-1), _conjugate_if_complex(y))
         else:
             grad_x = xp.matmul(g, _h(y))
 
     grad_y: xp.ndarray | None = None
     if 1 in active:
         if x_vector and y_vector:
-            grad_y = _conjugate_if_complex(x) * g
+            grad_y = xp.multiply(_conjugate_if_complex(x), g)
         elif x_vector:
-            grad_y = xp.expand_dims(_conjugate_if_complex(x), axis=-1) * xp.expand_dims(g, axis=-2)
+            grad_y = xp.multiply(
+                xp.expand_dims(_conjugate_if_complex(x), axis=-1),
+                xp.expand_dims(g, axis=-2),
+            )
         elif y_vector:
             if len(x_shape) == _MIN_MATRIX_NDIM:
                 grad_y = xp.matmul(_h(x), g)
@@ -146,10 +138,6 @@ def _vjp_dot(
     _ = rest, attrs
     a_ndim = len(_shape_of(a))
     b_ndim = len(_shape_of(b))
-
-    if _shape_of(g) != _shape_of(ans):
-        msg = f"numpy.dot expects cotangent shape {_shape_of(ans)}, got {_shape_of(g)}"
-        raise TypeError(msg)
 
     active_inputs = (
         frozenset((0, 1)) if active_input_indices is None else frozenset(active_input_indices)
@@ -192,10 +180,6 @@ def _vjp_tensordot(
     """VJP for numpy.tensordot."""
     _ = rest, attrs
 
-    if _shape_of(g) != _shape_of(ans):
-        msg = f"numpy.tensordot expects cotangent shape {_shape_of(ans)}, got {_shape_of(g)}"
-        raise TypeError(msg)
-
     a_axes, b_axes = _normalize_tensordot_axes(
         axes=axes,
         a_shape=_shape_of(a),
@@ -225,28 +209,27 @@ def _vjp_vecdot(
 ) -> tuple[xp.ndarray | None, xp.ndarray | None]:
     """Transpose the Array API conjugating vector product."""
     _ = rest, attrs
-    if _shape_of(g) != _shape_of(ans):
-        msg = f"linalg.vecdot expects cotangent shape {_shape_of(ans)}, got {_shape_of(g)}"
-        raise TypeError(msg)
     active = frozenset((0, 1)) if active_input_indices is None else frozenset(active_input_indices)
     x1_shape = _shape_of(x1)
     x2_shape = _shape_of(x2)
     x1_axis = _normalize_axis(axis, ndim=len(x1_shape), op_name="linalg.vecdot")
     x2_axis = _normalize_axis(axis, ndim=len(x2_shape), op_name="linalg.vecdot")
-    output_batch_rank = len(_shape_of(ans))
+    output_batch_rank = len(_shape_of(g))
     x1_result_axis = x1_axis + output_batch_rank - (len(x1_shape) - 1)
     x2_result_axis = x2_axis + output_batch_rank - (len(x2_shape) - 1)
 
     expanded_g = xp.expand_dims(g, axis=-1)
     x1_last = _moveaxis(x1, x1_axis, -1)
     x2_last = _moveaxis(x2, x2_axis, -1)
-    grad_x1 = _moveaxis(xp.conj(expanded_g) * x2_last, -1, x1_result_axis) if 0 in active else None
-    grad_x2 = _moveaxis(expanded_g * x1_last, -1, x2_result_axis) if 1 in active else None
+    grad_x1 = (
+        _moveaxis(xp.multiply(xp.conj(expanded_g), x2_last), -1, x1_result_axis)
+        if 0 in active
+        else None
+    )
+    grad_x2 = (
+        _moveaxis(xp.multiply(expanded_g, x1_last), -1, x2_result_axis) if 1 in active else None
+    )
     return grad_x1, grad_x2
-
-
-def _normalize_einsum_subscripts(subscripts: str) -> str:
-    return "".join(subscripts.split())
 
 
 def _normalize_einsum_optimize(
@@ -261,74 +244,6 @@ def _normalize_einsum_optimize(
     return True
 
 
-def _einsum_term_labels(term: str) -> tuple[str, ...]:
-    return tuple(ch for ch in term.replace(_EINSUM_ELLIPSIS, ""))
-
-
-def _einsum_has_repeated_labels(term: str) -> bool:
-    labels = _einsum_term_labels(term)
-    return len(labels) != len(set(labels))
-
-
-def _einsum_operand_fast_supported(
-    *,
-    operand_term: str,
-    output_term: str,
-    other_terms: tuple[str, ...],
-) -> bool:
-    if _einsum_has_repeated_labels(operand_term):
-        return False
-    if _EINSUM_ELLIPSIS not in operand_term and (
-        _EINSUM_ELLIPSIS in output_term or any(_EINSUM_ELLIPSIS in term for term in other_terms)
-    ):
-        return False
-    if _EINSUM_ELLIPSIS in operand_term and (
-        _EINSUM_ELLIPSIS not in output_term
-        and all(_EINSUM_ELLIPSIS not in term for term in other_terms)
-    ):
-        return False
-
-    output_labels = set(_einsum_term_labels(output_term))
-    other_labels: set[str] = set()
-    for term in other_terms:
-        other_labels.update(_einsum_term_labels(term))
-
-    for label in _einsum_term_labels(operand_term):
-        if label in output_labels or label in other_labels:
-            continue
-        return False
-    return True
-
-
-def _einsum_fast_vjp_plan(
-    normalized_subscripts: str,
-    arity: int,
-) -> tuple[tuple[str, tuple[int, ...]], ...] | None:
-    if _EINSUM_FALLBACK_SUBSTRING not in normalized_subscripts:
-        return None
-    lhs_subscripts, output_subscripts = normalized_subscripts.split(
-        _EINSUM_FALLBACK_SUBSTRING, maxsplit=1
-    )
-    operand_terms = tuple(lhs_subscripts.split(","))
-    if len(operand_terms) != arity:
-        return None
-
-    plans: list[tuple[str, tuple[int, ...]]] = []
-    for index, operand_term in enumerate(operand_terms):
-        other_indices = tuple(i for i in range(arity) if i != index)
-        other_terms = tuple(operand_terms[i] for i in other_indices)
-        if not _einsum_operand_fast_supported(
-            operand_term=operand_term,
-            output_term=output_subscripts,
-            other_terms=other_terms,
-        ):
-            return None
-        lhs_terms = [output_subscripts, *other_terms]
-        equation = f"{','.join(lhs_terms)}->{operand_term}"
-        plans.append((equation, other_indices))
-    return tuple(plans)
-
-
 def _vjp_einsum(
     ans: Any,
     *inputs: Any,
@@ -338,20 +253,28 @@ def _vjp_einsum(
     active_input_indices: tuple[int, ...] | None = None,
     **attrs: Any,
 ) -> tuple[Any, ...]:
-    _ = attrs
-    if _shape_of(g) != _shape_of(ans):
-        msg = f"numpy.einsum expects cotangent shape {_shape_of(ans)}, got {_shape_of(g)}"
-        raise TypeError(msg)
+    """Contract the cotangent with the other operands onto each operand's labels.
 
-    normalized_subscripts = _normalize_einsum_subscripts(subscripts)
-    fast_plan = _einsum_fast_vjp_plan(normalized_subscripts, len(inputs))
-    if fast_plan is None:
-        msg = (
-            "This einsum equation has no explicit real-adjoint rule. "
-            "Rewrite it with matmul/tensordot or define a custom @advect.primitive "
-            "transpose."
+    The NumPy frontend emits canonical equations: an explicit output, no
+    ellipsis, no label repeated within a term, and no label owned by one
+    operand alone. Each operand's adjoint is then the einsum
+    ``output,others->term``.
+    """
+    _ = ans, attrs
+    lhs, arrow, output = subscripts.partition("->")
+    terms = lhs.split(",")
+    labels = [set(term) for term in terms]
+    if (
+        not arrow
+        or len(terms) != len(inputs)
+        or any(
+            len(term_labels) != len(term)
+            or not term_labels <= set(output).union(*labels[:index], *labels[index + 1 :])
+            for index, (term, term_labels) in enumerate(zip(terms, labels, strict=True))
         )
-        raise NotImplementedError(msg)
+    ):
+        msg = f"numpy.einsum VJP requires a canonical equation, got {subscripts!r}"
+        raise RuntimeError(msg)
 
     optimize_arg = _normalize_einsum_optimize(optimize=optimize)
     active_inputs = (
@@ -360,13 +283,14 @@ def _vjp_einsum(
         else frozenset(active_input_indices)
     )
     gradients: list[Any | None] = []
-    for input_index, (equation, other_indices) in enumerate(fast_plan):
-        if input_index not in active_inputs:
+    for index, term in enumerate(terms):
+        if index not in active_inputs:
             gradients.append(None)
             continue
-        args: list[Any] = [g]
-        args.extend(xp.conjugate(inputs[operand_index]) for operand_index in other_indices)
-        gradients.append(xp.einsum(equation, *args, optimize=optimize_arg))
+        others = [position for position in range(len(terms)) if position != index]
+        equation = f"{','.join([output, *(terms[position] for position in others)])}->{term}"
+        conjugated = (xp.conjugate(inputs[position]) for position in others)
+        gradients.append(xp.einsum(equation, g, *conjugated, optimize=optimize_arg))
     return tuple(gradients)
 
 

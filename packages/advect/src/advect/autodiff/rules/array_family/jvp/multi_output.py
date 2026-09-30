@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import Any
 
 from advect.autodiff.rules.array_family._backend_runtime import xp
 from advect.autodiff.rules.array_family._transpose_utils import (
     infer_output_tangent_dtype as _infer_output_tangent_dtype,
-    zeros_output_tangent_structure as _zeros_output_tangent_structure,
 )
 from advect.autodiff.rules.array_family.jvp.common import _asarray_unwrapped
 
@@ -16,13 +15,11 @@ def _jvp_modf(
     ans: tuple[xp.ndarray, xp.ndarray],
     x: xp.ndarray,
     *rest: xp.ndarray,
-    tangents: tuple[xp.ndarray | None, ...],
+    tangents: tuple[xp.ndarray, ...],
     **attrs: Any,
 ) -> tuple[xp.ndarray, xp.ndarray]:
     _ = x, rest, attrs
-    tangent = tangents[0] if tangents else None
-    if tangent is None:
-        return cast("tuple[xp.ndarray, xp.ndarray]", _zeros_output_tangent_structure(ans, tangents))
+    tangent = tangents[0]
     dtype = _infer_output_tangent_dtype(ans, tangents)
     integral = xp.zeros_like(_asarray_unwrapped(ans[1]), dtype=dtype)
     return (tangent, integral)
@@ -32,13 +29,11 @@ def _jvp_frexp(
     ans: tuple[xp.ndarray, xp.ndarray],
     x: xp.ndarray,
     *rest: xp.ndarray,
-    tangents: tuple[xp.ndarray | None, ...],
+    tangents: tuple[xp.ndarray, ...],
     **attrs: Any,
 ) -> tuple[xp.ndarray, xp.ndarray]:
     _ = x, rest, attrs
-    tangent = tangents[0] if tangents else None
-    if tangent is None:
-        return cast("tuple[xp.ndarray, xp.ndarray]", _zeros_output_tangent_structure(ans, tangents))
+    tangent = tangents[0]
     mantissa, exponent = ans
     mantissa_arr = _asarray_unwrapped(mantissa)
     exponent_arr = _asarray_unwrapped(exponent)
@@ -59,8 +54,6 @@ def _jvp_divmod(
     _ = x, y, rest, attrs
     dx = tangents[0] if len(tangents) > 0 else None
     dy = tangents[1] if len(tangents) > 1 else None
-    if dx is None and dy is None:
-        return cast("tuple[xp.ndarray, xp.ndarray]", _zeros_output_tangent_structure(ans, tangents))
     quotient, _ = ans
     dtype = _infer_output_tangent_dtype(ans, tangents)
     d_quotient = xp.zeros_like(_asarray_unwrapped(quotient), dtype=dtype)

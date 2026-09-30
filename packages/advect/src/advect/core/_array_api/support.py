@@ -19,6 +19,7 @@ from advect.core._array_api.frontend import (
     _ARRAY_API_META_FUNCTIONS,
     _FUNCTION_SPECS,
     _NONDIFFERENTIABLE_ARRAY_API_COMPOSITES,
+    _RENAMED_PARAMETERS,
     _STAGED_ARRAY_API_COMPOSITES,
 )
 from advect.core._array_api.profiles import (
@@ -97,27 +98,20 @@ _PARTIAL_PARAMETERS = {
 _SPECIAL_STAGED_PARAMETERS = frozenset(
     {
         ("asarray", "copy"),
-        ("asarray", "device"),
         ("diff", "append"),
         ("diff", "prepend"),
         ("searchsorted", "sorter"),
     }
 )
-_STAGED_PARAMETER_ALIASES = {
-    ("tile", "repetitions"): "reps",
-}
 
 
-def _operand_names(path: str, *, version: str) -> frozenset[str]:
+def _operand_names(path: str) -> frozenset[str]:
     if path in _ARRAY_API_COMPOSITE_OPERANDS:
         return frozenset(_ARRAY_API_COMPOSITE_OPERANDS[path])
-    spec = _FUNCTION_SPECS[path]
-    names = official_parameter_names(path, version)
-    positional = {names[position] for position in spec.positional_operands if position < len(names)}
-    return frozenset((*spec.operands, *positional))
+    return frozenset(_FUNCTION_SPECS[path].operands)
 
 
-def _parameter_role(path: str, name: str, *, version: str) -> str:
+def _parameter_role(path: str, name: str) -> str:
     if (path, name) in _PARTIAL_PARAMETERS:
         return "unsupported"
     if (path, name) in _METADATA_LIVE_PARAMETERS:
@@ -127,10 +121,10 @@ def _parameter_role(path: str, name: str, *, version: str) -> str:
     if (path, name) in _NONDIFFERENTIABLE_PARAMETERS:
         return "nondifferentiable"
     if path in _NONDIFFERENTIABLE_FUNCTIONS:
-        return "nondifferentiable" if name in _operand_names(path, version=version) else "static"
+        return "nondifferentiable" if name in _operand_names(path) else "static"
     if (path, name) in _SPECIAL_DIFFERENTIABLE_PARAMETERS:
         return "differentiable"
-    return "differentiable" if name in _operand_names(path, version=version) else "static"
+    return "differentiable" if name in _operand_names(path) else "static"
 
 
 def _fully_staged(path: str, *, version: str) -> bool:
@@ -141,12 +135,16 @@ def _fully_staged(path: str, *, version: str) -> bool:
     rule = None if definition is None else definition.abstract_schema
     if rule is None:
         return False
-    operand_names = _operand_names(path, version=version)
+    operand_names = _operand_names(path)
     for name in official_parameter_names(path, version):
         if name in operand_names or (path, name) in _SPECIAL_STAGED_PARAMETERS:
             continue
-        alias = _STAGED_PARAMETER_ALIASES.get((path, name), name)
-        if alias not in rule.allowed_attrs and alias not in rule.positional_attrs:
+        attribute = _RENAMED_PARAMETERS.get(name, name)
+        if not (
+            attribute.startswith("_advect_")
+            or attribute in rule.allowed_attrs
+            or attribute in rule.positional_attrs
+        ):
             return False
     return True
 
@@ -161,7 +159,7 @@ def _static_parameters(*, version: str) -> dict[str, tuple[str, ...]]:
         path: tuple(
             name
             for name in official_parameter_names(path, version)
-            if _parameter_role(path, name, version=version) == "static"
+            if _parameter_role(path, name) == "static"
         )
         for path in profile.signatures
     }
@@ -217,7 +215,7 @@ def _evidence_gaps(*, version: str) -> dict[str, tuple[str, ...]]:
         if not any(case.variant == "baseline" for case in cases):
             reasons.append("no baseline callable evidence")
         for name in names:
-            role = _parameter_role(path, name, version=version)
+            role = _parameter_role(path, name)
             if role in {"differentiable", "nondifferentiable"} and not any(
                 input_indices(case_parameter_values(case, version)[name]) for case in cases
             ):
@@ -267,8 +265,7 @@ def build_support_profile(
                 "kind": "function",
                 "signature": _signature(path, version=version),
                 "parameters": [
-                    {"name": name, "role": _parameter_role(path, name, version=version)}
-                    for name in names
+                    {"name": name, "role": _parameter_role(path, name)} for name in names
                 ],
                 "modes": modes,
                 "complete": complete,

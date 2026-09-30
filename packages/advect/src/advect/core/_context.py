@@ -9,17 +9,16 @@ from __future__ import annotations
 
 import sys
 import threading
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
 from advect.core._errors import TracingError
 
-# Thread-local storage for trace frame state
-_thread_local = threading.local()
-
 if TYPE_CHECKING:
     from collections.abc import Callable, Generator, Iterable
+    from contextlib import AbstractContextManager
+    from types import FrameType
 
 
 @dataclass(slots=True)
@@ -36,31 +35,35 @@ class TraceFrame:
     require_jvp: bool = False
 
 
-def _get_trace_frames() -> list[TraceFrame]:
-    frames = cast("list[TraceFrame] | None", getattr(_thread_local, "trace_frames", None))
-    if frames is None:
-        new_frames: list[TraceFrame] = []
-        _thread_local.trace_frames = new_frames
-        return new_frames
-    return frames
+_PRIMAL_PHASE = "primal evaluation"
 
 
-def _next_trace_frame_id() -> int:
-    current = getattr(_thread_local, "trace_frame_counter", 0)
-    _thread_local.trace_frame_counter = int(current) + 1
-    return int(current)
+class _TraceState(threading.local):
+    """Per-thread trace state; ``threading.local`` runs ``__init__`` per thread."""
+
+    def __init__(self) -> None:
+        self.frames: list[TraceFrame] = []
+        self.operation_recorders: list[object] = []
+        self.next_frame_id = 0
+        self.array_api_versions: list[str] = []
+        self.rematerialization_depth = 0
+        self.debug = False
+        self.debug_numerics = False
+        self.numerics_context: tuple[str, str | None] = (_PRIMAL_PHASE, None)
+
+
+_state = _TraceState()
+_NO_NUMERICS_SCOPE: AbstractContextManager[None] = nullcontext()
 
 
 def _get_active_trace_frame() -> TraceFrame | None:
-    frames = _get_trace_frames()
-    if not frames:
-        return None
-    return frames[-1]
+    frames = _state.frames
+    return frames[-1] if frames else None
 
 
 def _is_recorder_in_active_trace_stack(recorder: Any) -> bool:  # noqa: ANN401
     """Return whether ``recorder`` belongs to any currently active trace frame."""
-    frames = _get_trace_frames()
+    frames = _state.frames
     if not frames:
         return False
     if frames[-1].recorder is recorder:
@@ -79,7 +82,7 @@ def _trace_use_status(
     both from one stack snapshot keeps the common operation path cheap and
     avoids races between independent lookups in nested traces.
     """
-    frames = _get_trace_frames()
+    frames = _state.frames
     if not frames:
         return False, False, None
 
@@ -112,7 +115,7 @@ def _get_active_recorder() -> Any | None:  # noqa: ANN401 - recorders have two l
 def _select_deepest_active_recorder(recorders: Iterable[object]) -> object:
     """Select the innermost active recorder represented by operation operands."""
     candidates = tuple(recorders)
-    frames = _get_trace_frames()
+    frames = _state.frames
     selected: object | None = None
     selected_depth = -1
     for recorder in candidates:
@@ -137,26 +140,14 @@ def _select_deepest_active_recorder(recorders: Iterable[object]) -> object:
 
 
 def _get_operation_recorder() -> object | None:
-    recorders = _get_operation_recorders()
-    return None if not recorders else recorders[-1]
-
-
-def _get_operation_recorders() -> list[object]:
-    recorders = cast(
-        "list[object] | None",
-        getattr(_thread_local, "operation_recorders", None),
-    )
-    if recorders is None:
-        new_recorders: list[object] = []
-        _thread_local.operation_recorders = new_recorders
-        return new_recorders
-    return recorders
+    recorders = _state.operation_recorders
+    return recorders[-1] if recorders else None
 
 
 @contextmanager
 def _use_operation_recorder(recorder: object) -> Generator[None]:
     """Expose one selected recorder while a backend handler evaluates operands."""
-    recorders = _get_operation_recorders()
+    recorders = _state.operation_recorders
     recorders.append(recorder)
     try:
         yield
@@ -167,8 +158,8 @@ def _use_operation_recorder(recorder: object) -> Generator[None]:
 @contextmanager
 def _suspend_tracing() -> Generator[None]:
     """Temporarily hide active recorders while an atomic provider executes."""
-    frames = _get_trace_frames()
-    operation_recorders = _get_operation_recorders()
+    frames = _state.frames
+    operation_recorders = _state.operation_recorders
     suspended_frames = tuple(frames)
     suspended_operation_recorders = tuple(operation_recorders)
     frames.clear()
@@ -194,7 +185,7 @@ def _active_trace_requires_jvp() -> bool:
 
 def _has_active_trace_kind(trace_kind: str) -> bool:
     """Return whether any current-thread trace frame has ``trace_kind``."""
-    frames = _get_trace_frames()
+    frames = _state.frames
     if not frames:
         return False
     if frames[-1].trace_kind == trace_kind:
@@ -205,14 +196,7 @@ def _has_active_trace_kind(trace_kind: str) -> bool:
 @contextmanager
 def _use_array_api_version(array_api_version: str) -> Generator[None]:
     """Retain a trace's selected Array API revision during replay."""
-    versions = cast(
-        "list[str] | None",
-        getattr(_thread_local, "array_api_version_overrides", None),
-    )
-    if versions is None:
-        new_versions: list[str] = []
-        _thread_local.array_api_version_overrides = new_versions
-        versions = new_versions
+    versions = _state.array_api_versions
     versions.append(array_api_version)
     try:
         yield
@@ -223,17 +207,18 @@ def _use_array_api_version(array_api_version: str) -> Generator[None]:
 @contextmanager
 def _rematerialization_region() -> Generator[None]:
     """Mark execution whose intermediates will be replayed during autodiff."""
-    depth = int(getattr(_thread_local, "rematerialization_depth", 0))
-    _thread_local.rematerialization_depth = depth + 1
+    state = _state
+    depth = state.rematerialization_depth
+    state.rematerialization_depth = depth + 1
     try:
         yield
     finally:
-        _thread_local.rematerialization_depth = depth
+        state.rematerialization_depth = depth
 
 
 def _is_rematerializing() -> bool:
     """Return whether the current call is inside a checkpointed region."""
-    return bool(getattr(_thread_local, "rematerialization_depth", 0))
+    return _state.rematerialization_depth > 0
 
 
 def _set_active_recorder(
@@ -247,7 +232,8 @@ def _set_active_recorder(
 
     Passing a recorder pushes a frame; passing ``None`` pops the top frame.
     """
-    frames = _get_trace_frames()
+    state = _state
+    frames = state.frames
     if recorder is None:
         if not frames:
             return
@@ -263,11 +249,13 @@ def _set_active_recorder(
             raise TracingError(message)
         return
 
+    frame_id = state.next_frame_id
+    state.next_frame_id = frame_id + 1
     frame = TraceFrame(
         recorder=recorder,
         trace_level=len(frames),
         trace_kind=trace_kind,
-        frame_id=_next_trace_frame_id(),
+        frame_id=frame_id,
         array_api_version=array_api_version,
         require_jvp=require_jvp,
     )
@@ -279,7 +267,7 @@ def _set_active_recorder(
 
 def _trace_frame_for_recorder(recorder: Any) -> TraceFrame | None:  # noqa: ANN401
     """Return the active frame owning ``recorder``, if present."""
-    for frame in reversed(_get_trace_frames()):
+    for frame in reversed(_state.frames):
         if frame.recorder is recorder:
             return frame
     return None
@@ -386,7 +374,7 @@ def transform_states[T](namespace: object) -> tuple[T, ...]:
         msg = "transform_states is available only during concrete dynamic transforms"
         raise TracingError(msg)
     states = []
-    for frame in reversed(_get_trace_frames()):
+    for frame in reversed(_state.frames):
         if frame.trace_kind != "autodiff_dynamic" or frame.transform_state is None:
             continue
         if namespace in frame.transform_state:
@@ -407,11 +395,8 @@ def _get_active_array_api_version() -> str | None:
     frame = _get_active_trace_frame()
     if frame is not None and frame.array_api_version is not None:
         return frame.array_api_version
-    versions = cast(
-        "list[str] | None",
-        getattr(_thread_local, "array_api_version_overrides", None),
-    )
-    return None if not versions else versions[-1]
+    versions = _state.array_api_versions
+    return versions[-1] if versions else None
 
 
 def is_debug() -> bool:
@@ -425,35 +410,36 @@ def is_debug() -> bool:
         True if debug mode is enabled, False otherwise.
 
     """
-    return getattr(_thread_local, "debug", False)
+    return _state.debug
 
 
 def _is_numerics_debug() -> bool:
     """Return whether first-nonfinite diagnostics are enabled."""
-    return is_debug() and bool(getattr(_thread_local, "debug_numerics", False))
+    state = _state
+    return state.debug and state.debug_numerics
 
 
 def _get_numerics_context() -> tuple[str, str | None]:
-    return cast(
-        "tuple[str, str | None]",
-        getattr(_thread_local, "numerics_context", ("primal evaluation", None)),
-    )
+    return _state.numerics_context
+
+
+def _numerics_context(phase: str, source_location: str | None) -> AbstractContextManager[None]:
+    """Attribute non-finite values to ``phase`` unless an outer phase already owns them."""
+    state = _state
+    if not (state.debug and state.debug_numerics) or state.numerics_context[0] != _PRIMAL_PHASE:
+        return _NO_NUMERICS_SCOPE
+    return _numerics_phase(phase, source_location)
 
 
 @contextmanager
-def _numerics_context(phase: str, source_location: str | None) -> Generator[None]:
-    if not _is_numerics_debug():
-        yield
-        return
-    previous = _get_numerics_context()
-    if previous[0] != "primal evaluation":
-        yield
-        return
-    _thread_local.numerics_context = (phase, source_location)
+def _numerics_phase(phase: str, source_location: str | None) -> Generator[None]:
+    state = _state
+    previous = state.numerics_context
+    state.numerics_context = (phase, source_location)
     try:
         yield
     finally:
-        _thread_local.numerics_context = previous
+        state.numerics_context = previous
 
 
 @contextmanager
@@ -465,17 +451,42 @@ def debug(*, numerics: bool = False) -> Generator[None]:
     the first non-finite primal, JVP, or VJP value found by a dynamic transform.
     State is thread-local and restored exactly when the scope exits.
     """
-    previous = (
-        bool(getattr(_thread_local, "debug", False)),
-        bool(getattr(_thread_local, "debug_numerics", False)),
-    )
-    _thread_local.debug = True
-    _thread_local.debug_numerics = numerics
+    state = _state
+    previous = (state.debug, state.debug_numerics)
+    state.debug = True
+    state.debug_numerics = numerics
     try:
         yield
     finally:
-        _thread_local.debug = previous[0]
-        _thread_local.debug_numerics = previous[1]
+        state.debug, state.debug_numerics = previous
+
+
+_ADVECT_PACKAGES = frozenset({"advect"})
+# Debug diagnostics also skip the array libraries and helpers that dispatch into Advect.
+_DIAGNOSTIC_PACKAGES = frozenset({"advect", "numpy", "array_api_compat", "contextlib"})
+
+
+def external_frame(
+    frame: FrameType | None,
+    internal: frozenset[str] = _ADVECT_PACKAGES,
+) -> FrameType | None:
+    """Return *frame* or its innermost caller outside the *internal* top-level packages."""
+    while frame is not None:
+        module = frame.f_globals.get("__name__")
+        if not isinstance(module, str) or module.partition(".")[0] not in internal:
+            return frame
+        frame = frame.f_back
+    return None
+
+
+def caller_location(internal: frozenset[str] = _ADVECT_PACKAGES) -> str | None:
+    """Return ``"file:line in function()"`` for the innermost caller outside *internal*."""
+    # Frame walking is the diagnostic boundary.
+    frame = external_frame(sys._getframe(1), internal)  # noqa: SLF001
+    if frame is None:
+        return None
+    code = frame.f_code
+    return f"{code.co_filename}:{frame.f_lineno} in {code.co_name}()"
 
 
 def get_source_location() -> str | None:
@@ -489,18 +500,4 @@ def get_source_location() -> str | None:
         Source location string "file:line in function()", or None
         if not in debug mode.
     """
-    if not is_debug():
-        return None
-
-    frame = sys._getframe(1)  # noqa: SLF001 - frame walking is the diagnostic boundary
-    while frame is not None:
-        module = str(frame.f_globals.get("__name__", ""))
-        internal = any(
-            module == prefix or module.startswith(f"{prefix}.")
-            for prefix in ("advect", "numpy", "array_api_compat", "contextlib")
-        )
-        if not internal:
-            code = frame.f_code
-            return f"{code.co_filename}:{frame.f_lineno} in {code.co_name}()"
-        frame = frame.f_back
-    return None
+    return caller_location(_DIAGNOSTIC_PACKAGES) if is_debug() else None

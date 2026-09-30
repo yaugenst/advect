@@ -11,33 +11,27 @@ import numpy as _numpy  # noqa: ICN001 - typed module and dynamic lowering names
 from advect.core._errors import TracingError
 from advect.core._protocols import _snapshot_traced
 from advect.numpy._array_function.composite import _finish
-from advect.numpy._array_function.emission import (
-    _add_backend_node,
-    _get_node,
-    _get_value,
-    _result_shape_and_dtype,
-)
+from advect.numpy._array_function.emission import _emit, _get_value, _is_traced_operand
 from advect.numpy._array_function.normalization import (
     _normalize_gradient_axes,
     _normalize_kth,
 )
-from advect.numpy._gradient_lowering import lower_gradient_axis, operand_ndim
-from advect.numpy._op_bindings import canonicalize_numpy_op, frontend_lowering
+from advect.numpy._composite_lowering import lower_gradient, operand_ndim
+from advect.numpy._op_bindings import frontend_lowering
+from advect.numpy._signature import ascending_sort_kwargs, take_mode
 
 np: Any = _numpy
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from advect.core._native import DynamicTape
     from advect.core._protocols import TracedArrayLike
-    from advect.numpy._array_function.emission import ArrayFunctionResult
+    from advect.numpy._array_function.emission import ArrayFunctionHandler, ArrayFunctionResult
 
 _ANGLE_POSITIONAL_ARGS = 2
 _TAKE_ARGS = 2
 _TAKE_ALONG_AXIS_ARGS = 3
-
-
-def _is_traced(value: object, traced_type: type[TracedArrayLike]) -> bool:
-    return isinstance(value, traced_type) or callable(getattr(value, "_advect_snapshot", None))
 
 
 def _clean_nonfinite_component(
@@ -61,10 +55,11 @@ def _differentiable_nan_to_num(
 ) -> Any:
     dtype = np.dtype(value.dtype)
     if not np.issubdtype(dtype, np.inexact):
+        # NumPy returns non-inexact input unchanged; replacements only join the trace.
         result = value
         for replacement in (nan, posinf, neginf):
             if replacement is not None:
-                result = result + replacement * 0
+                result = result + np.zeros_like(replacement, dtype=dtype, shape=())
         return np.astype(result, dtype)
     real_dtype = np.empty((), dtype=dtype).real.dtype
     limit = np.finfo(real_dtype).max
@@ -105,16 +100,7 @@ def _angle_handler(
     attrs: dict[str, Any] = {}
     if deg:
         attrs["deg"] = True
-    node_id = _add_backend_node(
-        graph=graph,
-        op=canonicalize_numpy_op("numpy.angle"),
-        inputs=(_get_node(x, graph, traced_type),),
-        value=result,
-        attrs=attrs,
-        shape=result.shape,
-        dtype=result.dtype,
-    )
-    return result, node_id
+    return _emit(graph, traced_type, "numpy.angle", (x,), result, attrs)
 
 
 def _nan_to_num_handler(
@@ -137,7 +123,7 @@ def _nan_to_num_handler(
     nan = values.get("nan")
     posinf = values.get("posinf")
     neginf = values.get("neginf")
-    if any(_is_traced(value, traced_type) for value in (nan, posinf, neginf) if value is not None):
+    if any(_is_traced_operand(value, traced_type) for value in (nan, posinf, neginf)):
         result = _differentiable_nan_to_num(
             x,
             nan=nan,
@@ -164,16 +150,7 @@ def _nan_to_num_handler(
     if neginf is not None:
         attrs["neginf"] = neginf
 
-    node_id = _add_backend_node(
-        graph=graph,
-        op=canonicalize_numpy_op("numpy.nan_to_num"),
-        inputs=(_get_node(x, graph, traced_type),),
-        value=result,
-        attrs=attrs,
-        shape=result.shape,
-        dtype=result.dtype,
-    )
-    return result, node_id
+    return _emit(graph, traced_type, "numpy.nan_to_num", (x,), result, attrs)
 
 
 def _sinc_handler(
@@ -184,16 +161,7 @@ def _sinc_handler(
 ) -> tuple[Any, int]:
     x = args[0]
     result = np.sinc(_get_value(x, traced_type))
-    node_id = _add_backend_node(
-        graph=graph,
-        op=canonicalize_numpy_op("numpy.sinc"),
-        inputs=(_get_node(x, graph, traced_type),),
-        value=result,
-        attrs={},
-        shape=result.shape,
-        dtype=result.dtype,
-    )
-    return result, node_id
+    return _emit(graph, traced_type, "numpy.sinc", (x,), result)
 
 
 @frontend_lowering("advect.copy")
@@ -216,17 +184,14 @@ def _copy_handler(
 
     x = args[0]
     result = np.copy(_get_value(x, traced_type), order=order, subok=subok)
-    result_shape, result_dtype = _result_shape_and_dtype(result)
-    node_id = _add_backend_node(
-        graph=graph,
-        op="advect.copy",
-        inputs=(_get_node(x, graph, traced_type),),
-        value=result,
-        attrs={"order": order, "_advect_backend": "numpy"},
-        shape=result_shape,
-        dtype=result_dtype,
+    return _emit(
+        graph,
+        traced_type,
+        "advect.copy",
+        (x,),
+        result,
+        {"order": order},
     )
-    return result, node_id
 
 
 def _take_handler(
@@ -235,15 +200,8 @@ def _take_handler(
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
 ) -> tuple[Any, int]:
-    positional_names = ("axis", "out", "mode")
-    values = dict(zip(positional_names, args[_TAKE_ARGS:], strict=False)) | kwargs
-    if values.get("out") is not None:
-        msg = "numpy.take positional out= is not supported; pass out= by keyword"
-        raise TracingError(msg)
-    mode = str(values.get("mode", "raise"))
-    if mode not in {"raise", "wrap", "clip"}:
-        msg = "numpy.take mode must be raise, wrap, or clip"
-        raise TracingError(msg)
+    values = dict(zip(("axis",), args[_TAKE_ARGS:], strict=False)) | kwargs
+    mode = take_mode(values.get("mode", "raise"))
 
     source, indices = args[:2]
     axis_value = values.get("axis")
@@ -254,20 +212,9 @@ def _take_handler(
         axis=axis,
         mode=mode,
     )
-    shape, dtype = _result_shape_and_dtype(result)
-    node_id = _add_backend_node(
-        graph=graph,
-        op=canonicalize_numpy_op("numpy.take"),
-        inputs=(
-            _get_node(source, graph, traced_type),
-            _get_node(indices, graph, traced_type),
-        ),
-        value=result,
-        attrs={"axis": axis, "mode": mode},
-        shape=shape,
-        dtype=dtype,
+    return _emit(
+        graph, traced_type, "numpy.take", (source, indices), result, {"axis": axis, "mode": mode}
     )
-    return result, node_id
 
 
 def _take_along_axis_handler(
@@ -294,20 +241,15 @@ def _take_along_axis_handler(
         _get_value(indices, traced_type),
         axis=axis,
     )
-    shape, dtype = _result_shape_and_dtype(result)
-    node_id = _add_backend_node(
-        graph=graph,
-        op=canonicalize_numpy_op("numpy.take_along_axis"),
-        inputs=(
-            _get_node(source, graph, traced_type),
-            _get_node(indices, graph, traced_type),
-        ),
-        value=result,
-        attrs={"axis": axis},
-        shape=shape,
-        dtype=dtype,
+    return _emit(
+        graph, traced_type, "numpy.take_along_axis", (source, indices), result, {"axis": axis}
     )
-    return result, node_id
+
+
+def _flatten_for_axis_none(x: Any, axis: Any) -> tuple[Any, int]:
+    """Apply NumPy's ``axis=None``: order the flattened array along its only axis."""
+    # reshape, unlike ravel, also stages inside a staged derivative program.
+    return (np.reshape(x, (-1,)), -1) if axis is None else (x, int(axis))
 
 
 def _sort_handler(
@@ -317,14 +259,14 @@ def _sort_handler(
     kwargs: dict[str, Any],
 ) -> tuple[Any, int]:
     positional_names = ("axis", "kind", "order")
+    kwargs = ascending_sort_kwargs("sort", kwargs)
     unsupported = set(kwargs) - {*positional_names, "stable"}
     if unsupported:
         msg = f"numpy.sort kwargs not supported during tracing: {sorted(unsupported)}"
         raise TracingError(msg)
     values = dict(zip(positional_names, args[1:], strict=False)) | kwargs
 
-    x = args[0]
-    axis = int(values.get("axis", -1))
+    x, axis = _flatten_for_axis_none(args[0], values.get("axis", -1))
     kind = values.get("kind")
     order = values.get("order")
     stable = values.get("stable")
@@ -344,16 +286,7 @@ def _sort_handler(
     if stable is not None:
         attrs["stable"] = bool(stable)
 
-    node_id = _add_backend_node(
-        graph=graph,
-        op=canonicalize_numpy_op("numpy.sort"),
-        inputs=(_get_node(x, graph, traced_type),),
-        value=result,
-        attrs=attrs,
-        shape=result.shape,
-        dtype=result.dtype,
-    )
-    return result, node_id
+    return _emit(graph, traced_type, "numpy.sort", (x,), result, attrs)
 
 
 def _partition_handler(
@@ -364,9 +297,8 @@ def _partition_handler(
 ) -> tuple[Any, int]:
     positional_names = ("kth", "axis", "kind", "order")
     values = dict(zip(positional_names, args[1:], strict=False)) | kwargs
-    x = args[0]
+    x, axis = _flatten_for_axis_none(args[0], values.get("axis", -1))
     kth = _normalize_kth(values["kth"])
-    axis = int(values.get("axis", -1))
     kind = values.get("kind", "introselect")
     order = values.get("order")
 
@@ -378,16 +310,7 @@ def _partition_handler(
     if order is not None:
         attrs["order"] = order
 
-    node_id = _add_backend_node(
-        graph=graph,
-        op=canonicalize_numpy_op("numpy.partition"),
-        inputs=(_get_node(x, graph, traced_type),),
-        value=result,
-        attrs=attrs,
-        shape=result.shape,
-        dtype=result.dtype,
-    )
-    return result, node_id
+    return _emit(graph, traced_type, "numpy.partition", (x,), result, attrs)
 
 
 def _gradient_handler(
@@ -403,59 +326,45 @@ def _gradient_handler(
         msg = f"numpy.gradient edge_order must be 1 or 2, got {edge_order}"
         raise TracingError(msg)
 
-    a_value = cast("Any", _get_value(a, traced_type))
-    axes = _normalize_gradient_axes(axis=axis, ndim=a_value.ndim)
-    spacings = args[1:]
-    if spacings:
-        if len(spacings) == 1 and operand_ndim(spacings[0]) == 0:
-            normalized_spacings = spacings * len(axes)
-        elif len(spacings) == len(axes):
-            normalized_spacings = spacings
-        else:
-            msg = (
-                "numpy.gradient requires one scalar spacing or one spacing per "
-                f"gradient axis; got {len(spacings)} spacings for {len(axes)} axes"
-            )
-            raise TracingError(msg)
-        outputs = tuple(
-            lower_gradient_axis(
-                np,
-                a,
-                spacing,
-                axis=out_axis,
-                edge_order=edge_order,
-            )
-            for out_axis, spacing in zip(axes, normalized_spacings, strict=True)
+    a_value = _get_value(a, traced_type)
+    axes = _normalize_gradient_axes(axis=axis, ndim=operand_ndim(a_value))
+    if len(args) > 1:
+        return _finish(
+            lower_gradient(a, args[1:], axes=axes, edge_order=edge_order, error=TracingError),
+            traced_type=traced_type,
         )
-        composite = outputs[0] if len(outputs) == 1 else outputs
-        return _finish(composite, traced_type=traced_type)
 
     axis_arg: int | tuple[int, ...] = axes[0] if len(axes) == 1 else axes
 
     result = np.gradient(a_value, axis=axis_arg, edge_order=edge_order)
     outputs = tuple(result) if isinstance(result, (list, tuple)) else (result,)
-    if len(outputs) != len(axes):
-        msg = (
-            "numpy.gradient tracing expected output count to match axis count "
-            f"(got {len(outputs)} outputs for axes={axes})"
-        )
-        raise TracingError(msg)
 
-    input_id = _get_node(a, graph, traced_type)
-    node_ids: list[int] = []
-    for out_axis, output in zip(axes, outputs, strict=True):
-        output_shape, output_dtype = _result_shape_and_dtype(output)
-        node_id = _add_backend_node(
-            graph=graph,
-            op=canonicalize_numpy_op("numpy.gradient"),
-            inputs=(input_id,),
-            value=output,
-            attrs={"axis": out_axis, "edge_order": edge_order},
-            shape=output_shape,
-            dtype=output_dtype,
-        )
-        node_ids.append(node_id)
-
+    node_ids = [
+        _emit(
+            graph,
+            traced_type,
+            "numpy.gradient",
+            (a,),
+            output,
+            {"axis": out_axis, "edge_order": edge_order},
+        )[1]
+        for out_axis, output in zip(axes, outputs, strict=True)
+    ]
     if len(outputs) == 1:
         return outputs[0], node_ids[0]
     return outputs, tuple(node_ids)
+
+
+def register_misc_handlers(
+    handlers: dict[Callable[..., Any], ArrayFunctionHandler],
+) -> None:
+    """Register the remaining single-purpose array functions."""
+    handlers[np.angle] = _angle_handler
+    handlers[np.nan_to_num] = _nan_to_num_handler
+    handlers[np.sinc] = _sinc_handler
+    handlers[np.copy] = _copy_handler
+    handlers[np.take] = _take_handler
+    handlers[np.take_along_axis] = _take_along_axis_handler
+    handlers[np.sort] = _sort_handler
+    handlers[np.partition] = _partition_handler
+    handlers[np.gradient] = _gradient_handler

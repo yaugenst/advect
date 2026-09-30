@@ -6,95 +6,70 @@ from typing import Any
 
 import numpy as np
 import pytest
-from hypothesis import given, strategies as st
+from hypothesis import example, given, strategies as st
+from hypothesis.extra import numpy as hnp
 
 import advect as ad
+from advect.numpy._support_contract import numpy_support_declarations
+from advect_numpy_tests._assertions import assert_spellings_agree
+from advect_numpy_tests._support_case_families import support_cases
 
-
-@pytest.mark.parametrize(
-    ("method", "operation", "expected"),
-    [
-        ("reduce", np.add, lambda x: np.sum(x, axis=1)),
-        ("reduce", np.multiply, lambda x: np.prod(x, axis=1)),
-        ("accumulate", np.add, lambda x: np.cumsum(x, axis=1)),
-        ("accumulate", np.multiply, lambda x: np.cumprod(x, axis=1)),
-    ],
-)
-def test_reduction_methods_match_equivalent_numpy_functions(
-    method: str,
-    operation: np.ufunc,
-    expected: Any,
-) -> None:
-    value = np.array([[0.7, 1.2, 1.8], [1.1, 0.8, 1.4]])
-    direction = np.array([[0.2, -0.3, 0.5], [-0.1, 0.4, 0.25]])
-
-    def apply(x: Any) -> Any:
-        return getattr(operation, method)(x, axis=1, dtype=np.float64)
-
-    primal, tangent = ad.jvp(apply)(value, tangents=direction)
-    epsilon = 1e-6
-    finite_difference = (
-        expected(value + epsilon * direction) - expected(value - epsilon * direction)
-    ) / (2 * epsilon)
-
-    np.testing.assert_allclose(primal, expected(value))
-    np.testing.assert_allclose(tangent, finite_difference, rtol=2e-6, atol=2e-6)
+_DIFFERENTIABLE = {
+    declaration.callable
+    for declaration in numpy_support_declarations()
+    if declaration.kind == "ufunc_method" and declaration.has_derivatives
+}
+_OUTER_CASES = {
+    case.callable.removeprefix("numpy."): case
+    for case in support_cases()
+    if case.callable.endswith(".outer") and case.callable in _DIFFERENTIABLE
+}
 
 
 @given(
-    left_rows=st.integers(min_value=1, max_value=4),
-    right_columns=st.integers(min_value=1, max_value=4),
+    name=st.sampled_from(sorted(_OUTER_CASES)),
+    left_shape=hnp.array_shapes(min_dims=0, max_dims=2, min_side=1, max_side=3),
+    right_shape=hnp.array_shapes(min_dims=0, max_dims=2, min_side=1, max_side=3),
 )
-def test_binary_outer_matches_broadcasted_call(
-    left_rows: int,
-    right_columns: int,
+@example(name="floor_divide.outer", left_shape=(3,), right_shape=(2,))
+@example(name="remainder.outer", left_shape=(3,), right_shape=(2,))
+@example(name="multiply.outer", left_shape=(4,), right_shape=(4,))
+def test_differentiable_outer_forms_are_broadcast_calls(
+    name: str,
+    left_shape: tuple[int, ...],
+    right_shape: tuple[int, ...],
 ) -> None:
-    left = np.linspace(0.3, 1.2, left_rows)
-    right = np.linspace(-0.7, 0.8, right_columns)
-    left_tangent = np.linspace(0.1, 0.4, left_rows)
-    right_tangent = np.linspace(-0.2, 0.3, right_columns)
-
-    primal, tangent = ad.jvp(
-        lambda x, y: np.multiply.outer(x, y),  # noqa: PLW0108 - JVP boundary
-        argnums=(0, 1),
-    )(
-        left,
-        right,
-        tangents=(left_tangent, right_tangent),
+    case = _OUTER_CASES[name]
+    ufunc = getattr(np, name.removesuffix(".outer"))
+    operands = tuple(
+        np.resize(np.asarray(spec.data, dtype=spec.dtype), shape)
+        for spec, shape in zip(case.inputs, (left_shape, right_shape), strict=True)
     )
+    argnums = (case.derivative_argnums or ((0, 1),))[-1]
+    argnums = tuple(index for index in argnums if operands[index].dtype.kind == "f")
 
-    np.testing.assert_allclose(primal, np.multiply.outer(left, right))
-    np.testing.assert_allclose(
-        tangent,
-        np.multiply.outer(left_tangent, right) + np.multiply.outer(left, right_tangent),
+    def broadcast(left: Any, right: Any) -> Any:
+        return ufunc(np.reshape(left, np.shape(left) + (1,) * np.ndim(right)), right)
+
+    assert_spellings_agree(
+        ufunc.outer, broadcast, operands, argnums=argnums, rtol=1e-12, atol=1e-12
     )
 
 
-@pytest.mark.parametrize(
-    ("operation", "partial"),
-    [
-        (np.floor_divide, 0.0),
-        (np.remainder, 1.0),
-    ],
-    ids=["floor-divide", "remainder"],
-)
-def test_nonsmooth_outer_left_jvp_has_the_primal_shape(
-    operation: np.ufunc,
-    partial: float,
-) -> None:
-    left = np.array([0.25, 1.25, 2.5])
-    right = np.array([0.7, 1.5])
-    left_tangent = np.array([0.1, -0.2, 0.3])
+@pytest.mark.parametrize("side", ["left", "right"])
+def test_outer_accepts_a_python_sequence_operand(side: str) -> None:
+    value = np.array([0.5, 1.5])
+    sequence = [1.0, 2.0, 3.0]
 
-    primal, tangent = ad.jvp(lambda value: operation.outer(value, right))(
-        left,
-        tangents=left_tangent,
-    )
+    def outer(x: Any) -> Any:
+        return np.add.outer(sequence, x) if side == "left" else np.add.outer(x, sequence)
 
-    np.testing.assert_allclose(primal, operation.outer(left, right))
-    assert tangent.shape == primal.shape
-    expected = np.broadcast_to(partial * left_tangent[:, None], primal.shape)
-    np.testing.assert_allclose(tangent, expected)
+    primal, tangent = ad.jvp(outer)(value, tangents=np.ones_like(value))
+    program = ad.stage(outer, specs=(ad.ArraySpec(value.shape, value.dtype),))
+
+    np.testing.assert_allclose(primal, outer(value))
+    np.testing.assert_allclose(tangent, np.ones_like(primal))
+    np.testing.assert_allclose(program(value), outer(value))
 
 
 def test_supported_ufunc_methods_functionalize_out_and_nondefault_controls() -> None:
@@ -152,27 +127,16 @@ def test_supported_ufunc_methods_functionalize_out_and_nondefault_controls() -> 
     )
 
 
-@pytest.mark.parametrize(
-    ("operation", "expected"),
-    [
-        (lambda x: np.add.reduce(x, axis=1), lambda x: np.sum(x, axis=1)),
-        (lambda x: np.multiply.reduce(x, axis=1), lambda x: np.prod(x, axis=1)),
-        (lambda x: np.add.accumulate(x, axis=1), lambda x: np.cumsum(x, axis=1)),
-        (lambda x: np.multiply.accumulate(x, axis=1), lambda x: np.cumprod(x, axis=1)),
-        (lambda x: np.multiply.outer(x[0], x[0]), lambda x: np.multiply.outer(x[0], x[0])),
-    ],
-    ids=["add-reduce", "multiply-reduce", "add-accumulate", "multiply-accumulate", "outer"],
-)
-def test_supported_ufunc_methods_stage_and_serialize(
-    operation: Any,
-    expected: Any,
-) -> None:
-    program = ad.stage(operation, specs=(ad.ArraySpec((2, 3), "float64"),))
-    restored = ad.StagedProgram.from_dict(program.to_dict())
-    value = np.array([[0.7, 1.2, 1.8], [1.1, 0.8, 1.4]])
-
-    for staged in (program, restored):
-        np.testing.assert_allclose(staged(value), expected(value))
+@pytest.mark.parametrize("operation", [np.add, np.multiply])
+def test_accumulate_rejects_a_0d_input_as_numpy_does(operation: np.ufunc) -> None:
+    # np.cumsum and np.cumprod read a 0-d input as a vector; accumulate does not.
+    value = np.asarray(1.5)
+    with pytest.raises(TypeError, match="cannot accumulate on a scalar"):
+        operation.accumulate(value)
+    with pytest.raises(TypeError, match="cannot accumulate on a scalar"):
+        ad.jvp(operation.accumulate)(value, tangents=np.ones_like(value))
+    with pytest.raises(TypeError, match="cannot accumulate on a scalar"):
+        ad.stage(operation.accumulate, specs=(ad.ArraySpec((), "float64"),))
 
 
 @pytest.mark.parametrize("method", ["reduceat", "at"])

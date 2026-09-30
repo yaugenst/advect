@@ -2,20 +2,60 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, cast
+import functools
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 
 from advect.core._array_api.providers import _get_array_namespace
+from advect.core._array_protocol_helpers import _staged_value
+from advect.core._context import is_tracing
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from types import ModuleType
+
+    from numpy.typing import DTypeLike
 
 
 def _is_traced_value(value: object) -> bool:
     return callable(getattr(value, "_advect_snapshot", None)) or bool(
         getattr(value, "__advect_abstract_array__", False)
     )
+
+
+def _numpy_dtype(dtype: object) -> np.dtype[Any]:
+    try:
+        return np.dtype(cast("DTypeLike", dtype))
+    except (TypeError, ValueError) as error:
+        msg = f"advect.scipy supports NumPy dtype specifications only; got {dtype!r}"
+        raise TypeError(msg) from error
+
+
+def _operand_dtype(value: object) -> np.dtype[Any]:
+    staged = _staged_value(value)
+    if staged is not None:
+        # Staged code sees its provider's dtype objects; the rules resolve
+        # NumPy loops from the canonical dtype, and the call rejects the
+        # provider when it runs.
+        return _numpy_dtype(staged.spec.dtype)
+    dtype = getattr(value, "dtype", None)
+    return np.asarray(value).dtype if dtype is None else _numpy_dtype(dtype)
+
+
+def _traceable_astype(value: Any, dtype: object) -> Any:  # noqa: ANN401 - any provider array.
+    """Cast ``value`` to ``dtype``, keeping only the real part for real targets."""
+    normalized = _numpy_dtype(dtype)
+    source = _operand_dtype(value)
+    if source == normalized:
+        return value
+    if np.issubdtype(source, np.complexfloating) and not np.issubdtype(
+        normalized,
+        np.complexfloating,
+    ):
+        value = np.real(value)
+    astype = getattr(value, "astype", None)
+    return astype(normalized) if callable(astype) else np.asarray(value, dtype=normalized)
 
 
 def _array_operand(value: object) -> object:
@@ -46,6 +86,30 @@ def _require_numpy_values(module: str, name: str, *values: object) -> None:
                 "this function."
             )
             raise TypeError(msg)
+
+
+def _concrete_scipy[**P, R](module: ModuleType) -> Callable[[Callable[P, R]], Callable[P, R]]:
+    """Forward concrete calls verbatim to ``module``'s same-named function.
+
+    Only traced calls run the decorated body, so concrete values, dtypes, and
+    ``output=`` handling are SciPy's own. Every argument must be NumPy-backed.
+    """
+
+    def decorate(function: Callable[P, R]) -> Callable[P, R]:
+        name = function.__name__
+        scipy_function = getattr(module, name)
+        module_name = module.__name__.rpartition(".")[2]
+
+        @functools.wraps(function)
+        def call(*args: P.args, **kwargs: P.kwargs) -> R:
+            if is_tracing():
+                return function(*args, **kwargs)
+            _require_numpy_values(module_name, name, *args, *kwargs.values())
+            return scipy_function(*args, **kwargs)
+
+        return call
+
+    return decorate
 
 
 def _replace_out(

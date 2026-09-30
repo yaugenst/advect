@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from contextlib import contextmanager
 from dataclasses import replace
 from functools import lru_cache
@@ -28,6 +29,12 @@ def _validate_opdef(op_def: OpDef) -> OpDef:
     if type(op_def.output_arity_known) is not bool:
         msg = f"Op '{op_def.name}' has non-boolean output-arity state"
         raise TypeError(msg)
+    if type(op_def.num_outputs) is not int:
+        msg = f"Op '{op_def.name}' has a non-integer output arity"
+        raise TypeError(msg)
+    if op_def.num_outputs < 1:
+        msg = f"Op '{op_def.name}': num_outputs must be >= 1 (got {op_def.num_outputs})"
+        raise ValueError(msg)
     if op_def.schema_version < 1:
         msg = f"Op '{op_def.name}' has invalid schema version {op_def.schema_version}"
         raise ValueError(msg)
@@ -58,11 +65,14 @@ class OpRegistry:
     primitives register additional definitions programmatically.
     """
 
-    __slots__ = ("_ops", "_revision")
+    __slots__ = ("_lock", "_ops", "_revision")
 
     def __init__(self) -> None:
         self._ops: dict[str, OpDef] = {}
         self._revision: int = 0
+        # Serializes mutations so a rollback cannot erase another thread's
+        # writes. Reads stay lock-free.
+        self._lock = threading.RLock()
 
     def _bump_revision(self) -> None:
         self._revision += 1
@@ -81,18 +91,21 @@ class OpRegistry:
 
         Transactions are intended for atomic consumers such as graph
         deserialization, where validating one node may register runtime metadata
-        before a later node or graph-level invariant fails.
+        before a later node or graph-level invariant fails. Other threads'
+        mutations wait for the transaction to finish. A rollback advances the
+        revision past every value observed inside the transaction.
         """
-        ops_before = self._ops.copy()
-        revision_before = self._revision
-        committed = False
-        try:
-            yield
-            committed = True
-        finally:
-            if not committed:
-                self._ops = ops_before
-                self._revision = revision_before
+        with self._lock:
+            ops_before = self._ops.copy()
+            revision_before = self._revision
+            committed = False
+            try:
+                yield
+                committed = True
+            finally:
+                if not committed and self._revision != revision_before:
+                    self._ops = ops_before
+                    self._bump_revision()
 
     def register(self, op_def: OpDef) -> None:
         """Register an operation definition.
@@ -107,27 +120,24 @@ class OpRegistry:
         ValueError
             If an operation with the same name is already registered.
         """
-        if op_def.name in self._ops:
-            msg = f"Op '{op_def.name}' is already registered"
-            raise ValueError(msg)
-        self._ops[op_def.name] = _validate_opdef(op_def)
-        self._bump_revision()
+        with self._lock:
+            if op_def.name in self._ops:
+                msg = f"Op '{op_def.name}' is already registered"
+                raise ValueError(msg)
+            self._ops[op_def.name] = _validate_opdef(op_def)
+            self._bump_revision()
 
     def update(self, name: str, **changes: Any) -> OpDef:  # noqa: ANN401
         """Atomically replace fields on one canonical operation record."""
-        if name not in self._ops:
-            msg = f"Op '{name}' not found in registry"
-            raise KeyError(msg)
-        if "name" in changes:
-            msg = "Operation identity cannot be changed"
-            raise ValueError(msg)
-        old_def = self._ops[name]
-        new_def = _validate_opdef(replace(old_def, **changes))
-        if new_def == old_def:
-            return old_def
-        self._ops[name] = new_def
-        self._bump_revision()
-        return new_def
+        with self._lock:
+            # ``name`` binds the positional parameter, so identity cannot change.
+            old_def = self.get(name)
+            new_def = _validate_opdef(replace(old_def, **changes))
+            if new_def == old_def:
+                return old_def
+            self._ops[name] = new_def
+            self._bump_revision()
+            return new_def
 
     def get(self, name: str) -> OpDef:
         """Get an operation definition by name.
@@ -147,14 +157,11 @@ class OpRegistry:
         KeyError
             If the operation is not found in the registry.
         """
-        if name not in self._ops:
+        try:
+            return self._ops[name]
+        except KeyError:
             msg = f"Op '{name}' not found in registry"
-            raise KeyError(msg)
-        return self._ops[name]
-
-    def _get_canonical(self, name: str) -> OpDef:
-        """Return an op whose caller already holds a canonical runtime ID."""
-        return self._ops[name]
+            raise KeyError(msg) from None
 
     def get_optional(self, name: str) -> OpDef | None:
         """Return an operation definition when registered."""
@@ -175,35 +182,6 @@ class OpRegistry:
         """
         return name in self._ops
 
-    def update_num_outputs(self, name: str, *, num_outputs: int) -> None:
-        """Update the output arity for an existing operation.
-
-        This replaces the stored :class:`~advect.OpDef` while preserving all other
-        fields (docstring, VJP rule, requirements, etc.).
-
-        Parameters
-        ----------
-        name
-            The namespaced operation name.
-        num_outputs
-            New output arity. Must be >= 1.
-
-        Raises
-        ------
-        KeyError
-            If the operation is not found.
-        ValueError
-            If num_outputs is invalid.
-        """
-        if num_outputs < 1:
-            msg = f"Op '{name}': num_outputs must be >= 1 (got {num_outputs})"
-            raise ValueError(msg)
-        if name not in self._ops:
-            msg = f"Op '{name}' not found in registry"
-            raise KeyError(msg)
-
-        self.update(name, num_outputs=num_outputs, output_arity_known=True)
-
     def has_vjp(self, name: str) -> bool:
         """Check if an operation has a registered VJP rule.
 
@@ -217,9 +195,8 @@ class OpRegistry:
         bool
             True if the operation exists and has a VJP rule.
         """
-        if name not in self._ops:
-            return False
-        return self._ops[name].vjp is not None
+        op_def = self._ops.get(name)
+        return op_def is not None and op_def.vjp is not None
 
     def has_jvp(self, name: str) -> bool:
         """Check if an operation has a registered JVP rule.
@@ -234,9 +211,8 @@ class OpRegistry:
         bool
             True if the operation exists and has a JVP rule.
         """
-        if name not in self._ops:
-            return False
-        return self._ops[name].jvp is not None
+        op_def = self._ops.get(name)
+        return op_def is not None and op_def.jvp is not None
 
     def register_vjp(
         self,
@@ -267,18 +243,6 @@ class OpRegistry:
         KeyError
             If the operation is not found.
         """
-        if name not in self._ops:
-            msg = f"Op '{name}' not found in registry. Register the op first."
-            raise KeyError(msg)
-
-        old_def = self._ops[name]
-        if (
-            old_def.vjp is vjp
-            and old_def.vjp_needs_inputs is needs_inputs
-            and old_def.vjp_needs_output is needs_output
-            and old_def.non_differentiable_reason is None
-        ):
-            return
         self.update(
             name,
             vjp=vjp,
@@ -306,10 +270,6 @@ class OpRegistry:
         KeyError
             If the operation is not found.
         """
-        if name not in self._ops:
-            msg = f"Op '{name}' not found in registry. Register the op first."
-            raise KeyError(msg)
-
         self.update(name, jvp=jvp)
 
 

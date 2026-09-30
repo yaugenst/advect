@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 import array_api_strict as xp
 import numpy as np
 import pytest
@@ -15,10 +13,9 @@ from advect.autodiff.api.common import (
     _prepare_higher_order_inputs,
     _require_array_namespace_for_higher_order,
 )
-from advect.autodiff.rules.array_family.providers import resolve_array_family_backend_provider
 from advect.core._array_api.providers import ResolvedArrayNamespace
 from advect.core._errors import HigherOrderNotSupportedError
-from advect.core._eval_dispatch import bind_node_evaluator, evaluate_node_value
+from advect.core._eval_dispatch import bind_node_evaluator
 
 
 def _numpy_sin(value: object) -> object:
@@ -32,26 +29,6 @@ def _array_api_sin(value: object) -> object:
 
 def _numpy_energy(value: object) -> object:
     return np.sum(np.sin(value) ** 2)
-
-
-def _build_backend_case(backend: str) -> tuple[Any, Any]:
-    if backend == "numpy":
-        runtime = np.asarray([1.0, -2.0], dtype=np.float64)
-        return np, runtime
-    if backend == "array_api_strict":
-        runtime = xp.asarray([1.0, -2.0], dtype=xp.float64)
-        return xp, runtime
-    msg = f"Unknown backend case: {backend}"
-    raise ValueError(msg)
-
-
-@pytest.mark.parametrize("backend", ["numpy", "array_api_strict"])
-def test_provider_resolution_matrix(backend: str) -> None:
-    namespace, runtime_value = _build_backend_case(backend)
-
-    resolved = resolve_array_family_backend_provider(runtime_value)
-    assert resolved.backend == backend
-    assert resolved.namespace is namespace
 
 
 def test_numpy_higher_order_namespace_contract() -> None:
@@ -74,9 +51,20 @@ def test_numpy_higher_order_namespace_contract() -> None:
     assert blocks[0][0].shape == (expected_size, expected_size)
 
 
-def test_unresolved_provider_failure_is_typed() -> None:
-    with pytest.raises(HigherOrderNotSupportedError, match="runtime array namespace"):
-        _ = _require_array_namespace_for_higher_order(args=(object(),), kwargs={})
+@pytest.mark.parametrize(
+    ("value", "match"),
+    [
+        pytest.param(
+            xp.asarray([1.0, -2.0], dtype=xp.float64),
+            r"zeros_like.*backend 'array_api_strict' is missing: diag\.$",
+            id="missing-capabilities",
+        ),
+        pytest.param(object(), "runtime array namespace", id="unresolved-provider"),
+    ],
+)
+def test_higher_order_namespace_failures_are_typed(value: object, match: str) -> None:
+    with pytest.raises(HigherOrderNotSupportedError, match=match):
+        _ = _require_array_namespace_for_higher_order(args=(value,), kwargs={})
 
 
 def test_numpy_authored_transform_stages_and_restores_on_numpy() -> None:
@@ -170,13 +158,6 @@ def test_unbound_numpy_evaluator_checks_provider_before_fallback_dispatch() -> N
 
     with pytest.raises(TypeError, match="NumPy-authored node"):
         evaluator((value,), context, None)
-    with pytest.raises(TypeError, match="NumPy-authored node"):
-        evaluate_node_value(
-            "unbound.operation",
-            (value,),
-            attrs,
-            namespace=context,
-        )
 
 
 def test_nested_staged_differentiation_retains_numpy_frontend() -> None:

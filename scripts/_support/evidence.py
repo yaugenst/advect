@@ -40,10 +40,15 @@ def evidence_environment() -> dict[str, object]:
     }
 
 
-def evidence_report_header(*, schema_version: int, report_kind: str) -> dict[str, object]:
-    """Return the identity and source environment shared by evidence reports."""
+def evidence_report_header(
+    *,
+    schema_version: int,
+    report_kind: str,
+    **environment: object,
+) -> dict[str, object]:
+    """Return the report identity and its source environment plus *environment*."""
     return {
         "schema_version": schema_version,
         "report_kind": report_kind,
-        "environment": evidence_environment(),
+        "environment": {**evidence_environment(), **environment},
     }

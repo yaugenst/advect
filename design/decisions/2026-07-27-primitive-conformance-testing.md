@@ -43,7 +43,11 @@ are required when behavior passes through a materially different boundary:
 
 One invocation may own several named `InputVariant` values. A variant changes
 argument shapes, dtypes, numerical reference, or tolerance without copying the
-frontend callable and semantic declaration. Pointwise families cover scalar,
+frontend callable and semantic declaration. It may also pass zero-dimensional
+arguments as weak Python numbers, differentiated or held constant, so NEP 50
+promotion, weak-scalar cotangents, and staging beside a selected or unselected
+weak scalar are laws rather than examples; mixed-precision variants do the
+same for cotangent dtypes. Pointwise families cover scalar,
 vector, matrix, tensor, broadcast, float32/64, and complex64/128 forms as
 applicable. Reductions cover multiple ranks; contractions cover vector,
 matrix, batched, and broadcast signatures; linear algebra covers vector and
@@ -108,19 +112,36 @@ Re <v, J u> = Re <J* v, u>
 
 at derivative tolerance rather than finite-difference tolerance. It covers
 both explicit VJPs and JVPs transposed structurally by the public reverse path.
+The tangent `u` and cotangent `v` are independent probes, drawn by Hypothesis
+around distinct dense anchors. With `u == v`, a pullback that applies `J`
+instead of `J*` would satisfy the identity for any real square map. The
+ordinary pullback applies one seed. A forward transform over a second pullback
+carries that seed as a traced value and a second seed as its tangent, so every
+pullback must also be linear and traceable, and a rule's concrete and traced
+cotangent branches both meet the identity. An invocation whose pullback is a
+documented first-order boundary quotes that refusal in `first_order`, and the
+law then requires the nested transform to keep raising it. Smooth domains
+never reach kinks, ties, zeros or domain edges, so the first invocation of each
+operation and frontend with elementwise domains also runs the adjoint law on
+exact lattice points: both modes must implement the same local linear map
+there even where finite differences are meaningless.
 
-`DTYPE`, `STRUCTURE`, and `NO_INPUT_MUTATION` are independent contracts rather
-than side effects of an all-close assertion. Staging is exhaustively
+`DTYPE` (including the tangent's shape and dtype), `STRUCTURE`, and
+`NO_INPUT_MUTATION` are independent contracts rather than side effects of an
+all-close assertion. Staging is exhaustively
 classified: every invocation either runs a serialized primal and a compiled,
 serialized VJP program or its exact invocation ID belongs to the closed
 `DYNAMIC_ONLY_STAGING_INVOCATIONS` set. Classification is deliberately keyed by
 frontend and call form rather than canonical operation: another invocation
-which lowers to the same operation may have a different staging contract. The
-coverage gate fails if the declared and observed invocation sets diverge. This
-makes dynamic-only support visible without pretending every dynamic rule has
-an abstract lowering. `SECOND_ORDER` compares a Hessian-vector product with both
+which lowers to the same operation may have a different staging contract. A
+gate stages one drawn example of every variant in that set and requires it to
+be refused, so a form that gains a lowering must leave the set. This makes
+dynamic-only support visible without pretending every dynamic rule has an
+abstract lowering. `SECOND_ORDER` compares a Hessian-vector product with both
 the dense Hessian contraction and an independent directional finite difference
-of the nested gradient. It remains opt-in: a first-order operation is not
+of the nested gradient, and a forward-over-forward derivative with a
+difference of JVPs, which alone sees a JVP detached from its primal. It
+remains opt-in: a first-order operation is not
 silently advertised as higher-order merely because its first derivative exists.
 
 ### Dependence is an explicit domain promise
@@ -158,17 +179,20 @@ complex128 before perturbation. The actual transform still runs at the declared
 low precision, and separate dtype and cotangent-structure laws require exact
 metadata preservation. This removes cancellation noise from the oracle without
 letting a widened derivative path satisfy the dtype contract. Decomposition
-oracles also align only mathematically arbitrary permutations and vector
-phases; QR and general-eigenvector domains stay away from provider gauge
-boundaries instead of hiding them with tolerance.
+oracles also align only mathematically arbitrary permutations, signs and
+vector phases, including the QR row sign that a low-precision difference step
+can straddle; QR and general-eigenvector domains stay away from structured
+provider gauge boundaries instead of hiding them with tolerance.
 
 There is no `assume()` in the domain layer. Hypothesis's normal health checks
 therefore remain meaningful and a failing example shrinks to the actual
 smallest valid input.
 
-The selected Hypothesis profile owns depth. Presubmit runs a small number of
-examples in every law-by-invocation cell; the `thorough` profile increases that
-depth and the composition search without changing which laws exist.
+The selected Hypothesis profile owns depth. A cell is one invocation variant:
+each drawn input runs the captured registered rules and then every declared
+law, and a failure names the law or rule boundary it violated. Presubmit runs
+a small number of examples in every cell; the `thorough` profile increases
+that depth and the composition search without changing which laws exist.
 `--hypothesis-show-statistics` is useful observability, but examples per second
 is not treated as a coverage metric.
 
@@ -304,7 +328,8 @@ or boundaries are correct.
 3. Choose a domain that is smooth and well conditioned after shrinking.
 4. Opt into `DEPENDENCE`, complex-step, or second order only when the case can
    state the stronger contract; add a genuine abstract-lowering gap to the
-   closed dynamic-only staging set.
+   closed dynamic-only staging set and quote a documented nested-pullback
+   refusal in `first_order`.
 5. If no frontend reaches an installed rule, add a `RawRuleCase`.
 6. If the operation is non-differentiable, put the reason in the registry.
 7. Run:

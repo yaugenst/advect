@@ -13,6 +13,10 @@ if TYPE_CHECKING:
 class ArraySpec:
     """Shape/dtype contract for one staged array input or result.
 
+    Staging stores the canonical name of ``dtype`` whichever supported spelling
+    declares it, and a function staged from ``specs`` alone sees NumPy dtype
+    objects.
+
     Examples
     --------
     >>> import advect as ad
@@ -63,6 +67,8 @@ class AbstractRule:
     required_attrs: frozenset[str] = frozenset()
     sequence_operand: bool = False
     generic_only: bool = False
+    # Internal attributes that each add one trailing operand when set.
+    optional_operands: tuple[str, ...] = ()
 
 
 type ResultEvaluator = Callable[
@@ -80,6 +86,7 @@ def rule(
     required: tuple[str, ...] = (),
     sequence: bool = False,
     generic_only: bool = False,
+    optional: tuple[str, ...] = (),
 ) -> AbstractRule:
     """Declare one frontend call schema without introducing another registry."""
     return AbstractRule(
@@ -90,4 +97,5 @@ def rule(
         required_attrs=frozenset(required),
         sequence_operand=sequence,
         generic_only=generic_only,
+        optional_operands=optional,
     )

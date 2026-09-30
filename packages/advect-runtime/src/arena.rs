@@ -16,8 +16,6 @@ pub const DEFAULT_OP_SCHEMA_VERSION: SchemaVersion = 1;
 
 const INPUT_FLAG: u8 = 1 << 0;
 const ACTIVE_FLAG: u8 = 1 << 1;
-const ACTIVE_PARENT_0_FLAG: u8 = 1 << 2;
-const ACTIVE_PARENT_1_FLAG: u8 = 1 << 3;
 
 /// Compact structural inputs for one SSA node.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -48,26 +46,13 @@ impl NodeFlags {
     /// Construct flags for an input node.
     #[must_use]
     pub const fn input(active: bool) -> Self {
-        Self(INPUT_FLAG | if active { ACTIVE_FLAG } else { 0 })
+        Self(INPUT_FLAG | Self::operation(active).0)
     }
 
-    /// Construct flags from parent activity.
+    /// Construct flags for an operation node.
     #[must_use]
-    pub fn operation(active_parents: &[bool]) -> Self {
-        Self::operation_activity(active_parents.iter().any(|&active| active), active_parents)
-    }
-
-    /// Construct operation flags with explicit result activity.
-    #[must_use]
-    pub fn operation_activity(active: bool, active_parents: &[bool]) -> Self {
-        let mut bits = if active { ACTIVE_FLAG } else { 0 };
-        if active_parents.first().copied().unwrap_or(false) {
-            bits |= ACTIVE_PARENT_0_FLAG;
-        }
-        if active_parents.get(1).copied().unwrap_or(false) {
-            bits |= ACTIVE_PARENT_1_FLAG;
-        }
-        Self(bits)
+    pub const fn operation(active: bool) -> Self {
+        Self(if active { ACTIVE_FLAG } else { 0 })
     }
 
     /// Whether this is an input node.
@@ -80,16 +65,6 @@ impl NodeFlags {
     #[must_use]
     pub const fn is_active(self) -> bool {
         self.0 & ACTIVE_FLAG != 0
-    }
-
-    /// Return inline activity for parent zero or one.
-    #[must_use]
-    pub const fn inline_parent_is_active(self, position: usize) -> Option<bool> {
-        match position {
-            0 => Some(self.0 & ACTIVE_PARENT_0_FLAG != 0),
-            1 => Some(self.0 & ACTIVE_PARENT_1_FLAG != 0),
-            _ => None,
-        }
     }
 }
 
@@ -436,40 +411,12 @@ impl RawArena {
                 self.nodes.len()
             )));
         }
-        for (node_index, &node_active) in active.iter().enumerate() {
-            let node = *self.nodes.get(node_index).ok_or_else(|| {
-                RawArenaError::new(format!("arena node %{node_index} is unavailable"))
-            })?;
-            let flags = if node.flags().is_input() {
+        for (node, &node_active) in self.nodes.iter_mut().zip(active) {
+            node.flags = if node.flags.is_input() {
                 NodeFlags::input(node_active)
             } else {
-                let parents = self.parents(node).ok_or_else(|| {
-                    RawArenaError::new(format!(
-                        "arena node %{node_index} has an invalid parent range"
-                    ))
-                })?;
-                let parent_activity = parents
-                    .iter()
-                    .map(|parent| {
-                        usize::try_from(parent)
-                            .ok()
-                            .and_then(|index| active.get(index))
-                            .copied()
-                            .ok_or_else(|| {
-                                RawArenaError::new(format!(
-                                    "arena node %{node_index} has invalid parent %{parent}"
-                                ))
-                            })
-                    })
-                    .collect::<Result<Vec<_>, _>>()?;
-                NodeFlags::operation_activity(node_active, &parent_activity)
+                NodeFlags::operation(node_active)
             };
-            self.nodes
-                .get_mut(node_index)
-                .ok_or_else(|| {
-                    RawArenaError::new(format!("arena node %{node_index} is unavailable"))
-                })?
-                .flags = flags;
         }
         Ok(())
     }

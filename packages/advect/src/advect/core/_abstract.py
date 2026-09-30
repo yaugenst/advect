@@ -1,4 +1,4 @@
-# ruff: noqa: PLR2004, SLF001
+# ruff: noqa: SLF001
 """Payload-free arrays for explicit, conservative abstract staging.
 
 Only operations declared in :mod:`advect.core._abstract_domains` are stageable.
@@ -9,30 +9,47 @@ abstract result rule. Unknown operations fail instead of guessing a result.
 from __future__ import annotations
 
 import math
+import sys
 from contextlib import nullcontext
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, NoReturn, cast
 
 from advect.core._abstract_helpers import (
+    ABSTRACT_NAMESPACE_NAME,
+    DTYPE_NAMES as _DTYPE_NAMES,
+    PYTHON_SCALAR_TYPES as _PYTHON_SCALAR_TYPES,
+    _staged_dtype,
     broadcast_shape as _broadcast_shape,
+    can_cast_dtype as _can_cast_dtype,
+    coerced_dtype as _coerced_dtype,
+    discovered_dtype as _discovered_dtype,
     dtype_kind_bits as _dtype_kind_bits,
     dtype_name as _dtype_name,
-    normalize_axis as _normalize_axis,
     promote_dtype as _promote_dtype,
+    safely_casts as _safely_casts,
     shape_tuple as _shape_tuple,
+    value_spec as _value_spec,
 )
 from advect.core._abstract_model import AbstractValue, ArraySpec
 from advect.core._array_api.frontend import (
+    _ARITHMETIC_OPERATORS,
+    _COMPARISON_OPERATORS,
     _FUNCTION_SPECS,
     _INTERNAL_FUNCTION_SPECS,
     _STAGED_ARRAY_API_COMPOSITES,
+    ArrayAPINamespace,
     _staged_array_api_composite,
     bind_array_api_call,
+    lower_array_api_call,
 )
 from advect.core._array_api.profiles import materialize_array_api_profile
 from advect.core._array_api.results import restore_array_api_result
-from advect.core._array_protocol_helpers import normalize_item_index
-from advect.core._basic_index import encode_basic_index
+from advect.core._array_protocol_helpers import (
+    PYTHON_OPERATOR_ATTR,
+    python_scalar_operands,
+    select_item,
+)
+from advect.core._basic_index import encode_basic_index, normalize_basic_index
 from advect.core._context import (
     _peek_pending_update,
     _set_pending_update,
@@ -47,50 +64,17 @@ from advect.core._errors import (
     _array_conversion_error,
 )
 from advect.core._graph_attrs import encode_graph_attrs_for_native
+from advect.core._protocols import _innermost
 from advect.core._registry import get_registry
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping, Sequence
+    from collections.abc import Callable, Iterator, Mapping, Sequence
     from contextlib import AbstractContextManager
 
     from advect.core._array_api.profiles import ArrayAPIProfile
     from advect.core._native import GraphBuilder
 
-
-_DTYPE_NAMES = frozenset(
-    {
-        "bool",
-        "int8",
-        "int16",
-        "int32",
-        "int64",
-        "uint8",
-        "uint16",
-        "uint32",
-        "uint64",
-        "float16",
-        "float32",
-        "float64",
-        "complex64",
-        "complex128",
-    }
-)
-_SAFE_CAST_TARGETS: dict[str, frozenset[str]] = {
-    "bool": frozenset({"bool"}),
-    "int8": frozenset({"int8", "int16", "int32", "int64"}),
-    "int16": frozenset({"int16", "int32", "int64"}),
-    "int32": frozenset({"int32", "int64"}),
-    "int64": frozenset({"int64"}),
-    "uint8": frozenset({"uint8", "uint16", "uint32", "uint64", "int16", "int32", "int64"}),
-    "uint16": frozenset({"uint16", "uint32", "uint64", "int32", "int64"}),
-    "uint32": frozenset({"uint32", "uint64", "int64"}),
-    "uint64": frozenset({"uint64"}),
-    "float16": frozenset({"float16", "float32", "float64", "complex64", "complex128"}),
-    "float32": frozenset({"float32", "float64", "complex64", "complex128"}),
-    "float64": frozenset({"float64", "complex128"}),
-    "complex64": frozenset({"complex64", "complex128"}),
-    "complex128": frozenset({"complex128"}),
-}
+_ASARRAY_LITERAL_TYPES = (tuple, list, *_PYTHON_SCALAR_TYPES)
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,7 +94,7 @@ class _StrongScalarConstant:
 @dataclass(frozen=True, slots=True)
 class _Finfo:
     bits: int
-    dtype: str
+    dtype: object
     eps: float
     max: float
     min: float
@@ -120,7 +104,7 @@ class _Finfo:
 @dataclass(frozen=True, slots=True)
 class _Iinfo:
     bits: int
-    dtype: str
+    dtype: object
     max: int
     min: int
 
@@ -160,6 +144,10 @@ class _PendingIndexUpdate:
         return True
 
 
+def _provider_name(namespace: object) -> str:
+    return str(getattr(namespace, "__name__", type(namespace).__name__))
+
+
 class AbstractTrace:
     """Construction state shared by all wrappers in one abstract trace."""
 
@@ -169,64 +157,80 @@ class AbstractTrace:
         "array_api_version",
         "array_factory",
         "builder",
+        "dtype_namespace",
+        "dtype_objects",
         "open",
-        "profile",
     )
 
     def __init__(
         self,
         builder: GraphBuilder,
         *,
-        profile: str,
         array_api_version: str,
         add_constant: Callable[[Any, ArraySpec], int],
         array_factory: type[AbstractArray],
+        dtype_namespace: object,
     ) -> None:
         self.builder = builder
-        self.profile = profile
         self.array_api_version = array_api_version
         self.array_api_profile: ArrayAPIProfile = materialize_array_api_profile(array_api_version)
         self.add_constant = add_constant
         self.array_factory = array_factory
+        if isinstance(dtype_namespace, ArrayAPINamespace):
+            # An enclosing dynamic transform proxies the examples' provider.
+            dtype_namespace = dtype_namespace.raw_namespace
+        if isinstance(dtype_namespace, AbstractNamespace):
+            # stage() inside another stage() trace presents the enclosing
+            # provider; that trace's namespace would record each empty() probe.
+            dtype_namespace = dtype_namespace._trace.dtype_namespace
+        self.dtype_namespace = dtype_namespace
+        self.dtype_objects: dict[str, object] = {}
         self.open = True
+
+    def dtype_object(self, name: str) -> object:
+        """Return the provider dtype object that user code sees for a staged dtype.
+
+        Staged specs hold canonical names. The provider that staging resolved
+        for this trace presents them, so ``x.dtype`` equals what its arrays report.
+        """
+        dtype = self.dtype_objects.get(name)
+        if dtype is None:
+            namespace = cast("Any", self.dtype_namespace)
+            provider_dtype = getattr(namespace, name, None)
+            if provider_dtype is None:
+                raise TypeError(
+                    f"Array provider {_provider_name(namespace)!r} has no {name} dtype "
+                    "to present for this staged value"
+                )
+            dtype = namespace.empty((0,), dtype=provider_dtype).dtype
+            self.dtype_objects[name] = dtype
+        return dtype
 
     def require_open(self) -> None:
         if not self.open:
             raise EscapedTracerError("An abstract tracer escaped the stage() trace that created it")
 
 
-def _scalar_spec(value: object) -> ArraySpec:
-    if isinstance(value, bool):
-        return ArraySpec((), "bool", weak=True)
-    if isinstance(value, complex):
-        return ArraySpec((), "complex128", weak=True)
-    if isinstance(value, float):
-        return ArraySpec((), "float64", weak=True)
-    if isinstance(value, int):
-        return ArraySpec((), "int64", weak=True)
-    shape = getattr(value, "shape", None)
-    dtype = getattr(value, "dtype", None)
-    if shape is None or dtype is None:
-        raise TypeError(f"Cannot stage concrete operand of type {type(value).__name__}")
-    return ArraySpec(tuple(int(size) for size in shape), dtype)
+def _leaves(value: object) -> Iterator[object]:
+    if isinstance(value, (tuple, list)):
+        for item in value:
+            yield from _leaves(item)
+    else:
+        yield value
 
 
-def _nested_sequence_spec(value: object, dtype: object | None) -> ArraySpec:
-    leaf_specs: list[ArraySpec] = []
+def _sequence_dtype(value: object) -> str:
+    """Return the dtype NumPy's array coercion discovers for *value*."""
+    return _coerced_dtype(map(_discovered_dtype, _leaves(value)))
 
-    def visit(item: object) -> tuple[int, ...]:
-        if not isinstance(item, (tuple, list)):
-            leaf_specs.append(_scalar_spec(item))
-            return ()
-        child_shapes = tuple(visit(child) for child in item)
-        if child_shapes and any(shape != child_shapes[0] for shape in child_shapes[1:]):
-            raise ValueError("asarray() requires a rectangular nested sequence")
-        return (len(item), *(child_shapes[0] if child_shapes else ()))
 
-    shape = visit(value)
-    if dtype is None:
-        dtype = "float64" if not leaf_specs else _promote_dtype(leaf_specs)
-    return ArraySpec(shape, _dtype_name(dtype))
+def _sequence_shape(value: object) -> tuple[int, ...]:
+    if not isinstance(value, (tuple, list)):
+        return ()
+    child_shapes = tuple(_sequence_shape(child) for child in value)
+    if child_shapes and any(shape != child_shapes[0] for shape in child_shapes[1:]):
+        raise ValueError("asarray() requires a rectangular nested sequence")
+    return (len(value), *(child_shapes[0] if child_shapes else ()))
 
 
 def _array_api_op(path: str) -> str:
@@ -252,7 +256,7 @@ class AbstractNamespace:
 
     @property
     def __name__(self) -> str:
-        return "advect.array_api"
+        return ABSTRACT_NAMESPACE_NAME
 
     @property
     def __array_api_version__(self) -> str:
@@ -272,7 +276,7 @@ class AbstractNamespace:
         """Identify this invocation-local namespace as Array API compatible."""
         return self
 
-    def result_type(self, *values: object) -> str:
+    def result_type(self, *values: object) -> object:
         """Evaluate dtype promotion as abstract compile-time metadata."""
         if not values:
             raise TypeError("result_type() requires at least one argument")
@@ -290,8 +294,8 @@ class AbstractNamespace:
             if normalized_dtype in _DTYPE_NAMES:
                 specs.append(ArraySpec((), normalized_dtype))
                 continue
-            specs.append(_scalar_spec(value))
-        return _promote_dtype(specs)
+            specs.append(_value_spec(value))
+        return self._trace.dtype_object(_promote_dtype(specs))
 
     def isdtype(self, dtype: object, kind: object) -> bool:
         """Evaluate standard dtype-category queries at staging time."""
@@ -315,17 +319,20 @@ class AbstractNamespace:
 
     def can_cast(self, from_: object, to: object) -> bool:
         """Evaluate the profile's lossless dtype-cast relation at staging time."""
-        source = from_.dtype if isinstance(from_, AbstractArray) else getattr(from_, "dtype", from_)
+        source = (
+            from_.spec.dtype if isinstance(from_, AbstractArray) else getattr(from_, "dtype", from_)
+        )
         source_name = _dtype_name(source)
         target_name = _dtype_name(to)
-        targets = _SAFE_CAST_TARGETS.get(source_name)
-        if targets is None or target_name not in _DTYPE_NAMES:
+        if source_name not in _DTYPE_NAMES or target_name not in _DTYPE_NAMES:
             raise TypeError(f"Unsupported dtype pair for can_cast(): {source!r}, {to!r}")
-        return target_name in targets
+        return _can_cast_dtype(source_name, target_name)
 
     def finfo(self, type_: object) -> _Finfo:
         """Return deterministic floating-point metadata during staging."""
-        dtype = type_.dtype if isinstance(type_, AbstractArray) else getattr(type_, "dtype", type_)
+        dtype = (
+            type_.spec.dtype if isinstance(type_, AbstractArray) else getattr(type_, "dtype", type_)
+        )
         dtype_name = _dtype_name(dtype)
         real_dtype = {
             "complex64": "float32",
@@ -334,7 +341,7 @@ class AbstractNamespace:
         if real_dtype == "float32":
             return _Finfo(
                 bits=32,
-                dtype="float32",
+                dtype=self._trace.dtype_object("float32"),
                 eps=2.0**-23,
                 max=float.fromhex("0x1.fffffep+127"),
                 min=-float.fromhex("0x1.fffffep+127"),
@@ -343,7 +350,7 @@ class AbstractNamespace:
         if real_dtype == "float64":
             return _Finfo(
                 bits=64,
-                dtype="float64",
+                dtype=self._trace.dtype_object("float64"),
                 eps=2.0**-52,
                 max=float.fromhex("0x1.fffffffffffffp+1023"),
                 min=-float.fromhex("0x1.fffffffffffffp+1023"),
@@ -353,20 +360,22 @@ class AbstractNamespace:
 
     def iinfo(self, type_: object) -> _Iinfo:
         """Return deterministic integer metadata during staging."""
-        dtype = type_.dtype if isinstance(type_, AbstractArray) else getattr(type_, "dtype", type_)
+        dtype = (
+            type_.spec.dtype if isinstance(type_, AbstractArray) else getattr(type_, "dtype", type_)
+        )
         dtype_name = _dtype_name(dtype)
         kind, bits = _dtype_kind_bits(dtype_name)
         if kind == "int":
             return _Iinfo(
                 bits=bits,
-                dtype=dtype_name,
+                dtype=self._trace.dtype_object(dtype_name),
                 max=(1 << (bits - 1)) - 1,
                 min=-(1 << (bits - 1)),
             )
         if kind == "uint":
             return _Iinfo(
                 bits=bits,
-                dtype=dtype_name,
+                dtype=self._trace.dtype_object(dtype_name),
                 max=(1 << bits) - 1,
                 min=0,
             )
@@ -374,12 +383,15 @@ class AbstractNamespace:
 
     def _advect_materialize_constant(self, value: object, spec: ArraySpec) -> AbstractArray:
         """Lift a closed staged constant without converting it through Python."""
-        node_id = self._trace.add_constant(value, spec)
-        return _new_abstract_array(self._trace, node_id, spec, owned=False)
+        return _constant(self._trace, value, spec)
 
-    def __getattr__(self, name: str) -> str | Callable[..., Any]:
+    def __getattr__(self, name: str) -> object:
         if not self._prefix and name in _DTYPE_NAMES:
-            return name
+            namespace = self._trace.dtype_namespace
+            if not hasattr(namespace, name):
+                message = f"Array provider {_provider_name(namespace)!r} has no {name} dtype"
+                raise AttributeError(message)
+            return self._trace.dtype_object(name)
         path = f"{self._prefix}{name}"
         if not self._trace.array_api_profile.admits(path) and path not in _INTERNAL_FUNCTION_SPECS:
             message = (
@@ -470,6 +482,35 @@ class AbstractArray:
                 "Call `.copy()` before mutating it."
             )
 
+    def _augmented_result(self, result: AbstractArray) -> AbstractArray:
+        """Return the value that an augmented assignment stores in this array.
+
+        Portable augmented assignment never changes dtype, so the promoted
+        result is kept and a dtype change is rejected. A frontend whose
+        in-place operators cast the result back to the destination overrides
+        this.
+        """
+        return result
+
+    def _assignment_value(self, value: AbstractArray, shape: tuple[int, ...]) -> AbstractArray:
+        """Return the value that a view assignment broadcasts into ``shape``.
+
+        Portable assignment broadcasts the value as given. A frontend whose
+        view assignment first drops extra leading unit dimensions overrides
+        this. An index that selects one element stores the value as given.
+        """
+        del shape
+        return value
+
+    def _squares(self, exponent: object) -> bool:
+        """Return whether Python's ``self ** exponent`` squares this array.
+
+        Portable ``**`` raises to a power. A frontend whose power operator
+        squares instead, with another result dtype, overrides this.
+        """
+        del exponent
+        return False
+
     def _commit(self, replacement: AbstractArray) -> None:
         replacement._require()
         self._cell.node_id = replacement.node_id
@@ -520,12 +561,8 @@ class AbstractArray:
         self._require()
         if self.shape != ():
             raise TypeError("A scalar cotangent seed requires a rank-zero value")
-        spec = ArraySpec((), self.dtype, device=self.device)
-        node_id = self._trace.add_constant(
-            _StrongScalarConstant(1.0, self.dtype),
-            spec,
-        )
-        return _new_abstract_array(self._trace, node_id, spec, owned=False)
+        spec = ArraySpec((), self.spec.dtype, device=self.device)
+        return _constant(self._trace, _StrongScalarConstant(1.0, self.spec.dtype), spec)
 
     @property
     def _advect_weak(self) -> bool:
@@ -561,7 +598,7 @@ class AbstractArray:
 
     @property
     def dtype(self) -> object:
-        return self.spec.dtype
+        return self._trace.dtype_object(self.spec.dtype)
 
     @property
     def device(self) -> str | None:
@@ -654,6 +691,8 @@ class AbstractArray:
         if isinstance(value, _PendingIndexUpdate):
             raise MutationError("This staged indexed-update token has expired")
         replacement = _lift(self._trace, value)
+        if not _selects_element(encoded, target_spec.shape):
+            replacement = self._assignment_value(replacement, target_spec.shape)
 
         self._require_mutable("item assignment")
         if _broadcast_shape(replacement.shape, target_spec.shape) != target_spec.shape:
@@ -693,16 +732,7 @@ class AbstractArray:
 
     def item(self, *args: object) -> AbstractArray:
         """Represent scalar extraction without requiring a concrete payload."""
-        index = normalize_item_index(args, ndim=self.ndim)
-        if index is None:
-            if self.size != 1:
-                raise ValueError("can only convert an array of size 1 to a scalar")
-            if self.shape == ():
-                return self
-            return self[tuple(0 for _dimension in self.shape)]
-        if isinstance(index, tuple):
-            return self[index]
-        return self.reshape((-1,))[index]
+        return cast("AbstractArray", select_item(self, args))
 
     def sum(self, *args: object, **kwargs: object) -> AbstractArray:
         return cast(
@@ -727,6 +757,8 @@ def _new_abstract_array(
     layout: str | None = None,
 ) -> AbstractArray:
     """Construct the concrete abstract tracer selected for this trace."""
+    if type(spec.dtype) is not str or spec.dtype not in _DTYPE_NAMES:
+        spec = replace(spec, dtype=_staged_dtype(spec.dtype))
     value = trace.array_factory(
         trace,
         node_id,
@@ -740,51 +772,62 @@ def _new_abstract_array(
     return value
 
 
+def _constant(trace: AbstractTrace, value: object, spec: ArraySpec) -> AbstractArray:
+    """Lift one closed constant as a borrowed value of this trace."""
+    return _new_abstract_array(trace, trace.add_constant(value, spec), spec, owned=False)
+
+
+def _traces(value: object, trace: AbstractTrace) -> bool:
+    """Return whether a tracer wraps a value of ``trace``."""
+    payload = _innermost(value)
+    return isinstance(payload, AbstractArray) and payload._trace is trace
+
+
 def _binary_method(
     name: str,
     *,
     reverse: bool = False,
 ) -> Callable[[AbstractArray, object], AbstractArray]:
     def method(self: AbstractArray, other: object) -> AbstractArray:
+        # A dynamic tracer that wraps this trace's values records the operation
+        # through its own reflected operator rather than becoming a constant.
+        if not isinstance(other, AbstractArray) and _traces(other, self._trace):
+            return NotImplemented
         args = (other, self) if reverse else (self, other)
-        return _apply_array(self._trace, name, args, {})
+        return _apply_array(self._trace, name, args, {}, by_operator=True)
 
     return method
 
 
-for _dunder, _operation in {
-    "add": "add",
-    "sub": "subtract",
-    "mul": "multiply",
-    "truediv": "divide",
-    "floordiv": "floor_divide",
-    "mod": "remainder",
-    "pow": "pow",
-    "matmul": "matmul",
-    "and": "bitwise_and",
-    "or": "bitwise_or",
-    "xor": "bitwise_xor",
-    "lt": "less",
-    "le": "less_equal",
-    "gt": "greater",
-    "ge": "greater_equal",
-    "eq": "equal",
-    "ne": "not_equal",
-}.items():
+for _dunder, _operation in _ARITHMETIC_OPERATORS.items():
     setattr(AbstractArray, f"__{_dunder}__", _binary_method(_operation))
     setattr(AbstractArray, f"__r{_dunder}__", _binary_method(_operation, reverse=True))
+for _dunder, _operation in _COMPARISON_OPERATORS.items():
+    setattr(AbstractArray, f"__{_dunder}__", _binary_method(_operation))
 
 
 def _unary_method(name: str) -> Callable[[AbstractArray], AbstractArray]:
     def method(self: AbstractArray) -> AbstractArray:
-        return _apply_array(self._trace, name, (self,), {})
+        return _apply_array(self._trace, name, (self,), {}, by_operator=True)
 
     return method
 
 
+def _augmented_replacement(self: AbstractArray, name: str, other: object) -> AbstractArray:
+    replacement = self._augmented_result(_apply_array(self._trace, name, (self, other), {}))
+    if replacement.shape != self.shape or replacement.spec.dtype != self.spec.dtype:
+        raise MutationError(
+            f"Augmented {name} would change shape or dtype from {self.spec!r} to "
+            f"{replacement.spec!r}"
+        )
+    return replacement
+
+
 def _inplace_method(name: str) -> Callable[[AbstractArray, object], object]:
     def method(self: AbstractArray, other: object) -> object:
-        self._require()
+        if self.spec.weak:
+            # A Python scalar has no in-place operator; Python rebinds the name.
+            return NotImplemented
         view = self._view
         if view is not None:
             if not view.root.owned:
@@ -797,14 +840,7 @@ def _inplace_method(name: str) -> Callable[[AbstractArray, object], object]:
                     "Mutation through a nested or reshaped staged view is unsupported. "
                     "Use one basic index on the base or call `.copy()` first."
                 )
-            replacement = _apply_array(self._trace, name, (self, other), {})
-            if replacement.shape != self.shape or _dtype_name(replacement.dtype) != _dtype_name(
-                self.dtype
-            ):
-                raise MutationError(
-                    f"Augmented {name} would change shape or dtype from {self.spec!r} to "
-                    f"{replacement.spec!r}"
-                )
+            replacement = _augmented_replacement(self, name, other)
             root = _new_abstract_array(
                 self._trace,
                 view.root.node_id,
@@ -838,14 +874,7 @@ def _inplace_method(name: str) -> Callable[[AbstractArray, object], object]:
             return self
 
         self._require_mutable(f"augmented {name}")
-        replacement = _apply_array(self._trace, name, (self, other), {})
-        if replacement.shape != self.shape or _dtype_name(replacement.dtype) != _dtype_name(
-            self.dtype
-        ):
-            raise MutationError(
-                f"Augmented {name} would change shape or dtype from {self.spec!r} to "
-                f"{replacement.spec!r}"
-            )
+        replacement = _augmented_replacement(self, name, other)
         self._commit(replacement)
         return self
 
@@ -854,21 +883,10 @@ def _inplace_method(name: str) -> Callable[[AbstractArray, object], object]:
 
 AbstractArray.__neg__ = _unary_method("negative")
 AbstractArray.__pos__ = _unary_method("positive")
-AbstractArray.__abs__ = _unary_method("absolute")
-for _dunder in (
-    ("iadd", "add"),
-    ("isub", "subtract"),
-    ("imul", "multiply"),
-    ("itruediv", "divide"),
-    ("ifloordiv", "floor_divide"),
-    ("imod", "remainder"),
-    ("ipow", "pow"),
-    ("imatmul", "matmul"),
-    ("iand", "bitwise_and"),
-    ("ior", "bitwise_or"),
-    ("ixor", "bitwise_xor"),
-):
-    setattr(AbstractArray, f"__{_dunder[0]}__", _inplace_method(_dunder[1]))
+AbstractArray.__abs__ = _unary_method("abs")
+AbstractArray.__invert__ = _unary_method("bitwise_invert")
+for _dunder, _operation in _ARITHMETIC_OPERATORS.items():
+    setattr(AbstractArray, f"__i{_dunder}__", _inplace_method(_operation))
 
 
 def _lift(trace: AbstractTrace, value: object) -> AbstractArray:
@@ -877,17 +895,88 @@ def _lift(trace: AbstractTrace, value: object) -> AbstractArray:
         if value._trace is not trace:
             raise TracingError("Cannot mix values from different abstract traces")
         return value
-    spec = (
-        _nested_sequence_spec(value, None)
-        if isinstance(value, (tuple, list))
-        else _scalar_spec(value)
-    )
-    return _new_abstract_array(
-        trace,
-        trace.add_constant(value, spec),
-        spec,
-        owned=False,
-    )
+    if isinstance(value, (tuple, list)):
+        return _assemble(trace, value, _sequence_dtype(value))
+    return _constant(trace, value, _value_spec(value))
+
+
+def _encodes(leaf: object, dtype: str) -> bool:
+    """Whether a sequence constant converts *leaf* to *dtype* as NumPy's coercion does.
+
+    Coercion converts a Python scalar to the target dtype, which the constant
+    encoder reproduces. It casts a NumPy scalar or array like ``astype``, which
+    the encoder reproduces for a rank-zero value that a safe cast admits or that
+    lies in the target's range.
+    """
+    if type(leaf) in _PYTHON_SCALAR_TYPES:
+        return True
+    if isinstance(leaf, AbstractArray):
+        return False
+    shape, source = getattr(leaf, "shape", None), getattr(leaf, "dtype", None)
+    if shape is None or source is None:
+        # A Python scalar subclass; the encoder rejects any other object.
+        return True
+    return not shape and (_safely_casts(source, dtype) or _encodes_in_range(leaf, source, dtype))
+
+
+# Largest finite magnitude of each floating width the constant encoder packs.
+_FLOAT_MAX = {16: 65504.0, 32: (2 - 2**-23) * 2.0**127, 64: sys.float_info.max}
+# Integers of at most this magnitude convert to float64 exactly.
+_EXACT_FLOAT64_INTEGER = 2**53
+_FLOAT64_BITS = 64
+
+
+def _fits_float(value: float, bits: int) -> bool:
+    return not math.isfinite(value) or abs(value) <= _FLOAT_MAX[bits]
+
+
+def _encodes_in_range(leaf: object, source: object, dtype: str) -> bool:
+    """Whether the encoder converts a rank-zero NumPy leaf to *dtype* as ``astype`` does.
+
+    The encoder raises on overflow and wrap-around where ``astype`` wraps or
+    saturates, but converts an in-range value identically.
+    """
+    kind, bits = _dtype_kind_bits(dtype)
+    source_kind = _dtype_kind_bits(source)[0]
+    convert = complex if source_kind == "complex" else float if source_kind == "float" else int
+    value: Any = convert(cast("Any", leaf))
+    if kind == "bool":
+        return True
+    if source_kind == "complex":
+        width = bits // 2
+        return (
+            kind == "complex" and _fits_float(value.real, width) and _fits_float(value.imag, width)
+        )
+    if kind in {"int", "uint"}:
+        if isinstance(value, float) and not math.isfinite(value):
+            return False
+        low = -(2 ** (bits - 1)) if kind == "int" else 0
+        high = 2 ** (bits - 1) - 1 if kind == "int" else 2**bits - 1
+        return low <= int(value) <= high
+    width = bits if kind == "float" else bits // 2
+    if (
+        source_kind in {"int", "uint"}
+        and width < _FLOAT64_BITS
+        and abs(value) > _EXACT_FLOAT64_INTEGER
+    ):
+        # The encoder would round through float64 first, rounding twice.
+        return False
+    return _fits_float(float(value), width)
+
+
+def _assemble(trace: AbstractTrace, value: object, dtype: str) -> AbstractArray:
+    """Build *value* with every leaf cast to *dtype*, as NumPy's coercion does."""
+    if isinstance(value, (tuple, list)):
+        if all(_encodes(leaf, dtype) for leaf in _leaves(value)):
+            return _constant(trace, value, ArraySpec(_sequence_shape(value), dtype))
+        children = tuple(_assemble(trace, item, dtype) for item in value)
+        return cast("AbstractArray", _apply_array_api(trace, "stack", (children,), {"axis": 0}))
+    if type(value) in _PYTHON_SCALAR_TYPES:
+        return _constant(trace, _StrongScalarConstant(value, dtype), ArraySpec((), dtype))
+    leaf = _lift(trace, value)
+    if leaf.spec.dtype == dtype:
+        return leaf
+    return cast("AbstractArray", _apply_array_api(trace, "astype", (leaf, dtype), {}))
 
 
 def _emitted_layout(
@@ -1018,7 +1107,7 @@ def _append_node(  # noqa: PLR0913 - mirrors the native node schema
 
 def _result_specs(
     op: str,
-    values: Sequence[AbstractArray],
+    specs: Sequence[ArraySpec],
     attrs: Mapping[str, Any],
 ) -> tuple[ArraySpec, ...]:
     """Return the fixed output contract for one abstract operation."""
@@ -1026,7 +1115,7 @@ def _result_specs(
     evaluator = definition.abstract_evaluator
     if evaluator is None:
         raise AssertionError(f"Operation {op!r} has no abstract evaluator")
-    return evaluator([value.spec for value in values], attrs)
+    return evaluator(specs, attrs)
 
 
 def _record_abstract_op(
@@ -1037,8 +1126,13 @@ def _record_abstract_op(
     *,
     abstract_attrs: Mapping[str, object] | None = None,
     graph_attrs: Mapping[str, object] | None = None,
+    by_operator: bool = False,
 ) -> AbstractArray | tuple[AbstractArray, ...]:
-    """Record one canonical operation after a frontend has bound its call."""
+    """Record one canonical operation after a frontend has bound its call.
+
+    *by_operator* says that a Python operator spelled the call, which on weak
+    operands computes as Python does and keeps a weak result.
+    """
     trace.require_open()
     operands = tuple(_lift(trace, value) for value in raw_operands)
     attrs = dict(raw_attrs)
@@ -1053,7 +1147,8 @@ def _record_abstract_op(
         raise TypeError(
             f"Abstract staging of {op} does not support attributes {tuple(sorted(unexpected))!r}"
         )
-    missing = rule.required_attrs - public_attrs
+    # A None value selects a provider default, which staging cannot know.
+    missing = rule.required_attrs - {name for name in public_attrs if attrs[name] is not None}
     if missing:
         raise TypeError(f"Abstract staging of {op} requires {tuple(sorted(missing))!r}")
 
@@ -1066,11 +1161,23 @@ def _record_abstract_op(
         attrs["dtype"] = _dtype_name(attrs["dtype"])
 
     evaluation_attrs = attrs if abstract_attrs is None else {**attrs, **abstract_attrs}
-    specs = _result_specs(op, operands, evaluation_attrs)
     emitted_attrs = attrs if graph_attrs is None else {**attrs, **graph_attrs}
+    operand_specs = [operand.spec for operand in operands]
+    python_operands = python_scalar_operands(op, operand_specs, by_operator=by_operator)
+    specs = _result_specs(
+        op,
+        operand_specs if python_operands is None else python_operands,
+        evaluation_attrs,
+    )
     if len(specs) > 1:
         return _emit_outputs(trace, op, operands, emitted_attrs, specs)
-    result = _emit(trace, op, operands, emitted_attrs, specs[0])
+    spec = specs[0]
+    if python_operands is not None:
+        # A Python-scalar result promotes weakly against the arrays it meets,
+        # and replay computes it with Python's operator again.
+        spec = replace(spec, weak=True)
+        emitted_attrs = {**emitted_attrs, PYTHON_OPERATOR_ATTR: True}
+    result = _emit(trace, op, operands, emitted_attrs, spec)
     if rule.kind in {
         "broadcast_to",
         "diagonal",
@@ -1089,9 +1196,11 @@ def _apply_array(
     raw_name: str,
     raw_args: tuple[Any, ...],
     raw_kwargs: dict[str, Any],
+    *,
+    by_operator: bool = False,
 ) -> AbstractArray:
     """Apply one single-output provider-neutral Array API operation."""
-    result = _apply_array_api(trace, raw_name, raw_args, raw_kwargs)
+    result = _apply_array_api(trace, raw_name, raw_args, raw_kwargs, by_operator=by_operator)
     if not isinstance(result, AbstractArray):
         msg = f"Single-output abstract operation {raw_name!r} returned metadata or a tuple"
         raise TypeError(msg)
@@ -1115,7 +1224,7 @@ def _alias_result(
     )
 
 
-def _array_api_asarray(  # noqa: C901 - one constructor contract
+def _array_api_asarray(
     trace: AbstractTrace,
     raw_args: tuple[Any, ...],
     raw_kwargs: dict[str, Any],
@@ -1133,92 +1242,29 @@ def _array_api_asarray(  # noqa: C901 - one constructor contract
     copy = kwargs.get("copy")
     if copy is not None and type(copy) is not bool:
         raise TypeError("asarray copy must be a bool or None")
-    dtype = kwargs.get("dtype")
+    dtype = None if kwargs.get("dtype") is None else _dtype_name(kwargs["dtype"])
 
-    def contains_abstract(value: object) -> bool:
-        if isinstance(value, AbstractArray):
-            return True
-        if isinstance(value, (tuple, list)):
-            return any(contains_abstract(item) for item in value)
-        return False
-
-    def assemble(value: object) -> AbstractArray:
-        if isinstance(value, AbstractArray):
-            return value
-        if not isinstance(value, (tuple, list)):
-            if type(value) in {bool, complex, float, int}:
-                spec = ArraySpec(
-                    (), _dtype_name(dtype) if dtype is not None else _scalar_spec(value).dtype
-                )
-                return _new_abstract_array(
-                    trace,
-                    trace.add_constant(_StrongScalarConstant(value, spec.dtype), spec),
-                    spec,
-                    owned=False,
-                )
-            return _lift(trace, value)
-        if not value:
-            spec = _nested_sequence_spec(value, dtype)
-            return _new_abstract_array(
-                trace,
-                trace.add_constant(value, spec),
-                spec,
-                owned=False,
-            )
-        children = tuple(assemble(item) for item in value)
-        stack_dtype = (
-            _dtype_name(dtype)
-            if dtype is not None
-            else _promote_dtype([child.spec for child in children])
+    if isinstance(raw_value, _ASARRAY_LITERAL_TYPES) and copy is False:
+        raise ValueError(
+            "asarray(copy=False) cannot construct an array from a sequence or Python scalar"
         )
-        children = tuple(
-            child
-            if _dtype_name(child.dtype) == stack_dtype
-            else cast(
-                "AbstractArray",
-                _apply_array_api(trace, "astype", (child, stack_dtype), {}),
-            )
-            for child in children
-        )
-        return cast(
-            "AbstractArray",
-            _apply_array_api(trace, "stack", (children,), {"axis": 0}),
-        )
-
-    if isinstance(raw_value, (tuple, list)):
-        if copy is False:
-            raise ValueError("asarray(copy=False) cannot construct an array from a sequence")
-        if contains_abstract(raw_value):
-            raw_value = assemble(raw_value)
-        else:
-            spec = _nested_sequence_spec(raw_value, dtype)
-            raw_value = _new_abstract_array(
-                trace,
-                trace.add_constant(raw_value, spec),
-                spec,
-                owned=False,
-            )
-    if dtype is not None and isinstance(raw_value, (bool, int, float, complex)):
-        spec = ArraySpec((), _dtype_name(dtype))
-        raw_value = _new_abstract_array(
-            trace,
-            trace.add_constant(_StrongScalarConstant(raw_value, spec.dtype), spec),
-            spec,
-            owned=False,
-        )
-    value = _lift(trace, raw_value)
-    target_dtype = value.dtype if dtype is None else _dtype_name(dtype)
+    value = (
+        _assemble(trace, raw_value, dtype or _sequence_dtype(raw_value))
+        if isinstance(raw_value, _ASARRAY_LITERAL_TYPES)
+        else _lift(trace, raw_value)
+    )
+    target_dtype = value.spec.dtype if dtype is None else dtype
     device = kwargs.get("device")
     target_device = value.device if device is None else str(device)
     if copy is False and (
-        _dtype_name(target_dtype) != _dtype_name(value.dtype)
+        target_dtype != value.spec.dtype
         or (value.device is not None and target_device != value.device)
     ):
         raise ValueError("asarray(copy=False) cannot satisfy the requested dtype or device")
     attrs: dict[str, object] = {
         "_advect_array_api_asarray": True,
         "copy": copy,
-        "dtype": _dtype_name(target_dtype),
+        "dtype": target_dtype,
     }
     if device is not None:
         attrs["_advect_device"] = target_device
@@ -1232,118 +1278,8 @@ def _array_api_asarray(  # noqa: C901 - one constructor contract
             abstract_attrs={"_advect_array_api_version": trace.array_api_version},
         ),
     )
-    unchanged = (
-        _dtype_name(target_dtype) == _dtype_name(value.dtype) and target_device == value.device
-    )
+    unchanged = target_dtype == value.spec.dtype and target_device == value.device
     return _alias_result(value, result) if copy is not True and unchanged else result
-
-
-def _array_api_cumulative_with_initial(
-    trace: AbstractTrace,
-    path: str,
-    raw_args: tuple[Any, ...],
-    raw_kwargs: dict[str, Any],
-) -> AbstractArray:
-    if not raw_args or len(raw_args) > 2:
-        raise TypeError(f"{path}() expects an array and optional axis")
-    if len(raw_args) == 2 and "axis" in raw_kwargs:
-        raise TypeError(f"{path}() received 'axis' twice")
-    source = _lift(trace, raw_args[0])
-    axis_value = raw_args[1] if len(raw_args) == 2 else raw_kwargs.get("axis")
-    if axis_value is None:
-        if source.ndim != 1:
-            raise ValueError(
-                "cumulative operations require axis= for inputs with more than one dimension"
-            )
-        axis = 0
-    else:
-        axis = _normalize_axis(axis_value, source.ndim)
-    options = dict(raw_kwargs)
-    options["axis"] = axis
-    options.pop("include_initial", None)
-    base = cast("AbstractArray", _apply_array_api(trace, path, (source,), options))
-    seed_shape = list(base.shape)
-    seed_shape[axis] = 1
-    fill_value = 1 if path == "cumulative_prod" else 0
-    seed = cast(
-        "AbstractArray",
-        _apply_array_api(
-            trace,
-            "full",
-            (tuple(seed_shape), fill_value),
-            {"dtype": base.dtype},
-        ),
-    )
-    return cast(
-        "AbstractArray",
-        _apply_array_api(trace, "concat", ((seed, base),), {"axis": axis}),
-    )
-
-
-def _array_api_diff(
-    trace: AbstractTrace,
-    raw_args: tuple[Any, ...],
-    raw_kwargs: dict[str, Any],
-) -> AbstractArray:
-    if not raw_args or len(raw_args) > 5:
-        raise TypeError("diff() expects (a, n, axis, prepend, append)")
-    values = dict(raw_kwargs)
-    unexpected = set(values) - {"append", "axis", "n", "prepend"}
-    if unexpected:
-        raise TypeError(
-            f"Abstract staging of diff() does not support {tuple(sorted(unexpected))!r}"
-        )
-    source_raw = raw_args[0]
-    for name, value in zip(("n", "axis", "prepend", "append"), raw_args[1:], strict=False):
-        if name in values:
-            raise TypeError(f"diff() received {name!r} twice")
-        values[name] = value
-    n = values.get("n", 1)
-    if isinstance(n, bool) or not isinstance(n, int) or n < 0:
-        raise ValueError("diff n must be a non-negative integer")
-    source = _lift(trace, source_raw)
-    axis = _normalize_axis(values.get("axis", -1), source.ndim)
-
-    def emit_diff(value: AbstractArray) -> AbstractArray:
-        return cast(
-            "AbstractArray",
-            _record_abstract_op(
-                trace,
-                "array.diff",
-                (value,),
-                {"axis": axis, "n": n},
-                abstract_attrs={"_advect_array_api_version": trace.array_api_version},
-            ),
-        )
-
-    if n == 0 or (values.get("prepend") is None and values.get("append") is None):
-        return emit_diff(source)
-    boundary_shape = list(source.shape)
-    boundary_shape[axis] = 1
-
-    def lift_boundary(raw_value: object) -> AbstractArray:
-        boundary = _lift(trace, raw_value)
-        if boundary.shape == ():
-            return cast(
-                "AbstractArray",
-                _apply_array_api(
-                    trace,
-                    "full",
-                    (tuple(boundary_shape), boundary),
-                    {},
-                ),
-            )
-        return boundary
-
-    parts = [lift_boundary(values["prepend"])] if values.get("prepend") is not None else []
-    parts.append(source)
-    if values.get("append") is not None:
-        parts.append(lift_boundary(values["append"]))
-    joined = cast(
-        "AbstractArray",
-        _apply_array_api(trace, "concat", (tuple(parts),), {"axis": axis}),
-    )
-    return emit_diff(joined)
 
 
 def _apply_array_api(
@@ -1351,22 +1287,16 @@ def _apply_array_api(
     path: str,
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
+    *,
+    by_operator: bool = False,
 ) -> Any:  # noqa: ANN401 - Array API calls may return structured results
     """Bind one provider-neutral call and record its canonical operation."""
     trace.require_open()
     if path == "asarray":
         return _array_api_asarray(trace, args, kwargs)
-    if path in {"cumulative_prod", "cumulative_sum"} and bool(kwargs.get("include_initial", False)):
-        return _array_api_cumulative_with_initial(trace, path, args, kwargs)
-    if path == "diff":
-        return _array_api_diff(trace, args, kwargs)
-    if path == "searchsorted" and kwargs.get("sorter") is not None:
-        if len(args) != 2:
-            raise TypeError("searchsorted() expects two positional array arguments")
-        options = dict(kwargs)
-        sorter = options.pop("sorter")
-        sorted_source = _apply_array_api(trace, "take", (args[0], sorter), {"axis": 0})
-        return _apply_array_api(trace, path, (sorted_source, args[1]), options)
+    lowered = lower_array_api_call(path, AbstractNamespace(trace), args, kwargs)
+    if lowered is not NotImplemented:
+        return lowered
 
     binding = bind_array_api_call(path, args, kwargs)
     result = _record_abstract_op(
@@ -1375,6 +1305,7 @@ def _apply_array_api(
         binding.operands,
         binding.attrs,
         abstract_attrs={"_advect_array_api_version": trace.array_api_version},
+        by_operator=by_operator,
     )
     if not isinstance(result, tuple):
         return result
@@ -1386,10 +1317,10 @@ def _basic_index_spec(
     index: object,
     *,
     allow_pending: bool = False,
-) -> tuple[object, ArraySpec]:
+) -> tuple[list[dict[str, object]], ArraySpec]:
     value._require(allow_pending=allow_pending)
-    encoded = encode_basic_index(index)
-    items = index if isinstance(index, tuple) else (index,)
+    items = normalize_basic_index(index)
+    encoded = encode_basic_index(items)
     if sum(item is Ellipsis for item in items) > 1:
         raise IndexError("Only one ellipsis is allowed")
     consumed = sum(item is not None and item is not Ellipsis for item in items)
@@ -1418,19 +1349,20 @@ def _basic_index_spec(
             if not -size <= item < size:
                 raise IndexError(f"Index {item} is out of bounds for axis of size {size}")
             continue
-        if not isinstance(item, slice):
-            raise TracingError(f"Unsupported basic index component {type(item).__name__}")
-        start, stop, step = item.indices(size)
+        start, stop, step = cast("slice", item).indices(size)
         shape.append(len(range(start, stop, step)))
     return encoded, ArraySpec(tuple(shape), source_spec.dtype)
+
+
+def _selects_element(encoded: list[dict[str, object]], shape: tuple[int, ...]) -> bool:
+    """Return whether an encoded basic index selects one element instead of a view."""
+    return not shape and all(item["type"] == "int" for item in encoded)
 
 
 def _apply_getitem(value: AbstractArray, index: object) -> AbstractArray:
     encoded, result_spec = _basic_index_spec(value, index)
     result = _emit(value._trace, "advect.getitem", (value,), {"index": encoded}, result_spec)
-    items = index if isinstance(index, tuple) else (index,)
-    is_alias = bool(result_spec.shape) or any(not isinstance(item, int) for item in items)
-    if not is_alias:
+    if _selects_element(encoded, result_spec.shape):
         return result
     return _alias_result(value, result, index=encoded if value._view is None else None)
 

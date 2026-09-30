@@ -5,6 +5,7 @@ from __future__ import annotations
 from contextlib import suppress
 from typing import Any, TypeGuard, cast
 
+from advect.autodiff.rules.array_family._transpose_utils import _dtype_is_complex
 from advect.core._pytree import tree_flatten, tree_unflatten
 
 
@@ -22,11 +23,7 @@ def _is_boolean_numeric(value: object) -> bool:
 
 
 def _is_complex_numeric(value: object) -> bool:
-    if isinstance(value, complex):
-        return True
-    dtype = getattr(value, "dtype", None)
-    kind = getattr(dtype, "kind", None)
-    return kind == "c" if kind is not None else "complex" in _dtype_name(value)
+    return isinstance(value, complex) or _dtype_is_complex(getattr(value, "dtype", None))
 
 
 def _is_real_python_scalar(value: object) -> TypeGuard[int | float]:
@@ -81,9 +78,25 @@ def _coerce_scalar_tangent_like(tangent: object, primal: object) -> float:
 
 
 def _unlift_scalar_array(value: object) -> object:
-    """Return a Python scalar for a concrete rank-zero array when possible."""
+    """Return a Python scalar for a concrete rank-zero array when possible.
+
+    Inside an enclosing dynamic trace the result stays traced as the weak
+    scalar it stands for. A strong rank-zero tracer may be a value the caller
+    still holds, such as a cotangent a pullback passes through, so a fresh
+    copy is marked weak instead of the caller's own value. A staged value
+    stays strong: staged execution represents only Python-scalar inputs and
+    Python operators' results on them as weak scalars.
+    """
     if callable(getattr(value, "_advect_snapshot", None)):
-        return value
+        if (
+            getattr(value, "shape", None) != ()
+            or getattr(value, "_advect_weak", True)
+            or getattr(type(value), "__advect_abstract_array__", False)
+        ):
+            return value
+        weak = cast("Any", value).copy()
+        weak._advect_mark_weak()  # noqa: SLF001
+        return weak
     if getattr(value, "shape", None) != ():
         return value
 
@@ -102,7 +115,7 @@ def _unlift_scalar_array(value: object) -> object:
 
 
 def _unlift_scalar_tree_by_mask(value: object, *, mask: tuple[bool, ...]) -> object:
-    """Unlift only output leaves that depend on lifted scalar primals."""
+    """Unlift only the output leaves that the mask marks as weak scalars."""
     if not any(mask):
         return value
     leaves, treedef = tree_flatten(value)

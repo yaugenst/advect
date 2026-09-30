@@ -1,36 +1,31 @@
 //! Native reverse-mode traversal for a concrete dynamic tape.
 
-use pyo3::exceptions::{PyAttributeError, PyRuntimeError, PyValueError};
+use pyo3::exceptions::{PyRuntimeError, PyValueError};
+use pyo3::intern;
 use pyo3::prelude::*;
 use pyo3::types::PyTuple;
 
-use super::MAX_MULTI_SEEDS;
-use super::layout::OperandSnapshot;
 use super::lifecycle::{
-    DynamicTape, ReverseNeeds, TraversalKind, clone_required_slot, close_and_drop_reverse_payloads,
-    finish_traversal, snapshot_operands,
+    DynamicTape, TraversalKind, close_and_drop_reverse_payloads, node_slot, snapshot_operands,
+};
+use super::traversal::{
+    Invocation, Lane, Seeds, run_traversal, seed_lanes, single_lane, take_requested,
 };
 use advect_runtime::{NodeCore, NodeId};
 
 const BATCH_VJP_ATTR: &str = "__advect_vjp_many__";
-type BatchedContributions = Vec<(usize, Vec<Py<PyAny>>)>;
 
+/// One node's VJP call with the payloads only reverse rules receive.
 #[derive(Debug)]
-struct Invocation {
-    node_id: NodeId,
-    op_name: String,
-    callback: Py<PyAny>,
-    output: Py<PyAny>,
-    operands: Py<PyTuple>,
+struct ReverseInvocation {
+    rule: Invocation,
     operand_count: usize,
     parents: Vec<NodeId>,
     parent_positions: Vec<usize>,
     parent_active: Vec<bool>,
     active_positions: Py<PyTuple>,
     parent_specs: Py<PyTuple>,
-    attrs: Py<PyAny>,
     residual: Py<PyAny>,
-    source_location: Option<String>,
 }
 
 /// Apply one reverse VJP over a frozen concrete tape.
@@ -40,263 +35,151 @@ struct Invocation {
 pub(crate) fn dynamic_vjp(
     py: Python<'_>,
     tape: Py<DynamicTape>,
-    output_cotangents: Vec<(NodeId, Py<PyAny>)>,
+    output_cotangents: Seeds,
     requested_inputs: Vec<NodeId>,
     consume: bool,
-) -> PyResult<Vec<Option<Py<PyAny>>>> {
-    let tape = tape.into_bound(py);
-    {
-        let mut state = tape.try_borrow_mut()?;
-        state.begin_traversal(TraversalKind::Reverse)?;
-    }
-    if consume {
-        let pruned = tape.try_borrow_mut()?.prune_zero_reverse_payloads();
-        let prune_result = pruned.and_then(|retired| close_and_drop_reverse_payloads(py, retired));
-        if let Err(error) = prune_result {
-            return finish_traversal(py, &tape, true, Err(error));
+) -> PyResult<Lane> {
+    run_traversal(py, tape, TraversalKind::Reverse, 1, consume, |tape| {
+        if consume {
+            let retired = tape.try_borrow_mut()?.prune_zero_reverse_payloads()?;
+            close_and_drop_reverse_payloads(py, retired)?;
         }
-    }
-    let result = reverse_inner(py, &tape, output_cotangents, requested_inputs, consume);
-    finish_traversal(py, &tape, consume, result)
+        reverse(
+            py,
+            tape,
+            vec![output_cotangents],
+            requested_inputs,
+            consume,
+            false,
+        )
+        .and_then(single_lane)
+    })
 }
 
-/// Apply several reverse VJPs in one arena traversal.
+/// Apply several reverse VJPs in one arena traversal, calling an operation's
+/// optional batched VJP once per node for all of its seeds.
 #[pyfunction]
 pub(crate) fn dynamic_vjp_many(
     py: Python<'_>,
     tape: Py<DynamicTape>,
-    output_cotangent_sets: Vec<Vec<(NodeId, Py<PyAny>)>>,
+    output_cotangent_sets: Vec<Seeds>,
     requested_inputs: Vec<NodeId>,
-) -> PyResult<Vec<Vec<Option<Py<PyAny>>>>> {
-    if output_cotangent_sets.len() > MAX_MULTI_SEEDS {
-        return Err(PyValueError::new_err(format!(
-            "dynamic VJP supports at most {MAX_MULTI_SEEDS} seeds per traversal"
-        )));
-    }
-    let tape = tape.into_bound(py);
-    {
-        let mut state = tape.try_borrow_mut()?;
-        state.begin_traversal(TraversalKind::Reverse)?;
-    }
-    let result = reverse_many_inner(py, &tape, output_cotangent_sets, requested_inputs);
-    finish_traversal(py, &tape, false, result)
+) -> PyResult<Vec<Lane>> {
+    let lane_count = output_cotangent_sets.len();
+    run_traversal(
+        py,
+        tape,
+        TraversalKind::Reverse,
+        lane_count,
+        false,
+        |tape| {
+            reverse(
+                py,
+                tape,
+                output_cotangent_sets,
+                requested_inputs,
+                false,
+                true,
+            )
+        },
+    )
 }
 
-fn reverse_inner(
+/// Sweep the tape backward. A consuming sweep retires each node's payloads
+/// right after its last use; a `batched` sweep prefers batched VJPs.
+fn reverse(
     py: Python<'_>,
     tape: &Bound<'_, DynamicTape>,
-    output_cotangents: Vec<(NodeId, Py<PyAny>)>,
+    output_cotangent_sets: Vec<Seeds>,
     requested_inputs: Vec<NodeId>,
     consume: bool,
-) -> PyResult<Vec<Option<Py<PyAny>>>> {
+    batched: bool,
+) -> PyResult<Vec<Lane>> {
+    let (mut lanes, requested) = seed_lanes(
+        py,
+        &*tape.try_borrow()?,
+        TraversalKind::Reverse,
+        output_cotangent_sets,
+        requested_inputs,
+    )?;
+    if lanes.is_empty() {
+        return Ok(Vec::new());
+    }
+    // The optional batched VJP is fixed per operation, so probe it once per
+    // operation rather than once per node.
+    let batched_vjps = if batched {
+        batched_vjp_bindings(py, tape)?
+    } else {
+        Vec::new()
+    };
     let node_count = tape.try_borrow()?.arena.node_count();
-    let mut cotangents: Vec<Option<Py<PyAny>>> =
-        std::iter::repeat_with(|| None).take(node_count).collect();
-    let requested_input_indices = validate_requested_inputs(tape, requested_inputs)?;
-    seed_outputs(py, tape, &mut cotangents, output_cotangents)?;
-
     for node_index in (0..node_count).rev() {
-        let node_id = NodeId::try_from(node_index)
-            .map_err(|_| PyRuntimeError::new_err("dynamic VJP node ID overflowed"))?;
         let node = tape
             .try_borrow()?
             .arena
-            .node(node_id)
+            .nodes()
+            .get(node_index)
+            .copied()
             .ok_or_else(|| PyRuntimeError::new_err("dynamic VJP node is unavailable"))?;
         if node.flags().is_input() {
             continue;
         }
-        let cotangent = cotangents
-            .get_mut(node_index)
-            .ok_or_else(|| PyRuntimeError::new_err("dynamic cotangent slot is unavailable"))?
-            .take();
+        let cotangents = lanes
+            .iter_mut()
+            .map(|lane| {
+                lane.get_mut(node_index)
+                    .map(Option::take)
+                    .ok_or_else(|| PyRuntimeError::new_err("dynamic cotangent slot is unavailable"))
+            })
+            .collect::<PyResult<Vec<_>>>()?;
         if !node.flags().is_active() {
             continue;
         }
-        let Some(cotangent) = cotangent else {
+        if cotangents.iter().all(Option::is_none) {
             if consume {
                 retire_invocation_payloads(py, tape, node_index)?;
             }
             continue;
-        };
-
-        let invocation = prepare_invocation(py, tape, node_id, node_index, node)?;
-        let contributions = execute_callback(py, &invocation, &cotangent)?;
-        commit_contributions(py, &mut cotangents, &invocation, &contributions)?;
+        }
+        let invocation = prepare_invocation(py, tape, node_index, node)?;
+        if let Some(batched_vjp) = batched_vjps
+            .get(usize::from(node.op()))
+            .and_then(Option::as_ref)
+        {
+            let contribution_sets =
+                execute_batched_callback(py, batched_vjp.bind(py), &invocation, &cotangents)?;
+            for (seed_index, contributions) in contribution_sets {
+                let lane = lanes.get_mut(seed_index).ok_or_else(|| {
+                    PyRuntimeError::new_err("batched VJP seed index is unavailable")
+                })?;
+                commit_contributions(py, lane, &invocation, &contributions)?;
+            }
+        } else {
+            for (lane, cotangent) in lanes.iter_mut().zip(cotangents) {
+                let Some(cotangent) = cotangent else {
+                    continue;
+                };
+                let contributions = execute_callback(py, &invocation, cotangent.bind(py))?;
+                commit_contributions(py, lane, &invocation, &contributions)?;
+            }
+        }
         if consume {
-            drop(contributions);
+            // Drop the invocation's payload references before retiring them.
             drop(invocation);
             retire_invocation_payloads(py, tape, node_index)?;
         }
     }
-
-    requested_input_indices
-        .into_iter()
-        .map(|index| {
-            Ok(cotangents
-                .get_mut(index)
-                .ok_or_else(|| PyRuntimeError::new_err("requested cotangent slot is unavailable"))?
-                .take())
-        })
-        .collect()
-}
-
-fn reverse_many_inner(
-    py: Python<'_>,
-    tape: &Bound<'_, DynamicTape>,
-    output_cotangent_sets: Vec<Vec<(NodeId, Py<PyAny>)>>,
-    requested_inputs: Vec<NodeId>,
-) -> PyResult<Vec<Vec<Option<Py<PyAny>>>>> {
-    let node_count = tape.try_borrow()?.arena.node_count();
-    let requested_input_indices = validate_requested_inputs(tape, requested_inputs)?;
-    if output_cotangent_sets.is_empty() {
-        return Ok(Vec::new());
-    }
-    let mut cotangent_tables = Vec::with_capacity(output_cotangent_sets.len());
-    for output_cotangents in output_cotangent_sets {
-        let mut cotangents: Vec<Option<Py<PyAny>>> =
-            std::iter::repeat_with(|| None).take(node_count).collect();
-        seed_outputs(py, tape, &mut cotangents, output_cotangents)?;
-        cotangent_tables.push(cotangents);
-    }
-
-    for node_index in (0..node_count).rev() {
-        let node_id = NodeId::try_from(node_index)
-            .map_err(|_| PyRuntimeError::new_err("dynamic VJP node ID overflowed"))?;
-        let node = tape
-            .try_borrow()?
-            .arena
-            .node(node_id)
-            .ok_or_else(|| PyRuntimeError::new_err("dynamic VJP node is unavailable"))?;
-        if node.flags().is_input() {
-            continue;
-        }
-        let node_cotangents = cotangent_tables
-            .iter_mut()
-            .map(|cotangents| {
-                cotangents
-                    .get_mut(node_index)
-                    .ok_or_else(|| PyRuntimeError::new_err("dynamic cotangent slot is unavailable"))
-                    .map(Option::take)
-            })
-            .collect::<PyResult<Vec<_>>>()?;
-        if !node.flags().is_active() || node_cotangents.iter().all(Option::is_none) {
-            continue;
-        }
-
-        let invocation = prepare_invocation(py, tape, node_id, node_index, node)?;
-        if let Some(contribution_sets) =
-            execute_batched_callback(py, &invocation, &node_cotangents)?
-        {
-            for (seed_index, contributions) in contribution_sets {
-                let cotangents = cotangent_tables.get_mut(seed_index).ok_or_else(|| {
-                    PyRuntimeError::new_err("batched VJP seed index is unavailable")
-                })?;
-                commit_contributions(py, cotangents, &invocation, &contributions)?;
-            }
-        } else {
-            for (cotangents, cotangent) in cotangent_tables.iter_mut().zip(node_cotangents) {
-                let Some(cotangent) = cotangent else {
-                    continue;
-                };
-                let contributions = execute_callback(py, &invocation, &cotangent)?;
-                commit_contributions(py, cotangents, &invocation, &contributions)?;
-            }
-        }
-    }
-
-    let mut results: Vec<Vec<Option<Py<PyAny>>>> = cotangent_tables
-        .iter()
-        .map(|_cotangents| Vec::with_capacity(requested_input_indices.len()))
-        .collect();
-    for index in requested_input_indices {
-        for (result, cotangents) in results.iter_mut().zip(cotangent_tables.iter_mut()) {
-            result.push(
-                cotangents
-                    .get_mut(index)
-                    .ok_or_else(|| {
-                        PyRuntimeError::new_err("requested cotangent slot is unavailable")
-                    })?
-                    .take(),
-            );
-        }
-    }
-    Ok(results)
-}
-
-fn validate_requested_inputs(
-    tape: &Bound<'_, DynamicTape>,
-    requested_inputs: Vec<NodeId>,
-) -> PyResult<Vec<usize>> {
-    let state = tape.try_borrow()?;
-    let mut indices = Vec::with_capacity(requested_inputs.len());
-    for node_id in requested_inputs {
-        let (index, _node) = state.require_node(node_id)?;
-        if !state.inputs.contains(&node_id) {
-            return Err(PyValueError::new_err(format!(
-                "dynamic VJP requested node %{node_id}, which is not a tape input"
-            )));
-        }
-        indices.push(index);
-    }
-    Ok(indices)
-}
-
-fn seed_outputs(
-    py: Python<'_>,
-    tape: &Bound<'_, DynamicTape>,
-    cotangents: &mut [Option<Py<PyAny>>],
-    output_cotangents: Vec<(NodeId, Py<PyAny>)>,
-) -> PyResult<()> {
-    let state = tape.try_borrow()?;
-    let mut seeded = vec![false; state.arena.node_count()];
-    for (node_id, cotangent) in output_cotangents {
-        let (index, _node) = state.require_node(node_id)?;
-        if !state.outputs.contains(&node_id) {
-            return Err(PyValueError::new_err(format!(
-                "dynamic VJP seed node %{node_id} is not a marked output"
-            )));
-        }
-        let seen = seeded
-            .get_mut(index)
-            .ok_or_else(|| PyRuntimeError::new_err("VJP seed marker is unavailable"))?;
-        if *seen {
-            return Err(PyValueError::new_err(format!(
-                "dynamic VJP repeats output seed %{node_id}"
-            )));
-        }
-        *seen = true;
-        if !cotangent.bind(py).is_none() {
-            *cotangents
-                .get_mut(index)
-                .ok_or_else(|| PyRuntimeError::new_err("VJP output slot is unavailable"))? =
-                Some(cotangent);
-        }
-    }
-    Ok(())
+    take_requested(&mut lanes, &requested)
 }
 
 fn prepare_invocation(
     py: Python<'_>,
     tape: &Bound<'_, DynamicTape>,
-    node_id: NodeId,
     node_index: usize,
     node: NodeCore,
-) -> PyResult<Invocation> {
+) -> PyResult<ReverseInvocation> {
     let state = tape.try_borrow()?;
-    let op_name = state
-        .arena
-        .op_name(node.op())
-        .ok_or_else(|| PyRuntimeError::new_err("dynamic tape has an invalid operation ID"))?
-        .to_owned();
-    let callback = state
-        .vjp_bindings
-        .get(usize::from(node.op()))
-        .and_then(Option::as_ref)
-        .ok_or_else(|| {
-            PyRuntimeError::new_err(format!("dynamic operation '{op_name}' has no VJP binding"))
-        })?
-        .clone_ref(py);
+    let mut rule = Invocation::bind(py, &state, TraversalKind::Reverse, node_index, node)?;
     let needs = state
         .reverse_needs
         .get(usize::from(node.op()))
@@ -304,88 +187,99 @@ fn prepare_invocation(
         .flatten()
         .ok_or_else(|| {
             PyRuntimeError::new_err(format!(
-                "dynamic operation '{op_name}' has no reverse retention contract"
+                "dynamic operation '{}' has no reverse retention contract",
+                rule.op_name
             ))
         })?;
-    let metadata = state
-        .metadata
-        .get(node_index)
-        .ok_or_else(|| PyRuntimeError::new_err("dynamic VJP metadata is unavailable"))?;
-    let OperandSnapshot {
-        parents,
-        parent_positions,
-        parent_active,
-        active_positions,
-        operands,
-        parent_specs,
-    } = snapshot_operands(py, &state, node_index, node, needs.primals)?;
-    let operand_count = operands.len();
-    let operands = PyTuple::new(py, operands.iter().map(|value| value.bind(py)))?.unbind();
-    let active_positions = PyTuple::new(py, active_positions.iter().copied())?.unbind();
-    let parent_specs = PyTuple::new(
-        py,
-        parent_specs
-            .iter()
-            .map(|spec| match spec {
-                Some((shape, dtype)) => PyTuple::new(
-                    py,
-                    [
-                        PyTuple::new(py, shape.iter().copied())?.into_any(),
-                        dtype.bind(py).clone(),
-                    ],
-                )
-                .map(|value| value.into_any().unbind()),
-                None => Ok(py.None()),
-            })
-            .collect::<PyResult<Vec<_>>>()?,
-    )?
-    .unbind();
-    let residual_slot = snapshot_residual(py, &state, node_index, needs)?;
-    let residual = match residual_slot.as_ref() {
-        Some(slot) => slot.bind(py).getattr("payload")?.unbind(),
-        None => py.None(),
+    let snapshot = snapshot_operands(py, &state, node_index, node, needs.primals)?;
+    let operand_count = snapshot.operands.len();
+    let parent_positions = snapshot.layout.parent_positions;
+    let active_positions = parent_positions
+        .iter()
+        .zip(&snapshot.parent_active)
+        .filter_map(|(&position, &active)| active.then_some(position))
+        .collect::<Vec<_>>();
+    let parent_specs = snapshot
+        .parent_specs
+        .iter()
+        .map(|spec| match spec {
+            Some((shape, dtype)) => PyTuple::new(
+                py,
+                [
+                    PyTuple::new(py, shape.iter().copied())?.into_any(),
+                    dtype.bind(py).clone(),
+                ],
+            )
+            .map(|value| value.into_any().unbind()),
+            None => Ok(py.None()),
+        })
+        .collect::<PyResult<Vec<_>>>()?;
+    let residual = if needs.residual {
+        state
+            .node(node_index)?
+            .residual
+            .as_ref()
+            .ok_or_else(|| {
+                PyRuntimeError::new_err("dynamic reverse residual payload is unavailable")
+            })?
+            .bind(py)
+            .getattr(intern!(py, "payload"))?
+            .unbind()
+    } else {
+        py.None()
     };
-    Ok(Invocation {
-        node_id,
-        op_name,
-        callback,
-        output: if needs.output {
-            clone_required_slot(py, &state.values, node_index, "output", node_id)?
-        } else {
-            py.None()
-        },
-        operands,
+    if needs.output {
+        rule.output = state.required_value(py, node_index, "output", rule.node_id)?;
+    }
+    rule.operands = PyTuple::new(py, snapshot.operands)?.unbind();
+    Ok(ReverseInvocation {
+        rule,
         operand_count,
-        parents,
+        parents: snapshot.parents,
         parent_positions,
-        parent_active,
-        active_positions,
-        parent_specs,
-        attrs: state
-            .attrs
-            .get(node_index)
-            .and_then(Option::as_ref)
-            .map_or_else(|| py.None(), |value| value.clone_ref(py)),
+        parent_active: snapshot.parent_active,
+        active_positions: PyTuple::new(py, active_positions)?.unbind(),
+        parent_specs: PyTuple::new(py, parent_specs)?.unbind(),
         residual,
-        source_location: metadata.source_location.clone(),
     })
 }
 
-fn snapshot_residual(
-    py: Python<'_>,
-    state: &DynamicTape,
-    node_index: usize,
-    needs: ReverseNeeds,
-) -> PyResult<Option<Py<PyAny>>> {
-    if !needs.residual {
-        return Ok(None);
+impl ReverseInvocation {
+    fn call<'py>(
+        &self,
+        callback: &Bound<'py, PyAny>,
+        label: &str,
+        cotangents: &Bound<'py, PyAny>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let py = callback.py();
+        self.rule.call(
+            callback,
+            label,
+            (
+                self.rule.output.bind(py),
+                self.rule.operands.bind(py),
+                cotangents,
+                self.rule.attrs.bind(py),
+                self.active_positions.bind(py),
+                self.residual.bind(py),
+                self.parent_specs.bind(py),
+                self.rule.source_location.as_deref(),
+            ),
+        )
     }
-    state
-        .residuals
-        .get(node_index)
-        .and_then(Option::as_ref)
-        .map(|value| Some(value.clone_ref(py)))
-        .ok_or_else(|| PyRuntimeError::new_err("dynamic reverse residual payload is unavailable"))
+
+    fn check_contribution_count(&self, label: &str, contributions: &[Py<PyAny>]) -> PyResult<()> {
+        if contributions.len() == self.operand_count {
+            return Ok(());
+        }
+        Err(PyValueError::new_err(format!(
+            "{label} for '{}' at dynamic node %{} returned {} contributions for {} operands",
+            self.rule.op_name,
+            self.rule.node_id,
+            contributions.len(),
+            self.operand_count
+        )))
+    }
 }
 
 fn retire_invocation_payloads(
@@ -401,161 +295,97 @@ fn retire_invocation_payloads(
 
 fn execute_callback(
     py: Python<'_>,
-    invocation: &Invocation,
-    cotangent: &Py<PyAny>,
+    invocation: &ReverseInvocation,
+    cotangent: &Bound<'_, PyAny>,
 ) -> PyResult<Vec<Py<PyAny>>> {
-    let result = invocation
-        .callback
-        .bind(py)
-        .call1((
-            invocation.output.bind(py),
-            invocation.operands.bind(py),
-            cotangent.bind(py),
-            invocation.attrs.bind(py),
-            invocation.active_positions.bind(py),
-            invocation.residual.bind(py),
-            invocation.parent_specs.bind(py),
-            invocation.source_location.as_deref(),
-        ))
-        .inspect_err(|error| {
-            let _ = error.add_note(
-                py,
-                format!(
-                    "while executing VJP for '{}' at dynamic node %{}",
-                    invocation.op_name, invocation.node_id
-                ),
-            );
-        })?;
+    let result = invocation.call(invocation.rule.callback.bind(py), "VJP", cotangent)?;
     let contributions = result.extract::<Vec<Py<PyAny>>>().map_err(|error| {
         PyValueError::new_err(format!(
             "VJP for '{}' at dynamic node %{} must return a sequence: {error}",
-            invocation.op_name, invocation.node_id
+            invocation.rule.op_name, invocation.rule.node_id
         ))
     })?;
-    if contributions.len() != invocation.operand_count {
-        return Err(PyValueError::new_err(format!(
-            "VJP for '{}' at dynamic node %{} returned {} contributions for {} operands",
-            invocation.op_name,
-            invocation.node_id,
-            contributions.len(),
-            invocation.operand_count
-        )));
-    }
+    invocation.check_contribution_count("VJP", &contributions)?;
     Ok(contributions)
 }
 
+fn batched_vjp_bindings(
+    py: Python<'_>,
+    tape: &Bound<'_, DynamicTape>,
+) -> PyResult<Vec<Option<Py<PyAny>>>> {
+    tape.try_borrow()?
+        .vjp_bindings
+        .iter()
+        .map(|binding| {
+            let Some(binding) = binding else {
+                return Ok(None);
+            };
+            Ok(binding
+                .bind(py)
+                .getattr_opt(intern!(py, BATCH_VJP_ATTR))?
+                .map(Bound::unbind))
+        })
+        .collect()
+}
+
+/// Call a batched VJP with every seeded lane's cotangent and pair each
+/// returned contribution set with its lane.
 fn execute_batched_callback(
     py: Python<'_>,
-    invocation: &Invocation,
+    callback: &Bound<'_, PyAny>,
+    invocation: &ReverseInvocation,
     cotangents: &[Option<Py<PyAny>>],
-) -> PyResult<Option<BatchedContributions>> {
-    let callback = match invocation.callback.bind(py).getattr(BATCH_VJP_ATTR) {
-        Ok(callback) => callback,
-        Err(error) if error.is_instance_of::<PyAttributeError>(py) => return Ok(None),
-        Err(error) => return Err(error),
-    };
-    let active_cotangents = cotangents
+) -> PyResult<Vec<(usize, Vec<Py<PyAny>>)>> {
+    let (seed_indices, seeded): (Vec<usize>, Vec<&Py<PyAny>>) = cotangents
         .iter()
         .enumerate()
-        .filter_map(|(seed_index, cotangent)| {
-            cotangent
-                .as_ref()
-                .map(|cotangent| (seed_index, cotangent.clone_ref(py)))
-        })
-        .collect::<Vec<_>>();
-    let cotangent_tuple = PyTuple::new(
-        py,
-        active_cotangents
-            .iter()
-            .map(|(_seed_index, cotangent)| cotangent.bind(py)),
-    )?;
-    let result = callback
-        .call1((
-            invocation.output.bind(py),
-            invocation.operands.bind(py),
-            cotangent_tuple,
-            invocation.attrs.bind(py),
-            invocation.active_positions.bind(py),
-            invocation.residual.bind(py),
-            invocation.parent_specs.bind(py),
-            invocation.source_location.as_deref(),
-        ))
-        .inspect_err(|error| {
-            let _ = error.add_note(
-                py,
-                format!(
-                    "while executing batched VJP for '{}' at dynamic node %{}",
-                    invocation.op_name, invocation.node_id
-                ),
-            );
-        })?;
+        .filter_map(|(seed_index, cotangent)| cotangent.as_ref().map(|value| (seed_index, value)))
+        .unzip();
+    let seeded = PyTuple::new(py, seeded.into_iter().map(|value| value.bind(py)))?;
+    let result = invocation.call(callback, "batched VJP", seeded.as_any())?;
     let contribution_sets = result.extract::<Vec<Vec<Py<PyAny>>>>().map_err(|error| {
         PyValueError::new_err(format!(
             "Batched VJP for '{}' at dynamic node %{} must return a sequence of sequences: {error}",
-            invocation.op_name, invocation.node_id
+            invocation.rule.op_name, invocation.rule.node_id
         ))
     })?;
-    if contribution_sets.len() != active_cotangents.len() {
+    if contribution_sets.len() != seed_indices.len() {
         return Err(PyValueError::new_err(format!(
             "Batched VJP for '{}' at dynamic node %{} returned {} contribution sets for {} seeds",
-            invocation.op_name,
-            invocation.node_id,
+            invocation.rule.op_name,
+            invocation.rule.node_id,
             contribution_sets.len(),
-            active_cotangents.len()
+            seed_indices.len()
         )));
     }
     for contributions in &contribution_sets {
-        if contributions.len() != invocation.operand_count {
-            return Err(PyValueError::new_err(format!(
-                "Batched VJP for '{}' at dynamic node %{} returned {} contributions for {} operands",
-                invocation.op_name,
-                invocation.node_id,
-                contributions.len(),
-                invocation.operand_count
-            )));
-        }
+        invocation.check_contribution_count("Batched VJP", contributions)?;
     }
-    Ok(Some(
-        active_cotangents
-            .into_iter()
-            .map(|(seed_index, _cotangent)| seed_index)
-            .zip(contribution_sets)
-            .collect(),
-    ))
+    Ok(seed_indices.into_iter().zip(contribution_sets).collect())
 }
 
 fn commit_contributions(
     py: Python<'_>,
     cotangents: &mut [Option<Py<PyAny>>],
-    invocation: &Invocation,
+    invocation: &ReverseInvocation,
     contributions: &[Py<PyAny>],
 ) -> PyResult<()> {
-    for parent_index in 0..invocation.parents.len() {
-        if !invocation
-            .parent_active
-            .get(parent_index)
-            .copied()
-            .ok_or_else(|| PyRuntimeError::new_err("parent activity is unavailable"))?
-        {
+    let parents = invocation
+        .parents
+        .iter()
+        .zip(&invocation.parent_positions)
+        .zip(&invocation.parent_active);
+    for ((&parent, &position), &active) in parents {
+        if !active {
             continue;
         }
-        let parent_id = *invocation
-            .parents
-            .get(parent_index)
-            .ok_or_else(|| PyRuntimeError::new_err("parent ID is unavailable"))?;
-        let parent_slot = usize::try_from(parent_id)
-            .map_err(|_| PyRuntimeError::new_err("parent ID is out of range"))?;
-        let position = *invocation
-            .parent_positions
-            .get(parent_index)
-            .ok_or_else(|| PyRuntimeError::new_err("parent position is unavailable"))?;
         let contribution = contributions
             .get(position)
             .ok_or_else(|| PyRuntimeError::new_err("contribution position is unavailable"))?;
         accumulate_slot(
             py,
             cotangents
-                .get_mut(parent_slot)
+                .get_mut(node_slot(parent)?)
                 .ok_or_else(|| PyRuntimeError::new_err("parent cotangent slot is unavailable"))?,
             contribution.bind(py),
         )?;
@@ -611,6 +441,15 @@ fn add_cotangents(
         (Some(_), None) | (None, Some(_)) => Err(PyValueError::new_err(
             "cannot add tuple and non-tuple cotangents",
         )),
-        (None, None) => existing.add(contribution).map(Bound::unbind),
+        (None, None) => {
+            // A concrete Array API array rejects a traced right operand, so
+            // a traced contribution goes on the left; addition commutes.
+            let snapshot = intern!(py, "_advect_snapshot");
+            if contribution.hasattr(snapshot)? && !existing.hasattr(snapshot)? {
+                contribution.add(existing).map(Bound::unbind)
+            } else {
+                existing.add(contribution).map(Bound::unbind)
+            }
+        }
     }
 }

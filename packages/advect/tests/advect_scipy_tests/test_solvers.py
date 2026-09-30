@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import array_api_strict as strict
 import numpy as np
 import pytest
@@ -13,6 +15,9 @@ from advect.autodiff.api.implicit import ImplicitSolveError
 from advect.scipy import special
 from advect.scipy.optimize import root_solver
 from advect.scipy.sparse.linalg import gmres_solver
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 def test_root_callback_preserves_array_shape_and_solves_real_system() -> None:
@@ -45,6 +50,7 @@ def test_root_callback_supports_complex_systems_through_real_packing() -> None:
         (np.float64(1), np.float64),
         (np.complex64(1), np.complex128),
         (np.complex128(1), np.complex128),
+        (np.array(1.0), np.ndarray),
     ],
 )
 def test_root_callback_preserves_scalar_category(
@@ -60,54 +66,10 @@ def test_root_callback_preserves_scalar_category(
     solution = root_solver()(residual, initial)
 
     assert type(solution) is expected_type
+    assert np.shape(solution) == np.shape(initial)
     assert seen
     assert all(value_type is expected_type for value_type in seen)
     assert_allclose(solution, 2)
-
-
-def test_root_callback_preserves_zero_dimensional_array_category() -> None:
-    initial = np.array(1.0)
-    seen: list[type[object]] = []
-
-    def residual(value: object) -> object:
-        seen.append(type(value))
-        return value - 2  # type: ignore[operator]
-
-    solution = root_solver()(residual, initial)
-
-    assert type(solution) is np.ndarray
-    assert np.shape(solution) == ()
-    assert seen
-    assert all(value_type is np.ndarray for value_type in seen)
-
-
-def test_root_callback_rejects_complex_residual_for_real_state() -> None:
-    solve = root_solver()
-
-    with pytest.raises(ImplicitSolveError, match="complex values for a real state"):
-        solve(lambda value: value - 1 + 1j, np.array([0.0]))
-
-
-def test_root_callback_turns_nonconvergence_into_implicit_solve_error() -> None:
-    solve = root_solver(options={"maxfev": 1})
-
-    with pytest.raises(ImplicitSolveError, match="did not converge"):
-        solve(lambda value: value * value + 1, np.array([1.0]))
-
-
-def test_root_callback_rejects_residual_shape_changes() -> None:
-    solve = root_solver()
-
-    with pytest.raises(ImplicitSolveError, match="must return the solution shape"):
-        solve(lambda _value: np.ones(3), np.ones(2))
-
-
-def test_root_callback_rejects_non_numpy_provider_values() -> None:
-    solve = root_solver()
-    initial = strict.asarray([1.0, 1.0], dtype=strict.float64)
-
-    with pytest.raises(ImplicitSolveError, match="concrete NumPy arrays or scalars"):
-        solve(lambda value: value - 1, initial)
 
 
 def test_gmres_callback_preserves_shape_and_supports_complex_values() -> None:
@@ -150,6 +112,8 @@ def test_gmres_callback_handles_identity_operator_without_aliasing() -> None:
         (np.float64(1), np.float64),
         (np.complex64(1), np.complex64),
         (np.complex128(1), np.complex128),
+        (np.array(1.0), np.ndarray),
+        (np.array([2, 4]), np.ndarray),
     ],
 )
 def test_gmres_callback_preserves_scalar_category_and_inexact_dtype(
@@ -165,25 +129,11 @@ def test_gmres_callback_preserves_scalar_category_and_inexact_dtype(
     solution = gmres_solver(rtol=1e-12, atol=1e-12)(operator, rhs)
 
     assert type(solution) is expected_type
+    assert np.asarray(solution).dtype == np.result_type(rhs, 1.0)
+    assert np.shape(solution) == np.shape(rhs)
     assert seen
     assert all(value_type is expected_type for value_type in seen)
     assert_allclose(solution, rhs / 2)  # type: ignore[operator]
-
-
-def test_gmres_callback_preserves_zero_dimensional_array_category() -> None:
-    rhs = np.array(1.0)
-    seen: list[type[object]] = []
-
-    def operator(value: object) -> object:
-        seen.append(type(value))
-        return 2 * value  # type: ignore[operator]
-
-    solution = gmres_solver(rtol=1e-12, atol=1e-12)(operator, rhs)
-
-    assert type(solution) is np.ndarray
-    assert np.shape(solution) == ()
-    assert seen
-    assert all(value_type is np.ndarray for value_type in seen)
 
 
 @pytest.mark.parametrize("dtype", [np.float32, np.complex64])
@@ -199,27 +149,48 @@ def test_gmres_callback_preserves_inexact_rhs_dtype(dtype: object) -> None:
     assert_allclose(solution, rhs / 2, rtol=2e-6, atol=2e-6)
 
 
-def test_gmres_callback_reports_nonconvergence() -> None:
-    rhs = np.array([1.0, 2.0])
-    solve = gmres_solver(rtol=0.0, atol=0.0, maxiter=1)
-
-    with pytest.raises(ImplicitSolveError, match="did not converge"):
-        solve(lambda value: np.array([value[1], 0.0]), rhs)
+_COMPLEX_FOR_REAL = "complex values for a real state"
+_NO_CONVERGENCE = "did not converge"
+_NUMPY = "concrete NumPy arrays or scalars"
 
 
-def test_gmres_callback_rejects_operator_shape_changes() -> None:
-    solve = gmres_solver()
+@pytest.mark.parametrize(
+    ("solve", "callback", "state", "match"),
+    [
+        (root_solver(), lambda x: x - 1 + 1j, np.array([0.0]), _COMPLEX_FOR_REAL),
+        (gmres_solver(), lambda x: x + 1j, np.array([1.0, 2.0]), _COMPLEX_FOR_REAL),
+        (root_solver(options={"maxfev": 1}), lambda x: x * x + 1, np.array([1.0]), _NO_CONVERGENCE),
+        (
+            gmres_solver(rtol=0.0, atol=0.0, maxiter=1),
+            lambda x: np.array([x[1], 0.0]),
+            np.array([1.0, 2.0]),
+            _NO_CONVERGENCE,
+        ),
+        (root_solver(), lambda _x: np.ones(3), np.ones(2), "must return the solution shape"),
+        (gmres_solver(), lambda _x: np.ones(3), np.ones(2), "must preserve"),
+        (root_solver(), lambda x: x - 1, strict.asarray([1.0, 1.0], dtype=strict.float64), _NUMPY),
+        (gmres_solver(), lambda x: x, strict.asarray([1.0, 2.0], dtype=strict.float64), _NUMPY),
+    ],
+    ids=[
+        f"{solver}-{failure}"
+        for failure in ("complex-for-real", "nonconvergence", "shape-change", "provider")
+        for solver in ("root", "gmres")
+    ],
+)
+def test_callbacks_report_failures_as_implicit_solve_errors(
+    solve: Callable[..., object],
+    callback: Callable[[object], object],
+    state: object,
+    match: str,
+) -> None:
+    with pytest.raises(ImplicitSolveError, match=match):
+        solve(callback, state)
 
-    with pytest.raises(ImplicitSolveError, match="must preserve"):
-        solve(lambda _value: np.ones(3), np.ones(2))
 
-
-def test_gmres_callback_rejects_non_numpy_provider_values() -> None:
-    solve = gmres_solver()
-    rhs = strict.asarray([1.0, 2.0], dtype=strict.float64)
-
-    with pytest.raises(ImplicitSolveError, match="concrete NumPy arrays or scalars"):
-        solve(lambda value: value, rhs)
+@pytest.mark.parametrize("kwargs", [{"rtol": -1.0}, {"atol": -1.0}, {"maxiter": 0}])
+def test_gmres_rejects_invalid_solver_configuration(kwargs: dict[str, object]) -> None:
+    with pytest.raises(ValueError, match="GMRES"):
+        gmres_solver(**kwargs)
 
 
 def test_scipy_callbacks_drive_implicit_root_end_to_end() -> None:

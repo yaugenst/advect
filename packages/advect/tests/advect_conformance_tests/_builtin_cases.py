@@ -18,17 +18,20 @@ genuinely flat somewhere -- say so by narrowing ``laws`` and recording
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import replace
 from typing import Any
 
 import numpy as np
 
+import advect as ad
 from advect_conformance_tests._harness import (
     DEFAULT_LAWS,
     Argument,
     ClipRegions,
     Distinct,
     Frontend,
+    HermitianTriangle,
     Increasing,
     InputVariant,
     Interior,
@@ -136,6 +139,35 @@ _POINTWISE_BINARY_VARIANTS = (
     ),
 )
 _MATCHED_BINARY_VARIANTS = _POINTWISE_BINARY_VARIANTS[:-1]
+# Each cotangent must keep its own operand's dtype, also where the partials
+# read no operand, as for add, subtract and nextafter.
+_MIXED_PRECISION_VARIANT = InputVariant(
+    "mixed-float32-float64",
+    shapes={"a": (5,), "b": (5,)},
+    dtypes={"a": "float32", "b": "float64"},
+    tolerance=_FLOAT32_TOLERANCE,
+)
+_MIXED_PRECISION_BINARY_VARIANTS = (*_POINTWISE_BINARY_VARIANTS, _MIXED_PRECISION_VARIANT)
+# NEP 50 keeps a Python number weak, so the array operand sets the result's
+# precision, whether the number is differentiated or held constant, as in
+# ``np.where(mask, x, 0.0)``, and so left unselected by staged pullbacks.
+_WEAK_SCALAR_VARIANTS = tuple(
+    InputVariant(
+        name,
+        shapes={array: (5,), scalar: ()},
+        dtypes={array: "float32"},
+        python_scalars=frozenset({scalar}),
+        constants=frozenset({scalar} if constant else ()),
+        tolerance=_FLOAT32_TOLERANCE,
+    )
+    for name, array, scalar, constant in (
+        ("float32-python-scalar", "a", "b", False),
+        ("float32-python-constant", "a", "b", True),
+        ("python-scalar-float32", "b", "a", False),
+        ("python-constant-float32", "b", "a", True),
+    )
+)
+_OPERAND_PROMOTION_VARIANTS = (*_MIXED_PRECISION_BINARY_VARIANTS, *_WEAK_SCALAR_VARIANTS)
 _CONCATENATE_VARIANTS = (
     InputVariant(
         "vector-float32",
@@ -246,23 +278,28 @@ _COMPLEX_REDUCTION_VARIANTS = (
 # reduction is associated in reverse as a vector cotangent. Keep the observed
 # bound on product reductions; the high-precision variant retains the strict
 # default gate and percent-scale formula defects remain far outside this one.
+# Products are high-degree polynomials: the float32 step would leave their
+# float64-promoted difference oracle with O(1e-4) truncation error.
+_PRODUCT_ORACLE_STEP = Tolerance().finite_difference_step
 _PRODUCT_COMPLEX64_TOLERANCE = replace(
     _FLOAT32_TOLERANCE,
     adjoint_rtol=1e-5,
     adjoint_atol=1e-5,
+    finite_difference_step=_PRODUCT_ORACLE_STEP,
 )
 _PRODUCT_COMPLEX_REDUCTION_VARIANTS = (
     replace(_COMPLEX_REDUCTION_VARIANTS[0], tolerance=_PRODUCT_COMPLEX64_TOLERANCE),
     _COMPLEX_REDUCTION_VARIANTS[1],
 )
-# A six-factor float32 product can accumulate a few ulps of association
-# difference between its scalar JVP pairing and elementwise pullback pairing.
-# Keep that observed bound local to product reductions; float64 retains the
-# strict default gate.
+# A six-factor float32 product or product scan can accumulate a few ulps of
+# association difference between its scalar JVP pairing and elementwise
+# pullback pairing. Keep that observed bound local to products instead of
+# weakening every float32 operation; float64 retains the strict default gate.
 _PRODUCT_FLOAT32_TOLERANCE = replace(
     _FLOAT32_TOLERANCE,
     adjoint_rtol=2e-6,
     adjoint_atol=2e-6,
+    finite_difference_step=_PRODUCT_ORACLE_STEP,
 )
 _PRODUCT_REDUCTION_VARIANTS = (
     _REDUCTION_VARIANTS[0],
@@ -277,23 +314,13 @@ _FIXED_REAL_DTYPE_VARIANTS = (
         tolerance=_FLOAT32_TOLERANCE,
     ),
 )
-# Six float32 scan products can accumulate a one-ulp difference between the
-# forward pairing and reverse association while still satisfying the adjoint
-# law. Keep that observed bound local to cumprod instead of weakening every
-# float32 operation.
-_CUMPROD_FLOAT32_TOLERANCE = replace(
-    _FLOAT32_TOLERANCE,
-    adjoint_rtol=2e-6,
-    adjoint_atol=2e-6,
-)
-_CUMPROD_REDUCTION_VARIANTS = (
-    _REDUCTION_VARIANTS[0],
-    replace(_REDUCTION_VARIANTS[1], tolerance=_CUMPROD_FLOAT32_TOLERANCE),
-    _REDUCTION_VARIANTS[2],
-)
-_CUMPROD_FIXED_REAL_DTYPE_VARIANTS = (
+_PRODUCT_FIXED_REAL_DTYPE_VARIANTS = (
     _FIXED_REAL_DTYPE_VARIANTS[0],
-    replace(_FIXED_REAL_DTYPE_VARIANTS[1], tolerance=_CUMPROD_FLOAT32_TOLERANCE),
+    replace(_FIXED_REAL_DTYPE_VARIANTS[1], tolerance=_PRODUCT_FLOAT32_TOLERANCE),
+)
+_FLATTENED_SCAN_VARIANTS = (
+    InputVariant("matrix", shapes={"x": (2, 3)}),
+    InputVariant("0d", shapes={"x": ()}),
 )
 _FIXED_NUMERIC_DTYPE_VARIANTS = (
     *_FIXED_REAL_DTYPE_VARIANTS,
@@ -430,20 +457,6 @@ _SIGNAL_VARIANTS = (
     ),
 )
 
-#: For primitives whose derivative is identically zero by construction. They
-#: still owe every other guarantee -- the forward value, a zero that transposes
-#: to a matching zero, input immutability, and exact result metadata.
-_FLAT = frozenset(
-    {
-        Law.PRIMAL,
-        Law.FINITE_DIFFERENCE,
-        Law.ADJOINT,
-        Law.STRUCTURE,
-        Law.NO_INPUT_MUTATION,
-        Law.DTYPE,
-    },
-)
-
 #: Values strictly inside one unit cell, so rounding primitives never sample
 #: within a finite-difference step of a jump.
 _BETWEEN_INTEGERS = Nonzero(margin=0.15, high=0.3)
@@ -518,7 +531,7 @@ def _real_binary(
 ) -> InvocationCase:
     kwargs.setdefault(
         "variants",
-        _POINTWISE_BINARY_VARIANTS if broadcast else _MATCHED_BINARY_VARIANTS,
+        _MIXED_PRECISION_BINARY_VARIANTS if broadcast else _MATCHED_BINARY_VARIANTS,
     )
     return _binary(op, call, left, right, **kwargs)
 
@@ -579,6 +592,11 @@ def _xp_call(value: Any, path: str, *arguments: Any, **kwargs: Any) -> Any:
     return target(*arguments, **kwargs)
 
 
+# A transpose that casts its cotangent back to the input dtype must stay
+# traceable when the dtype is unchanged, or nested derivatives fail.
+_CAST_LAWS = DEFAULT_LAWS | {Law.SECOND_ORDER}
+_CAST_REASON = "an unchanged-dtype cotangent cast stays traceable for nested derivatives"
+
 # --- elementwise, unbounded domain -------------------------------------------
 
 _ELEMENTWISE_REAL: tuple[InvocationCase, ...] = (
@@ -602,8 +620,14 @@ _ELEMENTWISE_REAL: tuple[InvocationCase, ...] = (
     _analytic_unary("array.positive", np.positive, Real()),
     _analytic_unary("array.square", np.square, Real()),
     _real_unary("array.conjugate", np.conjugate, Real()),
-    _real_unary("array.real", np.real, Real()),
-    _analytic_unary("array_ext.sinc", np.sinc, Nonzero()),
+    _real_unary("array.real", np.real, Real(), laws=_CAST_LAWS, reason=_CAST_REASON),
+    _analytic_unary(
+        "array_ext.sinc",
+        np.sinc,
+        Nonzero(),
+        laws=DEFAULT_LAWS | {Law.SECOND_ORDER},
+        reason="the derivative factor stays traced for nested differentiation",
+    ),
     _real_unary("array_ext.cbrt", np.cbrt, Nonzero()),
     _analytic_unary("array_ext.exp2", np.exp2, Real()),
     _real_unary("array_ext.degrees", np.degrees, Real()),
@@ -678,11 +702,19 @@ _ELEMENTWISE_COMPLEX: tuple[InvocationCase, ...] = (
 # --- elementwise, restricted domain ------------------------------------------
 
 _ELEMENTWISE_RESTRICTED: tuple[InvocationCase, ...] = (
-    _analytic_unary("array.log", np.log, Positive()),
+    *(
+        _analytic_unary(
+            op,
+            call,
+            Positive(),
+            laws=DEFAULT_LAWS | {Law.SECOND_ORDER},
+            reason="a division-based derivative factor stays traced for nested derivatives",
+        )
+        for op, call in (("array.log", np.log), ("array.sqrt", np.sqrt))
+    ),
     _analytic_unary("array.log2", np.log2, Positive()),
     _analytic_unary("array.log10", np.log10, Positive()),
     _analytic_unary("array.log1p", np.log1p, Positive()),
-    _analytic_unary("array.sqrt", np.sqrt, Positive()),
     _analytic_unary("array.reciprocal", np.reciprocal, Nonzero()),
     _analytic_unary("array.arcsin", np.arcsin, Unit()),
     _analytic_unary("array.arccos", np.arccos, Unit()),
@@ -690,47 +722,54 @@ _ELEMENTWISE_RESTRICTED: tuple[InvocationCase, ...] = (
     _analytic_unary("array.arccosh", np.arccosh, Positive(low=1.5, high=5.0)),
     # ``abs`` and ``fabs`` are kinked at the origin; the domain keeps every
     # sample away from it so the derivative laws stay meaningful.
-    _real_unary("array.absolute", np.absolute, Nonzero()),
+    _real_unary("array.absolute", np.absolute, Nonzero(), laws=_CAST_LAWS, reason=_CAST_REASON),
     _real_unary("array_ext.fabs", np.fabs, Nonzero()),
 )
 
 # --- elementwise with an identically zero derivative -------------------------
 
+# Piecewise-constant primitives still owe every default law: the forward
+# value, a zero derivative that transposes to a matching zero, input
+# immutability, and exact result metadata. Their domains stay off the jumps.
 _FLAT_ELEMENTWISE: tuple[InvocationCase, ...] = (
-    _real_unary("array.ceil", np.ceil, _BETWEEN_INTEGERS, laws=_FLAT, reason="piecewise constant"),
-    _real_unary(
-        "array.floor",
-        np.floor,
-        _BETWEEN_INTEGERS,
-        laws=_FLAT,
-        reason="piecewise constant",
-    ),
-    _real_unary("array.rint", np.rint, _BETWEEN_INTEGERS, laws=_FLAT, reason="piecewise constant"),
-    _real_unary(
-        "array.trunc",
-        np.trunc,
-        _BETWEEN_INTEGERS,
-        laws=_FLAT,
-        reason="piecewise constant",
-    ),
-    _real_unary("array.sign", np.sign, Nonzero(), laws=_FLAT, reason="piecewise constant"),
+    _real_unary("array.ceil", np.ceil, _BETWEEN_INTEGERS),
+    _real_unary("array.floor", np.floor, _BETWEEN_INTEGERS),
+    _real_unary("array.rint", np.rint, _BETWEEN_INTEGERS),
+    _real_unary("array.trunc", np.trunc, _BETWEEN_INTEGERS),
+    _real_unary("array.sign", np.sign, Nonzero()),
     _real_unary(
         "array_ext.spacing",
         np.spacing,
         Positive(low=0.3, high=0.45),
-        laws=_FLAT,
         reason="piecewise constant within one floating-point binade",
     ),
 )
 
 # --- binary elementwise ------------------------------------------------------
 
+# A selection's comparison must enter nested derivatives only as a where
+# condition; differentiating it would reach a non-differentiable primitive.
+_SELECTION_LAWS = DEFAULT_LAWS | {Law.SECOND_ORDER}
+_SELECTION_REASON = "the selection enters nested derivatives only as a where condition"
+
 _BINARY: tuple[InvocationCase, ...] = (
-    _real_binary("array.add", np.add, Real(), Real()),
-    _real_binary("array.subtract", np.subtract, Real(), Real()),
-    _real_binary("array.multiply", np.multiply, Real(), Real()),
-    _real_binary("array.divide", np.divide, Real(), Nonzero()),
-    _real_binary("array.power", np.power, Positive(), Real(scale=0.5)),
+    _real_binary("array.add", np.add, Real(), Real(), variants=_OPERAND_PROMOTION_VARIANTS),
+    _real_binary(
+        "array.subtract", np.subtract, Real(), Real(), variants=_OPERAND_PROMOTION_VARIANTS
+    ),
+    _real_binary(
+        "array.multiply", np.multiply, Real(), Real(), variants=_OPERAND_PROMOTION_VARIANTS
+    ),
+    _real_binary(
+        "array.divide", np.divide, Real(), Nonzero(), variants=_OPERAND_PROMOTION_VARIANTS
+    ),
+    _real_binary(
+        "array.power",
+        np.power,
+        Positive(),
+        Real(scale=0.5),
+        variants=_OPERAND_PROMOTION_VARIANTS,
+    ),
     _real_binary("array_ext.float_power", np.float_power, Positive(), Real(scale=0.5)),
     _real_binary("array.arctan2", np.arctan2, Nonzero(), Nonzero()),
     _real_binary("array.hypot", np.hypot, Nonzero(), Nonzero()),
@@ -739,12 +778,13 @@ _BINARY: tuple[InvocationCase, ...] = (
         "array_ext.heaviside",
         lambda x: np.heaviside(np.zeros_like(x), x),
         Real(),
+        laws=DEFAULT_LAWS | {Law.SECOND_ORDER},
+        reason="the zero test enters nested derivatives only as a where condition",
     ),
     _real_unary(
         "array_ext.heaviside",
         lambda x: np.heaviside(x, 0.5),
         Nonzero(),
-        laws=_FLAT,
         reason="piecewise constant away from the jump",
     ),
     _real_binary("array.logaddexp", np.logaddexp, Real(), Real()),
@@ -771,6 +811,8 @@ _BINARY: tuple[InvocationCase, ...] = (
         Real(),
         SeparatedFrom("a"),
         broadcast=False,
+        laws=_SELECTION_LAWS,
+        reason=_SELECTION_REASON,
     ),
     _real_binary(
         "array.minimum",
@@ -778,6 +820,8 @@ _BINARY: tuple[InvocationCase, ...] = (
         Real(),
         SeparatedFrom("a"),
         broadcast=False,
+        laws=_SELECTION_LAWS,
+        reason=_SELECTION_REASON,
     ),
     _real_binary(
         "array_ext.fmax",
@@ -785,6 +829,8 @@ _BINARY: tuple[InvocationCase, ...] = (
         Real(),
         SeparatedFrom("a"),
         broadcast=False,
+        laws=_SELECTION_LAWS,
+        reason=_SELECTION_REASON,
     ),
     _real_binary(
         "array_ext.fmin",
@@ -792,6 +838,8 @@ _BINARY: tuple[InvocationCase, ...] = (
         Real(),
         SeparatedFrom("a"),
         broadcast=False,
+        laws=_SELECTION_LAWS,
+        reason=_SELECTION_REASON,
     ),
     _real_binary("array.remainder", np.remainder, _MODULO_DIVIDEND, _MODULO_DIVISOR),
     _real_binary("array_ext.fmod", np.fmod, _MODULO_DIVIDEND, _MODULO_DIVISOR),
@@ -800,7 +848,6 @@ _BINARY: tuple[InvocationCase, ...] = (
         np.floor_divide,
         _MODULO_DIVIDEND,
         _MODULO_DIVISOR,
-        laws=_FLAT,
         reason="piecewise constant away from quotient boundaries",
     ),
 )
@@ -815,6 +862,15 @@ _BINARY_COMPLEX: tuple[InvocationCase, ...] = (
         Real(),
         Nonzero(),
         variants=_COMPLEX_DIVIDE_VARIANTS,
+    ),
+    # The imaginary shift keeps each base off the negative real branch cut
+    # while its real part still takes both signs.
+    _complex_binary("array.power", lambda a, b: np.power(a + 3j, b), Real(), Real(scale=0.5)),
+    _complex_binary(
+        "array_ext.float_power",
+        lambda a, b: np.float_power(a + 3j, b),
+        Real(),
+        Real(scale=0.5),
     ),
 )
 
@@ -835,35 +891,46 @@ _REDUCTIONS: tuple[InvocationCase, ...] = (
         "array.cumprod",
         lambda x: np.cumprod(x, axis=-1),
         Nonzero(),
-        variants=_CUMPROD_REDUCTION_VARIANTS,
+        variants=_PRODUCT_REDUCTION_VARIANTS,
     ),
-    _reduction("array.var", np.var, Distinct()),
-    _reduction("array.std", np.std, Distinct()),
+    _reduction("array.var", np.var, Distinct(), laws=_CAST_LAWS, reason=_CAST_REASON),
+    _reduction("array.std", np.std, Distinct(), laws=_CAST_LAWS, reason=_CAST_REASON),
     _reduction("array_ext.nansum", np.nansum, Real()),
-    _reduction("array_ext.nanmean", np.nanmean, Real()),
+    _reduction(
+        "array_ext.nanmean",
+        np.nanmean,
+        Real(),
+        laws=DEFAULT_LAWS | {Law.SECOND_ORDER},
+        reason="the NaN mask enters nested derivatives only as a where condition",
+    ),
     _reduction("array_ext.nanstd", np.nanstd, Distinct()),
     _reduction("array_ext.nanvar", np.nanvar, Distinct()),
     _reduction("array_ext.nanprod", np.nanprod, Nonzero()),
     # Extrema select one element, so a tie is the kink; keep values separated.
-    _reduction("array.max", np.max, Distinct()),
+    _reduction(
+        "array.max",
+        np.max,
+        Distinct(),
+        laws=_SELECTION_LAWS,
+        reason="the argmax selection stays traced for nested derivatives",
+    ),
     _reduction("array.min", np.min, Distinct()),
     _reduction("array_ext.amax", np.amax, Distinct()),
     _reduction("array_ext.amin", np.amin, Distinct()),
     _reduction("array_ext.nanmax", np.nanmax, Distinct()),
     _reduction("array_ext.nanmin", np.nanmin, Distinct()),
+    # The default axis=None scans a flattened matrix and a 0-d input as vectors.
     InvocationCase(
         op="array.cumsum",
         call=np.cumsum,
         arguments=(Argument("x", Real(), shape=_VECTOR),),
-        variants=_FIXED_REAL_DTYPE_VARIANTS,
-        reason="the default axis=None flattening contract is tested separately",
+        variants=(*_FIXED_REAL_DTYPE_VARIANTS, *_FLATTENED_SCAN_VARIANTS),
     ),
     InvocationCase(
         op="array.cumprod",
         call=np.cumprod,
         arguments=(Argument("x", Nonzero(), shape=_VECTOR),),
-        variants=_CUMPROD_FIXED_REAL_DTYPE_VARIANTS,
-        reason="the default axis=None flattening contract is tested separately",
+        variants=(*_PRODUCT_FIXED_REAL_DTYPE_VARIANTS, *_FLATTENED_SCAN_VARIANTS),
     ),
     InvocationCase(
         op="array.sum",
@@ -910,6 +977,18 @@ _REDUCTIONS: tuple[InvocationCase, ...] = (
         tolerance=_FLOAT32_TOLERANCE,
         reason="float32 input covers real reduction result and cotangent dtype",
     ),
+    *(
+        InvocationCase(
+            op=op,
+            call=lambda x, reduction=reduction: reduction(x, axis=-1, ddof=0.5),
+            arguments=(Argument("x", Distinct(), shape=(2, 3)),),
+            reason="a fractional ddof must survive the valid-count arithmetic",
+        )
+        for op, reduction in (
+            ("array_ext.nanvar", np.nanvar),
+            ("array_ext.nanstd", np.nanstd),
+        )
+    ),
 )
 
 _REDUCTIONS_COMPLEX: tuple[InvocationCase, ...] = (
@@ -930,6 +1009,8 @@ _REDUCTIONS_COMPLEX: tuple[InvocationCase, ...] = (
 )
 
 # --- shape and layout --------------------------------------------------------
+
+_ADVANCED_INDEX_FIRST_ORDER = "advanced indexing require an explicit scatter-add primitive"
 
 _SHAPE: tuple[InvocationCase, ...] = (
     *(
@@ -995,6 +1076,27 @@ _SHAPE: tuple[InvocationCase, ...] = (
         )
     ),
     InvocationCase(
+        op="array.reshape",
+        call=lambda x: np.reshape(x, (3, 2), order="F"),
+        arguments=(Argument("x", Real(), shape=(2, 3)),),
+        reason="column-major order permutes the reshape transpose, also when staged",
+    ),
+    InvocationCase(
+        op="array_ext.ravel",
+        call=lambda x: np.ravel(x, order="F"),
+        arguments=(Argument("x", Real(), shape=(2, 3)),),
+        reason="column-major order permutes the flattening transpose",
+    ),
+    *(
+        InvocationCase(
+            op="array_ext.diag",
+            call=lambda x, k=k: np.diag(x, k),
+            arguments=(Argument("x", Real(), shape=(2, 3)),),
+            reason="a rectangular source fixes the shape of the extracted diagonal's adjoint",
+        )
+        for k in (-1, 0, 1)
+    ),
+    InvocationCase(
         op="array.trace",
         call=lambda x: np.trace(x, offset=1),
         arguments=(Argument("x", Real(), shape=(3, 4)),),
@@ -1006,6 +1108,17 @@ _SHAPE: tuple[InvocationCase, ...] = (
         arguments=(Argument("x", Real(), shape=(3, 4)),),
         reason="a negative offset covers diagonal's shifted scatter transpose",
     ),
+    *(
+        InvocationCase(
+            op=op,
+            call=call,
+            arguments=(Argument("x", Real(), shape=(2, 3, 4)),),
+            static={"offset": 1, "axis1": axis1, "axis2": axis2},
+            reason=f"matrix axes ({axis1}, {axis2}) survive tracing, transposition and staging",
+        )
+        for op, call in (("array.trace", np.trace), ("array.diagonal", np.diagonal))
+        for axis1, axis2 in ((0, 2), (2, 0))
+    ),
     _binary(
         "array.concatenate",
         lambda left, right: np.concatenate((left, right), axis=None),
@@ -1016,6 +1129,8 @@ _SHAPE: tuple[InvocationCase, ...] = (
                 "distinct-shapes",
                 shapes={"a": (2, 3), "b": (2, 2)},
             ),
+            _MIXED_PRECISION_VARIANT,
+            *_WEAK_SCALAR_VARIANTS,
         ),
         reason="axis=None flattens inputs and the pullback restores their distinct shapes",
     ),
@@ -1044,11 +1159,41 @@ _SHAPE: tuple[InvocationCase, ...] = (
         reason="axis-preserving repetition has a distinct transpose from flattened repeat",
     ),
     InvocationCase(
+        op="array.repeat",
+        call=lambda x: np.repeat(x, 3, axis=0),
+        arguments=(Argument("x", Real(), shape=()),),
+        reason="NumPy repeats a rank-0 source along an axis as its one-element flattening",
+    ),
+    InvocationCase(
         op="array.tile",
         call=lambda x: _xp_call(x, "tile", x, (2, 3)),
         arguments=(Argument("x", Real(), shape=(3, 4)),),
         frontend=Frontend.ARRAY_API,
         reason="per-axis repetitions cover multidimensional tile reduction",
+    ),
+    InvocationCase(
+        op="advect.getitem",
+        call=lambda x: x[_xp_call(x, "asarray", [3, 0, 3, -1])],
+        arguments=(Argument("x", Real(), shape=(5,)),),
+        frontend=Frontend.ARRAY_API,
+        reason="repeated integer-array indices accumulate without a provider add.at",
+        first_order=_ADVANCED_INDEX_FIRST_ORDER,
+    ),
+    InvocationCase(
+        op="advect.getitem",
+        call=lambda x: x[_xp_call(x, "asarray", [1, 1, 0]), _xp_call(x, "asarray", [2, 2, -1])],
+        arguments=(Argument("x", Real(), shape=(2, 3)),),
+        frontend=Frontend.ARRAY_API,
+        reason="a tuple of integer arrays accumulates through one linearized index",
+        first_order=_ADVANCED_INDEX_FIRST_ORDER,
+    ),
+    InvocationCase(
+        op="advect.getitem",
+        call=lambda x: x[_xp_call(x, "asarray", [2, 0, 2, -1]), -1],
+        arguments=(Argument("x", Real(), shape=(3, 4)),),
+        frontend=Frontend.ARRAY_API,
+        reason="an integer beside an integer array joins the linearized index",
+        first_order=_ADVANCED_INDEX_FIRST_ORDER,
     ),
     *(
         InvocationCase(
@@ -1106,6 +1251,26 @@ def _new_numpy_contractions() -> tuple[InvocationCase, ...]:
             ),
             reason="complex contraction exercises real-adjoint vector-matrix transposition",
         ),
+        InvocationCase(
+            op="array_ext.matvec",
+            call=matvec,
+            arguments=(
+                Argument("a", Real(), shape=(3, 3)),
+                Argument("b", Real(), shape=(2, 3, 3)),
+            ),
+            laws=DEFAULT_LAWS | {Law.STAGED},
+            reason="batched vectors loop beside the core dimensions; matmul reads a matrix",
+        ),
+        InvocationCase(
+            op="array_ext.vecmat",
+            call=vecmat,
+            arguments=(
+                Argument("a", Real(), shape=(2, 3)),
+                Argument("b", Real(), shape=(2, 3, 4)),
+            ),
+            laws=DEFAULT_LAWS | {Law.STAGED},
+            reason="batched vectors loop beside the core dimensions; matmul reads a matrix",
+        ),
     )
 
 
@@ -1130,7 +1295,7 @@ _CONTRACTIONS: tuple[InvocationCase, ...] = (
             Argument("a", Real(), shape=(3,)),
             Argument("b", Real(), shape=(3,)),
         ),
-        variants=_MATMUL_VARIANTS,
+        variants=(*_MATMUL_VARIANTS, _MIXED_PRECISION_VARIANT),
     ),
     *_new_numpy_contractions(),
     _binary(
@@ -1150,6 +1315,7 @@ _CONTRACTIONS: tuple[InvocationCase, ...] = (
                 shapes={"a": (2,), "b": ()},
                 dtypes={"a": "complex128", "b": "complex128"},
             ),
+            _WEAK_SCALAR_VARIANTS[0],
         ),
     ),
     _binary(
@@ -1310,6 +1476,20 @@ _LINALG: tuple[InvocationCase, ...] = (
     ),
     _matrix("array_ext.linalg.inv", np.linalg.inv, WellConditioned(), tolerance=_LINALG_TOLERANCE),
     _matrix("array_ext.linalg.det", np.linalg.det, WellConditioned(), tolerance=_LINALG_TOLERANCE),
+    *(
+        InvocationCase(
+            op=op,
+            call=call,
+            arguments=(Argument("a", WellConditioned(), shape=(3, 3)),),
+            laws=_CAST_LAWS,
+            tolerance=_LINALG_TOLERANCE,
+            reason=_CAST_REASON,
+        )
+        for op, call in (
+            ("array_ext.linalg.inv", np.linalg.inv),
+            ("array_ext.linalg.det", np.linalg.det),
+        )
+    ),
     _matrix(
         "array_ext.linalg.slogdet",
         lambda a: _xp_call(a, "linalg.slogdet", a)[1],
@@ -1348,6 +1528,8 @@ _LINALG: tuple[InvocationCase, ...] = (
         lambda a: np.linalg.eigh(a)[0],
         SymmetricPositiveDefinite(),
         tolerance=_LINALG_TOLERANCE,
+        laws=DEFAULT_LAWS | {Law.SECOND_ORDER},
+        reason="Hermitian eigenvalues differentiate twice, complex inputs included",
     ),
     InvocationCase(
         op="array_ext.linalg.eigh",
@@ -1356,6 +1538,23 @@ _LINALG: tuple[InvocationCase, ...] = (
         variants=_SQUARE_MATRIX_VARIANTS,
         tolerance=_LINALG_TOLERANCE,
         reason="full eigensystems exercise the phase-aligned eigenvector derivative and adjoint",
+    ),
+    InvocationCase(
+        op="array_ext.linalg.eigh",
+        call=np.linalg.eigh,
+        arguments=(Argument("a", HermitianTriangle("U"), shape=_MATRIX),),
+        static={"UPLO": "U"},
+        variants=_SQUARE_MATRIX_VARIANTS,
+        tolerance=_LINALG_TOLERANCE,
+        reason="UPLO='U' differentiates only the upper triangle beside unrelated lower data",
+    ),
+    _matrix(
+        "array_ext.linalg.eigvalsh",
+        np.linalg.eigvalsh,
+        HermitianTriangle("U"),
+        static={"UPLO": "u"},
+        tolerance=_LINALG_TOLERANCE,
+        reason="a lowercase UPLO='u' selects the upper triangle beside unrelated lower data",
     ),
     _matrix(
         "array_ext.linalg.svdvals",
@@ -1412,7 +1611,8 @@ _LINALG: tuple[InvocationCase, ...] = (
         arguments=(Argument("a", WellConditioned(), shape=(3, 5)),),
         frontend=Frontend.ARRAY_API,
         tolerance=_LINALG_TOLERANCE,
-        reason="wide reduced QR covers the full-row-rank gauge and both outputs",
+        laws=DEFAULT_LAWS | {Law.SECOND_ORDER},
+        reason="wide reduced QR covers the full-row-rank gauge and both outputs, twice",
     ),
     InvocationCase(
         op="array_ext.linalg.qr_r",
@@ -1464,7 +1664,13 @@ _LINALG: tuple[InvocationCase, ...] = (
         tolerance=_LINALG_TOLERANCE,
         reason="complex-input eigvals has a data-independent staged output dtype",
     ),
-    _unary("array_ext.linalg.norm", np.linalg.norm, Nonzero()),
+    _unary(
+        "array_ext.linalg.norm",
+        np.linalg.norm,
+        Nonzero(),
+        laws=_CAST_LAWS,
+        reason=_CAST_REASON,
+    ),
     InvocationCase(
         op="array_ext.linalg.norm",
         call=np.linalg.norm,
@@ -1545,6 +1751,22 @@ def _fft_signature_cases() -> tuple[InvocationCase, ...]:
                     ),
                 )
             )
+    cases.extend(
+        InvocationCase(
+            op=f"array_ext.fft.{name}",
+            call=getattr(np.fft, name),
+            arguments=(Argument("x", Real(), shape=(5, 4), dtype=dtype),),
+            static={"n": length, "axis": 0},
+            reason=f"n={length} along a leading axis covers one-axis truncation or padding",
+        )
+        for name, dtype in (
+            ("fft", "complex128"),
+            ("ifft", "complex128"),
+            ("rfft", "float64"),
+            ("irfft", "complex128"),
+        )
+        for length in (3, 8)
+    )
     return tuple(cases)
 
 
@@ -1574,6 +1796,9 @@ _FFT: tuple[InvocationCase, ...] = (
 
 # --- interpolation, selection, and sampling ----------------------------------
 
+# Fixed interpolation queries below, inside, and above SpanningGrid's span.
+_INTERP_QUERIES = (-0.25, 0.4, 2.0)
+
 _SELECTION: tuple[InvocationCase, ...] = (
     _unary(
         "array_ext.bincount",
@@ -1600,9 +1825,10 @@ _SELECTION: tuple[InvocationCase, ...] = (
     ),
     InvocationCase(
         op="array_ext.interp",
-        call=lambda grid, values: np.interp(np.array([-0.25, 0.4, 2.0]), grid, values),
+        call=lambda grid, values: np.interp(np.array(_INTERP_QUERIES), grid, values),
         arguments=(
-            Argument("grid", SpanningGrid(), shape=(5,)),
+            # Interpolation is kinked where a knot meets a query.
+            Argument("grid", SpanningGrid(avoid=_INTERP_QUERIES), shape=(5,)),
             Argument("values", Distinct(), shape=(5,)),
         ),
         laws=DEFAULT_LAWS | {Law.DEPENDENCE},
@@ -1711,10 +1937,12 @@ _SELECTION: tuple[InvocationCase, ...] = (
     ),
     InvocationCase(
         op="array.where",
-        call=lambda a, b: np.where(np.arange(6) % 2 == 0, a, b),
-        arguments=(
-            Argument("a", Real(), shape=_VECTOR),
-            Argument("b", Real(), shape=_VECTOR),
+        call=lambda a, b: np.where(np.arange(5) % 2 == 0, a, b),
+        arguments=(Argument("a", Real()), Argument("b", Real())),
+        variants=(
+            InputVariant("vector-float64", shapes={"a": (5,), "b": (5,)}),
+            _MIXED_PRECISION_VARIANT,
+            *_WEAK_SCALAR_VARIANTS,
         ),
     ),
 )
@@ -1727,11 +1955,103 @@ def _index_update(x: Any) -> Any:
     return out
 
 
+def _set_block(base: Any, replacement: Any) -> Any:
+    """Overwrite a 2x2 block with a broadcast replacement cast to the base dtype."""
+    out = base.copy()
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", np.exceptions.ComplexWarning)
+        out[1:, 1:3] = replacement
+    return out
+
+
+def _block_update(*variants: InputVariant, **kwargs: Any) -> InvocationCase:
+    return InvocationCase(
+        op="advect.index_update",
+        call=_set_block,
+        arguments=(
+            Argument("base", Real(), shape=(3, 4)),
+            Argument("replacement", Real(), shape=(2, 1)),
+        ),
+        variants=variants,
+        **kwargs,
+    )
+
+
+#: Repeated positions make the scatter accumulate, and positions 2, 3, and 5
+#: receive nothing.
+_SCATTER_POSITIONS = np.array([4, 0, 4, 1, 4])
+
+
+def _gather_pullback(g: Any, *, frontend: Frontend, axis: int) -> Any:
+    """Pull ``g`` back through a repeated-index ``take`` along ``axis``.
+
+    No frontend spells ``advect.scatter_add``: a gather's transpose emits it
+    for a traced cotangent, so every transform over this call reaches the
+    operation through that public derivative path.
+    """
+    namespace = np if frontend is Frontend.NUMPY else _xp(g)
+    shape = list(g.shape)
+    shape[axis] = 6
+    source = namespace.zeros(tuple(shape), dtype=g.dtype)
+    positions = namespace.asarray(_SCATTER_POSITIONS)
+
+    def gather(x: Any) -> Any:
+        return (np if frontend is Frontend.NUMPY else _xp(x)).take(x, positions, axis=axis)
+
+    _value, pullback = ad.vjp(gather)(source)
+    return pullback(g)
+
+
+def _scatter_add(frontend: Frontend, axis: int, shape: tuple[int, ...]) -> InvocationCase:
+    return InvocationCase(
+        op="advect.scatter_add",
+        call=lambda g: _gather_pullback(g, frontend=frontend, axis=axis),
+        arguments=(Argument("g", Real(), shape=shape),),
+        frontend=frontend,
+        variants=(
+            InputVariant("float64"),
+            InputVariant("float32", dtypes={"g": "float32"}, tolerance=_FLOAT32_TOLERANCE),
+            InputVariant("complex128", dtypes={"g": "complex128"}),
+        ),
+        laws=DEFAULT_LAWS | {Law.SECOND_ORDER},
+        reason=(
+            f"the {frontend.value} scatter along axis {axis} is linear, so nested "
+            "derivatives transpose it back into a gather under an outer trace"
+        ),
+    )
+
+
 _INTERNAL: tuple[InvocationCase, ...] = (
+    _scatter_add(Frontend.NUMPY, 0, (5,)),
+    _scatter_add(Frontend.NUMPY, 1, (2, 5, 3)),
+    _scatter_add(Frontend.ARRAY_API, 1, (2, 5, 3)),
     InvocationCase(
         op="advect.index_update",
         call=_index_update,
         arguments=(Argument("x", Real(), shape=_VECTOR),),
+    ),
+    _block_update(
+        InputVariant("broadcast-replacement"),
+        InputVariant("constant-replacement", constants=frozenset({"replacement"})),
+        laws=DEFAULT_LAWS | {Law.SECOND_ORDER},
+        reason="set mode zeroes the overwritten base region and reduces a broadcast replacement",
+    ),
+    _block_update(
+        InputVariant("leading-singleton-replacement", shapes={"replacement": (1, 2, 1)}),
+        reason="the replacement cotangent restores a leading singleton that NumPy strips",
+    ),
+    _block_update(
+        InputVariant(
+            "complex64-base-float32-replacement",
+            dtypes={"base": "complex64", "replacement": "float32"},
+            tolerance=_FLOAT32_TOLERANCE,
+        ),
+        InputVariant(
+            "float32-base-complex64-replacement",
+            dtypes={"base": "float32", "replacement": "complex64"},
+            tolerance=_FLOAT32_TOLERANCE,
+        ),
+        reason="the replacement's cast to the base dtype has a real-linear adjoint",
     ),
     InvocationCase(
         op="advect.copy",
@@ -1816,7 +2136,7 @@ def _namespace_binary(
     **kwargs: Any,
 ) -> InvocationCase:
     if shape == _VECTOR:
-        kwargs.setdefault("variants", _POINTWISE_BINARY_VARIANTS)
+        kwargs.setdefault("variants", _MIXED_PRECISION_BINARY_VARIANTS)
     return _namespace(
         op,
         lambda a, b: _xp_call(a, path, a, b),
@@ -1893,6 +2213,8 @@ PORTABLE_ARRAY_API_INVOCATIONS: tuple[InvocationCase, ...] = (
         Argument("b", Real(), shape=(4,)),
         tolerance=_LINALG_TOLERANCE,
         variants=_SOLVE_VARIANTS,
+        laws=DEFAULT_LAWS | {Law.STAGED, Law.SECOND_ORDER},
+        reason="Array API solves stage durably and differentiate twice, complex ones included",
     ),
     _namespace_unary(
         "array_ext.linalg.svdvals",
@@ -1969,6 +2291,41 @@ PORTABLE_ARRAY_API_INVOCATIONS: tuple[InvocationCase, ...] = (
 
 _OTHER_FRONTEND_INVOCATIONS: tuple[InvocationCase, ...] = (
     _namespace(
+        "array.clip",
+        lambda x: _xp(x).clip(x, min=-0.31, max=0.31),
+        Argument("x", ClipRegions(-0.31, 0.31), shape=_VECTOR),
+        variants=_POINTWISE_REAL_VARIANTS,
+        reason="Python-float bounds bind as static weak scalars",
+    ),
+    _namespace(
+        "array.copysign",
+        lambda x: _xp(x).copysign(x, 1.0),
+        Argument("x", Nonzero(), shape=_VECTOR),
+        variants=_POINTWISE_REAL_VARIANTS,
+        reason="a Python-float sign operand binds as a static weak scalar",
+    ),
+    *(
+        _namespace(
+            op,
+            lambda x, path=path: _xp_call(x, path, x, n=5, norm="ortho"),
+            Argument("x", Real(), shape=shape, dtype=dtype),
+            reason="an odd n with norm='ortho' covers the Hermitian FFT resize and scaling",
+        )
+        for op, path, shape, dtype in (
+            ("array_ext.fft.hfft", "fft.hfft", (3,), "complex128"),
+            ("array_ext.fft.ihfft", "fft.ihfft", (5,), "float64"),
+        )
+    ),
+    *(
+        _namespace(
+            "array_ext.fft.fftn",
+            lambda x, size=size: _xp(x).fft.fftn(x, s=(size,), axes=(-1,), norm="ortho"),
+            Argument("x", Real(), shape=(2, 4), dtype="complex128"),
+            reason=f"s={size} {resize} the transformed axis, and its adjoint undoes that",
+        )
+        for size, resize in ((6, "zero-pads"), (3, "truncates"))
+    ),
+    _namespace(
         "array.take",
         lambda x: _xp(x).take(x, _xp(x).asarray([0, 2, 2, 4])),
         Argument("x", Real(), shape=_VECTOR),
@@ -1995,9 +2352,9 @@ _OTHER_FRONTEND_INVOCATIONS: tuple[InvocationCase, ...] = (
     ),
     InvocationCase(
         op="array.take_along_axis",
-        call=lambda x: np.take_along_axis(x, np.array([0, 2, 4]), axis=0),
+        call=lambda x: np.take_along_axis(x, np.array([0, -3, -1]), axis=0),
         arguments=(Argument("x", Real(), shape=_VECTOR),),
-        reason="NumPy array-function binding is independent from the Array API binding",
+        reason="NumPy binding, whose negative indices count from the end of the axis",
     ),
     InvocationCase(
         op="array.take_along_axis",
@@ -2009,10 +2366,22 @@ _OTHER_FRONTEND_INVOCATIONS: tuple[InvocationCase, ...] = (
         arguments=(Argument("x", Real(), shape=(1, 3)),),
         reason="broadcast source dimensions reduce duplicate indexed cotangents",
     ),
+    InvocationCase(
+        op="array.take_along_axis",
+        call=lambda x: np.take_along_axis(x, np.array([[0, 3, -1, 0, 2]]), axis=1),
+        arguments=(Argument("x", Real(), shape=(3, 4)),),
+        reason="broadcast index dimensions scatter each source row's cotangents",
+    ),
     _namespace(
         "array.astype",
         lambda x: _xp(x).astype(x, _xp(x).float64),
         Argument("x", Real(), shape=_VECTOR),
+    ),
+    _namespace(
+        "array.astype",
+        lambda x: _xp(x).asarray(x),
+        Argument("x", Real(), shape=_VECTOR),
+        reason="asarray without a dtype records a cast that keeps the source dtype",
     ),
     InvocationCase(
         op="array.astype",
@@ -2020,6 +2389,14 @@ _OTHER_FRONTEND_INVOCATIONS: tuple[InvocationCase, ...] = (
         arguments=(Argument("x", Real(), shape=_VECTOR),),
         tolerance=_CAST_TOLERANCE,
         reason="NumPy method binding is independent from the Array API binding",
+    ),
+    InvocationCase(
+        op="array.astype",
+        call=lambda x: np.astype(x, np.float32),
+        arguments=(Argument("x", Real(), shape=_VECTOR),),
+        tolerance=_CAST_TOLERANCE,
+        laws=_CAST_LAWS,
+        reason="NumPy's astype function casts an outer tracer in nested derivatives",
     ),
     InvocationCase(
         op="array.sort",
@@ -2105,6 +2482,15 @@ def _scipy_cases() -> tuple[InvocationCase, ...]:
         _unary("custom.scipy.special.erfc", special.erfc, Real()),
         _unary("custom.scipy.special.erfcx", special.erfcx, Real()),
         _unary("custom.scipy.special.erfinv", special.erfinv, Unit()),
+        # Advect's rules for SciPy's complex loops use the conj(derivative) real adjoint.
+        *(
+            _complex_unary(f"custom.scipy.special.{name}", getattr(special, name), Real())
+            for name in ("erf", "erfc", "erfcx", "ndtr")
+        ),
+        # Complex log_ndtr is log(ndtr) with a branch cut where ndtr crosses the
+        # negative real axis, which a finite-difference step must not straddle.
+        # Re ndtr is at least 0.015 on [-1, 1]^2, so the cut lies well outside.
+        _complex_unary("custom.scipy.special.log_ndtr", special.log_ndtr, Real(scale=0.5)),
         _unary(
             "custom.scipy.special.ndtri",
             special.ndtri,
@@ -2114,6 +2500,16 @@ def _scipy_cases() -> tuple[InvocationCase, ...]:
             "custom.scipy.special.logsumexp",
             special.logsumexp,
             Real(),
+        ),
+        InvocationCase(
+            op="custom.scipy.special.logsumexp",
+            call=lambda a, b: special.logsumexp(a, b=b),
+            arguments=(
+                Argument("a", Real(), shape=_VECTOR, dtype="float32"),
+                Argument("b", Positive(), shape=_VECTOR),
+            ),
+            tolerance=_FLOAT32_TOLERANCE,
+            reason="float32 values with float64 weights keep float32 value cotangents",
         ),
         _unary(
             "custom.scipy.special.softmax",
@@ -2140,6 +2536,8 @@ def _scipy_cases() -> tuple[InvocationCase, ...]:
             op="custom.scipy.special.polygamma",
             call=lambda x: special.polygamma(1, x),
             arguments=(Argument("x", Positive(), shape=_VECTOR),),
+            variants=_POINTWISE_REAL_VARIANTS,
+            reason="float32 inputs keep float32 cotangents under a float64 result",
         ),
         InvocationCase(
             op="custom.scipy.special.polygamma",
@@ -2277,6 +2675,23 @@ def _scipy_cases() -> tuple[InvocationCase, ...]:
             ),
             arguments=(Argument("x", Real(), shape=_VECTOR),),
         ),
+        # Reading one output leaf leaves the other's cotangent a symbolic zero,
+        # as reverse-over-reverse through a constant-mode filter does.
+        *(
+            InvocationCase(
+                op="custom.scipy.ndimage._stencil_input_transpose",
+                call=lambda x, leaf=leaf: _stencil_input_transpose_primitive(
+                    x,
+                    np.array([0.2, 0.6, 0.2]),
+                    axes=(0,),
+                    origins=(0,),
+                    modes=("constant",),
+                    convolution=False,
+                )[leaf],
+                arguments=(Argument("x", Real(), shape=_VECTOR),),
+            )
+            for leaf in (0, 1)
+        ),
         InvocationCase(
             op="custom.scipy.ndimage._selection_transpose",
             call=lambda x: _selection_transpose_primitive(
@@ -2318,9 +2733,14 @@ STAGED_ONLY_INVOCATIONS: tuple[InvocationCase, ...] = (
 # Dynamic differentiation is intentionally wider than abstract staging. This
 # closed set records exact invocation contracts whose current callable path has
 # no complete abstract lowering; another frontend or static form of the same
-# canonical operation may still earn a staged serialize/load law.
+# canonical operation may still earn a staged serialize/load law. The
+# conformance suite observes every entry refusing to stage, so a form that
+# gains a lowering must leave the set.
 DYNAMIC_ONLY_STAGING_INVOCATIONS = frozenset(
     {
+        "advect.getitem[array_api]#1",
+        "advect.getitem[array_api]#2",
+        "advect.getitem[array_api]#3",
         "array.atleast_1d[numpy]",
         "array.atleast_2d[numpy]",
         "array.atleast_3d[numpy]",
@@ -2329,7 +2749,6 @@ DYNAMIC_ONLY_STAGING_INVOCATIONS = frozenset(
         "array.linspace[numpy]#2",
         "array.linspace[numpy]#3",
         "array.outer[numpy]#1",
-        "array.roll[numpy]",
         "array.swapaxes[numpy]",
         "array_ext.amax[numpy]",
         "array_ext.amin[numpy]",
@@ -2338,6 +2757,9 @@ DYNAMIC_ONLY_STAGING_INVOCATIONS = frozenset(
         "array_ext.deg2rad[numpy]",
         "array_ext.degrees[numpy]",
         "array_ext.diag[numpy]",
+        "array_ext.diag[numpy]#1",
+        "array_ext.diag[numpy]#2",
+        "array_ext.diag[numpy]#3",
         "array_ext.divmod[numpy]",
         "array_ext.einsum[numpy]",
         "array_ext.einsum[numpy]#1",
@@ -2348,29 +2770,18 @@ DYNAMIC_ONLY_STAGING_INVOCATIONS = frozenset(
         "array_ext.einsum[numpy]#6",
         "array_ext.einsum[numpy]#7",
         "array_ext.einsum[numpy]#8",
-        "array_ext.fft.fft[numpy]#1",
-        "array_ext.fft.fft[numpy]#3",
-        "array_ext.fft.fft[numpy]#5",
-        "array_ext.fft.ifft[numpy]#1",
-        "array_ext.fft.ifft[numpy]#3",
-        "array_ext.fft.ifft[numpy]#5",
-        "array_ext.fft.irfft2[numpy]#1",
-        "array_ext.fft.irfft2[numpy]#2",
-        "array_ext.fft.irfft2[numpy]#3",
-        "array_ext.fft.irfftn[numpy]#1",
-        "array_ext.fft.irfftn[numpy]#2",
-        "array_ext.fft.irfftn[numpy]#3",
         "array_ext.linalg.eig[numpy]",
         "array_ext.linalg.eig[numpy]#2",
         "array_ext.linalg.eigvals[numpy]",
         "array_ext.linalg.eigh[numpy]#1",
-        "array_ext.linalg.norm[numpy]#1",
+        "array_ext.linalg.eigh[numpy]#2",
         "array_ext.linalg.svd[numpy]#2",
         "array_ext.exp2[numpy]",
         "array_ext.fabs[numpy]",
         "array_ext.flipud[numpy]",
         "array_ext.fliplr[numpy]",
         "array_ext.float_power[numpy]",
+        "array_ext.float_power[numpy]#1",
         "array_ext.fmax[numpy]",
         "array_ext.fmin[numpy]",
         "array_ext.fmod[numpy]",
@@ -2393,6 +2804,7 @@ DYNAMIC_ONLY_STAGING_INVOCATIONS = frozenset(
         "array_ext.rad2deg[numpy]",
         "array_ext.radians[numpy]",
         "array_ext.ravel[numpy]",
+        "array_ext.ravel[numpy]#1",
         "array_ext.rollaxis[numpy]",
         "array_ext.rot90[numpy]",
         "array_ext.sinc[numpy]",

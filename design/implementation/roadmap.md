@@ -98,7 +98,7 @@ operations such as `unstack` on an empty axis without adding sentinel nodes or
 special provenance metadata. The graph retains its input signature, and the
 empty output structure survives serialization and restoration.
 
-The detached envelope is `advect.ssa-program` version 2 and contains one program.
+The detached envelope is `advect.ssa-program` version 3 and contains one program.
 Its nested Rust graph remains the versioned portable graph artifact.
 
 ## Primitive system and abstract evaluation

@@ -2,11 +2,12 @@
 
 use std::collections::BTreeMap;
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Serializer};
 
+use crate::graph::{GraphData, validate_array_api_version};
 use crate::{
-    ArtifactError, AttrMap, DTypeDescriptor, GraphStore, NodeFlags, NodeId, NodeMetadata,
-    PortableConstant, RawArena,
+    ArtifactError, AttrMap, DTypeDescriptor, GraphStore, NodeFlags, NodeId, NodeMetadata, NodeRef,
+    Parents, PortableConstant, RawArena, ValueSpec,
 };
 
 /// Current graph-format version accepted by this runtime.
@@ -49,40 +50,17 @@ struct GraphWireRef<'a> {
     optimizer_version: u32,
     inputs: &'a [NodeId],
     outputs: &'a [NodeId],
-    nodes: Vec<NodeWire>,
+    nodes: Vec<NodeWireRef<'a>>,
     constants: BTreeMap<String, &'a PortableConstant>,
 }
 
 impl<'a> GraphWireRef<'a> {
     fn from_store(store: &'a GraphStore) -> Result<Self, ArtifactError> {
         let nodes = store
-            .topological_order()
-            .into_iter()
-            .map(|node_id| {
-                let record = store
-                    .get_node(node_id)
-                    .map_err(|error| ArtifactError::new(error.to_string()))?;
-                Ok(NodeWire {
-                    id: record.id,
-                    op: record.op,
-                    schema_version: record.schema_version,
-                    inputs: record.inputs,
-                    attrs: record.metadata.attrs().clone(),
-                    shape: record.metadata.shape().to_vec(),
-                    dtype: record.metadata.dtype().name().to_owned(),
-                    num_outputs: record.metadata.num_outputs(),
-                    output_shapes: record.metadata.output_shapes(),
-                    output_dtypes: record.metadata.output_dtypes().map(|dtypes| {
-                        dtypes
-                            .into_iter()
-                            .map(|dtype| dtype.name().to_owned())
-                            .collect()
-                    }),
-                    name: record.metadata.name().map(str::to_owned),
-                    source_location: record.metadata.source_location().map(str::to_owned),
-                })
-            })
-            .collect::<Result<Vec<_>, ArtifactError>>()?;
+            .nodes()
+            .map(|node| node.map(NodeWireRef::from))
+            .collect::<Result<_, _>>()
+            .map_err(|error| ArtifactError::new(error.to_string()))?;
         let constants = store
             .constants()
             .iter()
@@ -104,6 +82,54 @@ impl<'a> GraphWireRef<'a> {
             constants,
         })
     }
+}
+
+/// Borrowed serialization of one node, field for field with [`NodeWire`].
+#[derive(Serialize)]
+struct NodeWireRef<'a> {
+    id: NodeId,
+    op: &'a str,
+    schema_version: u32,
+    #[serde(serialize_with = "serialize_parents")]
+    inputs: Parents<'a>,
+    attrs: &'a AttrMap,
+    shape: &'a [usize],
+    dtype: &'a str,
+    num_outputs: usize,
+    output_shapes: Option<Vec<&'a [usize]>>,
+    output_dtypes: Option<Vec<&'a str>>,
+    name: Option<&'a str>,
+    source_location: Option<&'a str>,
+}
+
+impl<'a> From<NodeRef<'a>> for NodeWireRef<'a> {
+    fn from(node: NodeRef<'a>) -> Self {
+        let metadata = node.metadata;
+        let outputs = metadata.outputs();
+        let multi_output = outputs.len() > 1;
+        Self {
+            id: node.id,
+            op: node.schema.name(),
+            schema_version: node.schema.schema_version(),
+            inputs: node.parents,
+            attrs: metadata.attrs(),
+            shape: metadata.shape(),
+            dtype: metadata.dtype().name(),
+            num_outputs: outputs.len(),
+            output_shapes: multi_output.then(|| outputs.iter().map(ValueSpec::shape).collect()),
+            output_dtypes: multi_output
+                .then(|| outputs.iter().map(|output| output.dtype().name()).collect()),
+            name: metadata.name(),
+            source_location: metadata.source_location(),
+        }
+    }
+}
+
+fn serialize_parents<S: Serializer>(
+    parents: &Parents<'_>,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    serializer.collect_seq(parents.iter())
 }
 
 #[derive(Deserialize)]
@@ -179,46 +205,50 @@ impl GraphWire {
                     entry.id
                 )));
             }
-            let node_metadata = entry.to_metadata()?;
             let flags = if entry.op == "advect.input" {
                 NodeFlags::input(false)
             } else {
                 NodeFlags::NONE
             };
-            let appended = arena
+            arena
                 .append(&entry.op, entry.schema_version, &entry.inputs, flags)
                 .map_err(|error| ArtifactError::new(error.into_message()))?;
-            if appended != expected_id {
-                return Err(ArtifactError::new(
-                    "graph node append order is inconsistent",
-                ));
-            }
-            metadata.push(node_metadata);
+            metadata.push(entry.into_metadata()?);
         }
-        let mut constants = BTreeMap::new();
-        for (raw_id, constant) in self.constants {
-            let node_id = raw_id.parse::<NodeId>().map_err(|_| {
-                ArtifactError::new(format!("graph constant key {raw_id:?} is not a node ID"))
-            })?;
-            if constants.insert(node_id, constant).is_some() {
-                return Err(ArtifactError::new(format!(
-                    "graph constants contain duplicate normalized node ID {node_id}"
-                )));
-            }
-        }
-        GraphStore::from_parts(
-            &self.required_array_api_version,
-            arena,
-            metadata,
-            self.inputs,
-            self.outputs,
-            constants,
-        )
-        .map_err(|error| ArtifactError::new(error.to_string()))
+        // Only the canonical decimal spelling is accepted, so distinct keys
+        // name distinct nodes.
+        let constants = self
+            .constants
+            .into_iter()
+            .map(|(raw_id, constant)| {
+                raw_id
+                    .parse::<NodeId>()
+                    .ok()
+                    .filter(|node_id| node_id.to_string() == raw_id)
+                    .map(|node_id| (node_id, constant))
+                    .ok_or_else(|| {
+                        ArtifactError::new(format!(
+                            "graph constant key {raw_id:?} is not a canonical node ID"
+                        ))
+                    })
+            })
+            .collect::<Result<_, _>>()?;
+        validate_array_api_version(&self.required_array_api_version)
+            .and_then(|required_array_api_version| {
+                GraphStore::new(GraphData {
+                    required_array_api_version,
+                    arena,
+                    metadata,
+                    inputs: self.inputs,
+                    outputs: self.outputs,
+                    constants,
+                })
+            })
+            .map_err(|error| ArtifactError::new(error.to_string()))
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct NodeWire {
     id: NodeId,
@@ -236,39 +266,25 @@ struct NodeWire {
 }
 
 impl NodeWire {
-    fn to_metadata(&self) -> Result<NodeMetadata, ArtifactError> {
-        if self.op.is_empty() {
-            return Err(ArtifactError::new("graph operation name must not be empty"));
-        }
-        if self.schema_version == 0 {
-            return Err(ArtifactError::new(
-                "graph operation schema version must be at least 1",
-            ));
-        }
-        let dtype = DTypeDescriptor::from_name(&self.dtype)
-            .map_err(|error| ArtifactError::new(error.into_message()))?;
+    fn into_metadata(self) -> Result<NodeMetadata, ArtifactError> {
+        let parse_dtype = |name: &str| {
+            DTypeDescriptor::from_name(name)
+                .map_err(|error| ArtifactError::new(error.into_message()))
+        };
+        let dtype = parse_dtype(&self.dtype)?;
         let output_dtypes = self
             .output_dtypes
-            .as_ref()
-            .map(|dtypes| {
-                dtypes
-                    .iter()
-                    .map(|dtype| {
-                        DTypeDescriptor::from_name(dtype)
-                            .map_err(|error| ArtifactError::new(error.into_message()))
-                    })
-                    .collect::<Result<Vec<_>, _>>()
-            })
+            .map(|dtypes| dtypes.iter().map(|name| parse_dtype(name)).collect())
             .transpose()?;
         NodeMetadata::new(
-            self.attrs.clone(),
-            self.shape.clone(),
+            self.attrs,
+            self.shape,
             dtype,
-            self.name.clone(),
+            self.name,
             self.num_outputs,
-            self.output_shapes.clone(),
+            self.output_shapes,
             output_dtypes,
-            self.source_location.clone(),
+            self.source_location,
         )
         .map_err(|error| ArtifactError::new(error.to_string()))
     }
@@ -281,78 +297,43 @@ impl NodeWire {
 )]
 mod tests {
     use super::*;
-    use crate::{AttrValue, ConstantKind, GraphBuilder};
+    use crate::test_support::{self, scalar_constant};
+    use crate::{AttrValue, GraphBuilder};
     use serde_json::{Value, json};
 
-    fn metadata(shape: Vec<usize>, dtype: &str) -> NodeMetadata {
-        metadata_with_attrs(shape, dtype, AttrMap::new())
-    }
-
-    fn metadata_with_attrs(shape: Vec<usize>, dtype: &str, attrs: AttrMap) -> NodeMetadata {
-        NodeMetadata::new(
-            attrs,
-            shape,
-            DTypeDescriptor::from_name(dtype).unwrap(),
-            None,
-            1,
-            None,
-            None,
-            None,
-        )
-        .unwrap()
+    fn scalar(attrs: AttrMap) -> NodeMetadata {
+        test_support::metadata(vec![], "float64", attrs)
     }
 
     fn canonical_graph_json() -> String {
         let mut builder = GraphBuilder::new();
-        let input = builder.append_input(metadata(vec![], "float64")).unwrap();
-        let constant = PortableConstant::new(
-            ConstantKind::Scalar,
-            crate::NumericDType::Float64,
-            vec![],
-            2.0_f64.to_le_bytes().to_vec(),
-        )
-        .unwrap();
+        let input = builder.append_input(scalar(AttrMap::new())).unwrap();
         let constant = builder
-            .append_constant(metadata(vec![], "float64"), constant)
+            .append_constant(scalar(AttrMap::new()), scalar_constant(2.0))
             .unwrap();
         let mut attrs = AttrMap::new();
         attrs.insert("axis".to_owned(), AttrValue::Integer(0));
         let intermediate = builder
-            .append_operation(
-                "array.add",
-                1,
-                &[input, constant],
-                NodeFlags::NONE,
-                metadata_with_attrs(vec![], "float64", attrs),
-            )
+            .append_operation("array.add", 1, &[input, constant], scalar(attrs))
             .unwrap();
         let output = builder
             .append_operation(
                 "array.add",
                 1,
                 &[intermediate, constant],
-                NodeFlags::NONE,
-                metadata(vec![], "float64"),
+                scalar(AttrMap::new()),
             )
             .unwrap();
         builder.append_output(output).unwrap();
         builder.finish().unwrap().store.to_json().unwrap()
     }
 
-    fn replaced(payload: &Value, pointer: &str, value: Value) -> Value {
+    /// Copy `payload` with each JSON pointer replaced by its value.
+    fn replaced<const N: usize>(payload: &Value, patches: [(&str, Value); N]) -> Value {
         let mut malformed = payload.clone();
-        *malformed.pointer_mut(pointer).unwrap() = value;
-        malformed
-    }
-
-    fn inserted(payload: &Value, pointer: &str, field: &str, value: Value) -> Value {
-        let mut malformed = payload.clone();
-        malformed
-            .pointer_mut(pointer)
-            .unwrap()
-            .as_object_mut()
-            .unwrap()
-            .insert(field.to_owned(), value);
+        for (pointer, value) in patches {
+            *malformed.pointer_mut(pointer).unwrap() = value;
+        }
         malformed
     }
 
@@ -363,71 +344,168 @@ mod tests {
         assert_eq!(restored.to_json().unwrap(), encoded);
     }
 
+    /// Require every malformed payload to be rejected with its message.
+    fn assert_rejected<const N: usize>(cases: [(&str, Value, &str); N]) {
+        for (label, payload, fragment) in cases {
+            let message = GraphStore::from_json(&payload.to_string())
+                .unwrap_err()
+                .into_message();
+            assert!(message.contains(fragment), "{label}: {message}");
+        }
+    }
+
+    /// %0 input, %1 constant, %2 = %0 + %1 with an attribute, %3 = %2 + %1.
+    fn canonical_graph_value() -> Value {
+        serde_json::from_str(&canonical_graph_json()).unwrap()
+    }
+
     #[test]
     fn malformed_artifact_matrix_rejects_transactionally() {
-        let valid: Value = serde_json::from_str(&canonical_graph_json()).unwrap();
-        let cases = [
+        let valid = canonical_graph_value();
+        let constant = valid.pointer("/constants/1").unwrap().clone();
+        assert_rejected([
             (
                 "unknown attribute field",
-                inserted(&valid, "/nodes/2/attrs/axis", "extra", json!(true)),
+                replaced(
+                    &valid,
+                    [(
+                        "/nodes/2/attrs/axis",
+                        json!({"kind": "integer", "value": 0, "extra": true}),
+                    )],
+                ),
+                "string \"extra\", expected \"kind\" or \"value\"",
             ),
             (
                 "invalid dtype",
-                replaced(&valid, "/nodes/2/dtype", json!("")),
+                replaced(&valid, [("/nodes/2/dtype", json!(""))]),
+                "dtype descriptor must not be empty",
             ),
             (
                 "bad edge",
-                replaced(&valid, "/nodes/2/inputs/0", json!("0")),
+                replaced(&valid, [("/nodes/2/inputs/0", json!("0"))]),
+                "invalid type: string \"0\", expected u32",
             ),
             (
                 "forward edge",
-                replaced(&valid, "/nodes/2/inputs/0", json!(3)),
+                replaced(&valid, [("/nodes/2/inputs/0", json!(3))]),
+                "node %2 must reference only earlier nodes; got input %3",
             ),
             (
-                "missing edge",
-                replaced(&valid, "/nodes/2/inputs/0", json!(99)),
+                "non-dense node ID",
+                replaced(&valid, [("/nodes/2/id", json!(5))]),
+                "dense append-only IDs: expected 2, got 5",
             ),
-            ("missing output", replaced(&valid, "/outputs/0", json!(99))),
             (
                 "bad constant digest",
-                replaced(&valid, "/constants/1/digest", json!("0".repeat(64))),
+                replaced(&valid, [("/constants/1/digest", json!("0".repeat(64)))]),
+                "staged constant digest does not match its contents",
             ),
             (
-                "constant for missing node",
-                inserted(
-                    &valid,
-                    "/constants",
-                    "99",
-                    valid.pointer("/constants/1").unwrap().clone(),
-                ),
+                "zero-padded constant key",
+                replaced(&valid, [("/constants", json!({"01": constant}))]),
+                "graph constant key \"01\" is not a canonical node ID",
+            ),
+            (
+                "signed constant key",
+                replaced(&valid, [("/constants", json!({"+1": constant}))]),
+                "graph constant key \"+1\" is not a canonical node ID",
             ),
             (
                 "wrong header",
-                replaced(&valid, "/format", json!("not.advect.graph")),
+                replaced(&valid, [("/format", json!("not.advect.graph"))]),
+                "Unsupported graph format \"not.advect.graph\"",
             ),
             (
                 "wrong version",
-                replaced(&valid, "/version", json!("999.0")),
+                replaced(&valid, [("/version", json!("999.0"))]),
+                "Unsupported graph version \"999.0\"",
             ),
             (
                 "unsupported required Array API version",
-                replaced(&valid, "/required_array_api_version", json!("2025.12")),
+                replaced(&valid, [("/required_array_api_version", json!("2025.12"))]),
+                "Unsupported required Array API version \"2025.12\"",
             ),
             (
                 "zero operation schema",
-                replaced(&valid, "/nodes/2/schema_version", json!(0)),
+                replaced(&valid, [("/nodes/2/schema_version", json!(0))]),
+                "arena operation schema version must be at least 1",
             ),
             (
                 "mixed operation schema",
-                replaced(&valid, "/nodes/3/schema_version", json!(2)),
+                replaced(&valid, [("/nodes/3/schema_version", json!(2))]),
+                "arena operation 'array.add' is already schema version 1, not 2",
             ),
-        ];
+        ]);
+    }
 
-        for (label, payload) in cases {
-            assert!(
-                GraphStore::from_json(&payload.to_string()).is_err(),
-                "{label} unexpectedly loaded"
-            );
-        }
+    #[test]
+    fn artifacts_with_inconsistent_graph_roles_reject() {
+        let valid = canonical_graph_value();
+        let constant = valid.pointer("/constants/1").unwrap().clone();
+        assert_rejected([
+            (
+                "missing output",
+                replaced(&valid, [("/outputs/0", json!(99))]),
+                "graph output does not exist at node %99",
+            ),
+            (
+                "duplicate input",
+                replaced(&valid, [("/inputs", json!([0, 0]))]),
+                "graph inputs contain duplicate node IDs",
+            ),
+            (
+                "undeclared input node",
+                replaced(&valid, [("/inputs", json!([]))]),
+                "input role ownership is inconsistent at node %0",
+            ),
+            (
+                "multi-output input node",
+                replaced(
+                    &valid,
+                    [
+                        ("/nodes/0/num_outputs", json!(2)),
+                        ("/nodes/0/output_shapes", json!([[], []])),
+                        ("/nodes/0/output_dtypes", json!(["float64", "float64"])),
+                    ],
+                ),
+                "declared input is not a single-output schema-1 operand-free advect.input node",
+            ),
+            (
+                "constant for missing node",
+                replaced(
+                    &valid,
+                    [("/constants", json!({"1": constant, "99": constant}))],
+                ),
+                "graph constant does not exist at node %99",
+            ),
+            (
+                "constant payload on an operation",
+                replaced(
+                    &valid,
+                    [("/constants", json!({"1": constant, "2": constant}))],
+                ),
+                "constant payload ownership is inconsistent at node %2",
+            ),
+            (
+                "constant node without payload",
+                replaced(&valid, [("/constants", json!({}))]),
+                "constant payload ownership is inconsistent at node %1",
+            ),
+            (
+                "constant with operands",
+                replaced(&valid, [("/nodes/1/inputs", json!([0]))]),
+                "advect.const nodes must not have operands at node %1",
+            ),
+            (
+                "constant schema version",
+                replaced(&valid, [("/nodes/1/schema_version", json!(2))]),
+                "advect.const nodes must use schema version 1 at node %1",
+            ),
+            (
+                "constant shape mismatch",
+                replaced(&valid, [("/nodes/1/shape", json!([1]))]),
+                "portable constant shape/dtype does not match node metadata at node %1",
+            ),
+        ]);
     }
 }

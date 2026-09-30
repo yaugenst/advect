@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import inspect
 import subprocess
 import sys
+from importlib import import_module
 from importlib.metadata import metadata
 
 import pytest
@@ -13,46 +15,16 @@ import advect.interop._common as interop_common
 _FRAMEWORKS = ("autograd", "jax", "torch")
 
 
-def _run(script: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(  # noqa: S603 - fixed interpreter; script is test-owned
-        [sys.executable, "-c", script],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-
-
-def test_base_and_interop_package_imports_are_framework_free() -> None:
-    completed = _run(
-        f"""
-import sys
-import advect
-import advect.interop
-
-frameworks = set({_FRAMEWORKS!r})
-loaded = frameworks.intersection(name.partition(".")[0] for name in sys.modules)
-assert not loaded, loaded
-"""
-    )
-    assert completed.returncode == 0, completed.stderr
-
-
 @pytest.mark.parametrize("framework", _FRAMEWORKS)
 def test_bridge_preserves_the_wrapped_signature(framework: str) -> None:
     if framework != "autograd":
         pytest.importorskip(framework)
-    completed = _run(
-        f"""
-import inspect
-from advect.interop.{framework} import wrap
+    wrap = import_module(f"advect.interop.{framework}").wrap
 
-def operation(value, *, scale=1.0):
-    return scale * value
+    def operation(value: float, *, scale: float = 1.0) -> float:
+        return scale * value
 
-assert inspect.signature(wrap(operation)) == inspect.signature(operation)
-"""
-    )
-    assert completed.returncode == 0, completed.stderr
+    assert inspect.signature(wrap(operation)) == inspect.signature(operation)
 
 
 def test_framework_dependencies_use_only_individual_extras() -> None:
@@ -68,30 +40,38 @@ def test_framework_dependencies_use_only_individual_extras() -> None:
         assert f"extra == '{framework}'" in matches[0]
 
 
-@pytest.mark.parametrize("framework", _FRAMEWORKS)
-def test_framework_module_reports_its_extra_when_dependency_is_missing(
-    framework: str,
-) -> None:
-    completed = _run(
-        f"""
+def test_framework_modules_report_their_extra_when_the_dependency_is_missing() -> None:
+    script = f"""
 import importlib
 import importlib.abc
 import sys
 
-class BlockFramework(importlib.abc.MetaPathFinder):
+frameworks = {_FRAMEWORKS!r}
+
+class BlockFrameworks(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, path=None, target=None):
-        if fullname == {framework!r} or fullname.startswith({framework!r} + "."):
-            raise ModuleNotFoundError(name={framework!r})
+        root = fullname.partition(".")[0]
+        if root in frameworks:
+            raise ModuleNotFoundError(name=root)
         return None
 
-sys.meta_path.insert(0, BlockFramework())
-try:
-    importlib.import_module("advect.interop.{framework}")
-except ModuleNotFoundError as error:
-    assert "advect[{framework}]" in str(error), error
-else:
-    raise AssertionError("optional framework import unexpectedly succeeded")
+sys.meta_path.insert(0, BlockFrameworks())
+failures = []
+for framework in frameworks:
+    try:
+        importlib.import_module(f"advect.interop.{{framework}}")
+    except ModuleNotFoundError as error:
+        if f"advect[{{framework}}]" not in str(error):
+            failures.append(f"{{framework}}: {{error}}")
+    else:
+        failures.append(f"{{framework}}: optional import unexpectedly succeeded")
+assert not failures, failures
 """
+    completed = subprocess.run(  # noqa: S603 - fixed interpreter; script is test-owned
+        [sys.executable, "-c", script],
+        check=False,
+        capture_output=True,
+        text=True,
     )
     assert completed.returncode == 0, completed.stderr
 

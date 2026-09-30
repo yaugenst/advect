@@ -27,10 +27,34 @@ preserve the Python control flow that ran. [`stage`](staging.md#advect.stage)
 instead compiles one shape-and-dtype signature into an immutable graph; staged
 and serialized support are therefore separate claims from dynamic support.
 
-Selected real Python scalars are lifted to zero-dimensional `float64` arrays
-and their derivative results return as Python scalars. Structured inputs and
-outputs use [pytrees](pytree.md). Complex differentiation is real-linear; use
-[`jvp`](transforms.md#advect.jvp), [`vjp`](transforms.md#advect.vjp), or
+Python scalars promote weakly, as in NumPy 2 (NEP 50), in every lifetime:
+eager, traced, staged, and a staged program called inside another trace or
+stage. A value is weak exactly where eager Python holds a Python scalar: a
+Python scalar input, or a Python operator (arithmetic, comparison, bitwise,
+`abs`, `.real`, `.imag`) applied only to weak values; augmented assignment such
+as `s += 1.0` rebinds a Python scalar, as in Python. The `real` and `imag`
+functions read those attributes, and `diff` with `n=0` returns its input, so
+they keep a weak value weak, as NumPy's do.
+Other NumPy and Array API functions and array methods return strong values even
+when every argument is weak, so `np.sin(s) * x32` and `xp.multiply(s, s) * x32`
+are `float64` while `(s * s) * x32` stays `float32`. Advect's
+[`array`](arrays.md#advect.array) and [`asarray`](arrays.md#advect.asarray) are
+strong too, as NumPy's are, while
+[`stop_gradient`](arrays.md#advect.stop_gradient) keeps a weak value weak, as
+the eager identity does. A Python operator on weak values computes exactly as
+Python does, so `1.0 / (s - s)` raises `ZeroDivisionError`; a staged program
+keeps the dtype it declared and rejects a negative weak base raised to a
+fractional power, which Python makes complex.
+
+Selected real Python scalars are lifted to zero-dimensional `float64` arrays,
+which also provide the array methods a Python float lacks, such as `copy`.
+Derivatives with respect to them return as Python scalars, as does a weak
+output. Unlike eager NumPy, `item()` returns a strong rank-zero value so that
+its derivative stays attached.
+
+Structured inputs and outputs use [pytrees](pytree.md). Complex
+differentiation is real-linear; use [`jvp`](transforms.md#advect.jvp),
+[`vjp`](transforms.md#advect.vjp), or
 [`linearize`](transforms.md#advect.linearize) when the output is complex.
 
 Importing `advect` is enough for NumPy and Array API code. SciPy, xarray, and

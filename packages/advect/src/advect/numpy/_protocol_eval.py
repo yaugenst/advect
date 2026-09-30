@@ -14,6 +14,9 @@ type Evaluator = Callable[[tuple[object, ...], dict[str, object]], object]
 type BoundEvaluator = Callable[[tuple[object, ...]], object]
 type BackendFuncInfo = tuple[Callable[..., object], frozenset[str], bool]
 
+_UFUNC_KWARGS = frozenset({"casting", "dtype", "order", "signature", "subok", "where"})
+_GUFUNC_KWARGS = frozenset({"axes", "axis", "keepdims"})
+
 
 @dataclass(slots=True)
 class ArrayProtocolEvalRuntime:
@@ -117,18 +120,12 @@ class ArrayProtocolEvalRuntime:
 
         func, valid_params, accepts_var_keyword = func_info
         if self._looks_like_ufunc(func):
-            allowed_ufunc_kwargs = {
-                "casting",
-                "dtype",
-                "order",
-                "signature",
-                "subok",
-                "where",
-            }
+            allowed_ufunc_kwargs = _UFUNC_KWARGS
+            if getattr(func, "signature", None) is not None:
+                # A generalized ufunc such as vecdot also places its core dimensions.
+                allowed_ufunc_kwargs |= _GUFUNC_KWARGS
             base_kwargs = {
-                key: value
-                for key, value in attrs.items()
-                if not key.startswith("_advect_") and key in allowed_ufunc_kwargs
+                key: value for key, value in attrs.items() if key in allowed_ufunc_kwargs
             }
 
             if not base_kwargs:

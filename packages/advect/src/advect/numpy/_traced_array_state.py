@@ -10,6 +10,8 @@ import sys
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from advect.core._context import external_frame
+
 if TYPE_CHECKING:
     from types import FrameType
 
@@ -39,15 +41,9 @@ def user_location(*, depth: int | None = None) -> SourceLocation | None:
     except (KeyError, ValueError):  # Python implementations without frames.
         return None
 
-    if depth is not None:
-        return _source_location(frame)
-
-    while frame is not None:
-        module = frame.f_globals.get("__name__")
-        if not isinstance(module, str) or (module != "advect" and not module.startswith("advect.")):
-            return _source_location(frame)
-        frame = frame.f_back
-    return None
+    if depth is None:
+        frame = external_frame(frame)
+    return None if frame is None else _source_location(frame)
 
 
 @dataclass(frozen=True, slots=True)

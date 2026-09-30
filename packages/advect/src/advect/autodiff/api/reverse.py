@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any, Self, cast, overload
 
 from advect.autodiff._ephemeral import (
     LinearMap,
+    _namespace_follows_type,
     apply_unary_array_pullback,
     linearize_call,
     trace_unary_array_call,
@@ -33,11 +34,12 @@ from advect.autodiff.api.inputs import (
     _normalize_argnums_for_call,
     _normalize_argnums_spec,
     _prefix_for_argnum,
+    _resolve_selection,
     _validate_argnames,
 )
 from advect.core._abstract_model import ArraySpec
 from advect.core._context import _get_active_trace_kind
-from advect.core._protocols import _snapshot_traced
+from advect.core._protocols import _innermost
 from advect.core._pytree import tree_flatten, tree_unflatten
 from advect.core._stage import StagedProgram
 
@@ -66,7 +68,7 @@ class Pullback:
 
     def __call__(self, cotangent: object) -> object:
         """Apply the pullback once and release its retained trace."""
-        return self._linear._consume_pullback(cotangent)  # noqa: SLF001
+        return self._linear._pullback(cotangent, consume=True)  # noqa: SLF001
 
     def close(self) -> None:
         """Release the retained trace without applying the pullback."""
@@ -96,11 +98,7 @@ class _UnaryArrayProviderCache:
             return cast("tuple[bool, Any]", self._result)
 
         result = unary_array_trace_provider(value)
-        attrs = getattr(value, "__dict__", None)
-        instance_specific = (isinstance(attrs, dict) and "__array_namespace__" in attrs) or bool(
-            getattr(value_type, "__advect_namespace_is_instance_specific__", False)
-        )
-        if not instance_specific:
+        if _namespace_follows_type(value):
             self._input_type = value_type
             self._result = result
         return result
@@ -114,20 +112,37 @@ def _selected_arguments(
 ) -> tuple[tuple[int, ...], bool]:
     if argnames is not None and not isinstance(f, StagedProgram):
         _validate_argnames(_get_signature(f), argnames)
-    resolved = 0 if argnums is None and argnames is None else (() if argnums is None else argnums)
-    return _normalize_argnums_spec(resolved)
+    return _resolve_selection(argnums, argnames)
+
+
+def _staged_gradient_transform(
+    f: StagedProgram,
+    transformed: Callable[..., object],
+    *,
+    argnums: int | tuple[int, ...] | None,
+    argnames: tuple[str, ...] | None,
+    output_index: int,
+    output_argname: str | None = None,
+) -> StagedProgram:
+    """Compile a staged gradient whose selected weak-scalar leaves stay scalars."""
+    scalar_mask = _staged_gradient_scalar_mask(f, argnums=argnums, argnames=argnames)
+    return f._staged_transform(  # noqa: SLF001
+        transformed,
+        output_argname=output_argname,
+        scalar_output_override=(output_index, scalar_mask),
+    )
 
 
 def _staged_gradient_scalar_mask(
     f: StagedProgram,
     *,
-    argnums: tuple[int, ...],
-    single_argnum: bool,
+    argnums: int | tuple[int, ...] | None,
     argnames: tuple[str, ...] | None,
 ) -> tuple[bool, ...]:
     """Return the weak-scalar category of each selected staged input leaf."""
+    selection, _single_argnum = _selected_arguments(f, argnums=argnums, argnames=argnames)
     positional_specs, named_specs = f.signature
-    selected_argnums = _normalize_argnums_for_call(argnums, nargs=len(positional_specs))
+    selected_argnums = _normalize_argnums_for_call(selection, nargs=len(positional_specs))
     positional = [positional_specs[index] for index in selected_argnums]
     names = () if argnames is None else argnames
     missing = [name for name in names if name not in named_specs]
@@ -140,47 +155,16 @@ def _staged_gradient_scalar_mask(
     for spec in selected_leaves:
         if not isinstance(spec, ArraySpec):
             raise TypeError("Staged autodiff cannot select static input leaves")
-        dtype = str(spec.dtype).lower()
-        if spec.weak and not dtype.startswith("float"):
+        # Compiled signatures hold canonical dtype names.
+        if spec.weak and not spec.dtype.startswith("float"):
             msg = (
                 "Differentiating a staged weak scalar requires a real floating signature; "
                 f"got dtype={spec.dtype!r}. Use a strong rank-zero array for complex "
                 "differentiation."
             )
             raise TypeError(msg)
-
-    positional_masks = [
-        tree_unflatten(
-            treedef,
-            [isinstance(spec, ArraySpec) and spec.weak and spec.shape == () for spec in leaves],
-        )
-        for spec_tree in positional
-        for leaves, treedef in [tree_flatten(spec_tree)]
-    ]
-    named_masks = {
-        name: tree_unflatten(
-            treedef,
-            [isinstance(spec, ArraySpec) and spec.weak and spec.shape == () for spec in leaves],
-        )
-        for name, spec_tree in named.items()
-        for leaves, treedef in [tree_flatten(spec_tree)]
-    }
-    if named_masks:
-        if not positional_masks:
-            result: Any = named_masks
-        else:
-            positional_result: Any = (
-                positional_masks[0]
-                if single_argnum and len(positional_masks) == 1
-                else tuple(positional_masks)
-            )
-            result = positional_result, named_masks
-    elif single_argnum:
-        result = positional_masks[0]
-    else:
-        result = tuple(positional_masks)
-    leaves, _treedef = tree_flatten(result)
-    return tuple(bool(leaf) for leaf in leaves)
+    # Gradient results flatten in this same positional-then-named leaf order.
+    return tuple(spec.weak and spec.shape == () for spec in selected_leaves)
 
 
 def _reject_complex_grad_output(out_leaf: object) -> None:
@@ -198,12 +182,7 @@ def _materialize_aux[AuxT](aux: AuxT) -> AuxT:
     concrete: list[Any] = []
     for leaf in leaves:
         restore_python_scalar = bool(getattr(leaf, "_advect_weak", False))
-        value = leaf
-        while callable(getattr(value, "_advect_snapshot", None)):
-            _node_id, next_value = _snapshot_traced(value)
-            if next_value is value:
-                break
-            value = next_value
+        value = _innermost(leaf)
         concrete.append(_unlift_scalar_array(value) if restore_python_scalar else value)
     return cast("AuxT", tree_unflatten(treedef, concrete))
 
@@ -238,7 +217,8 @@ def _try_unary_array_value_and_grad(
     # the derivative program into the enclosing staged graph.
     if _get_active_trace_kind() == "stage_abstract":
         return None
-    if not args:
+    # A weak scalar tracer keeps its category through the general path.
+    if not args or getattr(args[0], "_advect_weak", False):
         return None
     supported, provider = provider_cache.resolve(args[0])
     if not supported:
@@ -269,21 +249,10 @@ def _real_scalar_seed(
     transform_name: str,
 ) -> object:
     """Validate and seed the common concrete rank-zero output directly."""
-    if output_is_leaf and getattr(output, "shape", None) == ():
-        dtype = getattr(output, "dtype", None)
-        kind = getattr(dtype, "kind", None)
-        if kind == "c":
-            _reject_complex_grad_output(output)
-        scalar_type = getattr(dtype, "type", None)
-        output_provider = type(output).__module__.partition(".")[0]
-        scalar_provider = str(getattr(scalar_type, "__module__", "")).partition(".")[0]
-        if callable(scalar_type) and output_provider == scalar_provider:
-            return scalar_type(1)
-        return _scalar_cotangent_leaf(output)
-
-    out_leaf, _out_treedef = _extract_scalar_output(output, transform_name=transform_name)
-    _reject_complex_grad_output(out_leaf)
-    return _scalar_cotangent_leaf(out_leaf)
+    if not (output_is_leaf and getattr(output, "shape", None) == ()):
+        output, _out_treedef = _extract_scalar_output(output, transform_name=transform_name)
+    _reject_complex_grad_output(output)
+    return _scalar_cotangent_leaf(output)
 
 
 def vjp[**CallP, ResultT](
@@ -433,12 +402,6 @@ def vjp_program(
         argnums=argnums,
         argnames=argnames,
     )
-    scalar_mask = _staged_gradient_scalar_mask(
-        f,
-        argnums=argnums_tuple,
-        single_argnum=single_argnum,
-        argnames=argnames,
-    )
 
     def pullback_program(*args: object, cotangent: object, **kwargs: object) -> object:
         _value, linear = linearize_call(
@@ -450,16 +413,15 @@ def vjp_program(
             single_argnum=single_argnum,
             reverse_only=True,
         )
-        try:
-            return linear._consume_pullback(cotangent)  # noqa: SLF001
-        except Exception:
-            linear.close()
-            raise
+        return linear._pullback(cotangent, consume=True)  # noqa: SLF001
 
-    return f._staged_transform(  # noqa: SLF001
+    return _staged_gradient_transform(
+        f,
         pullback_program,
+        argnums=argnums,
+        argnames=argnames,
+        output_index=0,
         output_argname="cotangent",
-        scalar_output_override=(0, scalar_mask),
     )
 
 
@@ -532,25 +494,21 @@ def _dynamic_value_and_grad[**CallP](
                 return fast_result
 
         aux_box: list[Any] = []
-        trace_target = f
-        if has_aux:
 
-            def trace_target(
-                *inner_args: CallP.args,
-                **inner_kwargs: CallP.kwargs,
-            ) -> object:
-                value, aux = cast("tuple[object, object]", f(*inner_args, **inner_kwargs))
-                aux_box.append(_materialize_aux(aux))
-                return value
+        def split_aux(output: object) -> object:
+            value, aux = cast("tuple[object, object]", output)
+            aux_box.append(_materialize_aux(aux))
+            return value
 
         value, linear = linearize_call(
-            trace_target,
+            f,
             args=args,
             kwargs=kwargs,
             argnums=argnums_tuple,
             argnames=argnames,
             single_argnum=single_argnum,
             reverse_only=True,
+            select_output=split_aux if has_aux else None,
         )
         try:
             out_leaf, out_treedef = _extract_scalar_output(
@@ -562,16 +520,12 @@ def _dynamic_value_and_grad[**CallP](
                 out_leaf=out_leaf,
                 out_treedef=out_treedef,
             )
-            gradients = linear._consume_pullback(cotangent)  # noqa: SLF001
+            gradients = linear._pullback(cotangent, consume=True)  # noqa: SLF001
         except Exception:
             linear.close()
             raise
         if has_aux:
-            return (
-                linear._unlift_outputs(value),  # noqa: SLF001
-                gradients,
-                _materialize_aux(aux_box[-1]),
-            )
+            return linear._unlift_outputs(value), gradients, aux_box[-1]  # noqa: SLF001
         return linear._unlift_outputs(value), gradients  # noqa: SLF001
 
     if not isinstance(f, StagedProgram):
@@ -702,20 +656,12 @@ def grad[**CallP](
         has_aux=has_aux,
     )
     if isinstance(f, StagedProgram):
-        argnums_tuple, single_argnum = _selected_arguments(
+        return _staged_gradient_transform(
             f,
+            transformed,
             argnums=argnums,
             argnames=argnames,
-        )
-        scalar_mask = _staged_gradient_scalar_mask(
-            f,
-            argnums=argnums_tuple,
-            single_argnum=single_argnum,
-            argnames=argnames,
-        )
-        return f._staged_transform(  # noqa: SLF001
-            transformed,
-            scalar_output_override=(0, scalar_mask),
+            output_index=0,
         )
     return transformed
 
@@ -844,20 +790,12 @@ def value_and_grad[**CallP](
         has_aux=has_aux,
     )
     if isinstance(f, StagedProgram):
-        argnums_tuple, single_argnum = _selected_arguments(
+        return _staged_gradient_transform(
             f,
+            transformed,
             argnums=argnums,
             argnames=argnames,
-        )
-        scalar_mask = _staged_gradient_scalar_mask(
-            f,
-            argnums=argnums_tuple,
-            single_argnum=single_argnum,
-            argnames=argnames,
-        )
-        return f._staged_transform(  # noqa: SLF001
-            transformed,
-            scalar_output_override=(1, scalar_mask),
+            output_index=1,
         )
     return transformed
 

@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal, cast
+from typing import Any
 
 from advect.autodiff.rules.array_family._backend_runtime import _moveaxis, xp
-from advect.autodiff.rules.array_family.jvp.common import _astype_preserving_trace
+from advect.autodiff.rules.array_family._transpose_utils import (
+    _layout_order,
+    _reshape_in_order,
+)
 
 
 def _vjp_restore_shape(
@@ -31,13 +34,9 @@ def _vjp_reshape(
     order: str | None = None,
     **attrs: Any,
 ) -> tuple[xp.ndarray]:
-    """Restore the source shape, preserving NumPy's optional order contract."""
-    _ = ans, rest
-    source_shape = tuple(x.shape)
-    if order is not None and "_advect_array_api_version" not in attrs:
-        reshape_order = cast("Literal['A', 'C', 'F']", order)
-        return (xp.reshape(g, source_shape, order=reshape_order),)
-    return (xp.reshape(g, source_shape),)
+    """Restore the source shape in the order NumPy's reshape read it."""
+    _ = ans, rest, attrs
+    return (_reshape_in_order(g, tuple(x.shape), _layout_order(x, order)),)
 
 
 def _vjp_transpose(
@@ -90,11 +89,7 @@ def _vjp_broadcast_to(
     for axis, size in enumerate(source_shape):
         if size == 1 and grad.shape[axis] != 1:
             grad = xp.sum(grad, axis=axis, dtype=grad.dtype, keepdims=True)
-    reshaped = xp.reshape(grad, source_shape)
-    source_dtype = getattr(x, "dtype", None)
-    if source_dtype is not None and getattr(reshaped, "dtype", None) != source_dtype:
-        reshaped = _astype_preserving_trace(reshaped, dtype=source_dtype)
-    return (reshaped,)
+    return (xp.reshape(grad, source_shape),)
 
 
 def _vjp_constant_like(

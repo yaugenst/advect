@@ -9,12 +9,12 @@ It intercepts NumPy operations via __array_ufunc__ and __array_function__ protoc
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Literal, Self, cast, override
+from typing import TYPE_CHECKING, Any, Literal, cast, override
 
 import numpy as np
 from numpy.lib.mixins import NDArrayOperatorsMixin
 
-from advect.core._array_protocol_helpers import normalize_item_index
+from advect.core._array_protocol_helpers import literal_is_weak, python_operator, select_item
 from advect.core._context import is_debug
 from advect.core._diagnostics import summarize_value
 from advect.core._errors import (
@@ -28,23 +28,31 @@ from advect.numpy._array_function.mutation import (
     NOT_FUNCTIONALIZED,
     functionalize_array_function_mutation,
 )
-from advect.numpy._constructors import NOT_A_CONSTRUCTOR, handle_traced_constructor
+from advect.numpy._composite_lowering import operand_dtype
+from advect.numpy._constructors import (
+    NOT_A_CONSTRUCTOR,
+    _normalize_order,
+    handle_traced_constructor,
+)
 from advect.numpy._op_bindings import canonicalize_numpy_op, frontend_lowering
 from advect.numpy._protocol_runtime import NUMPY_PROTOCOL_RUNTIME
 from advect.numpy._traced_array_checks import require_active_trace
-from advect.numpy._traced_array_indexing import getitem as _getitem, setitem as _setitem
-from advect.numpy._traced_array_inplace import (
-    inplace_matmul as _inplace_matmul,
+from advect.numpy._traced_array_indexing import (
+    getitem as _getitem,
     inplace_op as _inplace_op,
+    setitem as _setitem,
 )
 from advect.numpy._traced_array_protocols import (
+    _EPHEMERAL_UFUNC_OPS,
     NOT_HANDLED,
     run_ephemeral_simple_ufunc,
     run_ephemeral_sum,
+    run_weak_python_operator,
 )
 from advect.numpy._traced_array_state import ViewState, user_location
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from types import NotImplementedType
 
     from numpy.typing import DTypeLike
@@ -89,6 +97,20 @@ _SEMANTIC_ALIAS_FUNCTIONS = frozenset(
         "vsplit",
     }
 )
+
+
+def squares_bool_array(base: Any, exponent: object) -> bool:
+    """Return whether ``base ** exponent`` is ndarray's int8 square of a bool array.
+
+    ``ndarray.__pow__`` squares an array raised to the Python int 2, and a bool
+    array squares to int8 where ``np.power`` gives int64.
+    """
+    return (
+        type(exponent) is int
+        and exponent == 2  # noqa: PLR2004 - NumPy's squaring exponent
+        and base.ndim > 0
+        and operand_dtype(base) == np.bool_
+    )
 
 
 class TracedArray(NDArrayOperatorsMixin):
@@ -284,9 +306,15 @@ class TracedArray(NDArrayOperatorsMixin):
 
     @property
     def dtype(self) -> np.dtype[Any]:
-        """Return the dtype of the underlying array."""
+        """Return the NumPy dtype of the underlying array."""
         _node_id, value = self._advect_snapshot()
-        return np.dtype(value.dtype)
+        return operand_dtype(value)
+
+    @property
+    def device(self) -> Any:
+        """Return the device of the underlying array."""
+        _node_id, value = self._advect_snapshot()
+        return getattr(value, "device", None)
 
     @property
     def _advect_weak(self) -> bool:
@@ -300,21 +328,30 @@ class TracedArray(NDArrayOperatorsMixin):
     def __array_namespace__(self, *, api_version: str | None = None) -> Any:
         """Expose NumPy's negotiated namespace without detaching the tracer."""
         _node_id, value = self._advect_snapshot()
+        if isinstance(value, np.generic):
+            # NumPy 2.0 scalars lack the method their 0-d arrays expose.
+            value = np.asarray(value)
         namespace = getattr(value, "__array_namespace__", None)
         if not callable(namespace):
             msg = "The traced NumPy value does not expose __array_namespace__()"
             raise TypeError(msg)
         return namespace(api_version=api_version)
 
-    @property
-    def real(self) -> TracedArray:
-        """Return the real part of the array."""
+    def _component_view(self, part: Callable[[Any], Any]) -> TracedArray:
+        """Record ``numpy.real`` or ``numpy.imag`` as a view of this array's root.
+
+        A weak scalar's part is instead Python's weak ``.real`` or ``.imag``.
+        """
+        op = canonicalize_numpy_op(f"numpy.{part.__name__}")
+        if _is_weak_scalar(self):
+            python_part = cast("Callable[[Any], Any]", python_operator(op, 1))
+            return run_weak_python_operator(self, op, python_part, (self,))
         require_active_trace(recorder=self.recorder)
 
         input_node_id, value = self._advect_snapshot()
-        result_value = np.real(cast("Any", value))
+        result_value = part(value)
         node_id = self.recorder.record_operation(
-            canonicalize_numpy_op("numpy.real"),
+            op,
             (input_node_id,),
             result_value,
             {"_advect_backend": "numpy"},
@@ -329,30 +366,16 @@ class TracedArray(NDArrayOperatorsMixin):
             owned=False,
             view_state=ViewState(root, root.epoch, None, user_location()),
         )
+
+    @property
+    def real(self) -> TracedArray:
+        """Return the real part of the array."""
+        return self._component_view(np.real)
 
     @property
     def imag(self) -> TracedArray:
         """Return the imaginary part of the array."""
-        require_active_trace(recorder=self.recorder)
-
-        input_node_id, value = self._advect_snapshot()
-        result_value = np.imag(cast("Any", value))
-        node_id = self.recorder.record_operation(
-            canonicalize_numpy_op("numpy.imag"),
-            (input_node_id,),
-            result_value,
-            {"_advect_backend": "numpy"},
-            result_value.shape,
-            result_value.dtype,
-        )
-        root = self._root_for_view()
-        return TracedArray(
-            value=result_value,
-            node_id=node_id,
-            recorder=self.recorder,
-            owned=False,
-            view_state=ViewState(root, root.epoch, None, user_location()),
-        )
+        return self._component_view(np.imag)
 
     @property
     def ndim(self) -> int:
@@ -393,17 +416,15 @@ class TracedArray(NDArrayOperatorsMixin):
         """Return the length of the first dimension."""
         return len(cast("Any", self._advect_snapshot()[1]))
 
+    @override
+    def __pow__(self, other: Any) -> Any:
+        return np.square(self) if squares_bool_array(self, other) else super().__pow__(other)
+
     @frontend_lowering("advect.copy")
     def copy(self, order: str | None = "C") -> TracedArray:
         """Create a copy of the array with independent storage."""
         require_active_trace(recorder=self.recorder)
-        if order is not None and not isinstance(order, str):
-            msg = f"order must be str, not {type(order).__name__}"
-            raise TypeError(msg)
-        normalized_order = "C" if order is None else order.upper()
-        if normalized_order not in {"A", "C", "F", "K"}:
-            msg = f"order must be one of 'A', 'C', 'F', or 'K' (got {order!r})"
-            raise ValueError(msg)
+        normalized_order = _normalize_order(order, default="C")
 
         input_node_id, value = self._advect_snapshot()
         result_value = cast("Any", value).copy(order=normalized_order)
@@ -468,17 +489,7 @@ class TracedArray(NDArrayOperatorsMixin):
         materializes this rank-zero value after tracing completes.
         """
         require_active_trace(recorder=self.recorder)
-        index = normalize_item_index(args, ndim=self.ndim)
-        if index is None:
-            if self.size != 1:
-                msg = "can only convert an array of size 1 to a scalar"
-                raise ValueError(msg)
-            if self.shape == ():
-                return self
-            return self[tuple(0 for _dimension in self.shape)]
-        if isinstance(index, tuple):
-            return self[index]
-        return self.reshape((-1,))[index]
+        return cast("TracedArray", select_item(self, args))
 
     @frontend_lowering("array.astype")
     def astype(
@@ -543,28 +554,14 @@ class TracedArray(NDArrayOperatorsMixin):
         out: tuple[np.ndarray[Any, Any] | TracedArray | None, ...] | None = None,
         **kwargs: object,
     ) -> TracedArray | tuple[TracedArray, ...] | NotImplementedType:
-        simple_call = (
+        if (
             method == "__call__"
             and out is None
             and not kwargs
             and len(inputs) == ufunc.nin
             and ufunc.nout == 1
-        )
-        if simple_call:
-            fast_result = run_ephemeral_simple_ufunc(self, ufunc, inputs)
-            if fast_result is not NOT_HANDLED:
-                return cast(
-                    "TracedArray | tuple[TracedArray, ...] | NotImplementedType",
-                    fast_result,
-                )
-            return cast(
-                "TracedArray | tuple[TracedArray, ...] | NotImplementedType",
-                NUMPY_PROTOCOL_RUNTIME.run_simple_ufunc(
-                    self_arr=self,
-                    ufunc=ufunc,
-                    inputs=inputs,
-                ),
-            )
+        ):
+            return run_ephemeral_simple_ufunc(self, ufunc, inputs)
         return cast(
             "TracedArray | tuple[TracedArray, ...] | NotImplementedType",
             NUMPY_PROTOCOL_RUNTIME.array_ufunc(
@@ -584,6 +581,14 @@ class TracedArray(NDArrayOperatorsMixin):
         args: tuple[object, ...],
         kwargs: dict[str, object],
     ) -> object:
+        if (
+            (func is np.real or func is np.imag)
+            and args
+            and args[0] is self
+            and _is_weak_scalar(self)
+        ):
+            # NumPy returns the attribute, which a weak scalar reads as Python does.
+            return getattr(self, cast("Any", func).__name__)
         constructor_result = handle_traced_constructor(self, func, args, kwargs)
         if constructor_result is not NOT_A_CONSTRUCTOR:
             return constructor_result
@@ -643,57 +648,112 @@ class TracedArray(NDArrayOperatorsMixin):
     def __setitem__(self, key: object, value: object) -> None:
         _setitem(self, key, value)
 
-    def _inplace_op(self, other: Any, ufunc: np.ufunc, op_name: str) -> Self:
-        return cast("Self", _inplace_op(self, other, ufunc, op_name))
 
-    @override
-    def __iadd__(self, other: Any) -> Self:
-        return self._inplace_op(other, np.add, "numpy.add")
+def _is_weak_scalar(value: TracedArray) -> bool:
+    """Return whether a tracer stands for a Python scalar (NEP 50's weak category).
 
-    @override
-    def __isub__(self, other: Any) -> Self:
-        return self._inplace_op(other, np.subtract, "numpy.subtract")
+    Every operator asks this of its operands, so it reads the slots rather
+    than the validating properties. A pending view has no node and is never
+    weak, and an escaped tracer's released tape is left to the array path,
+    which reports it.
+    """
+    node_id = value._node_id  # noqa: SLF001
+    recorder = value.recorder
+    return (
+        node_id is not None
+        and getattr(value._value, "shape", None) == ()  # noqa: SLF001
+        and not recorder.is_consumed
+        and recorder.is_weak(node_id)
+    )
 
-    @override
-    def __imul__(self, other: Any) -> Self:
-        return self._inplace_op(other, np.multiply, "numpy.multiply")
 
-    @override
-    def __itruediv__(self, other: Any) -> Self:
-        return self._inplace_op(other, np.divide, "numpy.divide")
+def _is_weak_operand(value: object) -> bool:
+    if isinstance(value, TracedArray):
+        return _is_weak_scalar(value)
+    return not isinstance(value, np.ndarray | np.generic) and literal_is_weak(value)
 
-    @override
-    def __ifloordiv__(self, other: Any) -> Self:
-        return self._inplace_op(other, np.floor_divide, "numpy.floor_divide")
 
-    @override
-    def __imod__(self, other: Any) -> Self:
-        return self._inplace_op(other, np.mod, "numpy.remainder")
+def _binary_operator(stem: str, ufunc: np.ufunc, *, reflected: bool = False) -> Any:
+    """Wrap one mixin operator so all-weak operands compute as Python does (NEP 50)."""
+    name = f"__r{stem}__" if reflected else f"__{stem}__"
+    array_method = getattr(TracedArray, name)
+    op = _EPHEMERAL_UFUNC_OPS[ufunc]
+    python_binary = cast("Callable[[Any, Any], Any]", python_operator(op, 2))
 
-    @override
-    def __ipow__(self, other: Any) -> Self:
-        return self._inplace_op(other, np.power, "numpy.power")
+    def method(self: TracedArray, other: Any) -> Any:
+        if _is_weak_scalar(self) and _is_weak_operand(other):
+            operands = (other, self) if reflected else (self, other)
+            return run_weak_python_operator(self, op, python_binary, operands)
+        return array_method(self, other)
 
-    @override
-    def __imatmul__(self, other: Any) -> Self:
-        return cast("Self", _inplace_matmul(self, other))
+    method.__name__ = name
+    method.__qualname__ = f"TracedArray.{name}"
+    return method
 
-    @override
-    def __iand__(self, other: Any) -> Self:
-        return self._inplace_op(other, np.bitwise_and, "numpy.bitwise_and")
 
-    @override
-    def __ior__(self, other: Any) -> Self:
-        return self._inplace_op(other, np.bitwise_or, "numpy.bitwise_or")
+def _unary_operator(stem: str, ufunc: np.ufunc) -> Any:
+    """Wrap one mixin operator so a weak operand computes as Python does (NEP 50)."""
+    name = f"__{stem}__"
+    array_method = getattr(TracedArray, name)
+    op = _EPHEMERAL_UFUNC_OPS[ufunc]
+    python_unary = cast("Callable[[Any], Any]", python_operator(op, 1))
 
-    @override
-    def __ixor__(self, other: Any) -> Self:
-        return self._inplace_op(other, np.bitwise_xor, "numpy.bitwise_xor")
+    def method(self: TracedArray) -> Any:
+        if _is_weak_scalar(self):
+            return run_weak_python_operator(self, op, python_unary, (self,))
+        return array_method(self)
 
-    @override
-    def __ilshift__(self, other: Any) -> Self:
-        return self._inplace_op(other, np.left_shift, "numpy.left_shift")
+    method.__name__ = name
+    method.__qualname__ = f"TracedArray.{name}"
+    return method
 
-    @override
-    def __irshift__(self, other: Any) -> Self:
-        return self._inplace_op(other, np.right_shift, "numpy.right_shift")
+
+def _inplace_operator(stem: str, ufunc: np.ufunc) -> Callable[[TracedArray, Any], Any]:
+    name = f"__i{stem}__"
+
+    def method(self: TracedArray, other: Any) -> Any:
+        if _is_weak_scalar(self):
+            # A Python scalar has no in-place operator; Python rebinds the name.
+            return NotImplemented
+        return _inplace_op(self, other, ufunc)
+
+    method.__name__ = name
+    method.__qualname__ = f"TracedArray.{name}"
+    return method
+
+
+for _stem, _ufunc in (
+    ("add", np.add),
+    ("sub", np.subtract),
+    ("mul", np.multiply),
+    ("truediv", np.divide),
+    ("floordiv", np.floor_divide),
+    ("mod", np.remainder),
+    ("pow", np.power),
+    ("matmul", np.matmul),
+    ("and", np.bitwise_and),
+    ("or", np.bitwise_or),
+    ("xor", np.bitwise_xor),
+    ("lshift", np.left_shift),
+    ("rshift", np.right_shift),
+):
+    setattr(TracedArray, f"__{_stem}__", _binary_operator(_stem, _ufunc))
+    setattr(TracedArray, f"__r{_stem}__", _binary_operator(_stem, _ufunc, reflected=True))
+    setattr(TracedArray, f"__i{_stem}__", _inplace_operator(_stem, _ufunc))
+for _stem, _ufunc in (
+    ("lt", np.less),
+    ("le", np.less_equal),
+    ("gt", np.greater),
+    ("ge", np.greater_equal),
+    ("eq", np.equal),
+    ("ne", np.not_equal),
+):
+    setattr(TracedArray, f"__{_stem}__", _binary_operator(_stem, _ufunc))
+for _stem, _ufunc in (
+    ("neg", np.negative),
+    ("pos", np.positive),
+    ("abs", np.absolute),
+    ("invert", np.invert),
+):
+    setattr(TracedArray, f"__{_stem}__", _unary_operator(_stem, _ufunc))
+del _stem, _ufunc

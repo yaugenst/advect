@@ -7,7 +7,7 @@ use advect_runtime::{
     OutputOwnership, PortableConstant, ValueSpec,
 };
 
-const FIXTURE: &str = include_str!("fixtures/python_staged_add_multiply_v2.json");
+const FIXTURE: &str = include_str!("fixtures/python_staged_add_multiply_v3.json");
 
 #[derive(Debug)]
 enum Operation {
@@ -109,7 +109,7 @@ impl Host for VectorHost {
 fn python_staged_fixture_round_trips_and_executes_in_pure_rust() {
     let envelope: serde_json::Value = serde_json::from_str(FIXTURE.trim()).unwrap();
     assert_eq!(envelope.get("format").unwrap(), "advect.ssa-program");
-    assert_eq!(envelope.get("version").unwrap(), 2);
+    assert_eq!(envelope.get("version").unwrap(), 3);
     let program = envelope.get("program").unwrap();
     let fixture_graph = program.get("graph").unwrap();
     assert_eq!(

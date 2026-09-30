@@ -8,7 +8,7 @@ import numpy as np
 from scipy.sparse import linalg as _scipy_sparse_linalg
 
 from advect.autodiff.api.implicit import ImplicitSolveError
-from advect.scipy._containers import _as_concrete_array, _restore_container
+from advect.scipy._containers import _as_concrete_array, _RealPacking, _restore_container
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -67,47 +67,19 @@ def gmres_solver(
 
     def solve(operator: LinearOperator, rhs: object) -> object:
         rhs_array = _as_concrete_array(rhs, operation="GMRES")
-        shape = rhs_array.shape
-        size = rhs_array.size
-        is_complex = np.iscomplexobj(rhs_array)
-        if np.issubdtype(rhs_array.dtype, np.complexfloating):
-            packed_dtype = np.empty((), dtype=rhs_array.dtype).real.dtype
-        elif np.issubdtype(rhs_array.dtype, np.floating):
-            packed_dtype = rhs_array.dtype
-        else:
-            packed_dtype = np.dtype(np.float64)
-
-        def unpack(flat: np.ndarray) -> object:
-            if not is_complex:
-                unpacked = flat.reshape(shape)
-            else:
-                unpacked = (flat[:size] + 1j * flat[size:]).reshape(shape)
-            return _restore_container(unpacked, rhs)
-
-        def pack(value: object) -> np.ndarray:
-            result = _as_concrete_array(value, operation="GMRES operator")
-            if result.shape != shape:
-                msg = (
-                    "SciPy GMRES operator must preserve the right-hand-side shape "
-                    f"{shape!r}, got {result.shape!r}"
-                )
-                raise ImplicitSolveError(msg)
-            if not is_complex:
-                if np.iscomplexobj(result):
-                    msg = "SciPy GMRES operator returned complex values for a real state"
-                    raise ImplicitSolveError(msg)
-                return np.asarray(result, dtype=packed_dtype).reshape(-1).copy()
-            return np.concatenate(
-                (
-                    np.asarray(result.real, dtype=packed_dtype).reshape(-1),
-                    np.asarray(result.imag, dtype=packed_dtype).reshape(-1),
-                )
-            )
+        inexact = np.issubdtype(rhs_array.dtype, np.inexact)
+        packing = _RealPacking(
+            rhs,
+            rhs_array,
+            np.finfo(rhs_array.dtype).dtype if inexact else np.dtype(np.float64),
+            operation="GMRES operator",
+            requirement="preserve the right-hand-side shape",
+        )
 
         def matvec(flat: np.ndarray) -> np.ndarray:
-            return pack(operator(unpack(flat)))
+            return packing.pack(operator(packing.unpack(flat)))
 
-        packed_rhs = pack(rhs_array)
+        packed_rhs = packing.pack(rhs_array)
 
         linear_operator_factory = cast("Any", _scipy_sparse_linalg.LinearOperator)
         linear_operator = linear_operator_factory(
@@ -130,8 +102,8 @@ def gmres_solver(
             )
             msg = f"SciPy GMRES did not converge: {reason}"
             raise ImplicitSolveError(msg)
-        result = unpack(solution)
-        if np.issubdtype(rhs_array.dtype, np.inexact):
+        result = packing.unpack(solution)
+        if inexact:
             return _restore_container(
                 np.asarray(result, dtype=rhs_array.dtype),
                 rhs,

@@ -20,10 +20,11 @@ from advect.scipy._ndimage.common import (
     _mode_name,
     _operand_dtype,
     _require_numpy_values,
+    _zero_tangent,
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Callable, Iterator
 
     from advect.core import AbstractValue
 
@@ -46,26 +47,38 @@ def _numpy_pad_mode(
     )
 
 
+def _pad_width(
+    ndim: int,
+    axes: tuple[int, ...],
+    extents: tuple[tuple[int, int], ...],
+) -> _PadWidth:
+    """Return the padding that lets reads at ``extents`` offsets stay in bounds."""
+    pad = {
+        axis: (max(0, -low), max(0, high)) for axis, (low, high) in zip(axes, extents, strict=True)
+    }
+    return tuple(pad.get(axis, (0, 0)) for axis in range(ndim))
+
+
 def _pad_numpy(
-    input: np.ndarray,
+    value: np.ndarray,
     pad_width: _PadWidth,
     *,
-    mode: str,
-    cval: np.ndarray,
+    axes: tuple[int, ...],
+    modes: tuple[str, ...],
+    cval: Any,
 ) -> np.ndarray:
-    if _mode_name(mode) == "constant":
-        return np.pad(input, pad_width, mode="constant", constant_values=cval)
-    return np.pad(input, pad_width, mode=_numpy_pad_mode(mode))
+    """Pad ``axes`` by their boundary modes; :func:`_fold_numpy` is the adjoint.
 
-
-def _axis_indices(
-    length: int,
-    *,
-    offset: int,
-    mode: str,
-) -> tuple[np.ndarray, np.ndarray | None]:
-    raw = np.arange(length) + offset
-    return _normalize_indices(raw, length=length, mode=mode)
+    Constant padding stores ``cval`` at ``value``'s dtype.
+    """
+    for axis, mode in zip(axes, modes, strict=True):
+        widths = [(0, 0)] * value.ndim
+        widths[axis] = pad_width[axis]
+        if _mode_name(mode) == "constant":
+            value = np.pad(value, widths, mode="constant", constant_values=cval)
+        else:
+            value = np.pad(value, widths, mode=_numpy_pad_mode(mode))
+    return value
 
 
 def _normalize_indices(
@@ -106,7 +119,7 @@ def _shift_axis(value: Any, *, axis: int, offset: int, mode: str, cval: Any) -> 
     length = value.shape[axis]
     if length == 0:
         return value
-    indices, valid = _axis_indices(length, offset=offset, mode=mode)
+    indices, valid = _normalize_indices(np.arange(length) + offset, length=length, mode=mode)
     gathered = np.take(value, indices, axis=axis)
     if valid is None:
         return gathered
@@ -168,17 +181,13 @@ def _stencil_entries(
     weight_shape = tuple(int(size) for size in weights.shape)
     centers = tuple(size // 2 for size in weight_shape)
     complex_weights = np.issubdtype(_operand_dtype(weights), np.complexfloating)
+    # Convolution reads the kernel reflected through its center.
+    sign = -1 if convolution else 1
     for index in np.ndindex(weight_shape):
-        if convolution:
-            offsets = tuple(
-                center - item + origin
-                for item, center, origin in zip(index, centers, origins, strict=True)
-            )
-        else:
-            offsets = tuple(
-                item - center - origin
-                for item, center, origin in zip(index, centers, origins, strict=True)
-            )
+        offsets = tuple(
+            sign * (item - center - origin)
+            for item, center, origin in zip(index, centers, origins, strict=True)
+        )
         coefficient = weights[index]
         if complex_weights and not convolution:
             coefficient = np.conj(coefficient)
@@ -222,6 +231,54 @@ def _fold_axis_numpy(
     )
 
 
+def _padded_transpose_numpy(
+    cotangent: np.ndarray,
+    stencil: Callable[[np.ndarray], np.ndarray],
+    *,
+    axes: tuple[int, ...],
+    extents: tuple[tuple[int, int], ...],
+    modes: tuple[str, ...],
+) -> tuple[np.ndarray, np.ndarray]:
+    """Transpose a boundary-mode stencil whose reads span ``extents`` per axis.
+
+    ``stencil`` applies the zero-padded adjoint to the embedded cotangent. The
+    padding is then folded back onto the samples each boundary mode read, and
+    constant-mode padding becomes the boundary-value cotangent.
+    """
+    if 0 in cotangent.shape:
+        return np.zeros_like(cotangent), np.zeros((), dtype=cotangent.dtype)
+    pad_width = _pad_width(cotangent.ndim, axes, extents)
+    return _fold_numpy(
+        stencil(np.pad(cotangent, pad_width)),
+        pad_width,
+        axes=axes,
+        modes=modes,
+        shape=cotangent.shape,
+    )
+
+
+def _fold_numpy(
+    padded: np.ndarray,
+    pad_width: _PadWidth,
+    *,
+    axes: tuple[int, ...],
+    modes: tuple[str, ...],
+    shape: tuple[int, ...],
+) -> tuple[np.ndarray, np.ndarray]:
+    """Fold padding back onto the samples it read, and constant padding onto ``cval``."""
+    boundary_cotangent = np.zeros((), dtype=padded.dtype)
+    for axis, mode in reversed(tuple(zip(axes, modes, strict=True))):
+        padded, contribution = _fold_axis_numpy(
+            padded,
+            axis=axis,
+            length=shape[axis],
+            before=pad_width[axis][0],
+            mode=mode,
+        )
+        boundary_cotangent = boundary_cotangent + contribution
+    return padded, boundary_cotangent
+
+
 def _stencil_input_transpose_numpy(
     cotangent: np.ndarray,
     weights: np.ndarray,
@@ -231,8 +288,6 @@ def _stencil_input_transpose_numpy(
     modes: tuple[str, ...],
     convolution: bool,
 ) -> tuple[np.ndarray, np.ndarray]:
-    if 0 in cotangent.shape:
-        return np.zeros_like(cotangent), np.zeros((), dtype=cotangent.dtype)
     offsets = [
         entry_offsets
         for _index, entry_offsets, _coefficient in _stencil_entries(
@@ -241,41 +296,22 @@ def _stencil_input_transpose_numpy(
             convolution=convolution,
         )
     ]
-    before = tuple(max(0, -min(items)) for items in zip(*offsets, strict=True))
-    after = tuple(max(0, *items) for items in zip(*offsets, strict=True))
-    pad_by_axis = dict(zip(axes, zip(before, after, strict=True), strict=True))
-    pad_width = tuple(pad_by_axis.get(axis, (0, 0)) for axis in range(cotangent.ndim))
-    padded_shape = tuple(
-        size + lower + upper
-        for size, (lower, upper) in zip(cotangent.shape, pad_width, strict=True)
-    )
-    embedded = np.zeros(padded_shape, dtype=cotangent.dtype)
-    center = tuple(
-        slice(lower, lower + size)
-        for size, (lower, _upper) in zip(cotangent.shape, pad_width, strict=True)
-    )
-    embedded[center] = cotangent
     function = _scipy_ndimage.correlate if convolution else _scipy_ndimage.convolve
-    result = function(
-        embedded,
-        weights,
-        output=cotangent.dtype,
-        mode="constant",
-        cval=0,
-        origin=origins,
+    return _padded_transpose_numpy(
+        cotangent,
+        lambda embedded: function(
+            embedded,
+            weights,
+            output=cotangent.dtype,
+            mode="constant",
+            cval=0,
+            origin=origins,
+            axes=axes,
+        ),
         axes=axes,
+        extents=tuple((min(items), max(items)) for items in zip(*offsets, strict=True)),
+        modes=modes,
     )
-    boundary_cotangent = np.zeros((), dtype=cotangent.dtype)
-    for axis, lower, mode in reversed(tuple(zip(axes, before, modes, strict=True))):
-        result, contribution = _fold_axis_numpy(
-            result,
-            axis=axis,
-            length=cotangent.shape[axis],
-            before=lower,
-            mode=mode,
-        )
-        boundary_cotangent = boundary_cotangent + contribution
-    return result, boundary_cotangent
 
 
 def _stencil_weight_transpose(
@@ -337,13 +373,9 @@ def _stencil_input_transpose_primitive(
 def _stencil_input_transpose_abstract(
     cotangent: AbstractValue,
     weights: AbstractValue,
-    *,
-    axes: tuple[int, ...],
-    origins: tuple[int, ...],
-    modes: tuple[str, ...],
-    convolution: bool,
+    **static: Any,
 ) -> tuple[ArraySpec, ArraySpec]:
-    del weights, axes, origins, modes, convolution
+    del weights, static
     return (
         ArraySpec(
             cotangent.spec.shape,
@@ -359,33 +391,15 @@ def _stencil_input_transpose_jvp(
     output: Any,
     primals: tuple[Any, ...],
     tangents: tuple[Any | None, ...],
-    *,
-    axes: tuple[int, ...],
-    origins: tuple[int, ...],
-    modes: tuple[str, ...],
-    convolution: bool,
+    **static: Any,
 ) -> tuple[Any, Any]:
     cotangent, weights = primals
     cotangent_tangent, weights_tangent = tangents
     result: tuple[Any, Any] | None = None
     if cotangent_tangent is not None:
-        result = _stencil_input_transpose_primitive(
-            cotangent_tangent,
-            weights,
-            axes=axes,
-            origins=origins,
-            modes=modes,
-            convolution=convolution,
-        )
+        result = _stencil_input_transpose_primitive(cotangent_tangent, weights, **static)
     if weights_tangent is not None:
-        weight_term = _stencil_input_transpose_primitive(
-            cotangent,
-            weights_tangent,
-            axes=axes,
-            origins=origins,
-            modes=modes,
-            convolution=convolution,
-        )
+        weight_term = _stencil_input_transpose_primitive(cotangent, weights_tangent, **static)
         result = (
             weight_term
             if result is None
@@ -399,34 +413,17 @@ def _stencil_input_transpose_transpose(
     output_cotangent: tuple[Any, Any],
     primals: tuple[Any, ...],
     output: Any,
-    *,
-    axes: tuple[int, ...],
-    origins: tuple[int, ...],
-    modes: tuple[str, ...],
-    convolution: bool,
+    **static: Any,
 ) -> tuple[Any, Any]:
     del output
     cotangent, weights = primals
-    input_cotangent, boundary_cotangent = output_cotangent
+    # An output leaf that nothing read arrives as ``None``, a symbolic zero.
+    input_cotangent = _zero_tangent(cotangent, output_cotangent[0])
+    boundary_cotangent = 0 if output_cotangent[1] is None else output_cotangent[1]
     return (
-        _correlate_stencil(
-            input_cotangent,
-            weights,
-            axes=axes,
-            origins=origins,
-            modes=modes,
-            cval=boundary_cotangent,
-            convolution=convolution,
-        ),
+        _correlate_stencil(input_cotangent, weights, cval=boundary_cotangent, **static),
         _stencil_weight_transpose(
-            cotangent,
-            input_cotangent,
-            weights,
-            boundary_cotangent,
-            axes=axes,
-            origins=origins,
-            modes=modes,
-            convolution=convolution,
+            cotangent, input_cotangent, weights, boundary_cotangent, **static
         ),
     )
 

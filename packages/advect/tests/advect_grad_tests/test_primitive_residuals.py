@@ -11,6 +11,8 @@ from numpy.testing import assert_allclose
 import advect as ad
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from advect.core._primitive import Primitive
 
 
@@ -19,8 +21,11 @@ def _square_with_residual(
     *,
     released: list[object],
     forwards: list[object] | None = None,
-    transposes: list[object] | None = None,
+    on_transpose: Callable[[object], object] | None = None,
+    jvp: bool = True,
 ) -> Primitive[..., Any]:
+    """Square ``x``, keeping ``2 * x`` as the residual its transpose consumes."""
+
     @ad.primitive(name=name, residual=True)
     def primitive(x: np.ndarray) -> ad.PrimitiveResult[np.ndarray]:
         residual = 2 * x.copy()
@@ -28,16 +33,9 @@ def _square_with_residual(
             forwards.append(residual)
         return ad.PrimitiveResult(x * x, residual, release=released.append)
 
-    @primitive.def_jvp
-    def jvp_rule(
-        output: np.ndarray,
-        primals: tuple[np.ndarray, ...],
-        tangents: tuple[np.ndarray | None, ...],
-    ) -> np.ndarray:
-        del output
-        tangent = tangents[0]
-        assert tangent is not None
-        return 2 * primals[0] * tangent
+    primitive.def_abstract(lambda x: x.spec)
+    if jvp:
+        primitive.def_jvp(lambda _output, primals, tangents: 2 * primals[0] * tangents[0])
 
     @primitive.def_transpose
     def transpose_rule(
@@ -47,8 +45,8 @@ def _square_with_residual(
         residual: object,
     ) -> tuple[np.ndarray]:
         del primals, output
-        if transposes is not None:
-            transposes.append(residual)
+        if on_transpose is not None:
+            on_transpose(residual)
         return (cotangent * cast("np.ndarray", residual),)
 
     return primitive
@@ -62,7 +60,7 @@ def test_one_shot_grad_pairs_and_releases_each_exact_residual() -> None:
         "tests.residual.grad_pairing",
         released=released,
         forwards=forwards,
-        transposes=transposes,
+        on_transpose=transposes.append,
     )
     x = np.array([0.5, 1.5])
 
@@ -129,7 +127,7 @@ def test_jacobian_reuses_and_releases_one_exact_residual() -> None:
         "tests.residual.jacobian",
         released=released,
         forwards=forwards,
-        transposes=transposes,
+        on_transpose=transposes.append,
     )
     x = np.arange(1.0, 5.0)
 
@@ -169,34 +167,15 @@ def test_reentrant_close_rejection_does_not_poison_later_close() -> None:
     released: list[object] = []
     pullback_owner: dict[str, Any] = {}
 
-    @ad.primitive(name="tests.residual.reentrant_close", residual=True)
-    def primitive(x: np.ndarray) -> ad.PrimitiveResult[np.ndarray]:
-        residual = 2 * x.copy()
-        return ad.PrimitiveResult(x * x, residual, release=released.append)
-
-    @primitive.def_jvp
-    def jvp_rule(
-        output: np.ndarray,
-        primals: tuple[np.ndarray, ...],
-        tangents: tuple[np.ndarray | None, ...],
-    ) -> np.ndarray:
-        del output
-        tangent = tangents[0]
-        assert tangent is not None
-        return 2 * primals[0] * tangent
-
-    @primitive.def_transpose
-    def transpose_rule(
-        cotangent: np.ndarray,
-        primals: tuple[np.ndarray, ...],
-        output: np.ndarray,
-        residual: object,
-    ) -> tuple[np.ndarray]:
-        del primals, output
+    def close_during_traversal(_residual: object) -> None:
         with pytest.raises(RuntimeError, match="during traversal"):
             pullback_owner["value"].close()
-        return (cotangent * cast("np.ndarray", residual),)
 
+    primitive = _square_with_residual(
+        "tests.residual.reentrant_close",
+        released=released,
+        on_transpose=close_during_traversal,
+    )
     x = np.array([1.0, 2.0])
     _value, pullback = ad.vjp(primitive)(x)
     pullback_owner["value"] = cast("Any", pullback)
@@ -266,30 +245,15 @@ def test_unused_residual_node_is_released() -> None:
 
 def test_staged_residual_primitive_stays_atomic_under_grad() -> None:
     released: list[object] = []
-    seen_input_types: list[type[object]] = []
+    forwards: list[object] = []
     seen_residuals: list[object] = []
-
-    @ad.primitive(name="tests.residual.staged_grad", residual=True)
-    def primitive(x: np.ndarray) -> ad.PrimitiveResult[np.ndarray]:
-        seen_input_types.append(type(x))
-        residual = 2 * x.copy()
-        return ad.PrimitiveResult(x * x, residual, release=released.append)
-
-    @primitive.def_abstract
-    def abstract(x: ad.AbstractValue) -> ad.ArraySpec:
-        return x.spec
-
-    @primitive.def_transpose
-    def transpose_rule(
-        cotangent: np.ndarray,
-        primals: tuple[np.ndarray, ...],
-        output: np.ndarray,
-        residual: object,
-    ) -> tuple[np.ndarray]:
-        del primals, output
-        seen_residuals.append(residual)
-        return (cotangent * cast("np.ndarray", residual),)
-
+    primitive = _square_with_residual(
+        "tests.residual.staged_grad",
+        released=released,
+        forwards=forwards,
+        on_transpose=seen_residuals.append,
+        jvp=False,
+    )
     program = ad.stage(
         primitive,
         specs=(ad.ArraySpec((2,), "float64"),),
@@ -299,7 +263,8 @@ def test_staged_residual_primitive_stays_atomic_under_grad() -> None:
     gradient = ad.grad(lambda value: np.sum(program(value)))(x)
 
     assert_allclose(gradient, 2 * x)
-    assert seen_input_types == [np.ndarray]
+    # The implementation ran once, on concrete values rather than tracers.
+    assert [type(residual) for residual in forwards] == [np.ndarray]
     assert len(seen_residuals) == 1
     assert released == seen_residuals
 
@@ -328,3 +293,8 @@ def test_none_is_a_valid_exact_residual_payload() -> None:
         np.ones_like(x),
     )
     assert released == [None]
+
+
+def test_primitive_result_rejects_a_noncallable_release() -> None:
+    with pytest.raises(TypeError, match="release must be callable"):
+        ad.PrimitiveResult(output=1, residual=object(), release=1)  # type: ignore[arg-type]

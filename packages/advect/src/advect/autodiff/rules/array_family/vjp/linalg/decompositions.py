@@ -9,18 +9,19 @@ from advect.autodiff.rules.array_family._backend_runtime import (
     xp,
 )
 from advect.autodiff.rules.array_family._transpose_utils import (
+    _dtype_of,
     _lower_triangular_halfdiag,
     _right_solve,
+    _shape_of,
     _uses_standard_linalg_contract,
 )
+from advect.autodiff.rules.array_family.jvp.linalg import _hermitian_from_triangle
 from advect.autodiff.rules.array_family.vjp.linalg.common import (
     _broadcast_eye,
-    _dtype_of,
     _h,
     _hermitian_triangle_adjoint,
     _merge_multioutput_cotangent,
     _qr_skew_pullback,
-    _shape_of,
 )
 
 _QR_OUTPUT_COUNT = 2
@@ -42,7 +43,7 @@ def _vjp_cholesky(
         raise TypeError(msg)
     factor = _h(ans) if upper else ans
     factor_cotangent = _h(g) if upper else g
-    projected = _lower_triangular_halfdiag(_h(factor) @ factor_cotangent)
+    projected = _lower_triangular_halfdiag(xp.matmul(_h(factor), factor_cotangent))
     natural = xp.linalg.solve(_h(factor), _right_solve(factor, projected))
     natural = (natural + _h(natural)) / _scalar_like(2.0, natural)
     return (_hermitian_triangle_adjoint(natural, uplo="U" if upper else "L"),)
@@ -56,27 +57,43 @@ def _vjp_pinv(
     **attrs: Any,
 ) -> tuple[xp.ndarray | None, ...]:
     """Transpose the constant-rank Moore-Penrose inverse differential."""
-    _ = attrs
+    hermitian = bool(attrs.get("hermitian", False))
+    if hermitian:
+        # NumPy reads the Hermitian matrix from the lower triangle.
+        x = _hermitian_from_triangle(x, uplo="L")
     rows, columns = _shape_of(x)[-2:]
     batch_ndim = len(_shape_of(x)) - 2
     result_dtype = _dtype_of(ans)
     projection_rows = x @ ans
     projection_columns = ans @ x
-    identity_rows = xp.zeros_like(projection_rows) + _broadcast_eye(
-        n=rows,
-        batch_ndim=batch_ndim,
-        dtype=xp.dtype(result_dtype),
+    identity_rows = xp.add(
+        xp.zeros_like(projection_rows),
+        _broadcast_eye(
+            (projection_rows, g),
+            n=rows,
+            batch_ndim=batch_ndim,
+            dtype=xp.dtype(result_dtype),
+        ),
     )
-    identity_columns = xp.zeros_like(projection_columns) + _broadcast_eye(
-        n=columns,
-        batch_ndim=batch_ndim,
-        dtype=xp.dtype(result_dtype),
+    identity_columns = xp.add(
+        xp.zeros_like(projection_columns),
+        _broadcast_eye(
+            (projection_columns, g),
+            n=columns,
+            batch_ndim=batch_ndim,
+            dtype=xp.dtype(result_dtype),
+        ),
     )
 
-    term1 = -(ans @ _h(g) @ ans)
-    term2 = (ans @ _h(ans) @ g) @ (identity_rows - projection_rows)
-    term3 = (identity_columns - projection_columns) @ (g @ _h(ans) @ ans)
+    term1 = -(xp.matmul(ans, _h(g)) @ ans)
+    term2 = xp.matmul(ans @ _h(ans), g) @ xp.subtract(identity_rows, projection_rows)
+    term3 = xp.matmul(
+        xp.subtract(identity_columns, projection_columns),
+        xp.matmul(g, _h(ans)) @ ans,
+    )
     input_cotangent = _h(term1 + term2 + term3)
+    if hermitian:
+        input_cotangent = _hermitian_triangle_adjoint(input_cotangent, uplo="L")
     if not xp.iscomplexobj(x):
         input_cotangent = xp.real(input_cotangent)
     return (input_cotangent, *(None for _ in rest))
@@ -115,42 +132,33 @@ def _vjp_qr(
 
     if rows < columns:
         leading_r = r[..., :, :rows]
-        bar_a = q @ gr
-        bar_omega = _h(q) @ gq - gr @ _h(r)
+        bar_a = xp.matmul(q, gr)
+        bar_omega = xp.subtract(xp.matmul(_h(q), gq), xp.matmul(gr, _h(r)))
         bar_local = _qr_skew_pullback(
             bar_omega,
             batch_dims=batch_shape,
             n=rows,
         )
-        bar_tangent_r_inverse = q @ bar_local
+        bar_tangent_r_inverse = xp.matmul(q, bar_local)
         bar_leading = _right_solve(_h(leading_r), bar_tangent_r_inverse)
         trailing_zeros = xp.zeros_like(bar_a[..., :, rows:])
         leading_contribution = xp.concatenate(
             (bar_leading, trailing_zeros),
             axis=-1,
         )
-        input_cotangent = bar_a + leading_contribution
+        input_cotangent = xp.add(bar_a, leading_contribution)
         if not xp.iscomplexobj(x):
             input_cotangent = xp.real(input_cotangent)
         return (cast("xp.ndarray", input_cotangent),)
 
-    bar_qt = xp.zeros_like(r)
-    bar_do = xp.zeros_like(r)
-    bar_dx_rinv = xp.zeros_like(q)
-
-    bar_a = gr @ _h(r)
-    bar_qt = bar_qt + bar_a
-    bar_do = bar_do - bar_a
-    bar_dx_rinv = bar_dx_rinv + gq
-    bar_b = _h(q) @ gq
-    bar_do = bar_do + bar_b
-    bar_qt = bar_qt - bar_b
-    bar_qt = bar_qt + _qr_skew_pullback(
-        bar_do,
+    bar_a = xp.matmul(gr, _h(r))
+    bar_b = xp.matmul(_h(q), gq)
+    bar_qt = xp.subtract(bar_a, bar_b) + _qr_skew_pullback(
+        xp.subtract(bar_b, bar_a),
         batch_dims=batch_shape,
         n=columns,
     )
-    bar_dx_rinv = bar_dx_rinv + q @ bar_qt
+    bar_dx_rinv = xp.add(gq, xp.matmul(q, bar_qt))
     input_cotangent = _right_solve(_h(r), bar_dx_rinv)
     if not xp.iscomplexobj(x):
         input_cotangent = xp.real(input_cotangent)
@@ -165,7 +173,11 @@ def _vjp_svdvals(
     **attrs: Any,
 ) -> tuple[xp.ndarray]:
     """Transpose the singular-value differential."""
-    _ = ans, rest, attrs
+    _ = ans, rest
+    hermitian = bool(attrs.get("hermitian", False))
+    if hermitian:
+        # NumPy reads the Hermitian matrix from the lower triangle.
+        x = _hermitian_from_triangle(x, uplo="L")
     if _uses_standard_linalg_contract():
         u, singular_values, vh = xp.linalg.svd(x, full_matrices=False)
     else:
@@ -178,13 +190,17 @@ def _vjp_svdvals(
     size = _shape_of(singular_values)[-1]
     diagonal = (
         _broadcast_eye(
+            (u, g),
             n=size,
             batch_ndim=len(_shape_of(x)) - 2,
             dtype=_dtype_of(u),
         )
         * g[..., :, None]
     )
-    return (cast("xp.ndarray", u @ diagonal @ vh),)
+    natural = xp.matmul(u, diagonal) @ vh
+    if hermitian:
+        natural = _hermitian_triangle_adjoint(natural, uplo="L")
+    return (cast("xp.ndarray", natural),)
 
 
 def _vjp_svd(
@@ -233,10 +249,12 @@ def _vjp_svd(
     u_h = _h(u)
     v = _h(vh)
     gv = _h(gvh)
-    utgu = u_h @ gu
-    vtgv = vh @ gv
+    utgu = xp.matmul(u_h, gu)
+    vtgv = xp.matmul(vh, gv)
 
+    like = (u, singular_values, gu, gs, gvh)
     eye = _broadcast_eye(
+        like,
         n=size,
         batch_ndim=len(_shape_of(x)) - 2,
         dtype=_dtype_of(u),
@@ -244,32 +262,46 @@ def _vjp_svd(
     off_diagonal = xp.ones_like(eye) - eye
     squared = singular_values * singular_values
     denominator = squared[..., None, :] - squared[..., :, None]
-    inverse_gaps = off_diagonal / (denominator + eye)
+    inverse_gaps = off_diagonal / xp.add(denominator, eye)
 
     core = (
         (inverse_gaps * (utgu - _h(utgu))) * singular_values[..., None, :]
         + eye * gs[..., :, None]
-        + singular_values[..., :, None] * (inverse_gaps * (vtgv - _h(vtgv)))
+        + xp.multiply(singular_values[..., :, None], inverse_gaps * (vtgv - _h(vtgv)))
     )
 
     if xp.issubdtype(_dtype_of(u), xp.complexfloating):
         gauge = xp.imag(xp.diagonal(utgu, axis1=-2, axis2=-1)) / singular_values
         core = core + _scalar_like(1j, core) * eye * gauge[..., :, None]
 
-    grad = u @ core @ vh
+    grad = xp.matmul(u, core) @ vh
     if m < n:
         eye_n = _broadcast_eye(
+            like,
             n=n,
             batch_ndim=len(_shape_of(x)) - 2,
             dtype=_dtype_of(v),
         )
-        grad = grad + (u / singular_values[..., None, :]) @ _h(gv) @ (eye_n - v @ vh)
+        grad = xp.add(
+            grad,
+            xp.matmul(
+                xp.matmul(u / singular_values[..., None, :], _h(gv)),
+                xp.subtract(eye_n, v @ vh),
+            ),
+        )
     elif m > n:
         eye_m = _broadcast_eye(
+            like,
             n=m,
             batch_ndim=len(_shape_of(x)) - 2,
             dtype=_dtype_of(u),
         )
-        grad = grad + (eye_m - u @ u_h) @ gu @ _h(v / singular_values[..., None, :])
+        grad = xp.add(
+            grad,
+            xp.matmul(
+                xp.matmul(xp.subtract(eye_m, u @ u_h), gu),
+                _h(v / singular_values[..., None, :]),
+            ),
+        )
 
     return (cast("xp.ndarray", grad),)

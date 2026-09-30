@@ -3,34 +3,39 @@
 from __future__ import annotations
 
 import ast
-from collections import Counter
-from typing import TYPE_CHECKING
+from typing import Any
 
+import array_api_strict
 import pytest
-from scripts import report_array_api_support, run_array_api_conformance
+from scripts import report_array_api_support as reporter, run_array_api_conformance
 
+import advect as ad
+from advect.core._array_api.evidence import operation_cases
 from advect.core._array_api.frontend import _ARRAY_API_META_FUNCTIONS
 from advect.core._array_api.profiles import (
     LATEST_ARRAY_API_VERSION,
-    materialize_array_api_profile,
+    SUPPORTED_ARRAY_API_VERSIONS,
 )
 from advect.core._array_api.signatures import OFFICIAL_SIGNATURES, official_parameter_names
 from advect.core._array_api.support import build_support_profile
 
-if TYPE_CHECKING:
-    from types import ModuleType
+_OFFICIAL_FUNCTION_COUNTS = {"2022.12": 152, "2023.12": 164, "2024.12": 170}
+_CATALOG_COLUMNS = ("lowering", "abstract", "jvp", "vjp")
 
 
 @pytest.fixture(scope="module")
-def reporter() -> ModuleType:
-    return report_array_api_support
+def reports() -> dict[str, dict[str, Any]]:
+    return {version: reporter.build_report(version) for version in SUPPORTED_ARRAY_API_VERSIONS}
 
 
-def test_discovers_the_complete_installed_2024_12_function_surface(
-    reporter: ModuleType,
-) -> None:
-    functions = reporter._official_functions()
-    paths = [function.path for function in functions]
+@pytest.fixture(scope="module")
+def catalog() -> dict[str, dict[str, Any]]:
+    extension = ad.support_catalog()["extensions"]["array_api"]
+    return {row["callable"]: row for row in extension["functions"]}
+
+
+def test_discovers_the_complete_installed_2024_12_function_surface() -> None:
+    paths = [path for path, _function in reporter._official_functions()]
 
     assert len(paths) == 170
     assert len(paths) == len(set(paths))
@@ -40,6 +45,14 @@ def test_discovers_the_complete_installed_2024_12_function_surface(
     assert "linalg.solve" in paths
     assert "__array_namespace_info__" not in paths
     assert "set_array_api_strict_flags" not in paths
+
+
+def test_reporting_an_older_revision_keeps_the_reference_provider_flags() -> None:
+    flags = array_api_strict.get_array_api_strict_flags()
+
+    reporter._official_functions("2022.12")
+
+    assert array_api_strict.get_array_api_strict_flags() == flags
 
 
 def _signature_parameter_names(signature: str) -> tuple[str, ...]:
@@ -60,7 +73,7 @@ def _signature_parameter_names(signature: str) -> tuple[str, ...]:
 
 
 def test_runtime_manifest_snapshots_the_official_stub_contract(
-    reporter: ModuleType,
+    reports: dict[str, dict[str, Any]],
 ) -> None:
     profile = build_support_profile()
     snapshotted = {str(row["path"]): str(row["signature"]) for row in profile["callables"]}
@@ -80,11 +93,12 @@ def test_runtime_manifest_snapshots_the_official_stub_contract(
     } == official_parameters
     assert snapshotted_parameters == official_parameters
 
-    rows = {row["path"]: row for row in reporter.build_report()["functions"]}
+    report = reports[LATEST_ARRAY_API_VERSION]
+    rows = {row["path"]: row for row in report["functions"]}
     assert rows["expand_dims"]["signature"] == "(x, /, axis)"
     assert rows["expand_dims"]["provider_signature"] == "(x, /, *, axis)"
     assert rows["expand_dims"]["provider_signature_deviation"] is True
-    assert "expand_dims" in reporter.build_report()["provider_signature_deviations"]
+    assert "expand_dims" in report["provider_signature_deviations"]
 
 
 def test_official_runner_selects_the_declared_operations_for_each_mode() -> None:
@@ -116,163 +130,128 @@ def test_live_nondifferentiable_parameters_are_not_reported_as_static() -> None:
     assert result_type_roles["arrays_and_dtypes"] == "nondifferentiable"
 
 
-def test_report_classification_is_exhaustive_and_mutually_exclusive(
-    reporter: ModuleType,
+@pytest.mark.parametrize("version", SUPPORTED_ARRAY_API_VERSIONS)
+def test_report_joins_each_revision_profile_to_the_public_catalog(
+    reports: dict[str, dict[str, Any]],
+    catalog: dict[str, dict[str, Any]],
+    version: str,
 ) -> None:
-    report = reporter.build_report()
+    report = reports[version]
     rows = report["functions"]
-    summary = report["summary"]
-    classifications = Counter(row["classification"] for row in rows)
     paths = [row["path"] for row in rows]
+    profile = {row["path"]: row for row in build_support_profile(version)["callables"]}
+    summary = report["summary"]
 
-    assert report["schema_version"] == 3
+    assert report["schema_version"] == 4
     assert report["report_kind"] == "advect.array-api-support"
     assert report["environment"]["source_revision"]
     assert report["environment"]["python"]
     assert report["environment"]["machine"]["platform"]
-    assert len(rows) == summary["official_functions"]
-    assert len(paths) == len(set(paths))
-    assert sum(classifications.values()) == summary["official_functions"]
-    assert set(classifications).issubset(reporter._SUPPORT_CLASSIFICATIONS)
-    assert all(row["classification"] in reporter._SUPPORT_CLASSIFICATIONS for row in rows)
-    assert dict(sorted(classifications.items())) == summary["classifications"]
-    assert (
-        summary["supported_transform_functions"] + summary["unsupported_transform_functions"]
-        == summary["transform_applicable_functions"]
-    )
-    assert (
-        summary["transform_applicable_functions"] + classifications["provider_passthrough"]
-        == summary["official_functions"]
-    )
-    assert all(row["canonical_op"] is not None for row in rows if row["binding"] == "operation")
-    assert all(row["canonical_op"] is None for row in rows if row["binding"] == "composite")
-    assert all(
-        row["result_kind"] == "multiple_arrays"
-        for row in rows
-        if row["classification"] == "multi_output_unsupported"
-    )
-    assert all(
-        not row["has_array_operand"] and row["binding"] == "none"
-        for row in rows
-        if row["classification"] == "provider_passthrough"
-    )
-
-    official_paths = {row["path"] for row in rows}
-    expected_extras = [
-        {
-            "canonical_op": reporter._FUNCTION_SPECS[path].op,
-            "path": path,
-        }
-        for path in sorted(set(reporter._FUNCTION_SPECS).difference(official_paths))
+    assert report["api_version"] == version
+    assert paths == sorted(profile)
+    assert summary["official_functions"] == len(rows) == _OFFICIAL_FUNCTION_COUNTS[version]
+    assert sum(summary["classifications"].values()) == len(rows)
+    assert set(summary["classifications"]) <= set(reporter._SUPPORT_CLASSIFICATIONS)
+    for row in rows:
+        claim = profile[row["path"]]
+        entry = catalog.get(row["path"], dict.fromkeys(_CATALOG_COLUMNS))
+        assert [row[key] for key in ("signature", "modes", "complete")] == [
+            claim[key] for key in ("signature", "modes", "complete")
+        ]
+        assert [row[key] for key in _CATALOG_COLUMNS] == [entry[key] for key in _CATALOG_COLUMNS]
+    assert report["extra_catalog_paths"] == [
+        {"lowering": catalog[path]["lowering"], "path": path}
+        for path in sorted(set(catalog).difference(paths))
     ]
-    assert report["extra_catalog_paths"] == expected_extras
 
 
-def test_compile_time_metadata_uses_the_explicit_runtime_surface(
-    reporter: ModuleType,
+def test_report_rejects_a_revision_claim_absent_from_the_latest_catalog(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    rows = {row["path"]: row for row in reporter.build_report()["functions"]}
-    classified = {
-        path for path, row in rows.items() if row["classification"] == "compile_time_metadata"
-    }
+    catalog = ad.support_catalog()
+    extension = catalog["extensions"]["array_api"]
+    extension["functions"] = [row for row in extension["functions"] if row["callable"] != "abs"]
+    monkeypatch.setattr(reporter, "support_catalog", lambda: catalog)
 
-    assert classified == reporter._ARRAY_API_META_FUNCTIONS
-    assert all(rows[path]["binding"] == "compile_time_metadata" for path in classified)
-    assert all(rows[path]["canonical_op"] is None for path in classified)
-    assert all(rows[path]["derivative_status"] == "not_applicable" for path in classified)
-    assert rows["can_cast"]["classification"] == "compile_time_metadata"
-    assert rows["finfo"]["classification"] == "compile_time_metadata"
-    assert rows["iinfo"]["classification"] == "compile_time_metadata"
+    with pytest.raises(RuntimeError, match=r"does not list: \['abs'\]"):
+        reporter.build_report("2022.12")
 
 
-def test_registered_operations_have_complete_derivative_classification(
-    reporter: ModuleType,
+def test_report_rejects_an_unclaimed_callable_the_latest_revision_dropped(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    report = reporter.build_report()
-    rows = report["functions"]
-    unclassified = {row["path"] for row in rows if row["derivative_status"] == "unclassified"}
-    constant_only_ruleless = {
-        row["path"]
-        for row in rows
-        if row["registry_op"]
-        and not reporter._FUNCTION_SPECS[row["path"]].operands
-        and not row["jvp_registered"]
-        and not row["vjp_registered"]
-        and not row["non_differentiable"]
-        and row["canonical_op"] not in reporter.STRUCTURAL_OPS
-    }
-    structural = [row["path"] for row in rows if row["canonical_op"] in reporter.STRUCTURAL_OPS]
+    # An incomplete callable has no modes, but the latest-only catalog join
+    # would still misclassify it if a later revision removed it.
+    def with_retired_callable(version: str) -> dict[str, Any]:
+        profile = build_support_profile(version)
+        retired = {**profile["callables"][0], "complete": False, "modes": [], "path": "retired"}
+        return {**profile, "callables": [*profile["callables"], retired]}
 
-    assert unclassified == constant_only_ruleless
-    assert structural
+    monkeypatch.setattr(reporter, "build_support_profile", with_retired_callable)
+
+    with pytest.raises(RuntimeError, match=r"does not list: \['retired'\]"):
+        reporter.build_report("2022.12")
+
+
+@pytest.mark.parametrize("version", SUPPORTED_ARRAY_API_VERSIONS)
+def test_classification_follows_the_catalog_abstract_rule(
+    reports: dict[str, dict[str, Any]],
+    version: str,
+) -> None:
+    rows = {row["path"]: row for row in reports[version]["functions"]}
+
+    def classified(classification: str) -> set[str]:
+        return {path for path, row in rows.items() if row["classification"] == classification}
+
+    assert classified("compile_time_metadata") == _ARRAY_API_META_FUNCTIONS
+    assert all(rows[path]["lowering"] == "metadata" for path in _ARRAY_API_META_FUNCTIONS)
+    assert classified("dynamic_only") == {
+        path for path, row in rows.items() if row["abstract"] == "no"
+    }
+    assert classified("staged") == {
+        path for path, row in rows.items() if row["abstract"] in {"yes", "composite"}
+    }
+    assert rows["from_dlpack"]["classification"] == "provider_passthrough"
     assert all(
-        row["derivative_status"] == "not_applicable"
-        for row in rows
-        if row["canonical_op"] in reporter.STRUCTURAL_OPS
+        not rows[path]["has_array_operand"] and rows[path]["lowering"] is None
+        for path in classified("provider_passthrough")
     )
-    assert report["summary"]["derivative_statuses"].get("unclassified", 0) == len(
-        constant_only_ruleless
-    )
-
-
-def test_fixed_arity_multi_output_ops_are_reported_as_staged(reporter: ModuleType) -> None:
-    rows = {row["path"]: row for row in reporter.build_report()["functions"]}
-
     for path in ("linalg.eigh", "linalg.qr", "linalg.slogdet", "linalg.svd"):
-        row = rows[path]
-        assert row["result_kind"] == "multiple_arrays"
-        assert row["declared_num_outputs"] > 1
-        assert row["classification"] == "staged"
-
-    assert all(
-        row["declared_num_outputs"] is None
-        for row in rows.values()
-        if row["classification"] == "multi_output_unsupported"
-    )
+        assert rows[path]["result_kind"] == "multiple_arrays"
+        assert rows[path]["classification"] == "staged"
 
 
+@pytest.mark.parametrize("version", SUPPORTED_ARRAY_API_VERSIONS)
 def test_execution_catalog_accounts_for_every_staged_function(
-    reporter: ModuleType,
+    reports: dict[str, dict[str, Any]],
+    version: str,
 ) -> None:
-    rows = {row["path"]: row for row in reporter.build_report()["functions"]}
-    staged = {path for path, row in rows.items() if row["classification"] == "staged"}
-    executable = {
-        path for path, row in rows.items() if row["execution_qualification"] == "executable"
-    }
-    declared_gaps = {
-        path
-        for path, row in rows.items()
-        if row["execution_qualification"] == "declared_not_executable"
-    }
-    portable = {path for path, row in rows.items() if row["portable_execution_case"]}
+    rows = reports[version]["functions"]
+    staged = {row["path"] for row in rows if row["classification"] == "staged"}
+    executable = {row["path"] for row in rows if row["execution_qualification"] == "executable"}
+    portable = {row["path"] for row in rows if row["portable_execution_case"]}
 
-    assert executable | declared_gaps == staged
-    assert executable & declared_gaps == set()
-    assert declared_gaps == set()
-    assert len(executable) == len(staged)
-    assert len(portable) == sum(case.portable for case in reporter._execution_cases().values())
+    assert executable == staged
+    assert portable == {case.path for case in operation_cases(version) if case.portable}
 
 
-def test_human_report_renders_the_live_registry(reporter: ModuleType) -> None:
-    rendered = reporter._human_report(reporter.build_report())
+@pytest.mark.parametrize("version", SUPPORTED_ARRAY_API_VERSIONS)
+def test_only_structural_ops_lack_derivative_rules(
+    reports: dict[str, dict[str, Any]],
+    version: str,
+) -> None:
+    rows = reports[version]["functions"]
+    ruleless = {row["path"] for row in rows if "no" in {row["jvp"], row["vjp"]}}
+
+    assert ruleless
+    assert ruleless <= {row["path"] for row in rows if row["structural"]}
+
+
+def test_human_report_renders_the_catalog_join(reports: dict[str, dict[str, Any]]) -> None:
+    rendered = reporter._human_report(reports[LATEST_ARRAY_API_VERSION])
+
     assert "Array API 2024.12 support" in rendered
     assert "Support classifications:" in rendered
-    assert "Derivative status:" in rendered
-
-
-@pytest.mark.parametrize(
-    ("version", "expected_count"),
-    [("2022.12", 152), ("2023.12", 164), ("2024.12", 170)],
-)
-def test_report_materializes_each_declared_revision(
-    reporter: ModuleType,
-    version: str,
-    expected_count: int,
-) -> None:
-    report = reporter.build_report(version)
-    rows = report["functions"]
-    profile = materialize_array_api_profile(version)
-
-    assert report["api_version"] == version
-    assert report["summary"]["official_functions"] == expected_count
-    assert {row["path"] for row in rows} == set(profile.signatures)
+    assert "JVP:" in rendered
+    assert "VJP:" in rendered
+    assert "Structural ops without derivative rules (no differentiable input):" in rendered

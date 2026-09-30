@@ -4,9 +4,10 @@ use advect_runtime::{
     ExecutionError, Host, LinkedExecutionPlan, LinkedOperation, NodeId, Operand, OutputOwnership,
     PortableConstant, ValueSpec,
 };
-use pyo3::exceptions::{PyAttributeError, PyRuntimeError, PyTypeError, PyValueError};
+use pyo3::exceptions::{PyRuntimeError, PyTypeError, PyValueError};
+use pyo3::intern;
 use pyo3::prelude::*;
-use pyo3::types::{PyBool, PyComplex, PyFloat, PyInt, PyTuple};
+use pyo3::types::{PyBool, PyComplex, PyFloat, PyInt, PyString, PyTuple};
 use std::collections::BTreeMap;
 
 use crate::staged::GraphStore;
@@ -84,17 +85,19 @@ impl Host for PythonHost<'_> {
                 "staged evaluator binder returned a non-callable for {op:?}"
             )));
         }
-        let donation_positions =
-            optional_positions_attr(self.py, &evaluator, "__advect_donation_positions__")?;
-        let alias_positions =
-            optional_positions_attr(self.py, &evaluator, "__advect_alias_positions__")?;
+        let donation_positions: Vec<usize> = optional_attr(
+            &evaluator,
+            intern!(self.py, "__advect_donation_positions__"),
+        )?;
+        let alias_positions: Vec<usize> =
+            optional_attr(&evaluator, intern!(self.py, "__advect_alias_positions__"))?;
         if alias_positions.len() > 1 {
             return Err(PyValueError::new_err(format!(
                 "staged evaluator for {op:?} declares more than one alias source"
             )));
         }
-        let owns_output =
-            optional_bool_attr(self.py, &evaluator, "__advect_owned_output__")?.unwrap_or(false);
+        let owns_output: bool =
+            optional_attr(&evaluator, intern!(self.py, "__advect_owned_output__"))?;
         if owns_output && !alias_positions.is_empty() {
             return Err(PyValueError::new_err(format!(
                 "staged evaluator for {op:?} cannot declare both owned and aliased output"
@@ -200,7 +203,7 @@ fn validate_python_value(
     result: &ValueSpec,
     dtype_cache: &mut DTypeCache,
 ) -> PyResult<()> {
-    if let Some(kind) = python_scalar_kind(value) {
+    if let Some(kind) = python_scalar_kind(value)? {
         let dtype = result.dtype().name();
         if result.shape().is_empty() && scalar_kind_matches_dtype(kind, dtype) {
             return Ok(());
@@ -212,24 +215,30 @@ fn validate_python_value(
         )));
     }
 
-    let type_name = value.get_type().qualname()?.to_string();
-    let shape = value.getattr("shape").map_err(|_| {
+    // Runs for every node on every call, so format the type name only on error.
+    let not_an_array = |_| {
+        let type_name = value
+            .get_type()
+            .qualname()
+            .map_or_else(|_| "value".to_owned(), |name| name.to_string());
         PyRuntimeError::new_err(format!(
             "staged operation returned {type_name}, not an array value"
         ))
-    })?;
-    let dtype = value.getattr("dtype").map_err(|_| {
-        PyRuntimeError::new_err(format!(
-            "staged operation returned {type_name}, not an array value"
-        ))
-    })?;
+    };
+    let py = value.py();
+    let shape = value.getattr(intern!(py, "shape")).map_err(not_an_array)?;
+    let dtype = value.getattr(intern!(py, "dtype")).map_err(not_an_array)?;
     let actual_shape = shape
         .extract::<Vec<usize>>()
         .map_err(|_| PyRuntimeError::new_err("staged operation returned an invalid array shape"))?;
-    let actual_dtype = dtype_cache
-        .resolve(value.py(), &dtype)
-        .map_err(|_| PyRuntimeError::new_err("staged operation returned an invalid array dtype"))?;
-    if actual_shape != result.shape() || &actual_dtype != result.dtype() {
+    let invalid_dtype =
+        |_| PyRuntimeError::new_err("staged operation returned an invalid array dtype");
+    if actual_shape != result.shape()
+        || !dtype_cache
+            .matches(py, &dtype, result.dtype())
+            .map_err(invalid_dtype)?
+    {
+        let actual_dtype = dtype_cache.resolve(py, &dtype).map_err(invalid_dtype)?;
         return Err(PyValueError::new_err(format!(
             "Staged operation declared shape={}, dtype={}; produced shape={}, dtype={}",
             format_shape(result.shape()),
@@ -241,18 +250,31 @@ fn validate_python_value(
     Ok(())
 }
 
-fn python_scalar_kind(value: &Bound<'_, PyAny>) -> Option<&'static str> {
-    if value.is_instance_of::<PyBool>() {
-        Some("bool")
+/// Classify Python scalars the way `StagedProgram` infers call specs: an
+/// instance of a built-in scalar type, subclasses such as `IntEnum` members
+/// included, is a Python scalar unless it has `shape` and `dtype`. Array
+/// scalars such as `numpy.float64` subclass `float` but have both, so they
+/// take the strict shape and dtype path.
+fn python_scalar_kind(value: &Bound<'_, PyAny>) -> PyResult<Option<&'static str>> {
+    let (kind, exact) = if value.is_instance_of::<PyBool>() {
+        // `bool` cannot be subclassed.
+        ("bool", true)
     } else if value.is_instance_of::<PyInt>() {
-        Some("int")
+        ("int", value.is_exact_instance_of::<PyInt>())
     } else if value.is_instance_of::<PyFloat>() {
-        Some("float")
+        ("float", value.is_exact_instance_of::<PyFloat>())
     } else if value.is_instance_of::<PyComplex>() {
-        Some("complex")
+        ("complex", value.is_exact_instance_of::<PyComplex>())
     } else {
-        None
+        return Ok(None);
+    };
+    if exact {
+        return Ok(Some(kind));
     }
+    let py = value.py();
+    let array_scalar =
+        value.hasattr(intern!(py, "shape"))? && value.hasattr(intern!(py, "dtype"))?;
+    Ok((!array_scalar).then_some(kind))
 }
 
 fn scalar_kind_matches_dtype(kind: &str, dtype: &str) -> bool {
@@ -328,27 +350,14 @@ fn execution_error(py: Python<'_>, error: ExecutionError<PyErr>, action: &str) -
     }
 }
 
-fn optional_positions_attr(
-    py: Python<'_>,
-    evaluator: &Bound<'_, PyAny>,
-    name: &str,
-) -> PyResult<Vec<usize>> {
-    match evaluator.getattr(name) {
-        Ok(value) => value.extract(),
-        Err(error) if error.is_instance_of::<PyAttributeError>(py) => Ok(Vec::new()),
-        Err(error) => Err(error),
-    }
-}
-
-fn optional_bool_attr(
-    py: Python<'_>,
-    evaluator: &Bound<'_, PyAny>,
-    name: &str,
-) -> PyResult<Option<bool>> {
-    match evaluator.getattr(name) {
-        Ok(value) => value.extract().map(Some),
-        Err(error) if error.is_instance_of::<PyAttributeError>(py) => Ok(None),
-        Err(error) => Err(error),
+/// Read one optional evaluator annotation, defaulting when it is absent.
+fn optional_attr<'py, T>(evaluator: &Bound<'py, PyAny>, name: &Bound<'py, PyString>) -> PyResult<T>
+where
+    T: FromPyObjectOwned<'py> + Default,
+{
+    match evaluator.getattr_opt(name)? {
+        Some(value) => value.extract().map_err(Into::into),
+        None => Ok(T::default()),
     }
 }
 

@@ -36,19 +36,17 @@ class TestIndexingErrors:
         with pytest.raises(ad.TracingError, match="only supported for integer/bool arrays"):
             ad.jvp(lambda x: x[idx0, idx1])(arr, tangents=np.ones_like(arr))
 
-    def test_getitem_traced_array_index_freezes_selection(self) -> None:
-        """Traced discrete indices select source tangents and have zero tangent."""
-        arr = np.array([[1.0, 2.0], [3.0, 4.0]])
-        idx_arr = np.array([1, 0])
+    def test_traced_advanced_index_rejects_non_discrete_dtype(self) -> None:
+        """A traced index array must also have an integer or boolean dtype."""
+        value = np.arange(6.0).reshape(3, 2)
+        index = np.asarray([0.0, 1.0])
 
-        value, tangent = ad.jvp(lambda x, idx: x[idx], argnums=(0, 1))(
-            arr,
-            idx_arr,
-            tangents=(np.arange(4.0).reshape(2, 2), np.zeros_like(idx_arr)),
-        )
-
-        np.testing.assert_array_equal(value, arr[idx_arr])
-        np.testing.assert_array_equal(tangent, np.arange(4.0).reshape(2, 2)[idx_arr])
+        with pytest.raises(ad.TracingError, match="integer or boolean dtype"):
+            ad.jvp(lambda array, positions: array[positions], argnums=(0, 1))(
+                value,
+                index,
+                tangents=(np.ones_like(value), np.zeros_like(index)),
+            )
 
     def test_getitem_outside_trace_raises(self) -> None:
         """Test that indexing outside trace context raises an error."""

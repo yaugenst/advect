@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any, cast
 import numpy as _numpy  # noqa: ICN001 - typed module and dynamic lowering namespace
 
 from advect.core._errors import TracingError
-from advect.core._protocols import _snapshot_traced
+from advect.numpy._array_function.composite import _concrete
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -21,37 +21,13 @@ NOT_FUNCTIONALIZED = object()
 
 def _bind(
     *,
-    name: str,
     args: tuple[object, ...],
     kwargs: dict[str, object],
     parameters: tuple[str, ...],
-    required: int,
     defaults: dict[str, object] | None = None,
 ) -> dict[str, object]:
-    if len(args) > len(parameters):
-        msg = f"numpy.{name} received too many positional arguments during tracing"
-        raise TracingError(msg)
-    unsupported = set(kwargs) - set(parameters)
-    if unsupported:
-        msg = f"numpy.{name} kwargs not supported during tracing: {sorted(unsupported)}"
-        raise TracingError(msg)
-    values = {} if defaults is None else dict(defaults)
-    for parameter, value in zip(parameters, args, strict=False):
-        if parameter in kwargs:
-            msg = f"numpy.{name} received {parameter} twice"
-            raise TracingError(msg)
-        values[parameter] = value
-    values.update(kwargs)
-    if any(parameter not in values for parameter in parameters[:required]):
-        msg = f"numpy.{name} is missing a required argument during tracing"
-        raise TracingError(msg)
-    return values
-
-
-def _concrete(value: object) -> object:
-    if callable(getattr(value, "_advect_snapshot", None)):
-        return _snapshot_traced(value)[1]
-    return value
+    # NumPy's dispatcher already bound the public signature.
+    return {**(defaults or {}), **dict(zip(parameters, args, strict=False)), **kwargs}
 
 
 def _destination(
@@ -59,9 +35,10 @@ def _destination(
     *,
     traced_type: type[TracedArray],
     name: str,
+    hint: str = "",
 ) -> TracedArray:
     if not isinstance(value, traced_type):
-        msg = f"numpy.{name} destination must be a TracedArray during tracing"
+        msg = f"numpy.{name} destination must be a TracedArray during tracing{hint}"
         raise TracingError(msg)
     return value
 
@@ -72,14 +49,23 @@ def _copyto(
     kwargs: dict[str, object],
 ) -> None:
     values = _bind(
-        name="copyto",
         args=args,
         kwargs=kwargs,
         parameters=("dst", "src", "casting", "where"),
-        required=2,
         defaults={"casting": "same_kind", "where": True},
     )
-    dst = _destination(values["dst"], traced_type=traced_type, name="copyto")
+    # NumPy's full and full_like fill an untraced array through copyto, which
+    # NumPy dispatches here on the traced fill value alone.
+    dst = _destination(
+        values["dst"],
+        traced_type=traced_type,
+        name="copyto",
+        hint=(
+            ". An untraced array cannot hold a traced value, as when numpy.full or "
+            "numpy.full_like fills one; spell such a fill as "
+            "numpy.broadcast_to(value, shape).astype(dtype)"
+        ),
+    )
     src = values["src"]
     where = values["where"]
     casting = str(values["casting"])
@@ -101,11 +87,9 @@ def _putmask(
     kwargs: dict[str, object],
 ) -> None:
     values = _bind(
-        name="putmask",
         args=args,
         kwargs=kwargs,
         parameters=("a", "mask", "values"),
-        required=3,
     )
     dst = _destination(values["a"], traced_type=traced_type, name="putmask")
     mask = values["mask"]
@@ -127,11 +111,9 @@ def _place(
     kwargs: dict[str, object],
 ) -> None:
     values = _bind(
-        name="place",
         args=args,
         kwargs=kwargs,
         parameters=("arr", "mask", "vals"),
-        required=3,
     )
     dst = _destination(values["arr"], traced_type=traced_type, name="place")
     mask = values["mask"]
@@ -161,11 +143,9 @@ def _fill_diagonal(
     kwargs: dict[str, object],
 ) -> None:
     values = _bind(
-        name="fill_diagonal",
         args=args,
         kwargs=kwargs,
         parameters=("a", "val", "wrap"),
-        required=2,
         defaults={"wrap": False},
     )
     dst = _destination(values["a"], traced_type=traced_type, name="fill_diagonal")
@@ -210,11 +190,9 @@ def _put(
     kwargs: dict[str, object],
 ) -> None:
     values = _bind(
-        name="put",
         args=args,
         kwargs=kwargs,
         parameters=("a", "ind", "v", "mode"),
-        required=3,
         defaults={"mode": "raise"},
     )
     dst = _destination(values["a"], traced_type=traced_type, name="put")
@@ -249,11 +227,9 @@ def _put_along_axis(
     kwargs: dict[str, object],
 ) -> None:
     values = _bind(
-        name="put_along_axis",
         args=args,
         kwargs=kwargs,
         parameters=("arr", "indices", "values", "axis"),
-        required=4,
     )
     dst = _destination(values["arr"], traced_type=traced_type, name="put_along_axis")
     indices = np.asarray(_concrete(values["indices"]), dtype=np.intp)

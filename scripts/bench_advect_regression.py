@@ -3,21 +3,21 @@
 from __future__ import annotations
 
 import argparse
-import gc
 import hashlib
 import importlib
 import json
 import math
-import platform
 import shutil
 import statistics
 import subprocess
 import sys
-import time
 import traceback
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
+
+from scripts._support.bench import advect_worker_environment, emit_report, timed_blocks
+from scripts._support.cli import fraction, positive_float, positive_int
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
@@ -56,30 +56,6 @@ class _MeasurementConfig:
     warmed_replicates: int
 
 
-def _positive_int(value: str) -> int:
-    parsed = int(value)
-    if parsed < 1:
-        message = f"expected a positive integer, got {value!r}"
-        raise argparse.ArgumentTypeError(message)
-    return parsed
-
-
-def _fraction(value: str) -> float:
-    parsed = float(value)
-    if not 0 < parsed < 1:
-        message = f"expected a fraction between zero and one, got {value!r}"
-        raise argparse.ArgumentTypeError(message)
-    return parsed
-
-
-def _positive_float(value: str) -> float:
-    parsed = float(value)
-    if parsed <= 0:
-        message = f"expected a positive number, got {value!r}"
-        raise argparse.ArgumentTypeError(message)
-    return parsed
-
-
 def _arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--reference-wheel", type=Path)
@@ -87,15 +63,15 @@ def _arguments() -> argparse.Namespace:
     parser.add_argument("--reference-revision")
     parser.add_argument("--candidate-revision")
     parser.add_argument("--uv", default=shutil.which("uv") or "uv")
-    parser.add_argument("--size", type=_positive_int, default=32)
-    parser.add_argument("--warmup", type=_positive_int, default=10)
-    parser.add_argument("--rounds", type=_positive_int, default=7)
-    parser.add_argument("--block-size", type=_positive_int, default=50)
-    parser.add_argument("--warmed-replicates", type=_positive_int, default=5)
-    parser.add_argument("--minimum-threshold", type=_fraction, default=_DEFAULT_MINIMUM_THRESHOLD)
-    parser.add_argument("--maximum-threshold", type=_fraction, default=_DEFAULT_MAXIMUM_THRESHOLD)
+    parser.add_argument("--size", type=positive_int, default=32)
+    parser.add_argument("--warmup", type=positive_int, default=10)
+    parser.add_argument("--rounds", type=positive_int, default=7)
+    parser.add_argument("--block-size", type=positive_int, default=50)
+    parser.add_argument("--warmed-replicates", type=positive_int, default=5)
+    parser.add_argument("--minimum-threshold", type=fraction, default=_DEFAULT_MINIMUM_THRESHOLD)
+    parser.add_argument("--maximum-threshold", type=fraction, default=_DEFAULT_MAXIMUM_THRESHOLD)
     parser.add_argument(
-        "--noise-multiplier", type=_positive_float, default=_DEFAULT_NOISE_MULTIPLIER
+        "--noise-multiplier", type=positive_float, default=_DEFAULT_NOISE_MULTIPLIER
     )
     parser.add_argument("--acceptance", action="store_true")
     parser.add_argument("--format", choices=("text", "json"), default="text")
@@ -104,23 +80,17 @@ def _arguments() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        for block in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
-
-
 def _artifact_provenance(path: Path, *, source_revision: str) -> dict[str, object]:
     resolved = path.expanduser().resolve()
     if not resolved.is_file() or resolved.suffix != ".whl":
         message = f"benchmark artifact is not a wheel: {resolved}"
         raise ValueError(message)
+    with resolved.open("rb") as stream:
+        digest = hashlib.file_digest(stream, "sha256").hexdigest()
     return {
         "path": str(resolved),
         "bytes": resolved.stat().st_size,
-        "sha256": _sha256(resolved),
+        "sha256": digest,
         "source_revision": source_revision,
     }
 
@@ -134,18 +104,7 @@ def _measure(
 ) -> dict[str, object]:
     for _ in range(warmup):
         call()
-    samples: list[float] = []
-    gc_enabled = gc.isenabled()
-    gc.disable()
-    try:
-        for _ in range(rounds):
-            started = time.perf_counter_ns()
-            for _ in range(block_size):
-                call()
-            samples.append((time.perf_counter_ns() - started) / (1_000.0 * block_size))
-    finally:
-        if gc_enabled:
-            gc.enable()
+    samples = timed_blocks(call, rounds=rounds, block_size=block_size)
     return {"median_us": statistics.median(samples), "samples_us": samples}
 
 
@@ -162,8 +121,6 @@ def _stencil(np: Any, size: int) -> tuple[Callable[[object], object], object]:  
 def _worker_payload(spec: _WorkerSpec) -> dict[str, object]:
     np = importlib.import_module("numpy")
     ad = importlib.import_module("advect")
-    context = importlib.import_module("advect.core._context")
-    native = importlib.import_module("advect.core._native")
     loss, value = _stencil(np, spec.size)
 
     gradient = ad.grad(loss)
@@ -254,13 +211,7 @@ def _worker_payload(spec: _WorkerSpec) -> dict[str, object]:
             "block_size": spec.block_size,
         },
         "correctness": {"passed": True, "gradient": np.asarray(expected).tolist()},
-        "environment": {
-            "python": platform.python_version(),
-            "platform": platform.platform(),
-            "numpy": np.__version__,
-            "advect_native": native.native_build_info(),
-            "advect_debug": context.is_debug(),
-        },
+        "environment": {**advect_worker_environment(), "numpy": np.__version__},
         "workloads": [
             {"name": "stencil", "lifetime": "dynamic", "phases": dynamic_phases},
             {"name": "stencil", "lifetime": "staged", "phases": staged_phases},
@@ -545,14 +496,7 @@ def _controller_main(args: argparse.Namespace) -> int:
         thresholds=thresholds,
         acceptance=args.acceptance,
     )
-    rendered = json.dumps(report, indent=2, sort_keys=True)
-    if args.output is not None:
-        args.output.parent.mkdir(parents=True, exist_ok=True)
-        args.output.write_text(f"{rendered}\n", encoding="utf-8")
-    elif args.format == "json":
-        print(rendered)
-    else:
-        _print_text(report)
+    emit_report(report, fmt=args.format, output=args.output, print_text=_print_text)
     acceptance = cast("Mapping[str, object]", report["acceptance"])
     return 0 if not acceptance["requested"] or acceptance["valid"] else 2
 

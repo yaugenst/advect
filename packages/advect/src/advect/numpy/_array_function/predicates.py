@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+from functools import partial
 from typing import TYPE_CHECKING, Any
 
 import numpy as _numpy  # noqa: ICN001 - typed module and dynamic lowering namespace
 
-from advect.core._errors import TracingError
-from advect.numpy._array_function.composite import _finish, _first_traced
+from advect.numpy._array_function.composite import (
+    _finish,
+    _first_traced,
+    _lift_composite_constant,
+)
+from advect.numpy._array_function.normalization import _bind_optional_positionals
 
 np: Any = _numpy
 
@@ -27,32 +32,6 @@ _NO_VALUE = getattr(np, "_NoValue", object())
 def _shape(value: object) -> tuple[int, ...]:
     shape = getattr(value, "shape", None)
     return tuple(int(size) for size in shape) if shape is not None else tuple(np.shape(value))
-
-
-def _bind_optional_positionals(
-    *,
-    name: str,
-    args: tuple[Any, ...],
-    kwargs: dict[str, Any],
-    required: int,
-    optional: tuple[str, ...],
-    keyword_only: frozenset[str] = frozenset(),
-) -> dict[str, Any]:
-    if len(args) < required or len(args) > required + len(optional):
-        msg = f"numpy.{name} received an invalid positional signature during tracing"
-        raise TracingError(msg)
-    allowed = set(optional) | set(keyword_only)
-    unsupported = set(kwargs) - allowed
-    if unsupported:
-        msg = f"numpy.{name} kwargs not supported during tracing: {sorted(unsupported)}"
-        raise TracingError(msg)
-    values = dict(kwargs)
-    for parameter, value in zip(optional, args[required:], strict=False):
-        if parameter in values:
-            msg = f"numpy.{name} received {parameter} twice"
-            raise TracingError(msg)
-        values[parameter] = value
-    return values
 
 
 def _truth_reduction_handler(
@@ -90,36 +69,6 @@ def _truth_reduction_handler(
     return _finish(result, traced_type=traced_type)
 
 
-def _all_handler(
-    graph: DynamicTape,
-    traced_type: type[TracedArrayLike],
-    args: tuple[Any, ...],
-    kwargs: dict[str, Any],
-) -> CompositeResult:
-    return _truth_reduction_handler(
-        graph,
-        traced_type,
-        args,
-        kwargs,
-        any_value=False,
-    )
-
-
-def _any_handler(
-    graph: DynamicTape,
-    traced_type: type[TracedArrayLike],
-    args: tuple[Any, ...],
-    kwargs: dict[str, Any],
-) -> CompositeResult:
-    return _truth_reduction_handler(
-        graph,
-        traced_type,
-        args,
-        kwargs,
-        any_value=True,
-    )
-
-
 def _isclose_result(
     a: object,
     b: object,
@@ -141,37 +90,16 @@ def _isclose_result(
     return close
 
 
-def _isclose_handler(
+def _closeness_handler(
     _graph: DynamicTape,
     traced_type: type[TracedArrayLike],
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
+    *,
+    function: Callable[..., object],
 ) -> CompositeResult:
     values = _bind_optional_positionals(
-        name="isclose",
-        args=args,
-        kwargs=kwargs,
-        required=_BINARY_ARITY,
-        optional=("rtol", "atol", "equal_nan"),
-    )
-    result = _isclose_result(
-        args[0],
-        args[1],
-        rtol=values.get("rtol", 1e-5),
-        atol=values.get("atol", 1e-8),
-        equal_nan=bool(values.get("equal_nan", False)),
-    )
-    return _finish(result, traced_type=traced_type)
-
-
-def _allclose_handler(
-    _graph: DynamicTape,
-    traced_type: type[TracedArrayLike],
-    args: tuple[Any, ...],
-    kwargs: dict[str, Any],
-) -> CompositeResult:
-    values = _bind_optional_positionals(
-        name="allclose",
+        name=function.__name__,
         args=args,
         kwargs=kwargs,
         required=_BINARY_ARITY,
@@ -184,7 +112,7 @@ def _allclose_handler(
         atol=values.get("atol", 1e-8),
         equal_nan=bool(values.get("equal_nan", False)),
     )
-    return _finish(np.all(close), traced_type=traced_type)
+    return _finish(np.all(close) if function is np.allclose else close, traced_type=traced_type)
 
 
 def _array_equal_handler(
@@ -201,11 +129,8 @@ def _array_equal_handler(
         optional=("equal_nan",),
     )
     anchor = _first_traced(args[:2], traced_type=traced_type)
-    if anchor is None:
-        msg = "numpy.array_equal requires a traced operand"
-        raise TracingError(msg)
     if _shape(args[0]) != _shape(args[1]):
-        result = np.equal(np.sum(anchor) * 0, 1)
+        result = _lift_composite_constant(np.False_, anchor)
         return _finish(result, traced_type=traced_type)
     equal = np.equal(args[0], args[1])
     if bool(values.get("equal_nan", False)):
@@ -220,19 +145,13 @@ def _array_equiv_handler(
     _graph: DynamicTape,
     traced_type: type[TracedArrayLike],
     args: tuple[Any, ...],
-    kwargs: dict[str, Any],
+    _kwargs: dict[str, Any],
 ) -> CompositeResult:
-    if len(args) != _BINARY_ARITY or kwargs:
-        msg = "numpy.array_equiv expects two arrays during tracing"
-        raise TracingError(msg)
     anchor = _first_traced(args, traced_type=traced_type)
-    if anchor is None:
-        msg = "numpy.array_equiv requires a traced operand"
-        raise TracingError(msg)
     try:
         np.broadcast_shapes(_shape(args[0]), _shape(args[1]))
     except ValueError:
-        return _finish(np.equal(np.sum(anchor) * 0, 1), traced_type=traced_type)
+        return _finish(_lift_composite_constant(np.False_, anchor), traced_type=traced_type)
     return _finish(np.all(np.equal(args[0], args[1])), traced_type=traced_type)
 
 
@@ -259,16 +178,13 @@ def _count_nonzero_handler(
 
 
 def _unary_predicate_handler(
+    _graph: DynamicTape,
     traced_type: type[TracedArrayLike],
     args: tuple[Any, ...],
-    kwargs: dict[str, Any],
+    _kwargs: dict[str, Any],
     *,
-    name: str,
-    operation: Callable[[object], object],
+    operation: Callable[[Any], object],
 ) -> CompositeResult:
-    if len(args) != 1 or kwargs:
-        msg = f"numpy.{name} expects one array during tracing"
-        raise TracingError(msg)
     return _finish(operation(args[0]), traced_type=traced_type)
 
 
@@ -276,38 +192,18 @@ def register_predicate_handlers(
     handlers: dict[Callable[..., Any], ArrayFunctionHandler],
 ) -> None:
     """Register boolean-valued functions with exact a.e. zero derivatives."""
-    handlers[np.all] = _all_handler
-    handlers[np.any] = _any_handler
-    handlers[np.isclose] = _isclose_handler
-    handlers[np.allclose] = _allclose_handler
+    handlers[np.all] = partial(_truth_reduction_handler, any_value=False)
+    handlers[np.any] = partial(_truth_reduction_handler, any_value=True)
+    for function in (np.isclose, np.allclose):
+        handlers[function] = partial(_closeness_handler, function=function)
     handlers[np.array_equal] = _array_equal_handler
     handlers[np.array_equiv] = _array_equiv_handler
     handlers[np.count_nonzero] = _count_nonzero_handler
-    handlers[np.iscomplex] = lambda _graph, traced_type, args, kwargs: _unary_predicate_handler(
-        traced_type,
-        args,
-        kwargs,
-        name="iscomplex",
-        operation=lambda value: np.not_equal(np.imag(value), 0),
-    )
-    handlers[np.isreal] = lambda _graph, traced_type, args, kwargs: _unary_predicate_handler(
-        traced_type,
-        args,
-        kwargs,
-        name="isreal",
-        operation=lambda value: np.equal(np.imag(value), 0),
-    )
-    handlers[np.isposinf] = lambda _graph, traced_type, args, kwargs: _unary_predicate_handler(
-        traced_type,
-        args,
-        kwargs,
-        name="isposinf",
-        operation=lambda value: np.logical_and(np.isinf(value), np.greater(value, 0)),
-    )
-    handlers[np.isneginf] = lambda _graph, traced_type, args, kwargs: _unary_predicate_handler(
-        traced_type,
-        args,
-        kwargs,
-        name="isneginf",
-        operation=lambda value: np.logical_and(np.isinf(value), np.less(value, 0)),
-    )
+    unary: dict[Callable[..., Any], Callable[[Any], object]] = {
+        np.iscomplex: lambda value: np.not_equal(np.imag(value), 0),
+        np.isreal: lambda value: np.equal(np.imag(value), 0),
+        np.isposinf: lambda value: np.logical_and(np.isinf(value), np.greater(value, 0)),
+        np.isneginf: lambda value: np.logical_and(np.isinf(value), np.less(value, 0)),
+    }
+    for function, operation in unary.items():
+        handlers[function] = partial(_unary_predicate_handler, operation=operation)

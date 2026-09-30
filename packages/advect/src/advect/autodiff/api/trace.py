@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, cast
 
 from advect.autodiff.api._scalar_boundary import _is_real_python_scalar
 from advect.core._backends import dispatch_input
-from advect.core._pytree import TreeDef, tree_flatten_with_paths
+from advect.core._pytree import TreeDef, tree_flatten
 
 if TYPE_CHECKING:
     from advect.core._native import DynamicTape
@@ -27,29 +27,21 @@ def _wrap_input(
 
     Returns the traced wrapper and its node ID.
     """
-    _ = recorder  # The recorder is implicit via the active trace context.
-    traced = (
-        dispatch_input(value, name=name)
-        if active
-        else dispatch_input(value, name=name, active=False)
-    )
+    traced = dispatch_input(value, name=name, active=active)
     snapshot = getattr(traced, "_advect_snapshot_in_active_trace", None)
     if callable(snapshot):
         node_id, _value = cast("tuple[int, object]", snapshot())
-        resolved_id = node_id
-        if weak:
-            recorder.mark_weak(resolved_id)
-        return traced, resolved_id
-    if hasattr(traced, "node_id"):
-        resolved_id = int(traced.node_id)
-        if weak:
-            recorder.mark_weak(resolved_id)
-        return traced, resolved_id
-    msg = (
-        f"Backend input handler returned unsupported traced value type: {type(traced).__name__}. "
-        "Expected an object with a 'node_id' attribute."
-    )
-    raise TypeError(msg)
+    elif hasattr(traced, "node_id"):
+        node_id = int(traced.node_id)
+    else:
+        msg = (
+            "Backend input handler returned unsupported traced value type: "
+            f"{type(traced).__name__}. Expected an object with a 'node_id' attribute."
+        )
+        raise TypeError(msg)
+    if weak:
+        recorder.mark_weak(node_id)
+    return traced, node_id
 
 
 def _output_node_id(result: object, recorder: DynamicTape) -> int:
@@ -67,29 +59,26 @@ def _output_node_id(result: object, recorder: DynamicTape) -> int:
         return int(result.node_id)
 
     if _is_real_python_scalar(result):
-        value = float(result)
-        node_id = recorder.record_operation(
+        return recorder.record_operation(
             "advect.const",
             (),
-            value,
+            float(result),
             {},
             (),
             "float64",
+            weak=True,
         )
-        recorder.mark_weak(node_id)
-        return node_id
 
     if type(result) is complex:
-        node_id = recorder.record_operation(
+        return recorder.record_operation(
             "advect.const",
             (),
             result,
             {},
             (),
             "complex128",
+            weak=True,
         )
-        recorder.mark_weak(node_id)
-        return node_id
 
     if hasattr(result, "shape") and hasattr(result, "dtype"):
         shape = tuple(int(d) for d in result.shape)
@@ -113,7 +102,7 @@ def _mark_outputs(result: object, recorder: DynamicTape) -> tuple[TreeDef, list[
     if callable(getattr(result, "_advect_snapshot", None)):
         treedef, leaves = _LEAF_TREEDEF, (result,)
     else:
-        _paths, leaves, treedef = tree_flatten_with_paths(result)
+        leaves, treedef = tree_flatten(result)
     output_node_ids = [_output_node_id(leaf, recorder) for leaf in leaves]
     for node_id in dict.fromkeys(output_node_ids):
         recorder.mark_output(node_id)

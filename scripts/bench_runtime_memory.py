@@ -25,7 +25,9 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, cast
 
-from scripts._support.evidence import evidence_environment, source_revision_is_recorded
+from scripts._support.bench import advect_worker_environment, emit_report, timed_blocks
+from scripts._support.cli import byte_size, positive_float, positive_int
+from scripts._support.evidence import evidence_report_header, source_revision_is_recorded
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping, Sequence
@@ -48,6 +50,8 @@ _DONATION_MEMORY_RATIO = 0.80
 _DONATION_RUNTIME_RATIO = 1.05
 _ACCEPTANCE_TIMING_RUNS = 5
 _ACCEPTANCE_TIMING_ITERATIONS = 10
+_STAGED_WORKLOADS = frozenset({"functional_updates", "captured_constant"})
+_RETAINED_WORKLOADS = frozenset({"linear_map", "residual"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -104,7 +108,7 @@ _ACCEPTANCE_PROFILES = {
 
 @dataclass(frozen=True, slots=True)
 class _WorkerSpec:
-    case: _Case
+    cases: tuple[_Case, ...]
     byte_budget: int
     max_bytes: int
     sample_hold_seconds: float
@@ -134,53 +138,6 @@ def _staged_constant_bytes(program: _StagedProgramLike) -> int:
     return sum(record.bytes for record in program.constants)
 
 
-def _positive_int(value: str) -> int:
-    parsed = int(value)
-    if parsed < 1:
-        msg = f"expected a positive integer, got {value!r}"
-        raise argparse.ArgumentTypeError(msg)
-    return parsed
-
-
-def _positive_float(value: str) -> float:
-    parsed = float(value)
-    if parsed <= 0:
-        msg = f"expected a positive number, got {value!r}"
-        raise argparse.ArgumentTypeError(msg)
-    return parsed
-
-
-def _parse_byte_size(value: str) -> int:
-    """Parse an integer byte count or a binary KiB/MiB/GiB size."""
-    normalized = value.strip().lower().replace("_", "")
-    suffixes = {
-        "gib": 1024**3,
-        "gb": 1024**3,
-        "mib": 1024**2,
-        "mb": 1024**2,
-        "kib": 1024,
-        "kb": 1024,
-        "b": 1,
-    }
-    multiplier = 1
-    number = normalized
-    for suffix, candidate in suffixes.items():
-        if normalized.endswith(suffix):
-            multiplier = candidate
-            number = normalized[: -len(suffix)]
-            break
-    try:
-        parsed = float(number)
-    except ValueError as error:
-        msg = f"invalid byte size {value!r}"
-        raise argparse.ArgumentTypeError(msg) from error
-    result = int(parsed * multiplier)
-    if result < 1:
-        msg = f"expected a positive byte size, got {value!r}"
-        raise argparse.ArgumentTypeError(msg)
-    return result
-
-
 def _arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -188,13 +145,13 @@ def _arguments() -> argparse.Namespace:
         choices=tuple(_ACCEPTANCE_PROFILES),
         help="select an exact acceptance case matrix",
     )
-    parser.add_argument("--byte-budget", type=_parse_byte_size, default=_DEFAULT_BUDGET)
-    parser.add_argument("--max-bytes", type=_parse_byte_size, default=_DEFAULT_CAP)
-    parser.add_argument("--runs", type=_positive_int, default=5)
-    parser.add_argument("--timing-runs", type=_positive_int, default=5)
-    parser.add_argument("--timing-iterations", type=_positive_int, default=10)
-    parser.add_argument("--sample-interval-ms", type=_positive_float, default=2.0)
-    parser.add_argument("--sample-hold-ms", type=_positive_float, default=20.0)
+    parser.add_argument("--byte-budget", type=byte_size, default=_DEFAULT_BUDGET)
+    parser.add_argument("--max-bytes", type=byte_size, default=_DEFAULT_CAP)
+    parser.add_argument("--runs", type=positive_int, default=5)
+    parser.add_argument("--timing-runs", type=positive_int, default=5)
+    parser.add_argument("--timing-iterations", type=positive_int, default=10)
+    parser.add_argument("--sample-interval-ms", type=positive_float, default=2.0)
+    parser.add_argument("--sample-hold-ms", type=positive_float, default=20.0)
     parser.add_argument("--no-timing", action="store_true")
     parser.add_argument(
         "--smoke",
@@ -248,10 +205,10 @@ def _live_array_factor(workload: str) -> int:
     }[workload]
 
 
-def _element_count(spec: _WorkerSpec) -> int:
+def _element_count(case: _Case, spec: _WorkerSpec) -> int:
     return _elements_for_budget(
         spec.byte_budget,
-        live_array_factor=_live_array_factor(spec.case.workload),
+        live_array_factor=_live_array_factor(case.workload),
         max_bytes=spec.max_bytes,
     )
 
@@ -459,13 +416,13 @@ class _Reporter:
 
     def start(self, *, roots: Sequence[object]) -> None:
         self._tracker.observe(tuple(roots))
+        self._baseline_provider_bytes = self._tracker.peak_bytes
         gc.collect()
         _sync_provider(self._provider)
         tracemalloc.start()
         self._baseline_traced_bytes = tracemalloc.get_traced_memory()[0]
         tracemalloc.reset_peak()
         self.mark("baseline", roots=roots, excluded_roots=roots)
-        self._baseline_provider_bytes = self._tracker.peak_bytes
 
     def mark(
         self,
@@ -615,23 +572,12 @@ def _worker_environment(
     *,
     provider: object,
 ) -> dict[str, object]:
-    environment: dict[str, object] = {
-        "python": platform.python_version(),
-        "platform": platform.platform(),
+    return {
+        **advect_worker_environment(),
         "provider": getattr(provider, "__name__", type(provider).__name__),
         "provider_version": getattr(provider, "__version__", None),
+        "advect": getattr(importlib.import_module("advect"), "__version__", None),
     }
-    ad = importlib.import_module("advect")
-    native = importlib.import_module("advect.core._native")
-    context = importlib.import_module("advect.core._context")
-    environment.update(
-        {
-            "advect": getattr(ad, "__version__", None),
-            "advect_native": native.native_build_info(),
-            "advect_debug": context.is_debug(),
-        }
-    )
-    return environment
 
 
 def _linearize(
@@ -656,13 +602,13 @@ def _checkpoint_loss(
     provider: object,
     *,
     mode: str,
-    calls: dict[str, int],
+    counters: dict[str, int],
 ) -> Callable[[object], object]:
     ad = importlib.import_module("advect")
     region_steps = _CHECKPOINT_STEPS // _CHECKPOINT_REGIONS
 
     def region(field: object) -> object:
-        calls["count"] += 1
+        counters["calls"] += 1
         return _field_block(provider, field, steps=region_steps)
 
     active_region = ad.checkpoint(region) if mode == "checkpoint" else region
@@ -681,8 +627,8 @@ def _residual_loss(
     provider: object,
     spec: _WorkerSpec,
     *,
-    tracker_box: list[_BufferTracker],
-    release_calls: dict[str, int],
+    tracker: _BufferTracker | None,
+    counters: dict[str, int],
 ) -> tuple[Callable[[object], object], int]:
     ad = importlib.import_module("advect")
     residual_elements = _elements_for_budget(
@@ -701,11 +647,12 @@ def _residual_loss(
         payload = dynamic_provider.empty(residual_elements, dtype=dynamic_provider.float64)
         payload.fill(1.0)
         residual = (scale, payload)
-        tracker_box[0].observe(residual)
+        if tracker is not None:
+            tracker.observe(residual)
         dynamic_field = cast("Any", field)
 
         def release(_residual: object) -> None:
-            release_calls["count"] += 1
+            counters["releases"] += 1
 
         return ad.PrimitiveResult(
             dynamic_field * dynamic_field,
@@ -745,110 +692,106 @@ def _residual_loss(
     return loss, residual_elements * 8
 
 
-def _run_advect_dynamic_memory(spec: _WorkerSpec, provider: object) -> dict[str, object]:
-    importlib.import_module("advect.numpy")
-    elements = _element_count(spec)
+def _functional_update(field: object) -> object:
+    result = field.copy()  # type: ignore[attr-defined]
+    for _ in range(_UPDATE_STEPS):
+        result[1:-1] += 0.125
+    return result
+
+
+@dataclass(frozen=True, slots=True)
+class _Workload:
+    """The function every measurement of one case runs, and what it counts."""
+
+    function: Callable[[object], object]
+    roots: tuple[object, ...]
+    counters: dict[str, int]
+    residual_payload_bytes: int = 0
+
+
+def _workload(
+    case: _Case,
+    spec: _WorkerSpec,
+    provider: object,
+    value: object,
+    *,
+    tracker: _BufferTracker | None,
+) -> _Workload:
+    """Build *case* over *value*; a memory run's *tracker* observes residuals."""
+    counters = {"calls": 0, "releases": 0}
+    if case.workload in {"elementwise", "linear_map"}:
+        return _Workload(_elementwise_loss(provider, depth=_DYNAMIC_DEPTH), (value,), counters)
+    if case.workload == "stencil":
+        return _Workload(_stencil_loss(provider, steps=_STENCIL_STEPS), (value,), counters)
+    if case.workload == "checkpoint":
+        loss = _checkpoint_loss(provider, mode=case.mode, counters=counters)
+        return _Workload(loss, (value,), counters)
+    if case.workload == "residual":
+        loss, payload_bytes = _residual_loss(provider, spec, tracker=tracker, counters=counters)
+        return _Workload(loss, (value,), counters, payload_bytes)
+    if case.workload == "functional_updates":
+        return _Workload(_functional_update, (value,), counters)
+    if case.workload == "captured_constant":
+        constant = cast("Callable[[object], object]", cast("Any", provider).copy)(value)
+
+        def captured(field: object) -> object:
+            return field * constant + 0.25  # type: ignore[operator]
+
+        return _Workload(captured, (value, constant), counters)
+    msg = f"unsupported Advect workload {case.workload!r}"
+    raise ValueError(msg)
+
+
+def _run_dynamic_memory(case: _Case, spec: _WorkerSpec, provider: object) -> dict[str, object]:
+    elements = _element_count(case, spec)
     value = _make_input(provider, elements)
-    calls = {"count": 0}
-    residual_releases = {"count": 0}
-    residual_tracker: _BufferTracker | None = None
-    reporter_tracker_box: list[_BufferTracker] = []
-    residual_payload_bytes = 0
-
-    if spec.case.workload in {"elementwise", "linear_map"}:
-        loss = _elementwise_loss(provider, depth=_DYNAMIC_DEPTH)
-    elif spec.case.workload == "stencil":
-        loss = _stencil_loss(provider, steps=_STENCIL_STEPS)
-    elif spec.case.workload == "checkpoint":
-        loss = _checkpoint_loss(
-            provider,
-            mode=spec.case.mode,
-            calls=calls,
-        )
-    elif spec.case.workload == "residual":
-        loss, residual_payload_bytes = _residual_loss(
-            provider,
-            spec,
-            tracker_box=reporter_tracker_box,
-            release_calls=residual_releases,
-        )
-    else:
-        msg = f"unsupported Advect dynamic workload {spec.case.workload!r}"
-        raise ValueError(msg)
-
     reporter = _Reporter(provider, hold_seconds=spec.sample_hold_seconds)
-    if spec.case.workload == "residual":
-        reporter_tracker_box.append(reporter.tracker)
-        residual_tracker = reporter.tracker
-    reporter.start(roots=(value,))
-    output, linear = _linearize(
-        loss,
-        value,
-        reverse_only=spec.case.workload not in {"linear_map", "residual"},
-    )
-    forward_calls = calls["count"]
+    workload = _workload(case, spec, provider, value, tracker=reporter.tracker)
+    counters = workload.counters
+    retained = case.workload in _RETAINED_WORKLOADS
+    reporter.start(roots=workload.roots)
+    output, linear = _linearize(workload.function, value, reverse_only=not retained)
+    forward_calls = counters["calls"]
     tape = linear._trace.tape  # noqa: SLF001 - benchmark lifetime inspection
-    reporter.mark(
-        "forward",
-        roots=(value, output),
-        excluded_roots=(value, output),
-        tape=tape,
-        extra={
-            "forward_calls": forward_calls,
-            "residual_release_count": residual_releases["count"],
-            "residual_payload_bytes": residual_payload_bytes,
-        },
-    )
+
+    def mark(phase: str, *roots: object, collect: bool = False, **extra: object) -> None:
+        reporter.mark(
+            phase,
+            roots=(value, *roots),
+            excluded_roots=(value, *roots),
+            tape=tape,
+            collect=collect,
+            extra={
+                "forward_calls": forward_calls,
+                "residual_release_count": counters["releases"],
+                "residual_payload_bytes": workload.residual_payload_bytes,
+                **extra,
+            },
+        )
+
+    mark("forward", output)
     cotangent = _ones_like(provider, output)
-    if spec.case.workload in {"linear_map", "residual"}:
-        gradient = linear.pullback(cotangent)
-        reporter.mark(
-            "reverse_retained",
-            roots=(value, output, gradient),
-            excluded_roots=(value, output, gradient),
-            tape=tape,
-            extra={
-                "forward_calls": forward_calls,
-                "recomputation_count": max(0, calls["count"] - forward_calls),
-                "residual_release_count": residual_releases["count"],
-                "residual_payload_bytes": residual_payload_bytes,
-            },
-        )
-        linear.close()
+    if retained:
+        phase, gradient = "reverse_retained", linear.pullback(cotangent)
     else:
-        gradient = linear._consume_pullback(cotangent)  # noqa: SLF001
-        reporter.mark(
-            "reverse",
-            roots=(value, output, gradient),
-            excluded_roots=(value, output, gradient),
-            tape=tape,
-            extra={
-                "forward_calls": forward_calls,
-                "recomputation_count": max(0, calls["count"] - forward_calls),
-                "residual_release_count": residual_releases["count"],
-                "residual_payload_bytes": residual_payload_bytes,
-            },
-        )
-    reporter.mark(
+        phase, gradient = "reverse", linear._pullback(cotangent, consume=True)  # noqa: SLF001
+    mark(phase, output, gradient, recomputation_count=counters["calls"] - forward_calls)
+    if retained:
+        linear.close()
+    mark(
         "closed",
-        roots=(value, output, gradient),
-        excluded_roots=(value, output, gradient),
-        tape=tape,
+        output,
+        gradient,
         collect=True,
-        extra={
-            "forward_calls": forward_calls,
-            "recomputation_count": max(0, calls["count"] - forward_calls),
-            "residual_release_count": residual_releases["count"],
-            "residual_payload_bytes": residual_payload_bytes,
-            "residual_tracker_active": residual_tracker is not None,
-        },
+        recomputation_count=counters["calls"] - forward_calls,
+        residual_tracker_active=case.workload == "residual",
     )
     reporter.stop()
     return {
         "elements": elements,
         "input_bytes": int(getattr(value, "nbytes", 0)),
         "provider_accounting": "all retained tape values and observed residuals",
-        "residual_payload_bytes": residual_payload_bytes,
+        "residual_payload_bytes": workload.residual_payload_bytes,
     }
 
 
@@ -909,14 +852,19 @@ def _stage_with_profile_binding(
         stage_module.bind_native_node_evaluator = original
 
 
-def _functional_update_function() -> Callable[[object], object]:
-    def update(field: object) -> object:
-        result = field.copy()  # type: ignore[attr-defined]
-        for _ in range(_UPDATE_STEPS):
-            result[1:-1] += 0.125
-        return result
-
-    return update
+def _stage_workload(
+    case: _Case,
+    workload: _Workload,
+    *,
+    elements: int,
+    tracker: _BufferTracker | None,
+) -> _StagedProgramLike:
+    return _stage_with_profile_binding(
+        workload.function,
+        elements=elements,
+        tracker=tracker,
+        force_fresh=case.mode == "forced_fresh",
+    )
 
 
 def _staged_provider_cache_roots(program: _StagedProgramLike) -> tuple[object, ...]:
@@ -927,88 +875,46 @@ def _staged_provider_cache_roots(program: _StagedProgramLike) -> tuple[object, .
     return tuple(roots)
 
 
-def _run_staged_memory(spec: _WorkerSpec, provider: object) -> dict[str, object]:
-    importlib.import_module("advect.numpy")
-    elements = _element_count(spec)
+def _run_staged_memory(case: _Case, spec: _WorkerSpec, provider: object) -> dict[str, object]:
+    elements = _element_count(case, spec)
     value = _make_input(provider, elements)
     reporter = _Reporter(provider, hold_seconds=spec.sample_hold_seconds)
-
-    if spec.case.workload == "functional_updates":
-        function = _functional_update_function()
-        force_fresh = spec.case.mode == "forced_fresh"
-        program = _stage_with_profile_binding(
-            function,
-            elements=elements,
-            tracker=reporter.tracker,
-            force_fresh=force_fresh,
-        )
-        constant_bytes = 0
-        caller_roots = (value,)
-        reporter.start(roots=caller_roots)
-    else:
-        constant = cast("Callable[[object], object]", cast("Any", provider).copy)(value)
-        caller_roots = (value, constant)
-        reporter.start(roots=caller_roots)
-
-        def function(field: object) -> object:
-            return field * constant + 0.25  # type: ignore[operator]
-
-        force_fresh = False
-        program = _stage_with_profile_binding(
-            function,
-            elements=elements,
-            tracker=reporter.tracker,
-            force_fresh=False,
-        )
-        constant_bytes = int(getattr(constant, "nbytes", 0))
-        reporter.mark(
-            "compiled",
-            roots=caller_roots,
-            excluded_roots=caller_roots,
-            extra={
-                "force_fresh": force_fresh,
-                "constant_bytes": constant_bytes,
-                "constant_manifest_bytes": _staged_constant_bytes(program),
-                "compile_seconds": program.compile_seconds,
-            },
-        )
-
-    compile_seconds = program.compile_seconds
+    workload = _workload(case, spec, provider, value, tracker=reporter.tracker)
+    roots = workload.roots
+    # Donation compares execution alone, so functional updates compile before
+    # the baseline; a captured constant reports its compilation as a phase.
+    compiled_phase = case.workload != "functional_updates"
+    if compiled_phase:
+        reporter.start(roots=roots)
+    program = _stage_workload(case, workload, elements=elements, tracker=reporter.tracker)
+    if not compiled_phase:
+        reporter.start(roots=roots)
+    extra = {
+        "force_fresh": case.mode == "forced_fresh",
+        "constant_bytes": sum(int(getattr(root, "nbytes", 0)) for root in roots[1:]),
+        "constant_manifest_bytes": _staged_constant_bytes(program),
+        "compile_seconds": program.compile_seconds,
+    }
+    if compiled_phase:
+        reporter.mark("compiled", roots=roots, excluded_roots=roots, extra=extra)
     output = program(value)
     provider_cache_roots = _staged_provider_cache_roots(program)
-    result_roots = (*caller_roots, output)
-    reporter.mark(
-        "execute",
-        roots=result_roots,
-        excluded_roots=result_roots,
-        provider_cache_roots=provider_cache_roots,
-        extra={
-            "force_fresh": force_fresh,
-            "constant_bytes": constant_bytes,
-            "constant_manifest_bytes": _staged_constant_bytes(program),
-            "compile_seconds": compile_seconds,
-        },
-    )
-    reporter.mark(
-        "closed",
-        roots=result_roots,
-        excluded_roots=result_roots,
-        provider_cache_roots=provider_cache_roots,
-        collect=True,
-        extra={
-            "force_fresh": force_fresh,
-            "constant_bytes": constant_bytes,
-            "constant_manifest_bytes": _staged_constant_bytes(program),
-            "compile_seconds": compile_seconds,
-        },
-    )
+    for phase in ("execute", "closed"):
+        reporter.mark(
+            phase,
+            roots=(*roots, output),
+            excluded_roots=(*roots, output),
+            provider_cache_roots=provider_cache_roots,
+            collect=phase == "closed",
+            extra=extra,
+        )
     reporter.stop()
     return {
         "elements": elements,
         "input_bytes": int(getattr(value, "nbytes", 0)),
         "provider_accounting": "instrumented staged evaluator inputs and outputs",
-        "force_fresh": force_fresh,
-        "compile_seconds": compile_seconds,
+        "force_fresh": extra["force_fresh"],
+        "compile_seconds": program.compile_seconds,
     }
 
 
@@ -1046,96 +952,53 @@ def _assert_provider_allclose(provider: object, actual: object, expected: object
     cast("Any", provider).testing.assert_allclose(actual, expected, rtol=2e-6, atol=2e-8)
 
 
-def _run_correctness_preflight(spec: _WorkerSpec, provider: object) -> dict[str, object]:
+def _run_correctness_preflight(
+    case: _Case,
+    spec: _WorkerSpec,
+    provider: object,
+) -> dict[str, object]:
     """Check one scenario outside every measured memory and timing worker."""
     ad = importlib.import_module("advect")
-    importlib.import_module("advect.numpy")
     dynamic_provider = cast("Any", provider)
     elements = 16
     value = _make_input(provider, elements)
     original = dynamic_provider.copy(value)
-    case = spec.case
+    workload = _workload(case, spec, provider, value, tracker=None)
+    function = workload.function
 
-    if case.workload in {"elementwise", "stencil"}:
-        loss = (
-            _elementwise_loss(provider, depth=_DYNAMIC_DEPTH)
-            if case.workload == "elementwise"
-            else _stencil_loss(provider, steps=_STENCIL_STEPS)
-        )
-        gradient = ad.grad(loss)(value)
-        direction = dynamic_provider.linspace(0.2, 0.8, elements, dtype=dynamic_provider.float64)
-        epsilon = 1e-5
-        finite_difference = (
-            loss(value + epsilon * direction) - loss(value - epsilon * direction)
-        ) / (2 * epsilon)
-        directional = dynamic_provider.sum(gradient * direction)
-        _assert_provider_allclose(provider, directional, finite_difference)
-    elif case.workload == "checkpoint":
-        measured_loss = _checkpoint_loss(provider, mode=case.mode, calls={"count": 0})
-        plain_loss = _checkpoint_loss(provider, mode="plain", calls={"count": 0})
-        _assert_provider_allclose(provider, measured_loss(value), plain_loss(value))
-        _assert_provider_allclose(
-            provider,
-            ad.grad(measured_loss)(value),
-            ad.grad(plain_loss)(value),
-        )
-    elif case.workload == "functional_updates":
-        function = _functional_update_function()
-        donated = _stage_with_profile_binding(
-            function,
-            elements=elements,
-            tracker=None,
-            force_fresh=False,
-        )
-        forced_fresh = _stage_with_profile_binding(
-            function,
-            elements=elements,
-            tracker=None,
-            force_fresh=True,
-        )
+    if case.workload in _STAGED_WORKLOADS:
+        program = _stage_workload(case, workload, elements=elements, tracker=None)
         expected = function(value)
-        _assert_provider_allclose(provider, donated(value), expected)
-        _assert_provider_allclose(provider, forced_fresh(value), expected)
+        _assert_provider_allclose(provider, program(value), expected)
+        if case.workload == "captured_constant":
+            restored = ad.StagedProgram.from_dict(program.to_dict())
+            _assert_provider_allclose(provider, restored(value), expected)
+    elif case.workload == "checkpoint":
+        plain = _checkpoint_loss(provider, mode="plain", counters={"calls": 0})
+        _assert_provider_allclose(provider, function(value), plain(value))
+        _assert_provider_allclose(provider, ad.grad(function)(value), ad.grad(plain)(value))
     elif case.workload == "residual":
-        releases = {"count": 0}
-        loss, _payload_bytes = _residual_loss(
-            provider,
-            spec,
-            tracker_box=[_BufferTracker()],
-            release_calls=releases,
-        )
-        _assert_provider_allclose(provider, ad.grad(loss)(value), 2 * value)
-        if releases["count"] != 1:
-            msg = f"residual release ran {releases['count']} times, not once"
+        _assert_provider_allclose(provider, ad.grad(function)(value), 2 * value)
+        if (releases := workload.counters["releases"]) != 1:
+            msg = f"residual release ran {releases} times, not once"
             raise AssertionError(msg)
     elif case.workload == "linear_map":
-        loss = _elementwise_loss(provider, depth=_DYNAMIC_DEPTH)
-        expected = ad.grad(loss)(value)
-        output, linear = ad.linearize(loss, value)
+        expected = ad.grad(function)(value)
+        output, linear = ad.linearize(function, value)
         try:
             actual = linear.transpose()(_ones_like(provider, output))
         finally:
             linear.close()
         _assert_provider_allclose(provider, actual, expected)
-    elif case.workload == "captured_constant":
-        constant = dynamic_provider.copy(value)
-
-        def function(field: object) -> object:
-            return field * constant + 0.25  # type: ignore[operator]
-
-        program = _stage_with_profile_binding(
-            function,
-            elements=elements,
-            tracker=None,
-            force_fresh=False,
-        )
-        restored = ad.StagedProgram.from_dict(program.to_dict())
-        expected = function(value)
-        _assert_provider_allclose(provider, program(value), expected)
-        _assert_provider_allclose(provider, restored(value), expected)
     else:
-        msg = f"no correctness preflight for {case.workload!r}"
-        raise ValueError(msg)
+        gradient = ad.grad(function)(value)
+        direction = dynamic_provider.linspace(0.2, 0.8, elements, dtype=dynamic_provider.float64)
+        epsilon = 1e-5
+        finite_difference = (
+            function(value + epsilon * direction) - function(value - epsilon * direction)
+        ) / (2 * epsilon)
+        directional = dynamic_provider.sum(gradient * direction)
+        _assert_provider_allclose(provider, directional, finite_difference)
 
     dynamic_provider.testing.assert_array_equal(value, original)
     _sync_provider(provider)
@@ -1146,162 +1009,94 @@ def _run_correctness_preflight(spec: _WorkerSpec, provider: object) -> dict[str,
     }
 
 
-def _timed_callable(spec: _WorkerSpec, provider: object) -> Callable[[], object]:
-    case = spec.case
-    elements = _element_count(spec)
-    value = _make_input(provider, elements)
+def _run_timing(case: _Case, spec: _WorkerSpec, provider: object) -> dict[str, object]:
     ad = importlib.import_module("advect")
-    importlib.import_module("advect.numpy")
-    recomputations = {"count": 0}
-    if case.workload == "elementwise":
-        call = ad.grad(_elementwise_loss(provider, depth=_DYNAMIC_DEPTH))
-        return lambda: call(value)
-    if case.workload == "stencil":
-        call = ad.grad(_stencil_loss(provider, steps=_STENCIL_STEPS))
-        return lambda: call(value)
-    if case.workload == "checkpoint":
-        loss = _checkpoint_loss(
-            provider,
-            mode=case.mode,
-            calls=recomputations,
-        )
-        call = ad.grad(loss)
+    elements = _element_count(case, spec)
+    value = _make_input(provider, elements)
+    workload = _workload(case, spec, provider, value, tracker=None)
+    if case.workload in _STAGED_WORKLOADS:
+        program = _stage_workload(case, workload, elements=elements, tracker=None)
 
-        def checkpoint_call() -> object:
-            before = recomputations["count"]
-            result = call(value)
-            after = recomputations["count"]
-            checkpoint_call.recomputations = max(  # type: ignore[attr-defined]
-                0,
-                after - before - _CHECKPOINT_REGIONS,
-            )
-            return result
+        def call() -> object:
+            return program(value)
 
-        checkpoint_call.recomputations = 0  # type: ignore[attr-defined]
-        return checkpoint_call
-    if case.workload == "functional_updates":
-        program = _stage_with_profile_binding(
-            _functional_update_function(),
-            elements=elements,
-            tracker=None,
-            force_fresh=case.mode == "forced_fresh",
-        )
-        return lambda: program(value)
-    if case.workload == "captured_constant":
-        constant = cast("Callable[[object], object]", cast("Any", provider).copy)(value)
+    elif case.workload in _RETAINED_WORKLOADS:
 
-        def function(field: object) -> object:
-            return field * constant + 0.25  # type: ignore[operator]
-
-        program = _stage_with_profile_binding(
-            function,
-            elements=elements,
-            tracker=None,
-            force_fresh=False,
-        )
-        return lambda: program(value)
-    if case.workload in {"residual", "linear_map"}:
-        if case.workload == "residual":
-            loss, _payload_bytes = _residual_loss(
-                provider,
-                spec,
-                tracker_box=[_BufferTracker()],
-                release_calls={"count": 0},
-            )
-        else:
-            loss = _elementwise_loss(provider, depth=_DYNAMIC_DEPTH)
-
-        def linear_call() -> object:
-            output, linear = ad.linearize(loss, value)
+        def call() -> object:
+            output, linear = ad.linearize(workload.function, value)
             try:
                 return linear.pullback(_ones_like(provider, output))
             finally:
                 linear.close()
 
-        return linear_call
-    msg = f"unsupported timing workload {case.workload!r}"
-    raise ValueError(msg)
+    else:
+        gradient = ad.grad(workload.function)
 
+        def call() -> object:
+            return gradient(value)
 
-def _run_timing(spec: _WorkerSpec, provider: object) -> dict[str, object]:
-    call = _timed_callable(spec, provider)
-    for _ in range(3):
+    calls_before = workload.counters["calls"]
+    call()
+    recomputations = workload.counters["calls"] - calls_before - _CHECKPOINT_REGIONS
+    for _ in range(2):
         call()
     _sync_provider(provider)
     gc.collect()
-    gc_was_enabled = gc.isenabled()
-    gc.disable()
-    try:
-        started = time.perf_counter_ns()
-        for _ in range(spec.timing_iterations):
-            call()
-        _sync_provider(provider)
-        elapsed_ns = time.perf_counter_ns() - started
-    finally:
-        if gc_was_enabled:
-            gc.enable()
+    (microseconds,) = timed_blocks(
+        call,
+        rounds=1,
+        block_size=spec.timing_iterations,
+        synchronize=lambda: _sync_provider(provider),
+    )
     return {
         "iterations": spec.timing_iterations,
-        "seconds_per_call": elapsed_ns / (1e9 * spec.timing_iterations),
-        "recomputation_count": int(getattr(call, "recomputations", 0)),
+        "seconds_per_call": microseconds / 1e6,
+        "recomputation_count": max(0, recomputations),
     }
 
 
-def _run_worker(spec: _WorkerSpec) -> dict[str, object]:
-    if spec.case.workload == "allocation_probe":
-        if spec.measurement == "timing":
-            return {"status": "not_applicable"}
+def _run_worker(case: _Case, spec: _WorkerSpec) -> dict[str, object]:
+    if case.workload == "allocation_probe":
         result = _run_allocation_probe(spec)
         environment = {
             "python": platform.python_version(),
             "platform": platform.platform(),
         }
     else:
-        provider = _load_provider(spec.case.provider)
+        provider = _load_provider(case.provider)
+        importlib.import_module("advect.numpy")
         environment = _worker_environment(provider=provider)
         if spec.measurement == "correctness":
-            result = _run_correctness_preflight(spec, provider)
+            result = _run_correctness_preflight(case, spec, provider)
         elif spec.measurement == "timing":
-            result = _run_timing(spec, provider)
-        elif spec.case.workload in {"functional_updates", "captured_constant"}:
-            result = _run_staged_memory(spec, provider)
+            result = _run_timing(case, spec, provider)
+        elif case.workload in _STAGED_WORKLOADS:
+            result = _run_staged_memory(case, spec, provider)
         else:
-            result = _run_advect_dynamic_memory(spec, provider)
-    return {
-        "status": "ok",
-        "event": "result",
-        "case": asdict(spec.case),
-        "measurement": spec.measurement,
-        "environment": environment,
-        **result,
-    }
+            result = _run_dynamic_memory(case, spec, provider)
+    return {"status": "ok", "environment": environment, **result}
 
 
 def _worker_main(raw_spec: str) -> int:
+    """Run every case of one spec, printing one result event per case."""
     payload = json.loads(raw_spec)
-    case = _Case(**payload.pop("case"))
-    spec = _WorkerSpec(case=case, **payload)
-    try:
-        result = _run_worker(spec)
-    except (ImportError, ModuleNotFoundError) as error:
-        result = {
-            "status": "skipped",
-            "event": "result",
-            "case": asdict(spec.case),
-            "measurement": spec.measurement,
-            "reason": str(error),
-        }
-    except Exception as error:  # noqa: BLE001 - child must report structured diagnostics
-        result = {
-            "status": "error",
-            "event": "result",
-            "case": asdict(spec.case),
-            "measurement": spec.measurement,
-            "reason": f"{type(error).__name__}: {error}",
-            "traceback": traceback.format_exc(),
-        }
-    print(json.dumps(result, sort_keys=True), flush=True)
-    return 0 if result["status"] in {"ok", "skipped"} else 1
+    spec = _WorkerSpec(cases=tuple(_Case(**case) for case in payload.pop("cases")), **payload)
+    statuses: list[object] = []
+    for case in spec.cases:
+        try:
+            result = _run_worker(case, spec)
+        except (ImportError, ModuleNotFoundError) as error:
+            result = {"status": "skipped", "reason": str(error)}
+        except Exception as error:  # noqa: BLE001 - child must report structured diagnostics
+            result = {
+                "status": "error",
+                "reason": f"{type(error).__name__}: {error}",
+                "traceback": traceback.format_exc(),
+            }
+        result |= {"event": "result", "case": asdict(case), "measurement": spec.measurement}
+        print(json.dumps(result, sort_keys=True), flush=True)
+        statuses.append(result["status"])
+    return 0 if set(statuses) <= {"ok", "skipped"} else 1
 
 
 def _sample_process(
@@ -1384,7 +1179,8 @@ def _run_isolated(
     *,
     sample_interval_seconds: float,
     include_samples: bool,
-) -> dict[str, object]:
+) -> list[dict[str, object]]:
+    """Run *spec* in a child and return one result per case, in case order."""
     command = [
         sys.executable,
         "-m",
@@ -1404,36 +1200,33 @@ def _run_isolated(
         else []
     )
     stdout, stderr = process.communicate()
-    events: list[dict[str, object]] = []
-    for line in stdout.splitlines():
-        if not line.strip():
-            continue
-        events.append(cast("dict[str, object]", json.loads(line)))
-    result = next(
-        (event for event in reversed(events) if event.get("event") == "result"),
-        None,
-    )
-    if result is None:
-        return {
+    events = [cast("dict[str, object]", json.loads(line)) for line in stdout.splitlines() if line]
+    results = [event for event in events if event.get("event") == "result"]
+    if spec.measurement == "memory":
+        markers = [event for event in events if event.get("event") == "phase"]
+        for result in results:
+            _annotate_memory_result(
+                result,
+                markers=markers,
+                samples=samples,
+                include_samples=include_samples,
+            )
+    for result in results:
+        if stderr:
+            result["stderr"] = stderr
+    results.extend(
+        {
             "status": "error",
-            "case": asdict(spec.case),
+            "case": asdict(case),
             "measurement": spec.measurement,
             "reason": "worker emitted no result",
             "stderr": stderr,
-            "returncode": process.returncode,
         }
-    if stderr:
-        result["stderr"] = stderr
-    result["returncode"] = process.returncode
-    if spec.measurement == "memory":
-        markers = [event for event in events if event.get("event") == "phase"]
-        _annotate_memory_result(
-            result,
-            markers=markers,
-            samples=samples,
-            include_samples=include_samples,
-        )
-    return result
+        for case in spec.cases[len(results) :]
+    )
+    for result in results:
+        result["returncode"] = process.returncode
+    return results
 
 
 def _numeric_summary(values: Sequence[float | int]) -> dict[str, float]:
@@ -1458,67 +1251,71 @@ def _numeric_summary(values: Sequence[float | int]) -> dict[str, float]:
     }
 
 
-def _marker_metric(run: Mapping[str, object], key: str) -> float | None:
-    markers = cast("Sequence[Mapping[str, object]]", run.get("markers", ()))
-    values = [
-        float(value)
-        for marker in markers
-        if (value := marker.get(key)) is not None and isinstance(value, (int, float))
-    ]
-    return max(values) if values else None
-
-
-def _marker_phase_metric(
+def _marker_values(
     run: Mapping[str, object],
-    *,
-    phases: frozenset[str],
     key: str,
-) -> float | None:
+    phase: str | None = None,
+) -> list[float]:
+    """Return every numeric *key* in the run's markers, optionally from one *phase*."""
     markers = cast("Sequence[Mapping[str, object]]", run.get("markers", ()))
-    values = [
+    return [
         float(value)
         for marker in markers
-        if marker.get("phase") in phases
-        and (value := marker.get(key)) is not None
-        and isinstance(value, (int, float))
+        if (phase is None or marker.get("phase") == phase)
+        and isinstance(value := marker.get(key), (int, float))
     ]
-    return max(values) if values else None
 
 
-def _marker_delta_from_baseline(run: Mapping[str, object], key: str) -> float | None:
-    markers = cast("Sequence[Mapping[str, object]]", run.get("markers", ()))
-    baseline = next((marker for marker in markers if marker.get("phase") == "baseline"), None)
-    if baseline is None:
+def _peak(run: Mapping[str, object], key: str, phase: str | None = None) -> float | None:
+    return max(_marker_values(run, key, phase), default=None)
+
+
+def _baseline_change(run: Mapping[str, object], key: str, *, increase: bool) -> float | None:
+    """Return the largest increase, or decrease, of *key* from its baseline marker."""
+    baseline = _marker_values(run, key, "baseline")
+    if not baseline:
         return None
-    raw_baseline = baseline.get(key)
-    if not isinstance(raw_baseline, (int, float)):
-        return None
-    values = [
-        float(value)
-        for marker in markers
-        if (value := marker.get(key)) is not None and isinstance(value, (int, float))
-    ]
-    return max(0.0, max(values, default=float(raw_baseline)) - float(raw_baseline))
+    values = _marker_values(run, key)
+    return max(0.0, max(values) - baseline[0] if increase else baseline[0] - min(values))
 
 
-def _marker_decrease_from_baseline(run: Mapping[str, object], key: str) -> float | None:
-    markers = cast("Sequence[Mapping[str, object]]", run.get("markers", ()))
-    baseline = next((marker for marker in markers if marker.get("phase") == "baseline"), None)
-    if baseline is None:
-        return None
-    raw_baseline = baseline.get(key)
-    if not isinstance(raw_baseline, (int, float)):
-        return None
-    values = [
-        float(value)
-        for marker in markers
-        if (value := marker.get(key)) is not None and isinstance(value, (int, float))
-    ]
-    return max(0.0, float(raw_baseline) - min(values, default=float(raw_baseline)))
-
-
-def _available_metrics(values: Iterable[float | None]) -> list[float]:
-    return [value for value in values if value is not None]
+_MEMORY_METRICS: tuple[tuple[str, Callable[[Mapping[str, object]], object]], ...] = (
+    ("peak_rss_delta_bytes", lambda run: run["peak_rss_delta_bytes"]),
+    ("peak_tracemalloc_delta_bytes", lambda run: _peak(run, "tracemalloc_peak_delta_bytes")),
+    ("peak_provider_delta_bytes", lambda run: _peak(run, "provider_peak_delta_bytes")),
+    (
+        "peak_provider_pool_used_delta_bytes",
+        lambda run: _baseline_change(run, "provider_pool_used_bytes", increase=True),
+    ),
+    (
+        "peak_provider_pool_reserved_delta_bytes",
+        lambda run: _baseline_change(run, "provider_pool_reserved_bytes", increase=True),
+    ),
+    (
+        "peak_device_used_delta_bytes",
+        lambda run: _baseline_change(run, "device_free_bytes", increase=False),
+    ),
+    (
+        "reverse_entry_provider_owned_bytes",
+        lambda run: _peak(run, "provider_owned_live_bytes", "forward"),
+    ),
+    (
+        "reverse_retained_provider_owned_bytes",
+        lambda run: _peak(run, "provider_owned_live_bytes", "reverse_retained"),
+    ),
+    (
+        "post_close_provider_owned_bytes",
+        lambda run: _peak(run, "provider_owned_live_bytes", "closed"),
+    ),
+    ("provider_cache_live_bytes", lambda run: _peak(run, "provider_cache_live_bytes")),
+    ("native_structural_bytes", lambda run: _peak(run, "native_structural_bytes")),
+    ("recomputation_count", lambda run: _peak(run, "recomputation_count")),
+    ("residual_release_count", lambda run: _peak(run, "residual_release_count")),
+    (
+        "compile_seconds",
+        lambda run: seconds if isinstance(seconds := run.get("compile_seconds"), float) else None,
+    ),
+)
 
 
 def _summarize_case_runs(
@@ -1529,94 +1326,14 @@ def _summarize_case_runs(
     successful_memory = [run for run in memory_runs if run.get("status") == "ok"]
     successful_timing = [run for run in timing_runs if run.get("status") == "ok"]
     memory_summary = {
-        "peak_rss_delta_bytes": _numeric_summary(
-            [cast("int", run["peak_rss_delta_bytes"]) for run in successful_memory]
-        ),
-        "peak_tracemalloc_delta_bytes": _numeric_summary(
-            _available_metrics(
-                _marker_metric(run, "tracemalloc_peak_delta_bytes") for run in successful_memory
-            )
-        ),
-        "peak_provider_delta_bytes": _numeric_summary(
-            _available_metrics(
-                _marker_metric(run, "provider_peak_delta_bytes") for run in successful_memory
-            )
-        ),
-        "peak_provider_pool_used_delta_bytes": _numeric_summary(
-            _available_metrics(
-                _marker_delta_from_baseline(run, "provider_pool_used_bytes")
-                for run in successful_memory
-            )
-        ),
-        "peak_provider_pool_reserved_delta_bytes": _numeric_summary(
-            _available_metrics(
-                _marker_delta_from_baseline(run, "provider_pool_reserved_bytes")
-                for run in successful_memory
-            )
-        ),
-        "peak_device_used_delta_bytes": _numeric_summary(
-            _available_metrics(
-                _marker_decrease_from_baseline(run, "device_free_bytes")
-                for run in successful_memory
-            )
-        ),
-        "reverse_entry_provider_owned_bytes": _numeric_summary(
-            _available_metrics(
-                _marker_phase_metric(
-                    run,
-                    phases=frozenset({"forward"}),
-                    key="provider_owned_live_bytes",
-                )
-                for run in successful_memory
-            )
-        ),
-        "reverse_retained_provider_owned_bytes": _numeric_summary(
-            _available_metrics(
-                _marker_phase_metric(
-                    run,
-                    phases=frozenset({"reverse_retained"}),
-                    key="provider_owned_live_bytes",
-                )
-                for run in successful_memory
-            )
-        ),
-        "post_close_provider_owned_bytes": _numeric_summary(
-            _available_metrics(
-                _marker_phase_metric(
-                    run,
-                    phases=frozenset({"closed"}),
-                    key="provider_owned_live_bytes",
-                )
-                for run in successful_memory
-            )
-        ),
-        "provider_cache_live_bytes": _numeric_summary(
-            _available_metrics(
-                _marker_metric(run, "provider_cache_live_bytes") for run in successful_memory
-            )
-        ),
-        "native_structural_bytes": _numeric_summary(
-            _available_metrics(
-                _marker_metric(run, "native_structural_bytes") for run in successful_memory
-            )
-        ),
-        "recomputation_count": _numeric_summary(
-            _available_metrics(
-                _marker_metric(run, "recomputation_count") for run in successful_memory
-            )
-        ),
-        "residual_release_count": _numeric_summary(
-            _available_metrics(
-                _marker_metric(run, "residual_release_count") for run in successful_memory
-            )
-        ),
-        "compile_seconds": _numeric_summary(
+        name: _numeric_summary(
             [
-                cast("float", run["compile_seconds"])
+                cast("float", value)
                 for run in successful_memory
-                if isinstance(run.get("compile_seconds"), float)
+                if (value := metric(run)) is not None
             ]
-        ),
+        )
+        for name, metric in _MEMORY_METRICS
     }
     timing_summary = _numeric_summary(
         [cast("float", run["seconds_per_call"]) for run in successful_timing]
@@ -1671,9 +1388,7 @@ def _profile_contract_violations(
             f"unexpected={sorted(actual_case_names - expected_case_names)}"
         )
     preflights = cast("Sequence[Mapping[str, object]]", payload.get("correctness_preflights", ()))
-    expected_preflights = {
-        name for name in expected_case_names if not name.startswith("allocation_probe:")
-    }
+    expected_preflights = {case.name for case in _correctness_preflight_cases(profile.cases)}
     actual_preflights = {
         cast("str", item.get("scenario", ""))
         for item in preflights
@@ -1695,19 +1410,6 @@ def _profile_contract_violations(
     return violations
 
 
-def _phase_metric_is_present(
-    run: Mapping[str, object],
-    *,
-    phase: str,
-    key: str,
-) -> bool:
-    markers = cast("Sequence[Mapping[str, object]]", run.get("markers", ()))
-    return any(
-        marker.get("phase") == phase and isinstance(marker.get(key), (int, float))
-        for marker in markers
-    )
-
-
 def _required_memory_metrics(
     run: Mapping[str, object],
     *,
@@ -1720,20 +1422,12 @@ def _required_memory_metrics(
         required.append(
             (
                 "provider_pool_reserved_delta",
-                _marker_delta_from_baseline(run, "provider_pool_reserved_bytes") is not None,
+                _baseline_change(run, "provider_pool_reserved_bytes", increase=True) is not None,
             )
         )
-    if case["framework"] == "advect":
-        required.append(
-            (
-                "closed.provider_owned_live_bytes",
-                _phase_metric_is_present(
-                    run,
-                    phase="closed",
-                    key="provider_owned_live_bytes",
-                ),
-            )
-        )
+    phase_metrics = (
+        [("closed", "provider_owned_live_bytes")] if case["framework"] == "advect" else []
+    )
     workload_metric = {
         "checkpoint": ("closed", "recomputation_count"),
         "residual": ("closed", "residual_release_count"),
@@ -1741,13 +1435,10 @@ def _required_memory_metrics(
         "captured_constant": ("execute", "provider_cache_live_bytes"),
     }.get(case["workload"])
     if workload_metric is not None:
-        phase, key = workload_metric
-        required.append(
-            (
-                f"{phase}.{key}",
-                _phase_metric_is_present(run, phase=phase, key=key),
-            )
-        )
+        phase_metrics.append(workload_metric)
+    required.extend(
+        (f"{phase}.{key}", bool(_marker_values(run, key, phase))) for phase, key in phase_metrics
+    )
     if case["workload"] == "functional_updates":
         required.append(("input_bytes", isinstance(run.get("input_bytes"), int)))
     return required
@@ -1952,13 +1643,6 @@ def _case_by_workload_mode(
     return None
 
 
-def _summary_median(case: Mapping[str, object], metric: str) -> float | None:
-    memory = cast("Mapping[str, object]", case["memory"])
-    summary = cast("Mapping[str, Mapping[str, float]]", memory["summary"])
-    value = summary[metric].get("median")
-    return None if value is None else float(value)
-
-
 def _summary_stat(case: Mapping[str, object], metric: str, statistic: str) -> float | None:
     memory = cast("Mapping[str, object]", case["memory"])
     summary = cast("Mapping[str, Mapping[str, float]]", memory["summary"])
@@ -1977,8 +1661,8 @@ def _checkpoint_acceptance_check(
     plain: Mapping[str, object],
     checkpointed: Mapping[str, object],
 ) -> dict[str, object]:
-    plain_rss = _summary_median(plain, "peak_rss_delta_bytes")
-    checkpoint_rss = _summary_median(checkpointed, "peak_rss_delta_bytes")
+    plain_rss = _summary_stat(plain, "peak_rss_delta_bytes", "median")
+    checkpoint_rss = _summary_stat(checkpointed, "peak_rss_delta_bytes", "median")
     plain_runtime = _timing_median(plain)
     checkpoint_runtime = _timing_median(checkpointed)
     if (
@@ -2024,10 +1708,10 @@ def _donation_acceptance_check(
                 "CuPy device-memory measurements"
             ),
         }
-    donated_memory = _summary_median(donated, "peak_provider_pool_reserved_delta_bytes")
-    fresh_memory = _summary_median(forced_fresh, "peak_provider_pool_reserved_delta_bytes")
-    donated_device = _summary_median(donated, "peak_device_used_delta_bytes")
-    fresh_device = _summary_median(forced_fresh, "peak_device_used_delta_bytes")
+    donated_memory = _summary_stat(donated, "peak_provider_pool_reserved_delta_bytes", "median")
+    fresh_memory = _summary_stat(forced_fresh, "peak_provider_pool_reserved_delta_bytes", "median")
+    donated_device = _summary_stat(donated, "peak_device_used_delta_bytes", "median")
+    fresh_device = _summary_stat(forced_fresh, "peak_device_used_delta_bytes", "median")
     donated_runtime = _timing_median(donated)
     fresh_runtime = _timing_median(forced_fresh)
     fresh_runs = cast(
@@ -2322,61 +2006,60 @@ def _build_payload(args: argparse.Namespace) -> dict[str, object]:
         msg = f"--byte-budget ({byte_budget}) exceeds --max-bytes ({max_bytes})"
         raise ValueError(msg)
 
-    correctness_preflights = [
-        _run_isolated(
-            _WorkerSpec(
-                case=case,
-                byte_budget=min(byte_budget, 64 * 1024),
-                max_bytes=min(max_bytes, _MIB),
-                sample_hold_seconds=0.0,
-                measurement="correctness",
-                timing_iterations=1,
-            ),
-            sample_interval_seconds=args.sample_interval_ms / 1000.0,
-            include_samples=False,
-        )
-        for case in _correctness_preflight_cases(cases)
-    ]
-    case_results: list[dict[str, object]] = []
-    for case in cases:
-        memory_runs = [
-            _run_isolated(
-                _WorkerSpec(
-                    case=case,
-                    byte_budget=byte_budget,
-                    max_bytes=max_bytes,
-                    sample_hold_seconds=hold_seconds,
-                    measurement="memory",
-                    timing_iterations=timing_iterations,
-                ),
+    def run_workers(spec: _WorkerSpec, repeats: int = 1) -> list[dict[str, object]]:
+        return [
+            result
+            for _ in range(repeats)
+            for result in _run_isolated(
+                spec,
                 sample_interval_seconds=args.sample_interval_ms / 1000.0,
                 include_samples=args.include_rss_samples,
             )
-            for _ in range(runs)
         ]
-        timing_results: list[dict[str, object]] = []
-        profile_requires_timing = (case.workload, case.mode) in profile.timed_cases
-        if not args.no_timing and case.workload != "allocation_probe" and profile_requires_timing:
-            timing_results = [
-                _run_isolated(
-                    _WorkerSpec(
-                        case=case,
-                        byte_budget=byte_budget,
-                        max_bytes=max_bytes,
-                        sample_hold_seconds=0.0,
-                        measurement="timing",
-                        timing_iterations=timing_iterations,
-                    ),
-                    sample_interval_seconds=args.sample_interval_ms / 1000.0,
-                    include_samples=False,
-                )
-                for _ in range(timing_runs)
-            ]
+
+    correctness_preflights = run_workers(
+        _WorkerSpec(
+            cases=_correctness_preflight_cases(cases),
+            byte_budget=min(byte_budget, 64 * 1024),
+            max_bytes=min(max_bytes, _MIB),
+            sample_hold_seconds=0.0,
+            measurement="correctness",
+            timing_iterations=1,
+        )
+    )
+    case_results: list[dict[str, object]] = []
+    for case in cases:
+        memory_runs = run_workers(
+            _WorkerSpec(
+                cases=(case,),
+                byte_budget=byte_budget,
+                max_bytes=max_bytes,
+                sample_hold_seconds=hold_seconds,
+                measurement="memory",
+                timing_iterations=timing_iterations,
+            ),
+            runs,
+        )
+        timed = not args.no_timing and (case.workload, case.mode) in profile.timed_cases
+        timing_results = run_workers(
+            _WorkerSpec(
+                cases=(case,),
+                byte_budget=byte_budget,
+                max_bytes=max_bytes,
+                sample_hold_seconds=0.0,
+                measurement="timing",
+                timing_iterations=timing_iterations,
+            ),
+            timing_runs if timed else 0,
+        )
         case_results.append(_summarize_case_runs(case, memory_runs, timing_results))
 
     payload: dict[str, object] = {
-        "schema_version": 2,
-        "report_kind": "advect.runtime-memory",
+        **evidence_report_header(
+            schema_version=2,
+            report_kind="advect.runtime-memory",
+            linux_procfs=Path("/proc/self/status").exists(),
+        ),
         "command": [sys.executable, *sys.argv],
         "config": {
             "profile": profile.name,
@@ -2392,10 +2075,6 @@ def _build_payload(args: argparse.Namespace) -> dict[str, object]:
             "sample_hold_ms": hold_seconds * 1000,
             "smoke": args.smoke,
             "no_timing": args.no_timing,
-        },
-        "environment": {
-            **evidence_environment(),
-            "linux_procfs": Path("/proc/self/status").exists(),
         },
         "correctness_preflights": correctness_preflights,
         "cases": case_results,
@@ -2426,17 +2105,7 @@ def main() -> int:
     except ValueError as error:
         print(f"ERROR: {error}", file=sys.stderr)
         return 2
-    rendered = json.dumps(payload, indent=2, sort_keys=True) if args.format == "json" else None
-    if args.output is not None:
-        output = rendered
-        if output is None:
-            output = json.dumps(payload, indent=2, sort_keys=True)
-        args.output.parent.mkdir(parents=True, exist_ok=True)
-        args.output.write_text(f"{output}\n", encoding="utf-8")
-    elif rendered is not None:
-        print(rendered)
-    else:
-        _print_text(payload)
+    emit_report(payload, fmt=args.format, output=args.output, print_text=_print_text)
     acceptance = cast("Mapping[str, object]", payload["acceptance"])
     return 0 if not acceptance["requested"] or acceptance["valid"] else 2
 

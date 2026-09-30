@@ -11,6 +11,12 @@ mod graph;
 mod hex;
 mod node;
 mod optimize;
+#[cfg(test)]
+#[expect(
+    clippy::unwrap_used,
+    reason = "fixtures unwrap values whose absence should fail the test"
+)]
+mod test_support;
 
 pub use arena::{
     DEFAULT_OP_SCHEMA_VERSION, InputRef, NodeCore, NodeFlags, NodeId, OpId, OpSchema, Parents,
@@ -25,5 +31,5 @@ pub use dtype::{DTypeDescriptor, DTypeError};
 pub use error::{ArtifactError, ExecutionError, GraphError};
 pub use execution::{Host, LinkedExecutionPlan, LinkedOperation, Operand, OutputOwnership};
 pub use graph::{GraphBuilder, GraphStore, LATEST_ARRAY_API_VERSION, SUPPORTED_ARRAY_API_VERSIONS};
-pub use node::{NodeMetadata, NodeRecord, ValueSpec};
+pub use node::{NodeMetadata, NodeRecord, NodeRef, ValueSpec};
 pub use optimize::{OptimizationOutcome, OptimizationReport, PassReport, optimize};

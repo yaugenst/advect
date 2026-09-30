@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, NamedTuple
 
 import hypothesis.strategies as st
 
@@ -31,14 +31,7 @@ def _pair_flatten(tree: Pair) -> tuple[tuple[Any, ...], Any]:
 
 
 def _pair_unflatten(aux_data: Any, children: tuple[Any, ...]) -> Pair:
-    if not isinstance(aux_data, str):
-        msg = f"Invalid aux_data for Pair: expected str, got {type(aux_data).__name__}"
-        raise TypeError(msg)
-    if len(children) != 2:
-        msg = f"Invalid children for Pair: expected 2 children, got {len(children)}"
-        raise ValueError(msg)
-    left, right = children
-    return Pair(left=left, right=right, tag=aux_data)
+    return Pair(*children, tag=aux_data)
 
 
 ad.pytree.register_pytree_node(
@@ -47,10 +40,61 @@ ad.pytree.register_pytree_node(
     unflatten_fn=_pair_unflatten,
 )
 
+
+class Point(NamedTuple):
+    """Namedtuple node, flattened without registration."""
+
+    x: Any
+    y: Any
+
+
+@dataclass(frozen=True, slots=True)
+class Fresh:
+    """Protocol node whose flatten builds new child and metadata containers."""
+
+    left: Any
+    right: Any
+
+    def __advect_tree_flatten__(self) -> tuple[tuple[Any, ...], Any]:
+        # CPython recycles a freed list's or dict's address for the next one.
+        return ([self.left, self.right],), {"fields": ["left", "right"]}
+
+    @classmethod
+    def __advect_tree_unflatten__(cls, aux_data: Any, children: tuple[Any, ...]) -> Fresh:
+        del aux_data
+        left, right = children[0]
+        return cls(left, right)
+
+
+@dataclass(frozen=True, slots=True)
+class Box:
+    """Base registered with ``include_subclasses=True``."""
+
+    value: Any
+
+
+class LabeledBox(Box):
+    """Unregistered subclass that inherits its base's node implementation."""
+
+    __slots__ = ()
+
+
+ad.pytree.register_pytree_node(
+    Box,
+    flatten_fn=lambda tree: ((tree.value,), type(tree)),
+    unflatten_fn=lambda node_type, children: node_type(children[0]),
+    include_subclasses=True,
+)
+
 _SIMPLE_KEY = st.text(
     alphabet=st.characters(min_codepoint=97, max_codepoint=122),
     min_size=1,
     max_size=3,
+)
+_DICT_KEY = st.one_of(
+    _SIMPLE_KEY,
+    st.integers(min_value=0, max_value=3),
+    st.tuples(_SIMPLE_KEY, st.integers(min_value=0, max_value=3)),
 )
 _STATIC_VALUE = st.dictionaries(
     _SIMPLE_KEY,
@@ -85,8 +129,11 @@ def _recursive_tree(
         lambda children: st.one_of(
             st.lists(children, max_size=4),
             st.lists(children, max_size=4).map(tuple),
-            st.dictionaries(_SIMPLE_KEY, children, max_size=4),
+            st.dictionaries(_DICT_KEY, children, max_size=4),
             st.builds(Pair, children, children, tag=_SIMPLE_KEY),
+            st.builds(Point, children, children),
+            st.builds(Fresh, children, children),
+            st.builds(LabeledBox, children),
         ),
         max_leaves=max_leaves,
     )

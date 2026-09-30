@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 import numpy as np
 import pytest
 
 import advect as ad
-from advect.core._context import _is_numerics_debug, is_debug
+from advect.core._context import _is_numerics_debug, is_debug, is_tracing
 
 
 def test_debug_is_scoped_and_expands_live_tracer_repr() -> None:
@@ -38,6 +40,44 @@ def test_debug_is_scoped_and_expands_live_tracer_repr() -> None:
     assert "finite=2/2" in debug
 
 
+def _trace_state() -> tuple[bool, bool, bool]:
+    return is_debug(), _is_numerics_debug(), is_tracing()
+
+
+def test_debug_and_trace_state_are_isolated_per_thread() -> None:
+    observed: list[tuple[bool, bool, bool]] = []
+
+    def model(x: np.ndarray[Any, Any]) -> object:
+        observed.append(_trace_state())
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            observed.append(executor.submit(_trace_state).result(timeout=10))
+        return np.sum(x * x)
+
+    with ad.debug(numerics=True):
+        ad.grad(model)(np.ones(2))
+    assert observed == [(True, True, True), (False, False, False)]
+
+    entered = threading.Event()
+    release = threading.Event()
+
+    def blocking_model(x: np.ndarray[Any, Any]) -> object:
+        entered.set()
+        assert release.wait(timeout=10)
+        return np.sum(x)
+
+    def worker() -> object:
+        with ad.debug(numerics=True):
+            return ad.grad(blocking_model)(np.ones(2))
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(worker)
+        assert entered.wait(timeout=10)
+        outside = _trace_state()
+        release.set()
+        future.result(timeout=10)
+    assert outside == (False, False, False)
+
+
 def test_debug_records_the_user_callsite_for_derivative_errors() -> None:
     @ad.primitive(name="tests.debugging.no_derivative")
     def opaque(x: np.ndarray[Any, Any]) -> np.ndarray[Any, Any]:
@@ -63,12 +103,25 @@ def test_debug_records_the_user_callsite_for_derivative_errors() -> None:
 def test_numerics_debug_finds_primal_jvp_and_vjp_failures() -> None:
     value = np.array([0.0])
 
+    # A JVP-only primitive is transposed structurally, so the VJP failure stays
+    # in its JVP body whatever reverse rules the built-in operations use.
+    @ad.primitive(name="tests.debugging.jvp_only_root")
+    def root(x: np.ndarray[Any, Any]) -> np.ndarray[Any, Any]:
+        return np.sqrt(x)
+
+    @root.def_jvp
+    def root_jvp(output: Any, primals: object, tangents: tuple[Any, ...]) -> object:
+        del primals
+        return tangents[0] / (2.0 * output)
+
     with np.errstate(divide="ignore", invalid="ignore"):
         with ad.debug(numerics=True), pytest.raises(ad.NumericsError) as primal_error:
             ad.grad(lambda x: np.sum(np.log(x)))(np.array([-1.0]))
         with ad.debug(numerics=True), pytest.raises(ad.NumericsError) as jvp_error:
             ad.jvp(np.sqrt)(value, tangents=np.ones_like(value))
         with ad.debug(numerics=True), pytest.raises(ad.NumericsError) as vjp_error:
+            ad.grad(lambda x: np.sum(root(x)))(value)
+        with ad.debug(numerics=True), pytest.raises(ad.NumericsError) as builtin_vjp_error:
             ad.grad(lambda x: np.sum(np.sqrt(x)))(value)
 
     assert primal_error.value.phase == "primal evaluation"
@@ -78,6 +131,9 @@ def test_numerics_debug_finds_primal_jvp_and_vjp_failures() -> None:
     assert jvp_error.value.op == "array.sqrt"
     assert vjp_error.value.phase == "VJP propagation"
     assert vjp_error.value.op == "array.divide"
+    # Built-in elementwise rules transpose in closed form, so the user's op is named.
+    assert builtin_vjp_error.value.phase == "VJP propagation"
+    assert builtin_vjp_error.value.op == "array.sqrt"
 
 
 def test_staged_programs_render_and_fail_with_local_graph_context() -> None:

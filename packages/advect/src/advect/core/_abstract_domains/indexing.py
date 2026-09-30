@@ -22,6 +22,9 @@ if TYPE_CHECKING:
 
 
 RULES: dict[str, AbstractRule] = {
+    "advect.scatter_add": rule(
+        "scatter_add", 2, allowed=("axis", "size"), required=("axis", "size")
+    ),
     "array.argsort": rule(
         "argsort",
         1,
@@ -30,6 +33,7 @@ RULES: dict[str, AbstractRule] = {
     "array.diagonal": rule(
         "diagonal",
         1,
+        positional=("offset", "axis1", "axis2"),
         allowed=("axis1", "axis2", "offset"),
     ),
     "array.searchsorted": rule(
@@ -37,11 +41,12 @@ RULES: dict[str, AbstractRule] = {
         2,
         allowed=("side", "sorter"),
     ),
-    "array.take": rule("take", 2, allowed=("axis", "mode")),
+    "array.take": rule("take", 2, positional=("axis",), allowed=("axis", "mode")),
     "array.take_along_axis": rule("take_along_axis", 2, allowed=("axis",)),
     "array.trace": rule(
         "trace",
         1,
+        positional=("offset", "axis1", "axis2", "dtype"),
         allowed=("axis1", "axis2", "dtype", "offset"),
     ),
 }
@@ -80,6 +85,24 @@ def _take(
         axis = normalize_axis(axis_value, len(first.shape))
         shape = (*first.shape[:axis], *specs[1].shape, *first.shape[axis + 1 :])
     return (ArraySpec(shape, dtype_name(first.dtype)),)
+
+
+def _scatter_add(
+    specs: Sequence[ArraySpec],
+    attrs: Mapping[str, Any],
+) -> tuple[ArraySpec, ...]:
+    """Transpose a one-dimensional ``take`` along ``axis`` into ``size`` positions."""
+    values, indices = specs
+    if len(indices.shape) != 1 or not dtype_name(indices.dtype).startswith(("int", "uint")):
+        raise ValueError("scatter_add indices must be a one-dimensional integer array")
+    axis = normalize_axis(attrs["axis"], len(values.shape))
+    size = attrs["size"]
+    if isinstance(size, bool) or not isinstance(size, int) or size < 0:
+        raise ValueError(f"scatter_add size must be a non-negative integer, got {size!r}")
+    if values.shape[axis] != indices.shape[0]:
+        raise ValueError("scatter_add values and indices disagree along the scattered axis")
+    shape = (*values.shape[:axis], size, *values.shape[axis + 1 :])
+    return (ArraySpec(shape, dtype_name(values.dtype)),)
 
 
 def _take_along_axis(
@@ -144,13 +167,9 @@ def _trace(
     second_axis = normalize_axis(attrs.get("axis2", 1), len(first.shape))
     if first_axis == second_axis:
         raise ValueError("trace axes must be distinct")
-    dtype = (
-        dtype_name(attrs["dtype"])
-        if attrs.get("dtype") is not None
-        else accumulation_dtype(
-            first.dtype,
-            array_api_version=attrs.get("_advect_array_api_version"),
-        )
+    dtype = attrs.get("dtype") or accumulation_dtype(
+        first.dtype,
+        array_api_version=attrs.get("_advect_array_api_version"),
     )
     return (
         ArraySpec(
@@ -166,6 +185,7 @@ def _trace(
 
 EVALUATORS: dict[str, ResultEvaluator] = {
     "argsort": _argsort,
+    "scatter_add": _scatter_add,
     "searchsorted": _searchsorted,
     "take": _take,
     "take_along_axis": _take_along_axis,

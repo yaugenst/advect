@@ -24,7 +24,6 @@ Use ``help(advect.grad)``, ``help(advect.stage)``, or
 from __future__ import annotations
 
 from importlib import import_module
-from importlib.metadata import PackageNotFoundError, version
 from typing import TYPE_CHECKING
 
 from advect import pytree
@@ -64,17 +63,14 @@ if TYPE_CHECKING:
     from advect.autodiff.api.implicit import ImplicitSolveError, implicit_root
     from advect.autodiff.api.reverse import Pullback, grad, value_and_grad, vjp, vjp_program
 
+    __version__: str
+
 # NumPy is the required base frontend, so its handlers are deterministic
 # process state rather than an ambient plugin side effect. The Array API
 # compatibility fallback follows the same rule: array-api-compat is a base
 # dependency, so configuration here stays independent of install state.
 import_module("advect.numpy")
 import_module("advect._array_api_compat")
-
-try:
-    __version__ = version("advect")
-except PackageNotFoundError:
-    __version__ = "0.0.0+local"
 
 _AUTODIFF_EXPORT_MODULES = {
     "ImplicitSolveError": "implicit",
@@ -95,20 +91,33 @@ _AUTODIFF_EXPORT_MODULES = {
 }
 
 
+def _distribution_version() -> str:
+    # importlib.metadata costs tens of milliseconds, so it loads on first use.
+    from importlib.metadata import PackageNotFoundError, version  # noqa: PLC0415
+
+    try:
+        return version("advect")
+    except PackageNotFoundError:
+        return "0.0.0+local"
+
+
 def __getattr__(name: str) -> object:
-    """Load automatic-differentiation transforms on first use."""
-    module = _AUTODIFF_EXPORT_MODULES.get(name)
-    if module is None:
-        msg = f"module {__name__!r} has no attribute {name!r}"
-        raise AttributeError(msg)
-    value = getattr(import_module(f"advect.autodiff.api.{module}"), name)
+    """Load automatic-differentiation transforms and the version on first use."""
+    if name == "__version__":
+        value: object = _distribution_version()
+    else:
+        module = _AUTODIFF_EXPORT_MODULES.get(name)
+        if module is None:
+            msg = f"module {__name__!r} has no attribute {name!r}"
+            raise AttributeError(msg)
+        value = getattr(import_module(f"advect.autodiff.api.{module}"), name)
     globals()[name] = value
     return value
 
 
 def __dir__() -> list[str]:
     """List the deliberately small public surface."""
-    return sorted(set(globals()).union(_AUTODIFF_EXPORT_MODULES))
+    return sorted({*globals(), *_AUTODIFF_EXPORT_MODULES, "__version__"})
 
 
 __all__ = [

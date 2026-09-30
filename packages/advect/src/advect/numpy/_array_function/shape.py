@@ -6,14 +6,15 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as _numpy  # noqa: ICN001 - concrete namespace with dynamic protocol operands
 
+from advect.core._array_protocol_helpers import literal_is_weak
 from advect.core._errors import TracingError
 from advect.numpy._array_function.emission import (
-    _add_backend_node,
-    _get_node,
+    _emit,
+    _get_array_value,
     _get_value,
     _make_unary_shape_handler,
 )
-from advect.numpy._op_bindings import canonicalize_numpy_op, frontend_lowering
+from advect.numpy._op_bindings import frontend_lowering
 from advect.numpy._static_attr_arrays import encode_static_array_attr
 
 if TYPE_CHECKING:
@@ -26,21 +27,8 @@ if TYPE_CHECKING:
 np: Any = _numpy
 
 
-def _op_name(suffix: str) -> str:
-    return f"numpy.{suffix}"
-
-
-def _with_backend_attrs(attrs: dict[str, Any]) -> dict[str, Any]:
-    out = dict(attrs)
-    out["_advect_backend"] = "numpy"
-    return out
-
-
 _DIAG_MAX_ARGS = 2
-_REPEAT_MIN_ARGS = 2
-_REPEAT_MAX_ARGS = 3
-_REPEAT_AXIS_POSITIONAL_ARGS = 3
-_TILE_NARGS = 2
+_REPEAT_AXIS_POSITION = 2
 _RESHAPE_ORDER_POSITION = 2
 
 
@@ -80,16 +68,7 @@ def _reshape_handler(
     if copy is not None:
         attrs["copy"] = bool(copy)
 
-    node_id = _add_backend_node(
-        graph=graph,
-        op=canonicalize_numpy_op(_op_name("reshape")),
-        inputs=(_get_node(a, graph, traced_type),),
-        value=result,
-        attrs=_with_backend_attrs(attrs),
-        shape=resolved_shape,
-        dtype=result.dtype,
-    )
-    return result, node_id
+    return _emit(graph, traced_type, "numpy.reshape", (a,), result, attrs)
 
 
 def _normalize_axis_spec(value: object) -> object:
@@ -121,16 +100,7 @@ def _diag_handler(
     if k_int != 0:
         attrs["k"] = k_int
 
-    node_id = _add_backend_node(
-        graph=graph,
-        op=canonicalize_numpy_op(_op_name("diag")),
-        inputs=(_get_node(a, graph, traced_type),),
-        value=result,
-        attrs=_with_backend_attrs(attrs),
-        shape=result.shape,
-        dtype=result.dtype,
-    )
-    return result, node_id
+    return _emit(graph, traced_type, "numpy.diag", (a,), result, attrs)
 
 
 def _trace_handler(
@@ -142,10 +112,6 @@ def _trace_handler(
     """Handle ``np.trace`` with explicit attr capture."""
     positional_names = ("offset", "axis1", "axis2", "dtype", "out")
     values = dict(zip(positional_names, args[1:], strict=False)) | kwargs
-
-    if values.get("out") is not None:
-        msg = f"{_op_name('trace')} out= is not supported during tracing"
-        raise TracingError(msg)
 
     a = args[0]
     offset = int(values.get("offset", 0))
@@ -170,16 +136,7 @@ def _trace_handler(
     if dtype is not None:
         attrs["dtype"] = str(np.dtype(dtype))
 
-    node_id = _add_backend_node(
-        graph=graph,
-        op=canonicalize_numpy_op(_op_name("trace")),
-        inputs=(_get_node(a, graph, traced_type),),
-        value=result,
-        attrs=_with_backend_attrs(attrs),
-        shape=result.shape,
-        dtype=result.dtype,
-    )
-    return result, node_id
+    return _emit(graph, traced_type, "numpy.trace", (a,), result, attrs)
 
 
 def _diff_handler(
@@ -193,7 +150,7 @@ def _diff_handler(
 
     n = int(values.get("n", 1))
     if n < 0:
-        msg = f"{_op_name('diff')} requires n >= 0 during tracing (got n={n})"
+        msg = f"numpy.diff requires n >= 0 during tracing (got n={n})"
         raise TracingError(msg)
 
     axis = int(values.get("axis", -1))
@@ -211,7 +168,7 @@ def _diff_handler(
     if append_specified:
         diff_kwargs["append"] = _get_value(append, traced_type)
 
-    result = np.diff(_get_value(a, traced_type), **diff_kwargs)
+    result = np.diff(_get_array_value(a, traced_type), **diff_kwargs)
 
     attrs: dict[str, Any] = {
         "n": n,
@@ -235,20 +192,15 @@ def _diff_handler(
         else:
             attrs["append"] = encode_static_array_attr(append_arr)
 
-    inputs = [_get_node(a, graph, traced_type)]
+    operands = [a]
     if prepend_is_input:
-        inputs.append(_get_node(prepend, graph, traced_type))
+        operands.append(prepend)
     if append_is_input:
-        inputs.append(_get_node(append, graph, traced_type))
-    node_id = _add_backend_node(
-        graph=graph,
-        op=canonicalize_numpy_op(_op_name("diff")),
-        inputs=tuple(inputs),
-        value=result,
-        attrs=_with_backend_attrs(attrs),
-        shape=result.shape,
-        dtype=result.dtype,
-    )
+        operands.append(append)
+    result, node_id = _emit(graph, traced_type, "numpy.diff", operands, result, attrs)
+    if n == 0 and literal_is_weak(a):
+        # NumPy returns the input itself, so a Python scalar stays weak.
+        graph.mark_weak(node_id)
     return result, node_id
 
 
@@ -259,83 +211,31 @@ def _repeat_handler(
     kwargs: dict[str, Any],
 ) -> tuple[Any, int]:
     """Handle ``np.repeat`` with scalar integer repeats."""
-    unsupported = set(kwargs) - {"axis", "repeats"}
-    if unsupported:
-        msg = f"{_op_name('repeat')} kwargs not yet supported during tracing: {sorted(unsupported)}"
-        raise TracingError(msg)
-
-    if not args:
-        msg = f"{_op_name('repeat')} expects at least one positional argument during tracing"
-        raise TracingError(msg)
-    if len(args) > _REPEAT_MAX_ARGS:
-        msg = f"{_op_name('repeat')} supports at most three positional arguments during tracing"
-        raise TracingError(msg)
-
-    if len(args) >= _REPEAT_MIN_ARGS and "repeats" in kwargs:
-        msg = f"{_op_name('repeat')} repeats must be provided positionally or via keyword, not both"
-        raise TracingError(msg)
-    if len(args) >= _REPEAT_AXIS_POSITIONAL_ARGS and "axis" in kwargs:
-        msg = f"{_op_name('repeat')} axis must be provided positionally or via keyword, not both"
-        raise TracingError(msg)
-
-    a = args[0]
-    if len(args) >= _REPEAT_MIN_ARGS:
-        repeats_raw = args[1]
-    elif "repeats" in kwargs:
-        repeats_raw = kwargs["repeats"]
-    else:
-        msg = f"{_op_name('repeat')} requires a repeats argument during tracing"
-        raise TracingError(msg)
-
+    a, repeats_raw = args[:2]
     repeats_arr = np.asarray(repeats_raw)
     if repeats_arr.ndim != 0:
-        msg = f"{_op_name('repeat')} supports only scalar repeats during tracing"
+        msg = "numpy.repeat supports only scalar repeats during tracing"
         raise TracingError(msg)
 
     repeats = int(repeats_arr.item())
-    axis_raw = args[2] if len(args) == _REPEAT_AXIS_POSITIONAL_ARGS else kwargs.get("axis")
+    axis_raw = args[2] if len(args) > _REPEAT_AXIS_POSITION else kwargs.get("axis")
     axis = None if axis_raw is None else int(axis_raw)
     result = np.repeat(_get_value(a, traced_type), repeats, axis=axis)
 
     attrs: dict[str, Any] = {"repeats": repeats}
     if axis is not None:
         attrs["axis"] = axis
-    node_id = _add_backend_node(
-        graph=graph,
-        op=canonicalize_numpy_op(_op_name("repeat")),
-        inputs=(_get_node(a, graph, traced_type),),
-        value=result,
-        attrs=_with_backend_attrs(attrs),
-        shape=result.shape,
-        dtype=result.dtype,
-    )
-    return result, node_id
+    return _emit(graph, traced_type, "numpy.repeat", (a,), result, attrs)
 
 
 def _tile_handler(
     graph: DynamicTape,
     traced_type: type[TracedArrayLike],
     args: tuple[Any, ...],
-    kwargs: dict[str, Any],
+    _kwargs: dict[str, Any],
 ) -> tuple[Any, int]:
     """Handle ``np.tile`` with normalized reps attrs."""
-    unsupported = set(kwargs) - {"reps"}
-    if unsupported:
-        msg = f"{_op_name('tile')} kwargs not yet supported during tracing: {sorted(unsupported)}"
-        raise TracingError(msg)
-
-    if len(args) == _TILE_NARGS:
-        if "reps" in kwargs:
-            msg = f"{_op_name('tile')} reps must be provided positionally or via keyword, not both"
-            raise TracingError(msg)
-        a, reps_raw = args
-    elif len(args) == 1 and "reps" in kwargs:
-        a = args[0]
-        reps_raw = kwargs["reps"]
-    else:
-        msg = f"{_op_name('tile')} expects arguments (A, reps) during tracing"
-        raise TracingError(msg)
-
+    a, reps_raw = args
     reps_obj = _normalize_axis_spec(reps_raw)
     reps: int | tuple[int, ...]
     if isinstance(reps_obj, int):
@@ -343,23 +243,11 @@ def _tile_handler(
     elif isinstance(reps_obj, tuple):
         reps = tuple(int(item) for item in reps_obj)
     else:
-        msg = (
-            f"{_op_name('tile')} reps must be an int or tuple of ints "
-            f"(got {type(reps_obj).__name__})"
-        )
+        msg = f"numpy.tile reps must be an int or tuple of ints (got {type(reps_obj).__name__})"
         raise TracingError(msg)
     result = np.tile(_get_value(a, traced_type), reps)
 
-    node_id = _add_backend_node(
-        graph=graph,
-        op=canonicalize_numpy_op(_op_name("tile")),
-        inputs=(_get_node(a, graph, traced_type),),
-        value=result,
-        attrs=_with_backend_attrs({"reps": reps}),
-        shape=result.shape,
-        dtype=result.dtype,
-    )
-    return result, node_id
+    return _emit(graph, traced_type, "numpy.tile", (a,), result, {"reps": reps})
 
 
 def register_shape_handlers(
@@ -376,31 +264,31 @@ def register_shape_handlers(
     frontend_lowering("array.swapaxes")(handlers[np.swapaxes])
     handlers[np.broadcast_to] = _make_unary_shape_handler(
         np.broadcast_to,
-        _op_name("broadcast_to"),
+        "numpy.broadcast_to",
         ("shape",),
         _normalize_axis_spec,
     )
     handlers[np.flip] = _make_unary_shape_handler(
-        np.flip, _op_name("flip"), ("axis",), _normalize_axis_spec
+        np.flip, "numpy.flip", ("axis",), _normalize_axis_spec
     )
-    handlers[np.fliplr] = _make_unary_shape_handler(np.fliplr, _op_name("fliplr"), ())
-    handlers[np.flipud] = _make_unary_shape_handler(np.flipud, _op_name("flipud"), ())
+    handlers[np.fliplr] = _make_unary_shape_handler(np.fliplr, "numpy.fliplr", ())
+    handlers[np.flipud] = _make_unary_shape_handler(np.flipud, "numpy.flipud", ())
     handlers[np.roll] = _make_unary_shape_handler(
-        np.roll, _op_name("roll"), ("shift", "axis"), _normalize_axis_spec
+        np.roll, "numpy.roll", ("shift", "axis"), _normalize_axis_spec
     )
     handlers[np.rot90] = _make_unary_shape_handler(
-        np.rot90, _op_name("rot90"), ("k", "axes"), _normalize_axis_spec
+        np.rot90, "numpy.rot90", ("k", "axes"), _normalize_axis_spec
     )
     handlers[np.rollaxis] = _make_unary_shape_handler(
-        np.rollaxis, _op_name("rollaxis"), ("axis", "start"), _normalize_axis_spec
+        np.rollaxis, "numpy.rollaxis", ("axis", "start"), _normalize_axis_spec
     )
-    handlers[np.real] = _make_unary_shape_handler(np.real, _op_name("real"), ())
-    handlers[np.imag] = _make_unary_shape_handler(np.imag, _op_name("imag"), ())
-    handlers[np.triu] = _make_unary_shape_handler(np.triu, _op_name("triu"), ("k",), int)
-    handlers[np.tril] = _make_unary_shape_handler(np.tril, _op_name("tril"), ("k",), int)
+    handlers[np.real] = _make_unary_shape_handler(np.real, "numpy.real", ())
+    handlers[np.imag] = _make_unary_shape_handler(np.imag, "numpy.imag", ())
+    handlers[np.triu] = _make_unary_shape_handler(np.triu, "numpy.triu", ("k",), int)
+    handlers[np.tril] = _make_unary_shape_handler(np.tril, "numpy.tril", ("k",), int)
     handlers[np.diagonal] = _make_unary_shape_handler(
         np.diagonal,
-        _op_name("diagonal"),
+        "numpy.diagonal",
         ("offset", "axis1", "axis2"),
         _normalize_axis_spec,
     )
@@ -409,16 +297,16 @@ def register_shape_handlers(
     handlers[np.diff] = _diff_handler
     handlers[np.repeat] = _repeat_handler
     handlers[np.tile] = _tile_handler
-    handlers[np.ravel] = _make_unary_shape_handler(np.ravel, _op_name("ravel"), ("order",), str)
+    handlers[np.ravel] = _make_unary_shape_handler(np.ravel, "numpy.ravel", ("order",), str)
     handlers[np.squeeze] = _make_unary_shape_handler(
-        np.squeeze, _op_name("squeeze"), ("axis",), _normalize_axis_spec
+        np.squeeze, "numpy.squeeze", ("axis",), _normalize_axis_spec
     )
     handlers[np.expand_dims] = _make_unary_shape_handler(
-        np.expand_dims, _op_name("expand_dims"), ("axis",), _normalize_axis_spec
+        np.expand_dims, "numpy.expand_dims", ("axis",), _normalize_axis_spec
     )
     handlers[np.moveaxis] = _make_unary_shape_handler(
         np.moveaxis,
-        _op_name("moveaxis"),
+        "numpy.moveaxis",
         ("source", "destination"),
         _normalize_axis_spec,
     )

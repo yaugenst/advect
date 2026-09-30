@@ -86,3 +86,38 @@ def test_single_input_atleast_function_retains_alias_provenance() -> None:
 
     with pytest.raises(ad.StaleViewError, match="functionally updated"):
         ad.jvp(use_stale_view)(primal, tangents=tangent)
+
+
+@pytest.mark.parametrize(
+    "view",
+    [
+        pytest.param(lambda value: value.real, id="real"),
+        pytest.param(lambda value: value.imag, id="imag"),
+        pytest.param(np.real, id="np.real"),
+        pytest.param(np.imag, id="np.imag"),
+        pytest.param(np.flip, id="flip"),
+    ],
+)
+def test_views_reject_writes_and_stale_reads_in_every_lifetime(view: Any) -> None:
+    primal = np.array([1.5 + 0.5j, -2.0, 0.25j, 3.0])
+
+    def write_through_view(value: Any) -> Any:
+        owned = value.copy()
+        view(owned)[...] = 2.0
+        return owned
+
+    def read_stale_view(value: Any) -> Any:
+        owned = value.copy()
+        selected = view(owned)
+        owned[0] = 5.0
+        return selected * 1.0
+
+    for function, error in (
+        (write_through_view, ad.MutationError),
+        (read_stale_view, ad.StaleViewError),
+    ):
+        with pytest.raises(error):
+            ad.jvp(function)(primal, tangents=np.ones_like(primal))
+        # Staging once wrote to a copy and read the stale value silently.
+        with pytest.raises(error):
+            ad.stage(function, primal)

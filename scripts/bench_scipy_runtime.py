@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import gc
 import json
 import statistics
 import sys
@@ -17,22 +16,12 @@ from scipy import ndimage as scipy_ndimage, special as scipy_special
 
 import advect as ad
 from advect.scipy import ndimage as advect_ndimage, special as advect_special
-from scripts._support.evidence import evidence_environment
+from scripts._support.bench import emit_report, timed_blocks
+from scripts._support.cli import positive_float, positive_int
+from scripts._support.evidence import evidence_report_header
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
-
-
-_NEW_SPECIAL_NAMES = (
-    "erfc",
-    "erfcx",
-    "erfinv",
-    "log_expit",
-    "log_ndtr",
-    "ndtri",
-    "softmax",
-    "log_softmax",
-)
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,35 +47,19 @@ class _Case:
 class _Config:
     warmup: int
     rounds: int
-    target_seconds: float
+    target_ms: float
     max_block_size: int
     derivative_limit: float
 
 
-def _positive_int(value: str) -> int:
-    parsed = int(value)
-    if parsed < 1:
-        msg = f"expected a positive integer, got {value!r}"
-        raise argparse.ArgumentTypeError(msg)
-    return parsed
-
-
-def _positive_float(value: str) -> float:
-    parsed = float(value)
-    if parsed <= 0:
-        msg = f"expected a positive number, got {value!r}"
-        raise argparse.ArgumentTypeError(msg)
-    return parsed
-
-
 def _arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--size", type=_positive_int, default=256)
-    parser.add_argument("--warmup", type=_positive_int, default=3)
-    parser.add_argument("--rounds", type=_positive_int, default=9)
-    parser.add_argument("--target-ms", type=_positive_float, default=10.0)
-    parser.add_argument("--max-block-size", type=_positive_int, default=100)
-    parser.add_argument("--derivative-limit", type=_positive_float, default=8.0)
+    parser.add_argument("--size", type=positive_int, default=256)
+    parser.add_argument("--warmup", type=positive_int, default=3)
+    parser.add_argument("--rounds", type=positive_int, default=9)
+    parser.add_argument("--target-ms", type=positive_float, default=10.0)
+    parser.add_argument("--max-block-size", type=positive_int, default=100)
+    parser.add_argument("--derivative-limit", type=positive_float, default=8.0)
     parser.add_argument("--format", choices=("text", "json"), default="text")
     parser.add_argument("--output", type=Path, help="write JSON evidence to this path")
     parser.add_argument(
@@ -165,9 +138,6 @@ def _cases(size: int) -> tuple[_Case, ...]:
     if ndimage_names != set(advect_ndimage.__all__):
         msg = "benchmark ndimage inventory has drifted from the public module"
         raise RuntimeError(msg)
-    if {case.name for case in common if case.family == "special"} != set(_NEW_SPECIAL_NAMES):
-        msg = "benchmark special inventory has drifted"
-        raise RuntimeError(msg)
     return tuple(common)
 
 
@@ -184,23 +154,11 @@ def _measure(function: Callable[[], object], config: _Config) -> dict[str, float
     elapsed = max(1, time.perf_counter_ns() - started)
     block_size = min(
         config.max_block_size,
-        max(1, round(config.target_seconds * 1e9 / elapsed)),
+        max(1, round(config.target_ms * 1e6 / elapsed)),
     )
-    for _ in range(config.warmup):
-        for _ in range(block_size):
-            function()
-    samples = []
-    gc_was_enabled = gc.isenabled()
-    gc.disable()
-    try:
-        for _ in range(config.rounds):
-            started = time.perf_counter_ns()
-            for _ in range(block_size):
-                function()
-            samples.append((time.perf_counter_ns() - started) / (1_000 * block_size))
-    finally:
-        if gc_was_enabled:
-            gc.enable()
+    for _ in range(config.warmup * block_size):
+        function()
+    samples = timed_blocks(function, rounds=config.rounds, block_size=block_size)
     return {
         "median_us": statistics.median(samples),
         "minimum_us": min(samples),
@@ -306,35 +264,35 @@ def _print_text(payload: dict[str, object]) -> None:
         print(f"all derivative ratios are within {payload['derivative_limit']:.2f}x")
 
 
+def _report(size: int, config: _Config) -> dict[str, object]:
+    results = [_benchmark_case(case, config) for case in _cases(size)]
+    return {
+        **evidence_report_header(schema_version=1, report_kind="advect.scipy-runtime"),
+        "shape": [size, size],
+        "warmup": config.warmup,
+        "rounds": config.rounds,
+        "target_ms": config.target_ms,
+        "derivative_limit": config.derivative_limit,
+        "results": results,
+        "violations": _violations(results, config.derivative_limit),
+    }
+
+
 def main() -> int:
     """Run the SciPy runtime evidence matrix."""
     args = _arguments()
-    config = _Config(
-        warmup=args.warmup,
-        rounds=args.rounds,
-        target_seconds=args.target_ms / 1_000,
-        max_block_size=args.max_block_size,
-        derivative_limit=args.derivative_limit,
+    payload = _report(
+        args.size,
+        _Config(
+            warmup=args.warmup,
+            rounds=args.rounds,
+            target_ms=args.target_ms,
+            max_block_size=args.max_block_size,
+            derivative_limit=args.derivative_limit,
+        ),
     )
-    results = [_benchmark_case(case, config) for case in _cases(args.size)]
-    violations = _violations(results, config.derivative_limit)
-    payload = {
-        "environment": evidence_environment(),
-        "shape": [args.size, args.size],
-        "warmup": args.warmup,
-        "rounds": args.rounds,
-        "target_ms": args.target_ms,
-        "derivative_limit": config.derivative_limit,
-        "results": results,
-        "violations": violations,
-    }
-    if args.output is not None:
-        args.output.parent.mkdir(parents=True, exist_ok=True)
-        args.output.write_text(json.dumps(payload, indent=2) + "\n")
-    if args.format == "json" and args.output is None:
-        print(json.dumps(payload, indent=2))
-    elif args.format == "text":
-        _print_text(payload)
+    emit_report(payload, fmt=args.format, output=args.output, print_text=_print_text)
+    violations = payload["violations"]
     if args.check and violations:
         print(f"ERROR: {len(violations)} derivative limit violation(s)", file=sys.stderr)
         return 1

@@ -2,115 +2,135 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
+import array_api_strict as strict
 import numpy as np
 import pytest
-from hypothesis import given, strategies as st
+from hypothesis import example, given, strategies as st
+from hypothesis.extra import numpy as hnp
 
 import advect as ad
+from advect.core._array_api.profiles import LATEST_ARRAY_API_VERSION
 from advect.numpy._abstract_calls import can_cast_dtype
-
-
-def _directional_difference(
-    function: Any,
-    values: tuple[np.ndarray, ...],
-    directions: tuple[np.ndarray, ...],
-) -> np.ndarray:
-    epsilon = 1e-6
-    positive = tuple(
-        value + epsilon * direction for value, direction in zip(values, directions, strict=True)
-    )
-    negative = tuple(
-        value - epsilon * direction for value, direction in zip(values, directions, strict=True)
-    )
-    return (function(*positive) - function(*negative)) / (2 * epsilon)
-
-
-@pytest.mark.parametrize(
-    ("pure", "write"),
-    [
-        (
-            lambda x: np.sum(
-                x,
-                axis=1,
-                dtype=np.float64,
-                keepdims=True,
-                initial=0.25,
-                where=x > -0.5,
-            ),
-            lambda x, out: np.sum(
-                x,
-                axis=1,
-                dtype=np.float64,
-                out=out,
-                keepdims=True,
-                initial=0.25,
-                where=x > -0.5,
-            ),
-        ),
-        (
-            lambda x: np.mean(
-                x,
-                axis=0,
-                dtype=np.float64,
-                keepdims=True,
-                where=x > -0.5,
-            ),
-            lambda x, out: np.mean(
-                x,
-                axis=0,
-                dtype=np.float64,
-                out=out,
-                keepdims=True,
-                where=x > -0.5,
-            ),
-        ),
-        (
-            lambda x: np.cumsum(x, axis=1, dtype=np.float64),
-            lambda x, out: np.cumsum(x, axis=1, dtype=np.float64, out=out),
-        ),
-        (
-            lambda x: np.cumprod(x, axis=1, dtype=np.float64),
-            lambda x, out: np.cumprod(x, axis=1, dtype=np.float64, out=out),
-        ),
-        (
-            lambda x: np.take(x, [0, 2], axis=1, mode="wrap"),
-            lambda x, out: np.take(x, [0, 2], axis=1, out=out, mode="wrap"),
-        ),
-        (
-            lambda x: np.fft.fft(x, axis=1, norm="ortho"),
-            lambda x, out: np.fft.fft(x, axis=1, norm="ortho", out=out),
-        ),
-        (
-            lambda x: np.round(x, decimals=3),
-            lambda x, out: np.round(x, decimals=3, out=out),
-        ),
-    ],
-    ids=["sum", "mean", "cumsum", "cumprod", "take", "fft", "round"],
+from advect_numpy_tests._assertions import (
+    assert_jvp_matches_central_difference,
+    assert_spellings_agree,
+    assert_staged_round_trip,
+    assert_tree_close,
+    seeded_like,
 )
-def test_single_input_array_function_out_matches_pure_call_and_jvp(
-    pure: Any,
-    write: Any,
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+
+_SINGLE = {"f": np.dtype(np.float32), "c": np.dtype(np.complex64)}
+# Single-input array functions whose out= only receives the result, and
+# whether that spelling stages (round with decimals is dynamic-only).
+_OUT_FORMS: dict[str, tuple[Callable[..., Any], bool]] = {
+    "sum": (
+        lambda x, **out: np.sum(
+            x, axis=1, dtype=np.float64, keepdims=True, initial=0.25, where=x > 0.9, **out
+        ),
+        True,
+    ),
+    "mean": (lambda x, **out: np.mean(x, axis=0, dtype=np.float64, keepdims=True, **out), True),
+    "std": (lambda x, **out: np.std(x, axis=1, **out), True),
+    "prod": (lambda x, **out: np.prod(x, axis=0, **out), True),
+    "max": (lambda x, **out: np.max(x, axis=0, **out), True),
+    "cumsum": (lambda x, **out: np.cumsum(x, axis=1, dtype=np.float64, **out), True),
+    "cumprod": (lambda x, **out: np.cumprod(x, axis=1, dtype=np.float64, **out), True),
+    "take": (lambda x, **out: np.take(x, [0, 2], axis=1, mode="wrap", **out), True),
+    "fft": (lambda x, **out: np.fft.fft(x, axis=1, norm="ortho", **out), True),
+    "round": (lambda x, **out: np.round(x, decimals=1, **out), False),
+    "clip": (lambda x, **out: np.clip(x, 0.8, 1.5, **out), True),
+    "matmul": (lambda x, **out: np.matmul(x, x.T, **out), True),
+}
+_MATRIX = np.array([[0.7, 1.2, 1.8], [1.1, 0.8, 1.4]])
+
+
+@given(
+    name=st.sampled_from(sorted(_OUT_FORMS)),
+    single=st.booleans(),
+    traced_destination=st.booleans(),
+    value=hnp.arrays(
+        np.float64,
+        hnp.array_shapes(min_dims=2, max_dims=2, max_side=4),
+        elements=st.floats(min_value=0.5, max_value=2.0),
+    ),
+)
+@example(name="sum", single=True, traced_destination=False, value=_MATRIX)
+@example(name="mean", single=False, traced_destination=False, value=_MATRIX)
+@example(name="cumsum", single=False, traced_destination=False, value=_MATRIX)
+@example(name="cumprod", single=False, traced_destination=False, value=_MATRIX)
+@example(name="take", single=False, traced_destination=False, value=_MATRIX)
+@example(name="fft", single=False, traced_destination=False, value=_MATRIX)
+@example(name="round", single=False, traced_destination=False, value=_MATRIX)
+def test_array_function_out_writes_the_cast_pure_result(
+    name: str,
+    *,
+    single: bool,
+    traced_destination: bool,
+    value: np.ndarray[Any, Any],
 ) -> None:
-    value = np.array([[0.7, 1.2, 1.8], [1.1, 0.8, 1.4]])
-    direction = np.array([[0.2, -0.3, 0.5], [-0.1, 0.4, 0.25]])
-    identities: list[bool] = []
+    """``f(x, out=d)`` is ``d`` rebound to ``f(x).astype(d.dtype)`` in every lifetime."""
+    function, stages = _OUT_FORMS[name]
+    result = function(value)
+    dtype = _SINGLE[result.dtype.kind] if single else result.dtype
 
-    def into_out(x: Any) -> Any:
-        expected_shape = pure(x)
-        destination = np.zeros_like(expected_shape)
-        result = write(x, destination)
-        identities.append(result is destination)
-        return destination
+    def write(x: Any) -> Any:
+        out = np.full(result.shape, 7.0, like=x)
+        out = (out * np.mean(x) if traced_destination else out).astype(dtype)
+        assert function(x, out=out) is out
+        return out
 
-    primal, tangent = ad.jvp(into_out)(value, tangents=direction)
-    expected = pure(value)
-    finite_difference = _directional_difference(pure, (value,), (direction,))
+    primal = assert_spellings_agree(
+        write, lambda x: function(x).astype(dtype), (value,), argnums=(0,)
+    )
+    # NumPy may round intermediate results in the destination dtype.
+    rtol = 4 * float(np.finfo(dtype).eps)
+    assert_tree_close(primal, write(value), rtol=rtol)
+    if stages:
+        assert_staged_round_trip(write, value, rtol=rtol)
 
-    assert identities == [True]
-    np.testing.assert_allclose(primal, expected)
-    np.testing.assert_allclose(tangent, finite_difference, rtol=2e-5, atol=2e-5)
+
+@pytest.mark.parametrize("single", [False, True], ids=("same-dtype", "cast"))
+@pytest.mark.parametrize("name", sorted(name for name, (_, stages) in _OUT_FORMS.items() if stages))
+def test_staged_out_lowers_the_same_graph_from_another_providers_examples(
+    name: str, *, single: bool
+) -> None:
+    # Staged code sees the examples' provider dtype objects, which NumPy
+    # cannot interpret, so out= validation reads the staged dtypes.
+    function, _stages = _OUT_FORMS[name]
+    result = function(_MATRIX)
+    dtype = _SINGLE[result.dtype.kind] if single else result.dtype
+    version = min(np.__array_api_version__, LATEST_ARRAY_API_VERSION)
+
+    def write(x: Any) -> Any:
+        out = np.full(result.shape, 7.0, like=x).astype(dtype)
+        function(x, out=out)
+        return out
+
+    def graph(example: object) -> object:
+        program = ad.stage(write, example, array_api_version=version)
+        return program.to_dict()["program"]["graph"]
+
+    assert graph(strict.asarray(_MATRIX)) == graph(_MATRIX)
+
+
+@pytest.mark.parametrize("name", sorted(_OUT_FORMS))
+def test_array_function_out_derivatives_match_central_differences(name: str) -> None:
+    """Away from mask, clip, tie and rounding edges, ``out=`` matches central differences."""
+    function, _stages = _OUT_FORMS[name]
+
+    def write(x: Any) -> Any:
+        out = np.zeros_like(function(x))
+        assert function(x, out=out) is out
+        return out
+
+    value = np.array([[0.7, 1.2, 1.8], [1.1, 0.83, 1.4]])
+    assert_jvp_matches_central_difference(write, (value,), (seeded_like(value, name),))
 
 
 @pytest.mark.parametrize(
@@ -155,43 +175,9 @@ def test_multi_input_array_function_out_differentiates_every_array_operand(
         assert result is destination
         return destination
 
-    primal, tangent = ad.jvp(apply, argnums=(0, 1))(
-        left,
-        right,
-        tangents=(left_tangent, right_tangent),
+    assert_jvp_matches_central_difference(
+        apply, (left, right), (left_tangent, right_tangent), rtol=2e-6, atol=2e-6
     )
-    expected = call(left, right, np.empty_like(primal))
-    finite_difference = _directional_difference(
-        lambda x, y: call(x, y, np.empty_like(primal)),
-        (left, right),
-        (left_tangent, right_tangent),
-    )
-
-    np.testing.assert_allclose(primal, expected)
-    np.testing.assert_allclose(tangent, finite_difference, rtol=2e-6, atol=2e-6)
-
-
-@given(
-    rows=st.integers(min_value=1, max_value=4),
-    columns=st.integers(min_value=1, max_value=5),
-)
-def test_reduction_out_handles_shapes_and_unsafe_destination_casts(
-    rows: int,
-    columns: int,
-) -> None:
-    value = np.arange(rows * columns, dtype=np.float64).reshape(rows, columns) / 7
-
-    def apply(x: Any) -> Any:
-        destination = np.zeros_like(np.sum(x, axis=1), dtype=np.float32)
-        result = np.sum(x, axis=1, dtype=np.float64, out=destination)
-        assert result is destination
-        return destination
-
-    primal, tangent = ad.jvp(apply)(value, tangents=np.ones_like(value))
-
-    np.testing.assert_allclose(primal, np.sum(value, axis=1).astype(np.float32))
-    np.testing.assert_allclose(tangent, np.full(rows, columns, dtype=np.float32))
-    assert primal.dtype == np.dtype(np.float32)
 
 
 def test_array_function_out_to_integer_has_zero_derivative() -> None:
@@ -267,6 +253,35 @@ def test_clip_out_rejects_explicit_ufunc_loop_selection() -> None:
         ad.jvp(apply)(value, tangents=np.ones_like(value))
     with pytest.raises(ad.TracingError, match=r"dtype=.*staged out="):
         ad.stage(apply, specs=(ad.ArraySpec(value.shape, value.dtype),))
+
+
+@pytest.mark.parametrize(
+    "function",
+    [
+        lambda x: np.outer(x, x, out=None),
+        lambda x: np.einsum("i,j->ij", x, x, out=None),
+        lambda x: np.concatenate((x, x), out=None),
+        lambda x: np.stack((x, x), out=None),
+    ],
+    ids=["outer", "einsum", "concatenate", "stack"],
+)
+def test_array_function_out_none_means_no_destination(function: Any) -> None:
+    value = np.array([0.7, -1.2, 1.8])
+    direction = np.array([0.2, -0.3, 0.5])
+
+    assert_jvp_matches_central_difference(function, (value,), (direction,), rtol=2e-5, atol=2e-5)
+
+
+def test_composite_out_needs_a_traced_operand_besides_the_destination() -> None:
+    value = np.array([1.0, 2.0, 3.0])
+
+    def choose_into(x: Any) -> Any:
+        destination = x * 0.0
+        np.choose(np.array([0, 1, 0]), [value, -value], out=destination)
+        return destination
+
+    with pytest.raises(ad.TracingError, match="traced operand other than out="):
+        ad.jvp(choose_into)(value, tangents=np.ones_like(value))
 
 
 def test_positional_array_function_out_preserves_identity() -> None:
@@ -388,51 +403,6 @@ def test_array_function_out_validation_never_mutates_traced_operands() -> None:
     np.testing.assert_array_equal(value, original)
 
 
-def test_stageable_array_function_out_round_trips() -> None:
-    def apply(x: Any) -> Any:
-        destination = np.zeros_like(np.sum(x, axis=1))
-        result = np.sum(x, axis=1, out=destination)
-        assert result is destination
-        return destination
-
-    program = ad.stage(apply, specs=(ad.ArraySpec((2, 3), "float64"),))
-    restored = ad.StagedProgram.from_dict(program.to_dict())
-    value = np.arange(6.0).reshape(2, 3)
-
-    np.testing.assert_allclose(restored(value), np.sum(value, axis=1))
-
-
-def test_staged_reduction_out_preserves_where_and_unsafe_destination_cast() -> None:
-    def apply(x: Any) -> Any:
-        destination = np.zeros_like(np.sum(x, axis=1), dtype=np.float32)
-        result = np.sum(
-            x,
-            axis=1,
-            dtype=np.float64,
-            out=destination,
-            where=x > 1.5,
-        )
-        assert result is destination
-        return destination
-
-    program = ad.stage(apply, specs=(ad.ArraySpec((2, 3), "float64"),))
-    restored = ad.StagedProgram.from_dict(program.to_dict())
-    value = np.arange(6.0).reshape(2, 3)
-    expected = np.zeros(2, dtype=np.float32)
-    np.sum(
-        value,
-        axis=1,
-        dtype=np.float64,
-        out=expected,
-        where=value > 1.5,
-    )
-
-    for staged in (program, restored):
-        actual = staged(value)
-        np.testing.assert_allclose(actual, expected)
-        assert actual.dtype == np.dtype(np.float32)
-
-
 def test_staged_dot_out_requires_exact_dtype_and_c_layout() -> None:
     def valid(x: Any) -> Any:
         destination = np.empty((), dtype=x.dtype, order="C", like=x)
@@ -464,29 +434,34 @@ def test_staged_dot_out_requires_exact_dtype_and_c_layout() -> None:
         ad.stage(wrong_layout, specs=(ad.ArraySpec(matrix.shape, matrix.dtype),))
 
 
-def test_staged_take_out_matches_numpy_casting_policy() -> None:
-    def narrowing(x: Any) -> Any:
-        destination = np.empty((2,), dtype=np.float16, like=x)
-        result = np.take(x, [0, 2], out=destination)
-        assert result is destination
-        return destination
-
+@pytest.mark.parametrize(
+    "write",
+    [
+        lambda x, out: np.take(x, [0, 2], out=out),
+        lambda x, out: np.compress([True, False, True, False], x, out=out),
+    ],
+    ids=("take", "compress"),
+)
+def test_selection_out_matches_numpy_casting_policy(write: Any) -> None:
     value = np.arange(4, dtype=np.float32)
+
+    def into(dtype: type[np.floating[Any]]) -> Any:
+        def apply(x: Any) -> Any:
+            destination = np.empty((2,), dtype=dtype, like=x)
+            result = write(x, destination)
+            assert result is destination
+            return destination
+
+        return apply
+
+    narrowing, widening = into(np.float16), into(np.float64)
     dynamic, _tangent = ad.jvp(narrowing)(value, tangents=np.ones_like(value))
-    np.testing.assert_allclose(dynamic, np.take(value, [0, 2]).astype(np.float16))
-    program = ad.stage(narrowing, value)
-    restored = ad.StagedProgram.from_dict(program.to_dict())
-    for staged in (program, restored):
-        actual = staged(value)
-        np.testing.assert_allclose(actual, np.take(value, [0, 2]).astype(np.float16))
-        assert actual.dtype == np.dtype(np.float16)
+    assert_tree_close(dynamic, narrowing(value))
+    assert_staged_round_trip(narrowing, value)
 
-    def widening(x: Any) -> Any:
-        destination = np.empty((2,), dtype=np.float64, like=x)
-        return np.take(x, [0, 2], out=destination)
-
+    # NumPy versions differ on whether a widening selection out= is safe.
     try:
-        expected = np.take(value, [0, 2], out=np.empty((2,), dtype=np.float64))
+        expected = widening(value)
     except TypeError:
         with pytest.raises(TypeError, match="according to the rule 'safe'"):
             ad.jvp(widening)(value, tangents=np.ones_like(value))
@@ -494,47 +469,8 @@ def test_staged_take_out_matches_numpy_casting_policy() -> None:
             ad.stage(widening, value)
     else:
         dynamic, _tangent = ad.jvp(widening)(value, tangents=np.ones_like(value))
-        np.testing.assert_allclose(dynamic, expected)
-        staged = ad.stage(widening, value)(value)
-        np.testing.assert_allclose(staged, expected)
-        assert dynamic.dtype == expected.dtype
-        assert staged.dtype == expected.dtype
-
-
-def test_compress_out_matches_numpy_casting_policy() -> None:
-    value = np.arange(4, dtype=np.float32)
-    condition = np.array([True, False, True, False])
-
-    def narrowing(x: Any) -> Any:
-        destination = np.empty((2,), dtype=np.float16, like=x)
-        result = np.compress(condition, x, out=destination)
-        assert result is destination
-        return destination
-
-    expected = np.compress(condition, value).astype(np.float16)
-    dynamic, _tangent = ad.jvp(narrowing)(value, tangents=np.ones_like(value))
-    np.testing.assert_allclose(dynamic, expected)
-    program = ad.stage(narrowing, value)
-    np.testing.assert_allclose(program(value), expected)
-
-    def widening(x: Any) -> Any:
-        destination = np.empty((2,), dtype=np.float64, like=x)
-        return np.compress(condition, x, out=destination)
-
-    try:
-        expected = np.compress(condition, value, out=np.empty((2,), dtype=np.float64))
-    except TypeError:
-        with pytest.raises(TypeError, match="according to the rule 'safe'"):
-            ad.jvp(widening)(value, tangents=np.ones_like(value))
-        with pytest.raises(TypeError, match="according to the rule 'safe'"):
-            ad.stage(widening, value)
-    else:
-        dynamic, _tangent = ad.jvp(widening)(value, tangents=np.ones_like(value))
-        np.testing.assert_allclose(dynamic, expected)
-        staged = ad.stage(widening, value)(value)
-        np.testing.assert_allclose(staged, expected)
-        assert dynamic.dtype == expected.dtype
-        assert staged.dtype == expected.dtype
+        assert_tree_close(dynamic, expected)
+        assert_staged_round_trip(widening, value)
 
 
 def test_staged_out_tuple_matches_numpy_function_category() -> None:
@@ -574,12 +510,47 @@ def test_array_function_out_remains_traceable_at_second_order() -> None:
     np.testing.assert_allclose(ad.hessian(loss)(value), 2 * np.eye(value.size))
 
 
+@pytest.mark.parametrize("name", sorted(_OUT_FORMS))
+def test_array_function_out_differentiates_under_an_enclosing_transform(name: str) -> None:
+    """An enclosing trace sees how ``out=`` depends on the inputs, as without ``out=``."""
+    function, _stages = _OUT_FORMS[name]
+    value = np.array([[0.7, 1.2, 1.8], [1.1, 0.83, 1.4]])
+    direction = seeded_like(value, name)
+
+    def write(x: Any) -> Any:
+        out = np.zeros_like(function(x))
+        function(x, out=out)
+        return out
+
+    def inner_primal(call: Callable[..., Any]) -> Callable[..., Any]:
+        return lambda x: ad.jvp(call)(x, tangents=direction)[0]
+
+    def loss(call: Callable[..., Any]) -> Callable[..., Any]:
+        return lambda x: np.sum(np.sin(np.real(call(x))) ** 3)
+
+    assert_spellings_agree(inner_primal(write), inner_primal(function), (value,), argnums=(0,))
+    np.testing.assert_allclose(ad.hessian(loss(write))(value), ad.hessian(loss(function))(value))
+
+
 def test_astype_inexact_vjp_uses_the_static_target_dtype() -> None:
     value = np.array([1.0, 2.0], dtype=np.float64)
 
     gradient = ad.grad(lambda x: np.sum(x.astype(np.float32)))(value)
 
     np.testing.assert_allclose(gradient, np.ones_like(value))
+
+
+@pytest.mark.parametrize("dtype", [np.float64, np.float32])
+def test_astype_function_casts_nested_traces(dtype: type[np.floating[Any]]) -> None:
+    value = np.array([0.5, -1.0, 2.0])
+
+    def loss(x: Any) -> Any:
+        return np.sum(np.astype(x**3, dtype))
+
+    expected = np.diag(6 * value)
+    np.testing.assert_allclose(ad.hessian(loss)(value), expected, rtol=1e-6)
+    staged = ad.stage(ad.grad(loss), specs=(ad.ArraySpec(value.shape, value.dtype),))
+    np.testing.assert_allclose(staged(value), 3 * value**2, rtol=1e-6)
 
 
 @pytest.mark.parametrize(
@@ -660,3 +631,22 @@ def test_staged_casting_authority_matches_numpy_for_every_supported_dtype_pair(
             assert can_cast_dtype(source, target, casting=casting) is bool(
                 np.can_cast(source, target, casting=casting)
             )
+
+
+def test_staged_out_rejects_concrete_and_cross_trace_destinations() -> None:
+    with pytest.raises(ad.MutationError, match="requires one owned staged array destination"):
+        ad.stage(
+            lambda array: np.sum(array, out=np.zeros(())),
+            specs=(ad.ArraySpec((3,), "float64"),),
+        )
+
+    def outer(array: Any) -> Any:
+        destination = array.copy()
+        ad.stage(
+            lambda inner: np.add(inner, 1.0, out=destination),
+            specs=(ad.ArraySpec((3,), "float64"),),
+        )
+        return array
+
+    with pytest.raises(ad.TracingError, match="array from another trace"):
+        ad.stage(outer, specs=(ad.ArraySpec((3,), "float64"),))

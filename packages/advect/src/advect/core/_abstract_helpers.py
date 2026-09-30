@@ -3,22 +3,93 @@
 
 from __future__ import annotations
 
+import functools
 import math
+import string
 from collections.abc import Iterable
 from typing import TYPE_CHECKING
+
+from advect.core._abstract_model import ArraySpec
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from advect.core._abstract_model import ArraySpec
-
 _SINGLE_PRECISION_BITS = 32
 _DOUBLE_PRECISION_BITS = 64
-_COMPLEX128_BITS = 128
+# NumPy 2's default dtype for each Python scalar type.
+_PYTHON_SCALAR_DTYPES: dict[type, str] = {
+    bool: "bool",
+    int: "int64",
+    float: "float64",
+    complex: "complex128",
+}
+# Exact types with weak-scalar semantics; built-in subclasses need isinstance.
+PYTHON_SCALAR_TYPES = tuple(_PYTHON_SCALAR_DTYPES)
+# The name of the Array API namespace of abstract staged values.
+ABSTRACT_NAMESPACE_NAME = "advect.array_api"
+
+# NumPy's "safe" cast targets for every staged dtype, in promotion order. The
+# first target shared by every strong operand is their NumPy 2 result type.
+_INEXACT = "float16 float32 float64 complex64 complex128"
+_SAFE_CASTS: dict[str, tuple[str, ...]] = {
+    source: tuple(targets.split())
+    for source, targets in {
+        "bool": f"bool uint8 int8 uint16 int16 uint32 int32 uint64 int64 {_INEXACT}",
+        "uint8": f"uint8 uint16 int16 uint32 int32 uint64 int64 {_INEXACT}",
+        "int8": f"int8 int16 int32 int64 {_INEXACT}",
+        "uint16": "uint16 uint32 int32 uint64 int64 float32 float64 complex64 complex128",
+        "int16": "int16 int32 int64 float32 float64 complex64 complex128",
+        "uint32": "uint32 uint64 int64 float64 complex128",
+        "int32": "int32 int64 float64 complex128",
+        "uint64": "uint64 float64 complex128",
+        "int64": "int64 float64 complex128",
+        "float16": _INEXACT,
+        "float32": "float32 float64 complex64 complex128",
+        "float64": "float64 complex128",
+        "complex64": "complex64 complex128",
+        "complex128": "complex128",
+    }.items()
+}
+DTYPE_NAMES = frozenset(_SAFE_CASTS)
+_UNSUPPORTED_DTYPE = (
+    "Unsupported staged dtype {!r}; staged programs support only the canonical bool "
+    f"and numeric dtypes: {', '.join(_SAFE_CASTS)}"
+)
+_KIND_BITS = {
+    name: (name.rstrip(string.digits), int(name.lstrip(string.ascii_lowercase) or 8))
+    for name in _SAFE_CASTS
+}
+_WEAK_FLOAT = ArraySpec((), "float64", weak=True)
+_WEAK_COMPLEX = ArraySpec((), "complex128", weak=True)
+# Kind order of NEP 50 weak (Python scalar) promotion.
+_KIND_RANK = {"bool": 0, "uint": 1, "int": 1, "float": 2, "complex": 3}
+# Categories within which the Array API admits lossless casts.
+_CAST_CATEGORY = {"bool": 0, "uint": 1, "int": 1, "float": 2, "complex": 2}
+
+
+@functools.cache
+def _result_type(dtypes: frozenset[str]) -> str:
+    return next(
+        target
+        for target in _SAFE_CASTS["bool"]
+        if all(target in _SAFE_CASTS[dtype] for dtype in dtypes)
+    )
+
+
+def _weak_result_type(result: str, scalar: str) -> str:
+    result_kind = _KIND_BITS[result][0]
+    scalar_kind = _KIND_BITS[scalar][0]
+    if _KIND_RANK[scalar_kind] <= _KIND_RANK[result_kind]:
+        return result
+    if scalar_kind == "complex" and result_kind == "float":
+        return _result_type(frozenset((result, "complex64")))
+    return scalar
 
 
 def dtype_name(dtype: object) -> str:
     """Return the stable dtype spelling stored in graph metadata."""
+    if isinstance(dtype, type) and dtype in _PYTHON_SCALAR_DTYPES:
+        return _PYTHON_SCALAR_DTYPES[dtype]
     name = getattr(dtype, "name", None)
     if isinstance(name, str):
         return name
@@ -32,67 +103,123 @@ def dtype_name(dtype: object) -> str:
     return text
 
 
+def value_spec(value: object) -> ArraySpec:
+    """Return the staged spec of one concrete operand.
+
+    Python scalars are weak. NumPy scalars such as ``float64`` subclass Python
+    types but carry a dtype, so they are strong rank-zero arrays.
+    """
+    shape = getattr(value, "shape", None)
+    dtype = getattr(value, "dtype", None)
+    if shape is not None and dtype is not None:
+        return ArraySpec(tuple(int(size) for size in shape), dtype)
+    for python_type, python_dtype in _PYTHON_SCALAR_DTYPES.items():
+        if isinstance(value, python_type):
+            return ArraySpec((), python_dtype, weak=True)
+    raise TypeError(f"Cannot stage concrete operand of type {type(value).__name__}")
+
+
+@functools.lru_cache(maxsize=256)
+def _typed_dtype_name(_dtype_type: type, dtype: object) -> str:
+    # A provider dtype may compute its name on every access (NumPy's is a
+    # Python property), and staging reads one per sequence leaf. Keying on the
+    # type first keeps a cache hit from comparing dtypes across providers.
+    return dtype_name(dtype)
+
+
+def _staged_dtype(dtype: object) -> str:
+    name = dtype.lower() if type(dtype) is str else ""
+    if name not in DTYPE_NAMES:
+        try:
+            name = _typed_dtype_name(type(dtype), dtype).lower()
+        except TypeError:  # An unhashable dtype object.
+            name = dtype_name(dtype).lower()
+        if name not in DTYPE_NAMES:
+            raise TypeError(_UNSUPPORTED_DTYPE.format(dtype))
+    return name
+
+
 def dtype_kind_bits(dtype: object) -> tuple[str, int]:
     """Return Advect's staged promotion category and precision."""
-    name = dtype_name(dtype).lower()
-    if "complex" in name:
-        return "complex", 128 if "128" in name else 64
-    if "float" in name:
-        return "float", 64 if "64" in name else 32
-    if "uint" in name:
-        return "uint", int("".join(char for char in name if char.isdigit()) or 64)
-    if "int" in name:
-        return "int", int("".join(char for char in name if char.isdigit()) or 64)
-    if "bool" in name:
-        return "bool", 8
-    raise TypeError(f"Unsupported staged dtype {dtype!r}")
+    return _KIND_BITS[_staged_dtype(dtype)]
+
+
+def safely_casts(source: object, target: object) -> bool:
+    """Return whether NumPy's "safe" casting admits *source* to *target*."""
+    return _staged_dtype(target) in _SAFE_CASTS[_staged_dtype(source)]
+
+
+def can_cast_dtype(source: str, target: str) -> bool:
+    """Return the Array API lossless-cast relation between two staged dtypes."""
+    return (
+        target in _SAFE_CASTS[source]
+        and _CAST_CATEGORY[_KIND_BITS[source][0]] == _CAST_CATEGORY[_KIND_BITS[target][0]]
+    )
+
+
+def _operand_dtypes(specs: Sequence[ArraySpec]) -> frozenset[str]:
+    """Return the operand dtypes after NEP 50 resolves each weak scalar."""
+    if not specs:
+        raise TypeError("A staged operation requires at least one typed operand")
+    strong = frozenset(_staged_dtype(spec.dtype) for spec in specs if not spec.weak)
+    weak = {_staged_dtype(spec.dtype) for spec in specs if spec.weak}
+    if not strong:
+        return frozenset(weak)
+    result = _result_type(strong)
+    return strong | {_weak_result_type(result, dtype) for dtype in weak}
 
 
 def promote_dtype(specs: Sequence[ArraySpec]) -> str:
-    """Apply the staged weak-scalar promotion contract."""
-    if not specs:
-        raise TypeError("A staged operation requires at least one typed operand")
-    strong = [spec for spec in specs if not spec.weak]
-    effective = strong or list(specs)
-    effective_kinds_and_bits = [dtype_kind_bits(spec.dtype) for spec in effective]
-    effective_kinds = {kind for kind, _bits in effective_kinds_and_bits}
-    if effective_kinds == {"int", "uint"}:
-        signed_bits = max(bits for kind, bits in effective_kinds_and_bits if kind == "int")
-        unsigned_bits = max(bits for kind, bits in effective_kinds_and_bits if kind == "uint")
-        for candidate_bits in (8, 16, 32, 64):
-            if candidate_bits >= signed_bits and candidate_bits > unsigned_bits:
-                return f"int{candidate_bits}"
-        # NumPy defines the otherwise-unrepresentable int64/uint64 pair as
-        # float64. Array API providers do not admit that pair for promotion.
-        return "float64"
-    base = strong[0] if strong else specs[0]
-    kind, bits = dtype_kind_bits(base.dtype)
-    rank = {"bool": 0, "uint": 1, "int": 2, "float": 3, "complex": 4}
-    for spec in specs:
-        candidate_kind, candidate_bits = dtype_kind_bits(spec.dtype)
-        if spec.weak and strong:
-            if candidate_kind == "complex" and rank[kind] < rank["complex"]:
-                kind = "complex"
-                bits = (
-                    _DOUBLE_PRECISION_BITS if bits <= _SINGLE_PRECISION_BITS else _COMPLEX128_BITS
-                )
-            elif candidate_kind == "float" and rank[kind] < rank["float"]:
-                kind = "float"
-                bits = max(bits, _SINGLE_PRECISION_BITS)
-            continue
-        comparison_bits = candidate_bits
-        if kind == "complex" and candidate_kind != "complex":
-            comparison_bits *= 2
-        elif kind != "complex" and candidate_kind == "complex":
-            bits *= 2
-        if rank[candidate_kind] > rank[kind]:
-            kind = candidate_kind
-        bits = max(bits, comparison_bits)
-    if kind == "complex":
-        bits = _DOUBLE_PRECISION_BITS if bits <= _DOUBLE_PRECISION_BITS else _COMPLEX128_BITS
-    elif kind == "float":
-        bits = _SINGLE_PRECISION_BITS if bits <= _SINGLE_PRECISION_BITS else _DOUBLE_PRECISION_BITS
-    return "bool" if kind == "bool" else f"{kind}{bits}"
+    """Return NumPy 2's result type, with weak specs promoting as Python scalars."""
+    return _result_type(_operand_dtypes(specs))
+
+
+def strong_result_dtype(specs: Sequence[ArraySpec]) -> str:
+    """Return NumPy 2's result type once array coercion makes every weak spec strong.
+
+    ``stack`` and the contractions such as ``dot`` coerce a Python scalar to
+    an array at its default dtype before promoting, unlike ufuncs.
+    """
+    return _result_type(frozenset(_staged_dtype(spec.dtype) for spec in specs))
+
+
+def discovered_dtype(value: object) -> object:
+    """Return the dtype NumPy's array coercion discovers for one sequence leaf.
+
+    Coercion reads a Python scalar at its default dtype, not weakly, except that
+    it reads a Python int by value: int64, else uint64, else an object array,
+    which staging does not support.
+    """
+    if isinstance(value, int) and not isinstance(value, bool):
+        if -(2**63) <= value < 2**63:
+            return "int64"
+        return "uint64" if 0 <= value < 2**64 else "object"
+    return value_spec(value).dtype
+
+
+def coerced_dtype(dtypes: Iterable[object]) -> str:
+    """Return the dtype NumPy's array coercion discovers for a sequence's leaves.
+
+    Coercion folds ``promote_types`` over the leaves in order, so unlike the
+    result type it depends on their order: int8, uint8, float16 is float32, but
+    float16, uint8, int8 is float16. An empty sequence is float64.
+    """
+    result: str | None = None
+    for dtype in dtypes:
+        name = _staged_dtype(dtype)
+        result = name if result is None else _result_type(frozenset((result, name)))
+    return "float64" if result is None else result
+
+
+def inexact_dtype(specs: Sequence[ArraySpec]) -> str:
+    """Return the dtype of a NumPy ufunc with only floating-point and complex loops."""
+    return _result_type(_operand_dtypes(specs) | {"float16"})
+
+
+def division_dtype(dtype: object) -> str:
+    """Return NumPy's true-division and linalg dtype: exact dtypes compute in float64."""
+    name = _staged_dtype(dtype)
+    return "float64" if _KIND_BITS[name][0] in {"bool", "int", "uint"} else name
 
 
 def real_dtype(dtype: object) -> str:
@@ -103,14 +230,15 @@ def real_dtype(dtype: object) -> str:
     return "float32" if bits == _DOUBLE_PRECISION_BITS else "float64"
 
 
-def complex_dtype(dtype: object) -> str:
-    """Return the complex FFT dtype corresponding to *dtype*."""
-    kind, bits = dtype_kind_bits(dtype)
-    if kind not in {"float", "complex"}:
-        raise TypeError(f"FFT input must be floating-point or complex, got {dtype!r}")
-    if kind == "complex":
-        return "complex64" if bits == _DOUBLE_PRECISION_BITS else "complex128"
-    return "complex64" if bits == _SINGLE_PRECISION_BITS else "complex128"
+def fft_dtype(dtype: object, *, real_output: bool) -> str:
+    """Return NumPy's FFT result dtype for one input dtype.
+
+    Complex transforms return ``result_type(x, 1j)`` and inverse real
+    transforms ``result_type(x.real, 1.0)``, so exact inputs become float64.
+    """
+    if real_output:
+        return promote_dtype((ArraySpec((), real_dtype(dtype)), _WEAK_FLOAT))
+    return promote_dtype((ArraySpec((), dtype), _WEAK_COMPLEX))
 
 
 def accumulation_dtype(

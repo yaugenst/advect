@@ -15,7 +15,7 @@ from advect.core._pytree import tree_flatten, tree_unflatten
 if TYPE_CHECKING:
     from typing import Protocol
 
-    from advect.autodiff.api._input_trace import _TracedInputSpec
+    from advect.autodiff.api._input_trace import _LeafTraceSpec, _TracedInputSpec
     from advect.core._pytree import TreeDef
 
     class _SupportsAdd(Protocol):
@@ -82,7 +82,7 @@ def _unbroadcast(g: object, target_shape: tuple[int, ...]) -> object:
 
     axes_to_sum: list[int] = []
     for i, (g_dim, t_dim) in enumerate(zip(g_shape, target_shape, strict=True)):
-        if t_dim == 1 and g_dim > 1:
+        if t_dim == 1 and g_dim != 1:
             axes_to_sum.append(i)
 
     if axes_to_sum:
@@ -127,8 +127,28 @@ def _flatten_output_cotangents(output_treedef: TreeDef, g: object) -> list[objec
     return g_leaves
 
 
+def _provider_scalar_like(primal: object, value: object) -> object | None:
+    """Return ``value`` as the rank-zero ``primal``'s own scalar type, if any.
+
+    NumPy represents rank-zero results as scalars, so a seed of that type
+    keeps its type through identity partials, such as ``sum`` of a rank-zero
+    array, as any other rank-zero NumPy gradient does. A provider without its
+    own scalar types returns ``None``.
+    """
+    scalar_type = getattr(getattr(primal, "dtype", None), "type", None)
+    primal_provider = type(primal).__module__.partition(".")[0]
+    scalar_provider = str(getattr(scalar_type, "__module__", "")).partition(".")[0]
+    if callable(scalar_type) and primal_provider == scalar_provider:
+        return scalar_type(value)
+    return None
+
+
 def _coerce_output_cotangent_like(cotangent: object, primal: object) -> object:
-    """Validate one cotangent leaf against its concrete output primal."""
+    """Validate one cotangent leaf against its concrete output primal.
+
+    A Python-scalar cotangent of a rank-zero output is seeded as ``grad``
+    seeds it, so every reverse transform returns the same gradient types.
+    """
     if cotangent is None:
         return None
     if _is_boolean_numeric(cotangent):
@@ -153,6 +173,10 @@ def _coerce_output_cotangent_like(cotangent: object, primal: object) -> object:
         return cotangent
 
     expected_shape = tuple(int(dimension) for dimension in primal_shape)
+    if not expected_shape and type(cotangent) in {int, float, complex}:
+        seed = _provider_scalar_like(primal, cotangent)
+        if seed is not None:
+            cotangent = seed
     cotangent_shape = getattr(cotangent, "shape", None)
     if cotangent_shape is None:
         namespace = _get_array_namespace(primal)
@@ -188,30 +212,24 @@ def _build_grad_outputs(
     return gradients
 
 
-def _build_grad_tree(
-    spec: _TracedInputSpec,
-    *,
-    grads: dict[int, object],
-    active_leaf_positions: frozenset[int] | None = None,
-) -> object:
-    grad_leaves: list[object] = []
-    for position, leaf_spec in enumerate(spec.leaf_specs):
-        if active_leaf_positions is not None and position not in active_leaf_positions:
-            grad_leaves.append(None)
-            continue
-        node_id = leaf_spec.node_id
-        if node_id is None:
-            grad_leaves.append(None)
-            continue
+def _input_gradient_leaf(leaf_spec: _LeafTraceSpec, grads: dict[int, object]) -> object:
+    """Return one selected leaf's gradient, zero-filled when disconnected."""
+    if leaf_spec.node_id is None:
+        return None
+    gradient = grads.get(leaf_spec.node_id)
+    if gradient is None:
+        gradient = _zeros_like(leaf_spec.primal)
+    # A weak scalar tracer stands for a Python scalar, as a lifted one does.
+    if leaf_spec.restore_python_scalar or getattr(leaf_spec.primal, "_advect_weak", False):
+        return _unlift_scalar_array(gradient)
+    return gradient
 
-        grad_val = grads.get(node_id)
-        if grad_val is None:
-            primal = leaf_spec.primal
-            grad_val = None if primal is None else _zeros_like(primal)
-        if leaf_spec.restore_python_scalar:
-            grad_val = _unlift_scalar_array(grad_val)
-        grad_leaves.append(grad_val)
-    return tree_unflatten(spec.treedef, grad_leaves)
+
+def _build_grad_tree(spec: _TracedInputSpec, *, grads: dict[int, object]) -> object:
+    return tree_unflatten(
+        spec.treedef,
+        [_input_gradient_leaf(leaf_spec, grads) for leaf_spec in spec.leaf_specs],
+    )
 
 
 def _format_backward_result(

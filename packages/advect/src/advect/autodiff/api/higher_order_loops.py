@@ -17,6 +17,8 @@ from advect.autodiff.api.common import (
 from advect.core._pytree import tree_flatten, tree_unflatten
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from advect.autodiff._ephemeral import LinearMap
 
 
@@ -47,44 +49,21 @@ def _hessian_reverse_loop(
         primal_flat_sizes=context.primal_flat_sizes,
         primal_dtypes=context.primal_dtypes,
     )
-    positions = (
-        (col_block, column)
-        for col_block, col_size in enumerate(context.primal_flat_sizes)
-        for column in range(col_size)
-    )
-    for position_batch in batched(positions, _PULLBACK_MANY_BATCH_SIZE):
-        cotangents = _build_basis_cotangent_batch(
-            context=context,
-            grad_value=grad_value,
-            positions=position_batch,
-        )
-        hvp_values = linear.transpose_many(cotangents)
-        for (col_block, column), hvp_value in zip(
-            position_batch,
-            hvp_values,
-            strict=True,
-        ):
-            _assign_hessian_column(
-                context=context,
-                hess_blocks_flat=hess_blocks_flat,
-                col_block=col_block,
-                column=column,
-                hvp_value=hvp_value,
-            )
+    for col_block, column, hvp_entries in _basis_hvp_columns(
+        context=context,
+        linear=linear,
+        grad_value=grad_value,
+    ):
+        for row_block, entry in enumerate(hvp_entries):
+            hess_blocks_flat[row_block][col_block][:, column] = context.array_ns.asarray(
+                entry
+            ).reshape(-1)
 
     return _reshape_hessian_blocks(
         hessian_blocks_flat=hess_blocks_flat,
         primal_shapes=context.primal_shapes,
         single_argnum=context.single_argnum,
     )
-
-
-def _reshape_hessian_diagonals(*, context: _HessianLoopContext, diagonals: list[Any]) -> object:
-    reshaped = tuple(
-        diagonal.reshape(shape)
-        for diagonal, shape in zip(diagonals, context.primal_shapes, strict=True)
-    )
-    return reshaped[0] if context.single_argnum else reshaped
 
 
 def _hessian_diag_reverse_loop(
@@ -101,6 +80,30 @@ def _hessian_diag_reverse_loop(
             strict=True,
         )
     ]
+    for block, column, hvp_entries in _basis_hvp_columns(
+        context=context,
+        linear=linear,
+        grad_value=grad_value,
+    ):
+        diagonals[block][column] = context.array_ns.asarray(hvp_entries[block]).reshape(-1)[column]
+    reshaped = tuple(
+        diagonal.reshape(shape)
+        for diagonal, shape in zip(diagonals, context.primal_shapes, strict=True)
+    )
+    return reshaped[0] if context.single_argnum else reshaped
+
+
+def _basis_hvp_columns(
+    *,
+    context: _HessianLoopContext,
+    linear: LinearMap,
+    grad_value: object,
+) -> Iterator[tuple[int, int, tuple[Any, ...]]]:
+    """Yield ``(block, column, hvp_entries)`` for each selected input coordinate."""
+    layouts = tuple(
+        _gradient_entry_layout(context=context, entry=entry, block=block)
+        for block, entry in enumerate(_hvp_entries(context, grad_value))
+    )
     positions = (
         (block, column)
         for block, flat_size in enumerate(context.primal_flat_sizes)
@@ -109,42 +112,35 @@ def _hessian_diag_reverse_loop(
     for position_batch in batched(positions, _PULLBACK_MANY_BATCH_SIZE):
         cotangents = _build_basis_cotangent_batch(
             context=context,
-            grad_value=grad_value,
+            layouts=layouts,
             positions=position_batch,
         )
-        hvp_values = linear.transpose_many(cotangents)
         for (block, column), hvp_value in zip(
             position_batch,
-            hvp_values,
+            linear.transpose_many(cotangents),
             strict=True,
         ):
-            hvp_entries = _normalize_hvp_output(
-                hvp_value=hvp_value,
-                expected_selected_args=len(context.primal_shapes),
-                single_argnum=context.single_argnum,
-            )
-            diagonals[block][column] = context.array_ns.asarray(hvp_entries[block]).reshape(-1)[
-                column
-            ]
-    return _reshape_hessian_diagonals(context=context, diagonals=diagonals)
+            yield block, column, _hvp_entries(context, hvp_value)
+
+
+def _hvp_entries(context: _HessianLoopContext, value: object) -> tuple[Any, ...]:
+    return _normalize_hvp_output(
+        hvp_value=value,
+        expected_selected_args=len(context.primal_shapes),
+        single_argnum=context.single_argnum,
+    )
 
 
 def _build_basis_cotangent_batch(
     *,
     context: _HessianLoopContext,
-    grad_value: object,
+    layouts: tuple[_GradientEntryLayout, ...],
     positions: tuple[tuple[int, int], ...],
 ) -> tuple[object, ...]:
     """Build basis pytrees as row views over one allocation per gradient entry."""
-    grad_entries = _normalize_hvp_output(
-        hvp_value=grad_value,
-        expected_selected_args=len(context.primal_shapes),
-        single_argnum=context.single_argnum,
-    )
     values_by_seed: list[list[Any]] = [[] for _ in positions]
 
-    for block, entry in enumerate(grad_entries):
-        layout = _gradient_entry_layout(context=context, entry=entry, block=block)
+    for block, layout in enumerate(layouts):
         rows = context.array_ns.zeros(
             (len(positions), context.primal_flat_sizes[block]),
             dtype=context.primal_dtypes[block],
@@ -196,22 +192,3 @@ def _gradient_entry_layout(
         leaf_shapes=leaf_shapes,
         leaf_sizes=leaf_sizes,
     )
-
-
-def _assign_hessian_column(
-    *,
-    context: _HessianLoopContext,
-    hess_blocks_flat: list[list[Any]],
-    col_block: int,
-    column: int,
-    hvp_value: object,
-) -> None:
-    hvp_entries = _normalize_hvp_output(
-        hvp_value=hvp_value,
-        expected_selected_args=len(context.primal_shapes),
-        single_argnum=context.single_argnum,
-    )
-    for row_block, entry in enumerate(hvp_entries):
-        hess_blocks_flat[row_block][col_block][:, column] = context.array_ns.asarray(entry).reshape(
-            -1
-        )

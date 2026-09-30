@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, cast
 
 from advect.autodiff.rules.array_family._backend_runtime import xp
+from advect.core._abstract_helpers import ABSTRACT_NAMESPACE_NAME
 
 
 def _is_advect_abstract(value: object) -> bool:
@@ -12,7 +13,7 @@ def _is_advect_abstract(value: object) -> bool:
     if not callable(namespace_function):
         return False
     namespace = namespace_function()
-    return getattr(namespace, "__name__", None) == "advect.array_api"
+    return getattr(namespace, "__name__", None) == ABSTRACT_NAMESPACE_NAME
 
 
 def native_signal_product(

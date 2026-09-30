@@ -15,7 +15,7 @@ _FIXTURE_PATH = (
     / "advect-runtime"
     / "tests"
     / "fixtures"
-    / "python_staged_add_multiply_v2.json"
+    / "python_staged_add_multiply_v3.json"
 )
 
 

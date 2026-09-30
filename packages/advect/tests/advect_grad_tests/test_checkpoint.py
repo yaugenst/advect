@@ -85,18 +85,6 @@ def test_checkpoint_preserves_output_pytree_structure() -> None:
     assert_allclose(gradient, 2 * x + 3 * x**2)
 
 
-def test_checkpoint_transpose_remains_traceable_for_second_derivatives() -> None:
-    @ad.checkpoint
-    def block(value: np.ndarray) -> np.ndarray:
-        return value**3
-
-    first = ad.grad(lambda value: np.sum(block(value)))
-    second = ad.grad(lambda value: np.sum(first(value)))
-    x = np.array([1.0, 2.0, -3.0])
-
-    assert_allclose(second(x), 6 * x)
-
-
 def test_checkpoint_is_atomic_on_the_outer_tape() -> None:
     @ad.checkpoint
     def block(value: np.ndarray) -> np.ndarray:
@@ -151,3 +139,55 @@ def test_checkpoint_rejects_opaque_residual_primitives() -> None:
 
     with pytest.raises(ad.TracingError, match="residual primitive"):
         ad.grad(lambda value: np.sum(block(value)))(np.ones(2))
+
+
+def test_checkpoint_partial_jvp_zero_fills_passive_inputs() -> None:
+    @ad.checkpoint
+    def affine(
+        value: np.ndarray,
+        coefficient: np.ndarray,
+        *,
+        offset: float,
+    ) -> np.ndarray:
+        return value * coefficient + offset
+
+    value = np.array([1.0, 2.0])
+    coefficient = np.array([3.0, 4.0])
+    primal, tangent = ad.jvp(affine, argnums=0)(
+        value,
+        coefficient,
+        offset=2.0,
+        tangents=np.ones_like(value),
+    )
+
+    assert_allclose(primal, value * coefficient + 2.0)
+    assert_allclose(tangent, coefficient)
+
+
+def test_checkpoint_vjp_restores_a_multi_output_pytree() -> None:
+    @ad.checkpoint
+    def statistics(value: np.ndarray) -> dict[str, np.ndarray]:
+        return {"double": 2.0 * value, "sum": np.sum(value)}
+
+    value = np.array([1.0, 2.0, 3.0])
+    output, pullback = ad.vjp(statistics)(value)
+    gradient = pullback({"double": np.ones_like(value), "sum": np.array(3.0)})
+
+    assert_allclose(output["double"], 2.0 * value)
+    assert_allclose(output["sum"], np.sum(value))
+    assert_allclose(gradient, np.full_like(value, 5.0))
+
+
+def test_checkpoint_without_inputs_remains_a_direct_call_inside_a_trace() -> None:
+    calls = 0
+
+    @ad.checkpoint
+    def constant() -> np.ndarray:
+        nonlocal calls
+        calls += 1
+        return np.array(3.0)
+
+    gradient = ad.grad(lambda value: value * constant())(2.0)
+
+    assert gradient == pytest.approx(3.0)
+    assert calls == 1

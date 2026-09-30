@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import cast
+
 import numpy as np
 import pytest
 from numpy.testing import assert_allclose
@@ -32,62 +34,23 @@ class _ProtocolChild(_ProtocolBase):
     pass
 
 
-def test_tree_flatten_unflatten_roundtrip() -> None:
-    tree = {"a": [1, 2.0], "b": (3.0,)}
-    leaves, treedef = ad.pytree.tree_flatten(tree)
-    assert leaves == [1, 2.0, 3.0]
-    assert ad.pytree.tree_unflatten(treedef, leaves) == tree
+class _FreshContainers:
+    """Protocol node whose flatten builds new child and metadata containers."""
 
+    def __init__(self, left: object, right: object) -> None:
+        self.left = left
+        self.right = right
 
-def test_tree_map_single_tree() -> None:
-    tree = {"x": 1.0, "y": [2.0, 3.0]}
-    mapped = ad.pytree.tree_map(lambda v: v * 2, tree)
-    assert mapped == {"x": 2.0, "y": [4.0, 6.0]}
+    def __advect_tree_flatten__(self) -> tuple[tuple[object, ...], object]:
+        return ((self.left, self.right), {"fresh": 0}), None
 
-
-def test_tree_map_multi_tree() -> None:
-    a = {"x": 1.0, "y": 2.0}
-    b = {"x": 3.0, "y": 4.0}
-    mapped = ad.pytree.tree_map(lambda x, y: x + y, a, b)
-    assert mapped == {"x": 4.0, "y": 6.0}
-
-
-def test_static_wrapper_has_no_leaves_and_is_preserved() -> None:
-    tree = {"cfg": ad.pytree.static({"foo": 1}), "x": 1.0}
-    leaves, treedef = ad.pytree.tree_flatten(tree)
-    assert leaves == [1.0]
-
-    mapped = ad.pytree.tree_map(lambda v: v + 1.0, tree)
-    assert isinstance(mapped["cfg"], ad.pytree.Static)
-    assert mapped["cfg"].value == {"foo": 1}
-    assert mapped["x"] == 2.0
-    assert ad.pytree.tree_unflatten(treedef, leaves) == tree
-
-
-def test_tree_flatten_with_paths_returns_typed_entries() -> None:
-    tree = {"a": [1.0]}
-    paths, leaves, treedef = ad.pytree.tree_flatten_with_paths(tree)
-
-    assert leaves == [1.0]
-    assert treedef.num_leaves == 1
-    assert len(paths) == 1
-
-    path = paths[0]
-    assert isinstance(path[0], ad.pytree.DictKey)
-    assert isinstance(path[1], ad.pytree.SequenceKey)
-    assert ad.pytree.format_path(path) == "['a'][0]"
-
-
-def test_tree_flatten_leaf_roundtrip() -> None:
-    leaf = 3.14
-    leaves, treedef = ad.pytree.tree_flatten(leaf)
-    paths, leaves_with_paths, treedef_with_paths = ad.pytree.tree_flatten_with_paths(leaf)
-
-    assert leaves == [leaf]
-    assert leaves_with_paths == [leaf]
-    assert paths == [()]
-    assert treedef == treedef_with_paths
-    assert ad.pytree.tree_unflatten(treedef, leaves) == leaf
+    @classmethod
+    def __advect_tree_unflatten__(
+        cls, aux_data: object, children: tuple[object, ...]
+    ) -> _FreshContainers:
+        del aux_data
+        left, right = cast("tuple[object, object]", children[0])
+        return cls(left, right)
 
 
 def test_tree_flatten_treats_subclassed_builtin_container_as_leaf() -> None:
@@ -185,6 +148,51 @@ def test_inherited_pytree_protocol_participates_in_autodiff() -> None:
     assert gradient.tag == tree.tag
     assert_allclose(gradient.left, tree.right)
     assert_allclose(gradient.right, tree.left)
+
+
+def test_static_rejects_a_tracer_behind_freshly_flattened_containers() -> None:
+    # Regression: temporaries freed after one node's scan reused their
+    # addresses for the next node, so the cycle guard skipped the tracer.
+    def function(x: np.ndarray) -> object:
+        ad.pytree.static([_FreshContainers(1.0, 2.0), _FreshContainers(3.0, x)])
+        return np.sum(x)
+
+    with pytest.raises(TypeError, match="Static pytree metadata cannot contain"):
+        ad.grad(function)(np.ones(2))
+
+
+def test_static_primitive_argument_rejects_a_tracer_behind_fresh_containers() -> None:
+    @ad.primitive(name="tests.pytree.fresh_static_config", static_argnames=("config",))
+    def primitive(x: np.ndarray, config: object) -> np.ndarray:
+        del config
+        return x
+
+    def function(x: np.ndarray) -> object:
+        config = [_FreshContainers(1.0, 2.0), _FreshContainers(3.0, x)]
+        return np.sum(primitive(x, config))
+
+    with pytest.raises(TypeError, match=r"declared static.*received a traced value"):
+        ad.grad(function)(np.ones(2))
+
+
+_LEAF = ad.pytree.TreeDef(node_type=None, aux_data=None, children=(), num_leaves=1)
+
+
+@pytest.mark.parametrize(
+    ("children", "declared", "message"),
+    [
+        pytest.param((_LEAF, _LEAF), 1, "needs more leaves", id="undercounted"),
+        pytest.param((_LEAF,), 2, "did not consume all leaves", id="overcounted"),
+    ],
+)
+def test_unflatten_rejects_a_hand_built_treedef_with_a_wrong_leaf_count(
+    children: tuple[ad.pytree.TreeDef, ...], declared: int, message: str
+) -> None:
+    treedef = ad.pytree.TreeDef(
+        node_type=tuple, aux_data=len(children), children=children, num_leaves=declared
+    )
+    with pytest.raises(ValueError, match=message):
+        ad.pytree.tree_unflatten(treedef, list(range(declared)))
 
 
 def test_incomplete_pytree_protocol_fails_at_the_structural_boundary() -> None:

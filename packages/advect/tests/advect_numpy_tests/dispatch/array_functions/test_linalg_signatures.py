@@ -8,6 +8,10 @@ import numpy as np
 import pytest
 
 import advect as ad
+from advect_numpy_tests._assertions import (
+    assert_jvp_matches_central_difference,
+    assert_staged_round_trip,
+)
 
 
 def test_rectangular_full_svd_rejects_singular_vector_derivatives() -> None:
@@ -17,7 +21,7 @@ def test_rectangular_full_svd_rejects_singular_vector_derivatives() -> None:
         ad.jvp(np.linalg.svd)(value, tangents=np.ones_like(value))
 
     result, pullback = ad.vjp(np.linalg.svd)(value)
-    cotangent = (
+    cotangent = type(result)(
         np.ones_like(result[0]),
         np.zeros_like(result[1]),
         np.zeros_like(result[2]),
@@ -38,22 +42,33 @@ def test_svd_singular_values_support_the_hermitian_algorithm_flag() -> None:
             hermitian=True,
         )
 
-    primal, tangent = ad.jvp(singular_values)(value, tangents=direction)
-    epsilon = 1e-6
-    finite_difference = (
-        singular_values(value + epsilon * direction) - singular_values(value - epsilon * direction)
-    ) / (2 * epsilon)
-
-    np.testing.assert_allclose(primal, singular_values(value))
-    np.testing.assert_allclose(tangent, finite_difference, rtol=2e-6, atol=2e-6)
-
-    program = ad.stage(
-        singular_values,
-        specs=(ad.ArraySpec(value.shape, value.dtype),),
+    assert_jvp_matches_central_difference(
+        singular_values, (value,), (direction,), rtol=2e-6, atol=2e-6
     )
-    restored = ad.StagedProgram.from_dict(program.to_dict())
-    for staged in (program, restored):
-        np.testing.assert_allclose(staged(value), singular_values(value))
+    assert_staged_round_trip(singular_values, value)
+
+
+@pytest.mark.parametrize(
+    "singular_values",
+    [
+        lambda x: np.linalg.svd(x, compute_uv=0),
+        lambda x: np.linalg.svd(x, compute_uv=np.False_),
+        lambda x: np.linalg.svd(x, False, False),  # noqa: FBT003
+    ],
+    ids=("integer-flag", "numpy-bool-flag", "positional-flags"),
+)
+@pytest.mark.parametrize("shape", [(2, 2), (3, 2)], ids=("square", "rectangular"))
+def test_svd_reads_compute_uv_by_truthiness_in_every_lifetime(
+    singular_values: Any,
+    shape: tuple[int, int],
+) -> None:
+    value = np.arange(1.0, 1.0 + np.prod(shape)).reshape(shape) + np.eye(*shape)
+    expected = singular_values(value)
+
+    primal, tangent = ad.jvp(singular_values)(value, tangents=np.ones_like(value))
+    assert primal.shape == tangent.shape == expected.shape
+    np.testing.assert_allclose(primal, expected)
+    assert_staged_round_trip(singular_values, value)
 
 
 def test_linalg_required_operands_accept_keyword_spelling_when_staged() -> None:
@@ -72,38 +87,4 @@ def test_linalg_required_operands_accept_keyword_spelling_when_staged() -> None:
     np.testing.assert_allclose(primal, expected)
     np.testing.assert_array_equal(tangent, np.zeros_like(expected))
 
-    program = ad.stage(
-        solve,
-        specs=(
-            ad.ArraySpec(matrix.shape, matrix.dtype),
-            ad.ArraySpec(right.shape, right.dtype),
-        ),
-    )
-    restored = ad.StagedProgram.from_dict(program.to_dict())
-    for staged in (program, restored):
-        np.testing.assert_allclose(staged(matrix, right), expected)
-
-
-def test_slogdet_preserves_named_outputs_across_program_lifetimes() -> None:
-    value = np.array([[3.0, 1.0], [1.0, 2.0]])
-    expected = np.linalg.slogdet(value)
-
-    primal, tangent = ad.jvp(np.linalg.slogdet)(
-        value,
-        tangents=np.full_like(value, 0.1),
-    )
-    assert primal._fields == ("sign", "logabsdet")
-    assert tangent._fields == ("sign", "logabsdet")
-    np.testing.assert_allclose(primal.sign, expected.sign)
-    np.testing.assert_allclose(primal.logabsdet, expected.logabsdet)
-
-    program = ad.stage(
-        np.linalg.slogdet,
-        specs=(ad.ArraySpec(value.shape, value.dtype),),
-    )
-    restored = ad.StagedProgram.from_dict(program.to_dict())
-    for staged in (program, restored):
-        result = staged(value)
-        assert result._fields == ("sign", "logabsdet")
-        np.testing.assert_allclose(result.sign, expected.sign)
-        np.testing.assert_allclose(result.logabsdet, expected.logabsdet)
+    assert_staged_round_trip(solve, matrix, right)

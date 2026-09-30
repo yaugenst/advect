@@ -8,7 +8,8 @@ array that reproduces a failure.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Protocol, override
+from itertools import pairwise
+from typing import TYPE_CHECKING, Any, override
 
 import hypothesis.strategies as st
 import numpy as np
@@ -23,8 +24,10 @@ __all__ = [
     "ClipRegions",
     "Distinct",
     "Domain",
+    "HermitianTriangle",
     "Increasing",
     "Interior",
+    "Lattice",
     "Nonzero",
     "Positive",
     "Real",
@@ -36,31 +39,7 @@ __all__ = [
     "WellConditioned",
 ]
 
-_DEFAULT_CONDITION_LIMIT = 30.0
 _MATRIX_RANK = 2
-
-
-class Domain(Protocol):
-    """Construct one concrete argument strategy."""
-
-    def strategy(
-        self,
-        shape: tuple[int, ...],
-        dtype: np.dtype[Any],
-        drawn: Mapping[str, Any],
-    ) -> SearchStrategy[Any]:
-        """Return values of ``shape`` and ``dtype`` satisfying this domain."""
-        ...
-
-    @property
-    def condition_note(self) -> str:
-        """Explain the guarantees relevant to derivative checks."""
-        ...
-
-    @property
-    def depends_on(self) -> tuple[str, ...]:
-        """Arguments which must be drawn before this domain is constructed."""
-        ...
 
 
 def _float_width(dtype: np.dtype[Any]) -> int:
@@ -113,7 +92,9 @@ def _count(shape: tuple[int, ...]) -> int:
     return int(np.prod(shape, dtype=np.int64)) if shape else 1
 
 
-class _BaseDomain:
+class Domain:
+    """Construct one concrete argument strategy."""
+
     __slots__ = ()
 
     def strategy(
@@ -122,19 +103,22 @@ class _BaseDomain:
         dtype: np.dtype[Any],
         drawn: Mapping[str, Any],
     ) -> SearchStrategy[Any]:
+        """Return values of ``shape`` and ``dtype`` satisfying this domain."""
         del shape, dtype, drawn
         raise NotImplementedError
 
     @property
     def condition_note(self) -> str:
+        """Explain the guarantees relevant to derivative checks."""
         return type(self).__name__
 
     @property
     def depends_on(self) -> tuple[str, ...]:
+        """Arguments which must be drawn before this domain is constructed."""
         return ()
 
 
-class Real(_BaseDomain):
+class Real(Domain):
     """Finite real or complex values with bounded magnitude."""
 
     __slots__ = ("_scale",)
@@ -161,7 +145,7 @@ class Real(_BaseDomain):
         return f"finite values in [{-2.0 * self._scale}, {2.0 * self._scale}]"
 
 
-class Positive(_BaseDomain):
+class Positive(Domain):
     """Strictly positive values bounded away from zero."""
 
     __slots__ = ("_high", "_low")
@@ -196,7 +180,7 @@ class Positive(_BaseDomain):
         return f"values in [{self._low}, {self._high}]"
 
 
-class Nonzero(_BaseDomain):
+class Nonzero(Domain):
     """Values whose magnitude is bounded away from zero."""
 
     __slots__ = ("_high", "_margin")
@@ -241,7 +225,7 @@ class Nonzero(_BaseDomain):
         return f"magnitude in [{self._margin}, {self._high}]"
 
 
-class Unit(_BaseDomain):
+class Unit(Domain):
     """Real values strictly inside ``(-1, 1)``."""
 
     __slots__ = ("_margin",)
@@ -272,7 +256,36 @@ class Unit(_BaseDomain):
         return f"values in (-{1.0 - self._margin}, {1.0 - self._margin})"
 
 
-class ClipRegions(_BaseDomain):
+class Lattice(Domain):
+    """Exact kinks, ties, zeros and domain edges, shrinking to zero.
+
+    The points are exact in every float dtype, so forward and reverse modes
+    see identical primals even where finite differences are meaningless.
+    """
+
+    __slots__ = ()
+    _POINTS = (0.0, 1.0, -1.0, 0.5, -0.5, 2.0, -2.0)
+
+    @override
+    def strategy(
+        self,
+        shape: tuple[int, ...],
+        dtype: np.dtype[Any],
+        drawn: Mapping[str, Any],
+    ) -> SearchStrategy[np.ndarray[Any, Any]]:
+        del drawn
+        point = st.sampled_from(self._POINTS)
+        if np.issubdtype(dtype, np.complexfloating):
+            return _array(dtype, shape, st.tuples(point, point).map(lambda pair: complex(*pair)))
+        return _array(dtype, shape, point)
+
+    @override
+    @property
+    def condition_note(self) -> str:
+        return f"lattice points {self._POINTS}"
+
+
+class ClipRegions(Domain):
     """Values safely below, inside, and above fixed clipping bounds."""
 
     __slots__ = ("_excursion", "_lower", "_margin", "_upper")
@@ -354,7 +367,7 @@ class ClipRegions(_BaseDomain):
         )
 
 
-class Distinct(_BaseDomain):
+class Distinct(Domain):
     """Finite real values separated by a minimum gap."""
 
     __slots__ = ("_gap", "_scale")
@@ -403,12 +416,12 @@ class Distinct(_BaseDomain):
         return f"pairwise separation of at least {self._gap}"
 
 
-class SeparatedFrom(_BaseDomain):
+class SeparatedFrom(Domain):
     """Values separated elementwise from another argument.
 
-    Signs alternate, so binary selection primitives exercise both branches
-    while remaining a fixed positive distance from their nondifferentiable
-    equality boundary.
+    Each element lies above or below the other argument by a drawn side, so
+    binary selection primitives exercise both branches while remaining a
+    fixed positive distance from their nondifferentiable equality boundary.
     """
 
     __slots__ = ("_high", "_margin", "_other")
@@ -432,20 +445,13 @@ class SeparatedFrom(_BaseDomain):
         if base.shape != shape:
             msg = f"SeparatedFrom expected shape {base.shape} from '{self._other}', got {shape}"
             raise ValueError(msg)
-        magnitudes = _array(
-            dtype,
-            shape,
-            _bounded_float(dtype, low=self._margin, high=self._high),
-        )
-        signs = np.ones(base.size, dtype=np.float64)
-        signs[1::2] = -1.0
-        signs = signs.reshape(shape)
-        return magnitudes.map(lambda amount: (base + signs * amount).astype(dtype))
+        offsets = Nonzero(margin=self._margin, high=self._high).strategy(shape, dtype, drawn)
+        return offsets.map(lambda offset: (base + offset).astype(dtype))
 
     @override
     @property
     def condition_note(self) -> str:
-        return f"alternating above/below '{self._other}' by at least {self._margin}"
+        return f"above or below '{self._other}' by at least {self._margin}"
 
     @override
     @property
@@ -453,7 +459,7 @@ class SeparatedFrom(_BaseDomain):
         return (self._other,)
 
 
-class Increasing(_BaseDomain):
+class Increasing(Domain):
     """A strictly increasing one-dimensional grid."""
 
     __slots__ = ("_gap", "_start")
@@ -493,7 +499,7 @@ class Increasing(_BaseDomain):
         return f"strictly increasing with gaps of at least {self._gap}"
 
 
-class Interior(_BaseDomain):
+class Interior(Domain):
     """Points away from every knot of another argument's grid.
 
     At least one point is always in an interior cell.  Remaining points may be
@@ -561,17 +567,50 @@ class Interior(_BaseDomain):
         return (self._grid,)
 
 
-class SpanningGrid(_BaseDomain):
-    """A strictly increasing grid that brackets a fixed span."""
+class SpanningGrid(Domain):
+    """A strictly increasing grid that brackets a fixed span.
 
-    __slots__ = ("_high", "_low")
+    Interior knots keep at least ``_MARGIN`` from every ``avoid`` point, such
+    as a fixed interpolation query, where a piecewise linear map of the grid
+    is kinked.
+    """
 
-    def __init__(self, low: float = -1.0, high: float = 1.0) -> None:
+    __slots__ = ("_avoid", "_high", "_low")
+    _MARGIN = 0.1
+
+    def __init__(
+        self,
+        low: float = -1.0,
+        high: float = 1.0,
+        *,
+        avoid: tuple[float, ...] = (),
+    ) -> None:
         if low >= high:
             msg = "SpanningGrid requires low < high"
             raise ValueError(msg)
+        margin = self._MARGIN
+        # A point more than the margin beyond the span is never near a knot;
+        # each other window must lie inside the span, apart from the others.
+        self._avoid = tuple(
+            sorted(point for point in avoid if low - margin <= point <= high + margin)
+        )
+        edges = (edge for point in self._avoid for edge in (point - margin, point + margin))
+        if any(left >= right for left, right in pairwise((low, *edges, high))):
+            msg = "SpanningGrid avoided windows must be disjoint and inside the span"
+            raise ValueError(msg)
         self._low = low
         self._high = high
+
+    def knots(self, weights: list[float]) -> np.ndarray[Any, Any]:
+        """Place the endpoints and one interior knot per weight but the last."""
+        width = 2 * self._MARGIN
+        free = self._high - self._low - width * len(self._avoid)
+        cumulative = np.cumsum(np.asarray(weights, dtype=np.float64))
+        interior = self._low + free * cumulative[:-1] / cumulative[-1]
+        # Skipping each avoided window in turn keeps the knots strictly increasing.
+        for point in self._avoid:
+            interior = np.where(interior >= point - self._MARGIN, interior + width, interior)
+        return np.concatenate(([self._low], interior, [self._high]))
 
     @override
     def strategy(
@@ -584,7 +623,6 @@ class SpanningGrid(_BaseDomain):
         if len(shape) != 1 or shape[0] < 2:
             msg = f"SpanningGrid requires a 1-D shape of length >= 2, got {shape}"
             raise ValueError(msg)
-        count = shape[0] - 2
         # Positive weights normalised to the span guarantee strict ordering
         # without rejection, even after Hypothesis shrinks every raw value.
         weights = st.lists(
@@ -592,40 +630,23 @@ class SpanningGrid(_BaseDomain):
             min_size=shape[0] - 1,
             max_size=shape[0] - 1,
         )
-
-        def build(raw: list[float]) -> np.ndarray[Any, Any]:
-            cumulative = np.cumsum(np.asarray(raw, dtype=np.float64))
-            interior = self._low + (self._high - self._low) * cumulative[:-1] / cumulative[-1]
-            values = np.concatenate(([self._low], interior[:count], [self._high]))
-            return values.astype(dtype)
-
-        return weights.map(build)
+        return weights.map(lambda raw: self.knots(raw).astype(dtype))
 
     @override
     @property
     def condition_note(self) -> str:
-        return f"strictly increasing grid spanning [{self._low}, {self._high}]"
+        avoided = f", knots at least {self._MARGIN} from {self._avoid}" if self._avoid else ""
+        return f"strictly increasing grid spanning [{self._low}, {self._high}]{avoided}"
 
 
-def _matrix_noise_strategy(
-    shape: tuple[int, ...],
-    dtype: np.dtype[Any],
-    *,
-    magnitude: float,
-) -> SearchStrategy[np.ndarray[Any, Any]]:
-    return _real_array(dtype, shape, low=-magnitude, high=magnitude)
+def _diagonal(matrix: np.ndarray[Any, Any], size: int) -> np.ndarray[Any, Any]:
+    return np.diagonal(matrix, axis1=-2, axis2=-1)[..., :size]
 
 
-class SymmetricPositiveDefinite(_BaseDomain):
+class SymmetricPositiveDefinite(Domain):
     """Hermitian positive-definite matrices with separated eigenvalues."""
 
-    __slots__ = ("_condition",)
-
-    def __init__(self, condition: float = _DEFAULT_CONDITION_LIMIT) -> None:
-        if condition <= 1:
-            msg = "condition must exceed one"
-            raise ValueError(msg)
-        self._condition = condition
+    __slots__ = ()
 
     @override
     def strategy(
@@ -639,32 +660,63 @@ class SymmetricPositiveDefinite(_BaseDomain):
             msg = f"SymmetricPositiveDefinite requires a square shape, got {shape}"
             raise ValueError(msg)
         size = shape[-1]
-        eigenvalues = np.linspace(1.0, min(self._condition, 4.0), size)
 
         def build(noise: np.ndarray[Any, Any]) -> np.ndarray[Any, Any]:
-            seed = np.sin(
-                np.arange(size * size, dtype=np.float64).reshape(size, size) + 0.75,
-            )
-            seed += np.eye(size)
-            dense_seed = np.broadcast_to(seed.astype(dtype), shape)
-            basis, _ = np.linalg.qr(dense_seed + noise)
+            # The noise tilts the basis and jitters each eigenvalue by at most
+            # 0.2 around 1..4, so the spectrum stays separated.
+            eigenvalues = np.linspace(1.0, 4.0, size) + 0.4 * np.real(_diagonal(noise, size))
+            seed = np.sin(np.arange(size * size, dtype=np.float64).reshape(size, size) + 0.75)
+            basis, _ = np.linalg.qr((seed + np.eye(size)).astype(dtype) + noise)
             transpose = np.swapaxes(np.conjugate(basis), -1, -2)
             matrix = (basis * eigenvalues[..., None, :]) @ transpose
             return ((matrix + np.swapaxes(np.conjugate(matrix), -1, -2)) / 2).astype(dtype)
 
-        return _matrix_noise_strategy(shape, dtype, magnitude=0.15).map(build)
+        return _real_array(dtype, shape, low=-0.5, high=0.5).map(build)
 
     @override
     @property
     def condition_note(self) -> str:
-        return (
-            "Hermitian positive definite with separated eigenvalues and "
-            f"condition number at most {min(self._condition, 4.0)}"
-        )
+        return "Hermitian positive definite with eigenvalues in [0.8, 4.2] separated by 0.6"
 
 
-class StableEigensystem(_BaseDomain):
-    """Square matrices away from eigenvalue ordering and phase boundaries."""
+class HermitianTriangle(Domain):
+    """A ``SymmetricPositiveDefinite`` triangle beside unrelated data in the other.
+
+    NumPy's Hermitian routines read only their ``UPLO`` triangle, so the laws
+    see the unread triangle's data as inert rather than as a mirrored copy.
+    """
+
+    __slots__ = ("_uplo",)
+
+    def __init__(self, uplo: str) -> None:
+        self._uplo = uplo.upper()
+
+    @override
+    def strategy(
+        self,
+        shape: tuple[int, ...],
+        dtype: np.dtype[Any],
+        drawn: Mapping[str, Any],
+    ) -> SearchStrategy[np.ndarray[Any, Any]]:
+        read = np.triu if self._uplo == "U" else np.tril
+        return st.tuples(
+            SymmetricPositiveDefinite().strategy(shape, dtype, drawn),
+            _real_array(dtype, shape, low=-4.0, high=4.0),
+        ).map(lambda pair: read(pair[0]) + pair[1] - read(pair[1]))
+
+    @override
+    @property
+    def condition_note(self) -> str:
+        return f"Hermitian positive definite in UPLO={self._uplo!r}, unrelated data elsewhere"
+
+
+class StableEigensystem(Domain):
+    """Dense non-normal matrices away from eigenvalue ordering and phase boundaries.
+
+    ``S diag(lambda) S^-1`` with ``S = I + N`` and ``|N| <= 0.2`` keeps each
+    eigenvector's largest component on the diagonal. Complex dtypes draw a
+    genuinely complex spectrum.
+    """
 
     __slots__ = ()
 
@@ -682,30 +734,27 @@ class StableEigensystem(_BaseDomain):
         size = shape[-1]
 
         def build(noise: np.ndarray[Any, Any]) -> np.ndarray[Any, Any]:
-            diagonal = np.linspace(1.0, 4.0, size).astype(dtype)
-            identity = np.eye(size, dtype=dtype)
-            base = identity * diagonal[..., None, :]
-            upper = np.triu(noise, k=1)
-            return np.broadcast_to(base, shape) + upper
+            # Real parts stay 1.5 apart up to a 0.25 jitter; complex dtypes
+            # also draw imaginary parts in [-0.6, 0.6].
+            jitter = _diagonal(noise, size)
+            eigenvalues = np.linspace(1.0, 4.0, size) + 1.25 * np.real(jitter)
+            if np.iscomplexobj(noise):
+                eigenvalues = eigenvalues + 3j * np.imag(jitter)
+            vectors = np.eye(size) + noise
+            return (vectors @ (eigenvalues[..., :, None] * np.linalg.inv(vectors))).astype(dtype)
 
-        return _matrix_noise_strategy(shape, dtype, magnitude=0.05).map(build)
+        return _real_array(dtype, shape, low=-0.2, high=0.2).map(build)
 
     @override
     @property
     def condition_note(self) -> str:
-        return "upper triangular with ordered, separated eigenvalues and stable phase pivots"
+        return "non-normal with separated eigenvalues and diagonal eigenvector pivots"
 
 
-class WellConditioned(_BaseDomain):
+class WellConditioned(Domain):
     """Full-rank matrices kept uniformly away from singularity."""
 
-    __slots__ = ("_condition",)
-
-    def __init__(self, condition: float = _DEFAULT_CONDITION_LIMIT) -> None:
-        if condition <= 1:
-            msg = "condition must exceed one"
-            raise ValueError(msg)
-        self._condition = condition
+    __slots__ = ()
 
     @override
     def strategy(
@@ -722,31 +771,34 @@ class WellConditioned(_BaseDomain):
         rank = min(rows, columns)
 
         def build(noise: np.ndarray[Any, Any]) -> np.ndarray[Any, Any]:
-            diagonal = np.linspace(1.0, min(self._condition, 3.0), rank)
-            left_seed = np.sin(
-                np.arange(rows * rank, dtype=np.float64).reshape(rows, rank) + 1.0,
-            )
+            # The real part tilts both singular bases, jitters the singular
+            # values by at most 0.2 around 1..3, and flips the first row's
+            # sign (and so the determinant's) when its last entry is negative.
+            # Complex dtypes add a fixed imaginary part and at most 0.02 of
+            # drawn noise, staying off LAPACK's complex QR gauge boundary at
+            # real-valued matrices.
+            real = np.real(noise)
+            singular = np.linspace(1.0, 3.0, rank) + 0.4 * _diagonal(real, rank)
+            left_seed = np.sin(np.arange(rows * rank, dtype=np.float64).reshape(rows, rank) + 1.0)
             right_seed = np.cos(
-                np.arange(columns * rank, dtype=np.float64).reshape(columns, rank) + 0.5,
+                np.arange(columns * rank, dtype=np.float64).reshape(columns, rank) + 0.5
             )
-            left_seed += np.eye(rows, rank)
-            right_seed += np.eye(columns, rank)
-            left, _ = np.linalg.qr(left_seed)
-            right, _ = np.linalg.qr(right_seed)
-            dense_base = (left * diagonal[None, :]) @ right.T
-            if np.issubdtype(dtype, np.complexfloating):
-                phase_seed = np.sin(
-                    np.arange(rows * columns, dtype=np.float64).reshape(rows, columns) + 0.37,
+            left, _ = np.linalg.qr(left_seed + np.eye(rows, rank) + real[..., :, :rank])
+            right, _ = np.linalg.qr(
+                right_seed + np.eye(columns, rank) + np.swapaxes(real[..., :rank, :], -1, -2)
+            )
+            matrix = (left * singular[..., None, :]) @ np.swapaxes(right, -1, -2)
+            matrix[..., :1, :] *= np.where(real[..., -1:, -1:] < 0, -1.0, 1.0)
+            if np.iscomplexobj(noise):
+                phase = np.sin(
+                    np.arange(rows * columns, dtype=np.float64).reshape(rows, columns) + 0.37
                 )
-                dense_base = dense_base + 0.1j * phase_seed
-            base = np.broadcast_to(dense_base.astype(dtype), shape)
-            return (base + noise).astype(dtype)
+                matrix = matrix + 1j * (0.1 * phase + 0.04 * np.imag(noise))
+            return matrix.astype(dtype)
 
-        # ||noise||_2 <= sqrt(rows*columns)*0.02, so the smallest singular
-        # value stays comfortably above zero for the small conformance shapes.
-        return _matrix_noise_strategy(shape, dtype, magnitude=0.02).map(build)
+        return _real_array(dtype, shape, low=-0.5, high=0.5).map(build)
 
     @override
     @property
     def condition_note(self) -> str:
-        return "full rank with singular values bounded away from zero"
+        return "singular values in [0.8, 3.2] with drawn bases and determinant sign"

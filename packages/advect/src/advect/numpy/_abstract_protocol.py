@@ -1,20 +1,39 @@
-# ruff: noqa: PLR2004
 """NumPy protocol lowering for payload-free staged arrays."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Protocol, cast, override
 
-from advect.core._abstract import AbstractArray, _lift, _record_abstract_op
+import numpy as np
+
+from advect.core._abstract import (
+    AbstractArray,
+    _alias_result,
+    _lift,
+    _record_abstract_op,
+    _traces,
+)
 from advect.core._errors import TracingError
-from advect.numpy._abstract_calls import _empty_out, _numpy_array, apply_numpy
-from advect.numpy._array_function.registry import ARRAY_FUNCTION_RUNTIME
-from advect.numpy._constructors import construct_abstract
-from advect.numpy._signature import normalize_required_positionals
+from advect.numpy._abstract_calls import _empty_out, _numpy_array, apply_numpy, can_cast_dtype
+from advect.numpy._array_function.composite import _map_tree
+from advect.numpy._array_function.registry import (
+    _STATIC_ARRAY_FUNCTIONS,
+    ARRAY_FUNCTION_HANDLERS,
+)
+from advect.numpy._array_function.runtime import _LIKE_DISPATCH_CONSTRUCTORS
+from advect.numpy._composite_lowering import lower_ufunc_method
+from advect.numpy._constructors import _normalize_order, construct_abstract
+from advect.numpy._signature import (
+    keyword_optional_positionals,
+    normalize_required_positionals,
+    positional_parameters,
+)
 from advect.numpy._stage_lifecycle import stage_context
+from advect.numpy._traced_array import _SEMANTIC_ALIAS_FUNCTIONS, squares_bool_array
+from advect.numpy._traced_array_indexing import normalize_integer_scalars
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Callable, Iterable, Sequence
     from contextlib import AbstractContextManager
 
     from advect.core._native import DynamicTape
@@ -25,6 +44,22 @@ class _NamedProtocol(Protocol):
     __name__: str
 
 
+# NumPy 2.0 rounds booleans and integers in a floating loop; later releases
+# keep their dtype, as the canonical rounding operations do.
+_ROUNDING_UFUNCS = frozenset({"ceil", "floor", "trunc"})
+
+
+def _in_rounding_loop(ufunc: np.ufunc, value: object) -> object:
+    """Cast an integral operand into the loop the installed NumPy selects."""
+    if not isinstance(value, AbstractArray):
+        return value
+    dtype = np.dtype(value.spec.dtype)
+    if dtype.kind not in "biu":
+        return value
+    loop = ufunc.resolve_dtypes((dtype, None))[0]
+    return value if loop == dtype else value.astype(loop)
+
+
 def abstract_array_ufunc(
     self: AbstractArray,
     ufunc: _NamedProtocol,
@@ -33,58 +68,13 @@ def abstract_array_ufunc(
     **kwargs: object,
 ) -> AbstractArray:
     """Lower one NumPy ufunc call into the staged canonical graph."""
-    name = ufunc.__name__
-    if method in {"reduce", "accumulate"}:
-        if len(inputs) != 1:
-            raise TracingError(f"numpy.{name}.{method} expects one input array")
-        lowered = {
-            ("add", "accumulate"): "cumsum",
-            ("add", "reduce"): "sum",
-            ("multiply", "accumulate"): "cumprod",
-            ("multiply", "reduce"): "prod",
-        }.get((name, method))
-        if lowered is None:
-            raise TracingError(f"numpy.{name}.{method} is not supported during staging")
-        kwargs.setdefault("axis", 0)
-        if isinstance(kwargs.get("out"), tuple):
-            kwargs["_advect_ufunc_out_tuple"] = True
-        return _numpy_array(self._trace, lowered, inputs, kwargs)
-
-    if method == "outer":
-        if (
-            len(inputs) != 2
-            or int(getattr(ufunc, "nin", 0)) != 2
-            or int(getattr(ufunc, "nout", 0)) != 1
-            or getattr(ufunc, "signature", None) is not None
-        ):
-            raise TracingError(
-                f"numpy.{name}.outer requires an ordinary binary, single-output "
-                "ufunc; generalized ufunc signatures are unsupported"
-            )
-        trace = self._trace
-        left = _lift(trace, inputs[0])
-        right = _lift(trace, inputs[1])
-        expanded_left = _numpy_array(
-            trace,
-            "expand_dims",
-            (left,),
-            {"axis": tuple(range(left.ndim, left.ndim + right.ndim))},
-        )
-        expanded_right = _numpy_array(
-            trace,
-            "expand_dims",
-            (right,),
-            {"axis": tuple(range(left.ndim))},
-        )
-        if not _empty_out(kwargs.get("out")):
-            kwargs["_advect_ufunc_call"] = True
-        return _numpy_array(trace, name, (expanded_left, expanded_right), kwargs)
-
     if method != "__call__":
-        raise TracingError(f"numpy.{name}.{method} is not supported during staging")
+        return lower_ufunc_method(ufunc, method, inputs, kwargs)
+    if ufunc.__name__ in _ROUNDING_UFUNCS and len(inputs) == 1 and not kwargs:
+        inputs = (_in_rounding_loop(cast("np.ufunc", ufunc), inputs[0]),)
     if not _empty_out(kwargs.get("out")):
         kwargs["_advect_ufunc_call"] = True
-    return _numpy_array(self._trace, name, inputs, kwargs)
+    return _numpy_array(self._trace, ufunc.__name__, inputs, kwargs)
 
 
 def abstract_array_function(
@@ -98,7 +88,8 @@ def abstract_array_function(
     del types
     module = str(getattr(func, "__module__", "numpy"))
     name = func.__name__
-    if module == "numpy.lib.scimath":
+    # NumPy 2.0 and 2.1 define scimath in numpy.lib._scimath_impl.
+    if getattr(np.lib.scimath, name, None) is func:
         raise TracingError(
             f"numpy.lib.scimath.{name} is dynamic-only because its output dtype "
             "can depend on runtime values"
@@ -107,27 +98,28 @@ def abstract_array_function(
         name = f"linalg.{name}"
     elif module.startswith("numpy.fft"):
         name = f"fft.{name}"
-    args, kwargs = normalize_required_positionals(func, args, kwargs)
+    positional = positional_parameters(func)
+    args, kwargs = normalize_required_positionals(positional, args, kwargs, func=func)
+    args, kwargs = keyword_optional_positionals(positional, args, kwargs)
     if module.startswith("numpy") and name in {"array", "asarray", "asanyarray"}:
         return construct_abstract(name, self, args, kwargs)
-    if not ARRAY_FUNCTION_RUNTIME.is_supported_array_function(cast("Callable[..., Any]", func)):
+    if func not in ARRAY_FUNCTION_HANDLERS and func not in _STATIC_ARRAY_FUNCTIONS:
         raise TracingError(f"Array function 'numpy.{name}' is not supported during staging")
     if name == "copy":
-        if not args or len(args) > 3 or set(kwargs) - {"order", "subok"}:
+        if set(kwargs) - {"order", "subok"}:
             raise TracingError("numpy.copy expects (a, order='K', subok=False) during staging")
-        values = dict(kwargs)
-        for parameter, value in zip(("order", "subok"), args[1:], strict=False):
-            if parameter in values:
-                raise TracingError(f"numpy.copy received {parameter} twice")
-            values[parameter] = value
-        if bool(values.get("subok", False)):
+        if bool(kwargs.get("subok", False)):
             raise TracingError(
                 "numpy.copy(subok=True) is not supported during staging because "
                 "durable programs do not preserve ndarray subclass identity"
             )
         source = cast("_NumpyAbstractArray", _lift(self._trace, args[0]))
-        return source.copy(order=str(values.get("order", "K")))
-    return apply_numpy(self._trace, name, args, kwargs)
+        return source.copy(order=str(kwargs.get("order", "K")))
+    result = apply_numpy(self._trace, name, args, kwargs)
+    if name in _SEMANTIC_ALIAS_FUNCTIONS and isinstance(args[0], AbstractArray):
+        # NumPy returns a view, so writes and stale reads fail as they do dynamically.
+        return _alias_result(args[0], cast("AbstractArray", result))
+    return result
 
 
 class _NumpyAbstractArray(AbstractArray):
@@ -143,6 +135,44 @@ class _NumpyAbstractArray(AbstractArray):
         return stage_context(_captures)
 
     @override
+    def __getitem__(self, index: object) -> AbstractArray:
+        return super().__getitem__(normalize_integer_scalars(index))
+
+    @override
+    def __setitem__(self, index: object, value: object) -> None:
+        super().__setitem__(normalize_integer_scalars(index), value)
+
+    @property
+    @override
+    def real(self) -> AbstractArray:
+        # NumPy's components are views, so writes and stale reads fail as for other views.
+        return _alias_result(self, super().real)
+
+    @property
+    @override
+    def imag(self) -> AbstractArray:
+        return _alias_result(self, super().imag)
+
+    @override
+    def _assignment_value(self, value: AbstractArray, shape: tuple[int, ...]) -> AbstractArray:
+        # NumPy drops a value's leading unit dimensions beyond the target rank.
+        extra = value.ndim - len(shape)
+        if extra > 0 and all(size == 1 for size in value.shape[:extra]):
+            return value.reshape(value.shape[extra:])
+        return value
+
+    @override
+    def _augmented_result(self, result: AbstractArray) -> AbstractArray:
+        # NumPy evaluates `a op= b` as `op(a, b, out=a)`, which casts the
+        # promoted result back to a's dtype under same_kind, whatever the
+        # operand is. The cast is a neutral astype, so any provider replays it.
+        if result.spec.dtype == self.spec.dtype or not can_cast_dtype(
+            result.spec.dtype, self.spec.dtype, casting="same_kind"
+        ):
+            return result
+        return result.astype(self.spec.dtype)
+
+    @override
     def astype(self, dtype: object, **kwargs: object) -> AbstractArray:
         if any(name in kwargs for name in ("casting", "order", "subok")):
             return cast(
@@ -155,39 +185,34 @@ class _NumpyAbstractArray(AbstractArray):
     def copy(self, order: str | None = None) -> AbstractArray:
         if order is None:
             return super().copy()
-        if not isinstance(order, str):
-            raise TypeError(f"order must be str, not {type(order).__name__}")
-        order = order.upper()
-        if order not in {"A", "C", "F", "K"}:
-            raise ValueError(f"order must be one of 'A', 'C', 'F', or 'K' (got {order!r})")
         return cast(
             "AbstractArray",
             _record_abstract_op(
                 self._trace,
                 "advect.copy",
                 (self,),
-                {"order": order},
+                {"order": _normalize_order(order, default="C")},
                 graph_attrs={"_advect_backend": "numpy"},
             ),
         )
 
     @override
+    def _squares(self, exponent: object) -> bool:
+        return squares_bool_array(self, exponent)
+
+    def __pow__(self, other: object) -> AbstractArray:
+        if squares_bool_array(self, other):
+            return cast("AbstractArray", np.square(self))
+        return cast("Any", super()).__pow__(other)
+
+    # The methods bind their arguments exactly as NumPy's functions do.
+    @override
     def sum(self, *args: object, **kwargs: object) -> AbstractArray:
-        if any(name in kwargs for name in ("initial", "out", "where")):
-            return cast(
-                "AbstractArray",
-                apply_numpy(self._trace, "sum", (self, *args), kwargs),
-            )
-        return super().sum(*args, **kwargs)
+        return cast("Any", np.sum)(self, *args, **kwargs)
 
     @override
     def mean(self, *args: object, **kwargs: object) -> AbstractArray:
-        if any(name in kwargs for name in ("out", "where")):
-            return cast(
-                "AbstractArray",
-                apply_numpy(self._trace, "mean", (self, *args), kwargs),
-            )
-        return super().mean(*args, **kwargs)
+        return cast("Any", np.mean)(self, *args, **kwargs)
 
     def __array_ufunc__(
         self,
@@ -196,6 +221,8 @@ class _NumpyAbstractArray(AbstractArray):
         *inputs: object,
         **kwargs: object,
     ) -> AbstractArray:
+        if _wraps_nested(self, inputs) or (kwargs and _wraps_nested(self, kwargs.values())):
+            return NotImplemented
         return abstract_array_ufunc(self, ufunc, method, *inputs, **kwargs)
 
     def __array_function__(
@@ -205,7 +232,24 @@ class _NumpyAbstractArray(AbstractArray):
         args: tuple[Any, ...],
         kwargs: dict[str, Any],
     ) -> Any:  # noqa: ANN401 - NumPy's protocol returns heterogeneous pytrees
+        if _wraps_nested(self, args) or _wraps_nested(self, kwargs.values()):
+            return NotImplemented
         return abstract_array_function(self, func, types, args, kwargs)
+
+
+def _wraps_nested(self: AbstractArray, values: Iterable[object]) -> bool:
+    """Return whether a nested dynamic trace's tracer of this trace's values is in ``values``.
+
+    That tracer's frontend records the call in its own trace, as its reflected
+    operator does, instead of this trace reading it as a constant.
+    """
+    for value in values:
+        if isinstance(value, (tuple, list)):
+            if _wraps_nested(self, value):
+                return True
+        elif not isinstance(value, AbstractArray) and _traces(value, self._trace):
+            return True
+    return False
 
 
 def as_numpy_nested(value: object) -> Any:  # noqa: ANN401 - optional protocol conversion
@@ -214,7 +258,8 @@ def as_numpy_nested(value: object) -> Any:  # noqa: ANN401 - optional protocol c
     if not callable(snapshot):
         return NotImplemented
     node_id, wrapped = cast("tuple[int, object]", cast("Any", snapshot)())
-    if not bool(getattr(type(wrapped), "__advect_abstract_array__", False)):
+    # A staged value is its own payload: the enclosing stage's, not a nested tracer.
+    if wrapped is value or not bool(getattr(type(wrapped), "__advect_abstract_array__", False)):
         return NotImplemented
     recorder = getattr(value, "recorder", None)
     if recorder is None:
@@ -228,6 +273,21 @@ def as_numpy_nested(value: object) -> Any:  # noqa: ANN401 - optional protocol c
     )
 
 
+def _as_numpy_nested_tree(tree: object) -> tuple[Any, bool]:
+    """Wrap each nested Array API tracer leaf; report whether any was wrapped."""
+    changed = False
+
+    def convert(value: object) -> object:
+        nonlocal changed
+        nested = as_numpy_nested(value)
+        if nested is NotImplemented:
+            return value
+        changed = True
+        return nested
+
+    return _map_tree(convert, tree), changed
+
+
 def nested_array_ufunc(
     _tracer: object,
     ufunc: _NamedProtocol,
@@ -236,22 +296,7 @@ def nested_array_ufunc(
     kwargs: dict[str, Any],
 ) -> Any:  # noqa: ANN401 - NumPy's protocol returns heterogeneous pytrees
     """Let NumPy bind a call encountered inside an Array API nested trace."""
-    changed = False
-
-    def convert(value: Any) -> Any:  # noqa: ANN401
-        nonlocal changed
-        nested = as_numpy_nested(value)
-        if nested is not NotImplemented:
-            changed = True
-            return nested
-        if isinstance(value, tuple):
-            return tuple(convert(item) for item in value)
-        if isinstance(value, list):
-            return [convert(item) for item in value]
-        return value
-
-    converted_inputs = tuple(convert(value) for value in inputs)
-    converted_kwargs = {key: convert(value) for key, value in kwargs.items()}
+    (converted_inputs, converted_kwargs), changed = _as_numpy_nested_tree((inputs, kwargs))
     if not changed:
         return NotImplemented
     call = cast("Callable[..., object]", getattr(ufunc, method))
@@ -265,24 +310,11 @@ def nested_array_function(
     kwargs: dict[str, Any],
 ) -> Any:  # noqa: ANN401 - NumPy's protocol returns heterogeneous pytrees
     """Let NumPy bind an array function inside an Array API nested trace."""
-    changed = False
-
-    def convert(value: Any) -> Any:  # noqa: ANN401
-        nonlocal changed
-        nested = as_numpy_nested(value)
-        if nested is not NotImplemented:
-            changed = True
-            return nested
-        if isinstance(value, tuple):
-            return tuple(convert(item) for item in value)
-        if isinstance(value, list):
-            return [convert(item) for item in value]
-        if isinstance(value, dict):
-            return {key: convert(item) for key, item in value.items()}
-        return value
-
-    converted_args = cast("tuple[Any, ...]", convert(args))
-    converted_kwargs = cast("dict[str, Any]", convert(kwargs))
+    if getattr(function, "__name__", "") in _LIKE_DISPATCH_CONSTRUCTORS and "like" not in kwargs:
+        # NumPy consumed like= to dispatch a constructor here; rebinding it
+        # must dispatch again rather than convert its traced operands.
+        kwargs = {**kwargs, "like": _tracer}
+    (converted_args, converted_kwargs), changed = _as_numpy_nested_tree((args, kwargs))
     if not changed:
         return NotImplemented
     return cast("Callable[..., object]", function)(*converted_args, **converted_kwargs)

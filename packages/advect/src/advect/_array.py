@@ -6,6 +6,7 @@ from __future__ import annotations
 from typing import Any, cast
 
 from advect.core._array_api.providers import _get_array_namespace
+from advect.core._array_protocol_helpers import weak_scalar_runtime_value
 from advect.core._errors import TracingError
 from advect.core._pytree import tree_flatten, tree_unflatten
 
@@ -77,7 +78,14 @@ def _same_dtype(value: object, dtype: object) -> bool:
 
 def _cast_traced(value: Any, dtype: object | None, *, copy: bool | None) -> Any:
     if dtype is None or _same_dtype(value, dtype):
-        return value.copy() if copy is True else value
+        if not getattr(value, "_advect_weak", False):
+            return value.copy() if copy is True else value
+        # A weak tracer stands for a Python scalar, which NumPy's asarray
+        # copies into a strong array.
+        if copy is False:
+            msg = "Unable to avoid a copy when constructing an array from a Python scalar"
+            raise ValueError(msg)
+        return value.copy()
     if copy is False:
         msg = "Unable to avoid a copy while changing dtype in advect.asarray"
         raise ValueError(msg)
@@ -130,7 +138,8 @@ def asarray(
     """Construct an array without detaching Advect tracers.
 
     Direct tracers and rectangular nested tracer sequences remain
-    differentiable. This is the provider-neutral explicit alternative to
+    differentiable. A traced Python scalar becomes a strong array, as
+    ``numpy.asarray`` makes one. This is the provider-neutral explicit alternative to
     NumPy's standard ``numpy.asarray(..., like=tracer)`` dispatch. Ordinary
     non-traced values retain their provider when they expose the pinned Array
     API namespace and otherwise use NumPy.
@@ -210,6 +219,9 @@ def _concrete_tracer_copy(value: object) -> object:
             raise TracingError(msg)
         current = next_value
 
+    if getattr(value, "_advect_weak", False):
+        # A weak tracer stands for a Python scalar, which the eager identity keeps weak.
+        return weak_scalar_runtime_value(value, current)
     copy_fn = getattr(current, "copy", None)
     if callable(copy_fn):
         return copy_fn()
@@ -225,7 +237,8 @@ def _concrete_tracer_copy(value: object) -> object:
 def stop_gradient[T](value: T) -> T:
     """Return a concrete copy of traced leaves, explicitly stopping gradients.
 
-    Registered pytree structure is preserved. The operation is available only
+    Registered pytree structure is preserved, and a traced Python scalar returns
+    as a Python scalar, so it still promotes weakly. The operation is available only
     during concrete dynamic tracing; staging rejects it because an abstract
     value has no concrete primal to validate or serialize.
 

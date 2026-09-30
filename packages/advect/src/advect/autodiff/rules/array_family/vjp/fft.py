@@ -5,33 +5,17 @@ from __future__ import annotations
 from functools import partial
 from typing import TYPE_CHECKING, Any
 
-from advect.autodiff.rules.array_family._backend_runtime import _array_constructor_like, xp
-from advect.autodiff.rules.array_family._transpose_utils import _adjoint_fft_norm as _adjoint_norm
+from advect.autodiff.rules.array_family._backend_runtime import _zero_pad_axis, xp
+from advect.autodiff.rules.array_family._transpose_utils import (
+    _adjoint_fft_norm as _adjoint_norm,
+    _axis_slice,
+    _normalize_axis,
+)
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from advect.autodiff.rules.array_family._transpose_utils import FFTNorm
-
-
-def _normalize_axis(axis: int, *, ndim: int) -> int:
-    normalized = axis
-    if normalized < 0:
-        normalized += ndim
-    if normalized < 0 or normalized >= ndim:
-        msg = f"FFT axis {axis} is out of bounds for rank {ndim}"
-        raise ValueError(msg)
-    return normalized
-
-
-def _axis_slice(
-    *,
-    ndim: int,
-    axis: int,
-    start: int | None = None,
-    stop: int | None = None,
-) -> tuple[slice, ...]:
-    result = [slice(None)] * ndim
-    result[axis] = slice(start, stop)
-    return tuple(result)
 
 
 def _resize_axis_adjoint(
@@ -41,7 +25,7 @@ def _resize_axis_adjoint(
     axis: int,
 ) -> xp.ndarray:
     """Transpose NumPy's crop-or-zero-pad behavior for one transform axis."""
-    normalized_axis = _normalize_axis(axis, ndim=value.ndim)
+    normalized_axis = _normalize_axis(axis, ndim=value.ndim, op_name="FFT")
     current_length = int(value.shape[normalized_axis])
     if target_length == current_length:
         return value
@@ -53,15 +37,12 @@ def _resize_axis_adjoint(
                 stop=target_length,
             )
         ]
-    zeros_shape = list(value.shape)
-    zeros_shape[normalized_axis] = target_length - current_length
-    zeros = _array_constructor_like(
+    return _zero_pad_axis(
         value,
-        "zeros",
-        tuple(zeros_shape),
-        dtype=value.dtype,
+        axis=normalized_axis,
+        before=0,
+        after=target_length - current_length,
     )
-    return xp.concatenate((value, zeros), axis=normalized_axis)
 
 
 def _resize_axes_adjoint(
@@ -90,134 +71,39 @@ def _transform_axes(
         if shape is None:
             return tuple(range(ndim))
         return tuple(range(ndim - len(shape), ndim))
-    return tuple(_normalize_axis(axis, ndim=ndim) for axis in axes)
+    return tuple(_normalize_axis(axis, ndim=ndim, op_name="FFT") for axis in axes)
 
 
-def _vjp_fft(
-    ans: xp.ndarray,
-    x: xp.ndarray,
-    *rest: xp.ndarray,
-    g: xp.ndarray,
-    n: int | None = None,
-    axis: int = -1,
-    norm: FFTNorm | None = None,
-    **attrs: Any,
-) -> tuple[xp.ndarray]:
-    _ = ans, rest, attrs
-    transformed = xp.fft.ifft(g, n=n, axis=axis, norm=_adjoint_norm(norm))
-    return (
-        _resize_axis_adjoint(
-            transformed,
-            target_length=int(x.shape[_normalize_axis(axis, ndim=x.ndim)]),
-            axis=axis,
-        ),
-    )
+def _complex_fftn_vjp(adjoint: str) -> Callable[..., tuple[xp.ndarray]]:
+    """Transpose a complex N-D FFT through its adjoint transform ``adjoint``."""
 
-
-def _vjp_ifft(
-    ans: xp.ndarray,
-    x: xp.ndarray,
-    *rest: xp.ndarray,
-    g: xp.ndarray,
-    n: int | None = None,
-    axis: int = -1,
-    norm: FFTNorm | None = None,
-    **attrs: Any,
-) -> tuple[xp.ndarray]:
-    _ = ans, rest, attrs
-    transformed = xp.fft.fft(g, n=n, axis=axis, norm=_adjoint_norm(norm))
-    return (
-        _resize_axis_adjoint(
-            transformed,
-            target_length=int(x.shape[_normalize_axis(axis, ndim=x.ndim)]),
-            axis=axis,
-        ),
-    )
-
-
-def _vjp_fftn(
-    ans: xp.ndarray,
-    x: xp.ndarray,
-    *rest: xp.ndarray,
-    g: xp.ndarray,
-    s: tuple[int, ...] | None = None,
-    axes: tuple[int, ...] | None = None,
-    norm: FFTNorm | None = None,
-    **attrs: Any,
-) -> tuple[xp.ndarray]:
-    _ = ans, rest, attrs
-    transformed = xp.fft.ifftn(g, s=s, axes=axes, norm=_adjoint_norm(norm))
-    normalized_axes = _transform_axes(ndim=x.ndim, shape=s, axes=axes)
-    target_shape = tuple(int(x.shape[axis]) for axis in normalized_axes)
-    return (
-        _resize_axes_adjoint(
-            transformed,
-            target_shape=target_shape,
-            axes=normalized_axes,
-        ),
-    )
-
-
-def _vjp_ifftn(
-    ans: xp.ndarray,
-    x: xp.ndarray,
-    *rest: xp.ndarray,
-    g: xp.ndarray,
-    s: tuple[int, ...] | None = None,
-    axes: tuple[int, ...] | None = None,
-    norm: FFTNorm | None = None,
-    **attrs: Any,
-) -> tuple[xp.ndarray]:
-    _ = ans, rest, attrs
-    transformed = xp.fft.fftn(g, s=s, axes=axes, norm=_adjoint_norm(norm))
-    normalized_axes = _transform_axes(ndim=x.ndim, shape=s, axes=axes)
-    target_shape = tuple(int(x.shape[axis]) for axis in normalized_axes)
-    return (
-        _resize_axes_adjoint(
-            transformed,
-            target_shape=target_shape,
-            axes=normalized_axes,
-        ),
-    )
-
-
-_vjp_fft2 = partial(_vjp_fftn, axes=(-2, -1))
-_vjp_ifft2 = partial(_vjp_ifftn, axes=(-2, -1))
-
-
-def _vjp_rfft(
-    ans: xp.ndarray,
-    x: xp.ndarray,
-    *rest: xp.ndarray,
-    g: xp.ndarray,
-    n: int | None = None,
-    axis: int = -1,
-    norm: FFTNorm | None = None,
-    **attrs: Any,
-) -> tuple[xp.ndarray]:
-    """Embed the half spectrum, then apply the full complex FFT adjoint."""
-    _ = ans, rest, attrs
-    normalized_axis = _normalize_axis(axis, ndim=x.ndim)
-    transform_length = int(x.shape[normalized_axis]) if n is None else n
-    if transform_length < int(g.shape[normalized_axis]):
-        msg = "rfft cotangent is longer than its full transform length"
-        raise ValueError(msg)
-    spectrum = _resize_axis_adjoint(g, target_length=transform_length, axis=normalized_axis)
-    transformed = xp.real(
-        xp.fft.ifft(
-            spectrum,
-            n=transform_length,
-            axis=normalized_axis,
-            norm=_adjoint_norm(norm),
+    def vjp(
+        ans: xp.ndarray,
+        x: xp.ndarray,
+        *rest: xp.ndarray,
+        g: xp.ndarray,
+        s: tuple[int, ...] | None = None,
+        axes: tuple[int, ...] | None = None,
+        norm: FFTNorm | None = None,
+        **attrs: Any,
+    ) -> tuple[xp.ndarray]:
+        _ = ans, rest, attrs
+        transformed = getattr(xp.fft, adjoint)(g, s=s, axes=axes, norm=_adjoint_norm(norm))
+        normalized_axes = _transform_axes(ndim=x.ndim, shape=s, axes=axes)
+        target_shape = tuple(int(x.shape[axis]) for axis in normalized_axes)
+        return (
+            _resize_axes_adjoint(
+                transformed,
+                target_shape=target_shape,
+                axes=normalized_axes,
+            ),
         )
-    )
-    return (
-        _resize_axis_adjoint(
-            transformed,
-            target_length=int(x.shape[normalized_axis]),
-            axis=normalized_axis,
-        ),
-    )
+
+    return vjp
+
+
+_vjp_fftn = _complex_fftn_vjp("ifftn")
+_vjp_ifftn = _complex_fftn_vjp("fftn")
 
 
 def _vjp_rfftn(
@@ -258,47 +144,6 @@ def _vjp_rfftn(
             transformed,
             target_shape=target_shape,
             axes=normalized_axes,
-        ),
-    )
-
-
-_vjp_rfft2 = partial(_vjp_rfftn, axes=(-2, -1))
-
-
-def _vjp_irfft(
-    ans: xp.ndarray,
-    x: xp.ndarray,
-    *rest: xp.ndarray,
-    g: xp.ndarray,
-    n: int | None = None,
-    axis: int = -1,
-    norm: FFTNorm | None = None,
-    **attrs: Any,
-) -> tuple[xp.ndarray]:
-    """Apply the weighted half-spectrum adjoint of a real inverse FFT."""
-    _ = ans, rest, attrs
-    normalized_axis = _normalize_axis(axis, ndim=g.ndim)
-    transform_length = int(g.shape[normalized_axis]) if n is None else n
-    spectrum = xp.fft.rfft(
-        g,
-        n=transform_length,
-        axis=normalized_axis,
-        norm=_adjoint_norm(norm),
-    )
-    half_length = int(spectrum.shape[normalized_axis])
-    weights = xp.ones((half_length,), dtype=xp.real(spectrum).dtype)
-    if half_length > 1:
-        endpoint = half_length - 1 if transform_length % 2 == 0 else half_length
-        if endpoint > 1:
-            weights[1:endpoint] = 2
-    weight_shape = [1] * spectrum.ndim
-    weight_shape[normalized_axis] = half_length
-    weighted = spectrum * xp.reshape(weights, tuple(weight_shape))
-    return (
-        _resize_axis_adjoint(
-            weighted,
-            target_length=int(x.shape[_normalize_axis(axis, ndim=x.ndim)]),
-            axis=axis,
         ),
     )
 
@@ -348,6 +193,32 @@ def _vjp_irfftn(
     )
 
 
+def _one_axis(nd_vjp: Callable[..., tuple[xp.ndarray]]) -> Callable[..., tuple[xp.ndarray]]:
+    """Transpose a one-axis transform as its N-D form over ``axes=(axis,)``."""
+
+    def vjp(
+        ans: xp.ndarray,
+        x: xp.ndarray,
+        *rest: xp.ndarray,
+        g: xp.ndarray,
+        n: int | None = None,
+        axis: int = -1,
+        norm: FFTNorm | None = None,
+        **attrs: Any,
+    ) -> tuple[xp.ndarray]:
+        s = None if n is None else (n,)
+        return nd_vjp(ans, x, *rest, g=g, s=s, axes=(axis,), norm=norm, **attrs)
+
+    return vjp
+
+
+_vjp_fft = _one_axis(_vjp_fftn)
+_vjp_ifft = _one_axis(_vjp_ifftn)
+_vjp_rfft = _one_axis(_vjp_rfftn)
+_vjp_irfft = _one_axis(_vjp_irfftn)
+_vjp_fft2 = partial(_vjp_fftn, axes=(-2, -1))
+_vjp_ifft2 = partial(_vjp_ifftn, axes=(-2, -1))
+_vjp_rfft2 = partial(_vjp_rfftn, axes=(-2, -1))
 _vjp_irfft2 = partial(_vjp_irfftn, axes=(-2, -1))
 
 

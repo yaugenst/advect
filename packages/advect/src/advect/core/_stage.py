@@ -1,4 +1,4 @@
-# ruff: noqa: ANN401, PLR2004, SLF001
+# ruff: noqa: ANN401, SLF001
 """Orchestrate Python staging across abstract tracing and the durable runtime.
 
 This module owns call-signature validation, snapshots static inputs, drives an
@@ -12,13 +12,13 @@ module, and Python does not maintain a parallel durable graph model here.
 from __future__ import annotations
 
 import json
+import operator
 import re
 import time
-import traceback
-from dataclasses import dataclass, field, replace
+from dataclasses import asdict, dataclass, field, fields, replace
 from itertools import pairwise
 from threading import Lock
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Self, cast
 
 from advect.core._abstract import (
     AbstractArray,
@@ -30,20 +30,26 @@ from advect.core._abstract import (
     _lift,
     _new_abstract_array,
 )
+from advect.core._abstract_helpers import (
+    PYTHON_SCALAR_TYPES,
+    _staged_dtype,
+    value_spec as python_value_spec,
+)
 from advect.core._array_api.profiles import (
     LATEST_ARRAY_API_VERSION,
     materialize_array_api_profile,
 )
 from advect.core._array_api.providers import (
     ResolvedArrayNamespace,
-    _get_array_namespace,
     _get_backend_key_from_namespace,
     _get_provider_array_api_version,
     _negotiate_array_namespace_for_call,
+    _negotiate_default_array_namespace,
+    _version_key,
 )
 from advect.core._backends import get_hook
-from advect.core._context import _set_active_recorder
-from advect.core._eval_dispatch import bind_native_node_evaluator
+from advect.core._context import _set_active_recorder, caller_location
+from advect.core._eval_dispatch import bind_native_node_evaluator, shared_operand_positions
 from advect.core._graph_attrs import decode_graph_attrs_from_native
 from advect.core._native import (
     build_graph_execution_plan,
@@ -56,7 +62,6 @@ from advect.core._portable_constant import (
     iter_constant_values,
     normalize_constant_dtype,
     portable_constant_from_native,
-    portable_constant_from_payload,
     snapshot_constant_parts,
 )
 from advect.core._primitive_call import (
@@ -83,7 +88,7 @@ from advect.core._stage_serialization import (
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator, Sequence
 
-    from advect.core._native import GraphBuilder, GraphExecutionPlan, GraphStore
+    from advect.core._native import GraphBuilder, GraphExecutionPlan, GraphStore, NativeNode
     from advect.core._pytree import TreeDef
 
 _ADVECT_ARRAY_SEMANTIC_PROFILE = "advect-array-1"
@@ -259,81 +264,60 @@ class _ExecutionState:
         default_factory=Lock,
         repr=False,
     )
+    # Found on first need: only providers without read-only arrays copy them.
+    output_constant_ids: frozenset[int] | None = field(default=None, repr=False)
 
 
 _STAGED_PROGRAM_FORMAT = "advect.ssa-program"
-_STAGED_PROGRAM_FORMAT_VERSION = 2
+_STAGED_PROGRAM_FORMAT_VERSION = 3
 _OPTIMIZATION_PASS_NAMES = ("dce", "simplify", "cse")
+_SHA256_HEX = re.compile(r"[0-9a-f]{64}")
+_REPORT_COUNTS = ("nodes_before", "nodes_after", "rewritten_nodes")
+_PASS_COUNTS = ("nodes_before", "nodes_after", "removed_nodes", "rewritten_nodes")
+_CONSTANT_FIELDS = tuple(item.name for item in fields(ConstantRecord))
+
+
+def _closed_mapping(payload: object, label: str, names: Sequence[str]) -> dict[str, Any]:
+    """Return one artifact record whose fields are exactly ``names``."""
+    if not isinstance(payload, dict):
+        raise TypeError(f"Staged {label} must be a mapping")
+    if payload.keys() != set(names):
+        raise ValueError(f"Staged {label} has invalid fields")
+    return payload
+
+
+def _count(value: object, label: str) -> int:
+    if type(value) is not int or value < 0:
+        raise TypeError(f"Staged {label} must be a non-negative integer")
+    return value
 
 
 def _encode_optimization(report: OptimizationReport) -> dict[str, object]:
-    return {
-        "nodes_before": report.nodes_before,
-        "nodes_after": report.nodes_after,
-        "rewritten_nodes": report.rewritten_nodes,
-        "passes": [
-            {
-                "name": item.name,
-                "nodes_before": item.nodes_before,
-                "nodes_after": item.nodes_after,
-                "removed_nodes": item.removed_nodes,
-                "rewritten_nodes": item.rewritten_nodes,
-            }
-            for item in report.passes
-        ],
-    }
+    return {**asdict(report), "passes": [asdict(item) for item in report.passes]}
 
 
 def _decode_optimization(payload: object) -> OptimizationReport:
-    if not isinstance(payload, dict):
-        raise TypeError("Staged optimization report must be a mapping")
-    if set(payload) != {"nodes_before", "nodes_after", "rewritten_nodes", "passes"}:
-        raise ValueError("Staged optimization report has invalid fields")
-    for key in ("nodes_before", "nodes_after", "rewritten_nodes"):
-        value = payload[key]
-        if type(value) is not int or value < 0:
-            raise TypeError(f"Staged optimization {key} must be a non-negative integer")
-    raw_passes = payload["passes"]
+    report = _closed_mapping(payload, "optimization report", (*_REPORT_COUNTS, "passes"))
+    nodes_before, nodes_after, rewritten_nodes = (
+        _count(report[key], f"optimization {key}") for key in _REPORT_COUNTS
+    )
+    raw_passes = report["passes"]
     if not isinstance(raw_passes, list):
         raise TypeError("Staged optimization passes must be a list")
     passes: list[OptimizationPass] = []
     for raw_pass in raw_passes:
-        if not isinstance(raw_pass, dict):
-            raise TypeError("Staged optimization pass must be a mapping")
-        required = {
-            "name",
-            "nodes_before",
-            "nodes_after",
-            "removed_nodes",
-            "rewritten_nodes",
-        }
-        if set(raw_pass) != required:
-            raise ValueError("Staged optimization pass has invalid fields")
-        name = raw_pass["name"]
-        if not isinstance(name, str):
+        record = _closed_mapping(raw_pass, "optimization pass", ("name", *_PASS_COUNTS))
+        if not isinstance(record["name"], str):
             raise TypeError("Staged optimization pass name must be a string")
-        counts: dict[str, int] = {}
-        for key in required - {"name"}:
-            value = raw_pass[key]
-            if type(value) is not int or value < 0:
-                raise TypeError(f"Staged optimization pass {key} must be a non-negative integer")
-            counts[key] = value
-        if counts["removed_nodes"] != counts["nodes_before"] - counts["nodes_after"]:
-            raise ValueError("Staged optimization removed-node count is inconsistent")
-        passes.append(
-            OptimizationPass(
-                name=name,
-                nodes_before=counts["nodes_before"],
-                nodes_after=counts["nodes_after"],
-                removed_nodes=counts["removed_nodes"],
-                rewritten_nodes=counts["rewritten_nodes"],
-            )
+        item = OptimizationPass(
+            record["name"],
+            *(_count(record[key], f"optimization pass {key}") for key in _PASS_COUNTS),
         )
+        if item.removed_nodes != item.nodes_before - item.nodes_after:
+            raise ValueError("Staged optimization removed-node count is inconsistent")
+        passes.append(item)
     if tuple(item.name for item in passes) != _OPTIMIZATION_PASS_NAMES:
         raise ValueError("Staged optimization pass sequence is invalid")
-    nodes_before = cast("int", payload["nodes_before"])
-    nodes_after = cast("int", payload["nodes_after"])
-    rewritten_nodes = cast("int", payload["rewritten_nodes"])
     if (
         passes[0].nodes_before != nodes_before
         or passes[-1].nodes_after != nodes_after
@@ -341,23 +325,12 @@ def _decode_optimization(payload: object) -> OptimizationReport:
         or sum(item.rewritten_nodes for item in passes) != rewritten_nodes
     ):
         raise ValueError("Staged optimization aggregate counts are inconsistent")
-    return OptimizationReport(
-        nodes_before=nodes_before,
-        nodes_after=nodes_after,
-        rewritten_nodes=rewritten_nodes,
-        passes=tuple(passes),
-    )
+    return OptimizationReport(nodes_before, nodes_after, rewritten_nodes, tuple(passes))
 
 
 def _encode_spec(spec: ArraySpec | StaticSpec) -> dict[str, object]:
     if isinstance(spec, ArraySpec):
-        return {
-            "kind": "array",
-            "shape": list(spec.shape),
-            "dtype": str(spec.dtype),
-            "device": spec.device,
-            "weak": spec.weak,
-        }
+        return {"kind": "array", **asdict(spec), "shape": list(spec.shape)}
     return {"kind": "static", "value": _encode_value(spec.value)}
 
 
@@ -366,8 +339,7 @@ def _decode_spec(payload: object) -> ArraySpec | StaticSpec:
         raise TypeError("Staged call spec must be a mapping")
     kind = payload.get("kind")
     if kind == "array":
-        if set(payload) != {"kind", "shape", "dtype", "device", "weak"}:
-            raise ValueError("Staged array spec has invalid fields")
+        _closed_mapping(payload, "array spec", ("kind", "shape", "dtype", "device", "weak"))
         shape = payload["shape"]
         dtype = payload["dtype"]
         device = payload["device"]
@@ -380,110 +352,49 @@ def _decode_spec(payload: object) -> ArraySpec | StaticSpec:
             raise TypeError("Staged array device must be a string or None")
         if not isinstance(weak, bool):
             raise TypeError("Staged array weak flag must be a bool")
-        return ArraySpec(tuple(shape), dtype, device=device, weak=weak)
+        return ArraySpec(tuple(shape), _dtype_name(dtype), device=device, weak=weak)
     if kind == "static":
-        if set(payload) != {"kind", "value"}:
-            raise ValueError("Staged static spec has invalid fields")
+        _closed_mapping(payload, "static spec", ("kind", "value"))
         return StaticSpec(_decode_value(payload["value"]))
     raise ValueError(f"Unknown staged call spec kind {kind!r}")
 
 
 def _encode_constant(record: ConstantRecord) -> dict[str, object]:
-    return {
-        "value_id": record.value_id,
-        "origin": record.origin,
-        "location": record.location,
-        "shape": list(record.shape),
-        "dtype": record.dtype,
-        "bytes": record.bytes,
-        "digest": record.digest,
-        "name": record.name,
-    }
+    return {**asdict(record), "shape": list(record.shape)}
 
 
 def _decode_constant(payload: object) -> ConstantRecord:
-    if not isinstance(payload, dict):
-        raise TypeError("Staged constant record must be a mapping")
-    required = {"value_id", "origin", "location", "shape", "dtype", "bytes", "digest", "name"}
-    if set(payload) != required:
-        raise ValueError("Staged constant record has invalid fields")
-    value_id = payload["value_id"]
-    origin = payload["origin"]
-    location = payload["location"]
-    shape = payload["shape"]
-    dtype = payload["dtype"]
-    byte_count = payload["bytes"]
-    digest = payload["digest"]
-    name = payload["name"]
-    if type(value_id) is not int or value_id < 0:
-        raise TypeError("Staged constant value_id must be a non-negative integer")
-    if origin not in {"closure", "global", "created"}:
+    record = _closed_mapping(payload, "constant record", _CONSTANT_FIELDS)
+    _count(record["value_id"], "constant value_id")
+    if record["origin"] not in {"closure", "global", "created"}:
         raise ValueError("Staged constant origin must be closure, global, or created")
-    if location is not None and not isinstance(location, str):
+    if record["location"] is not None and not isinstance(record["location"], str):
         raise TypeError("Staged constant location must be a string or None")
+    shape = record["shape"]
     if not isinstance(shape, list) or any(type(size) is not int or size < 0 for size in shape):
         raise TypeError("Staged constant shape must be a list of non-negative integers")
-    if not isinstance(dtype, str) or not dtype:
+    if not isinstance(record["dtype"], str) or not record["dtype"]:
         raise TypeError("Staged constant dtype must be a non-empty string")
-    if type(byte_count) is not int or byte_count < 0:
-        raise TypeError("Staged constant bytes must be a non-negative integer")
-    if (
-        not isinstance(digest, str)
-        or len(digest) != 64
-        or any(character not in "0123456789abcdef" for character in digest)
-    ):
+    _count(record["bytes"], "constant bytes")
+    digest = record["digest"]
+    if not isinstance(digest, str) or _SHA256_HEX.fullmatch(digest) is None:
         raise TypeError("Staged constant digest must be a lowercase SHA-256 hex string")
-    if name is not None and not isinstance(name, str):
+    if record["name"] is not None and not isinstance(record["name"], str):
         raise TypeError("Staged constant name must be a string or None")
-    return ConstantRecord(
-        value_id=value_id,
-        origin=origin,
-        location=location,
-        shape=tuple(shape),
-        dtype=dtype,
-        bytes=byte_count,
-        digest=digest,
-        name=name,
-    )
+    decoded: dict[str, Any] = {**record, "shape": tuple(shape)}
+    return ConstantRecord(**decoded)
 
 
-def _link_custom_output_counts(graph_payload: object) -> None:
-    """Install serialized custom-node arities before native graph loading."""
-    if not isinstance(graph_payload, dict):
-        return
-    nodes = graph_payload.get("nodes")
-    if not isinstance(nodes, list):
-        return
-    for node in nodes:
-        if not isinstance(node, dict):
-            continue
-        op = node.get("op")
-        count = node.get("num_outputs")
-        if isinstance(op, str) and op.startswith("custom.") and type(count) is int:
-            try:
-                _record_primitive_output_count(op, count)
-            except KeyError as error:
-                name = op.removeprefix("custom.")
-                raise ValueError(f"Staged program requires unlinked primitive '{name}'") from error
+def _native_byte_order(value: Any) -> Any:
+    """Return *value* in native byte order for the runtime.
 
-
-def _validate_custom_calls(graph: GraphStore) -> None:
-    """Validate the call metadata needed to link custom nodes safely."""
-    for node_id in graph.node_ids():
-        node = graph.get_node(node_id)
-        if not node.op.startswith("custom."):
-            continue
-        attrs = decode_graph_attrs_from_native(node.attrs)
-        try:
-            call_meta, _node_attrs = _split_primitive_attrs(attrs)
-        except (TypeError, ValueError) as error:
-            raise ValueError(
-                f"Staged custom node {node.op!r} has an invalid call contract"
-            ) from error
-        if call_meta.output_treedef.num_leaves != node.num_outputs:
-            raise ValueError(
-                f"Staged custom node {node.op!r} output structure does not match its arity"
-            )
+    Staged dtypes name logical dtypes, so a byte-swapped NumPy array passes the
+    call check, but the runtime compares storage dtype identity.
+    """
+    dtype = getattr(value, "dtype", None)
+    if dtype is None or getattr(dtype, "isnative", True):
+        return value
+    return value.astype(dtype.newbyteorder("="))
 
 
 def _value_spec(value: Any) -> ArraySpec:
@@ -498,14 +409,8 @@ def _value_spec(value: Any) -> ArraySpec:
             device=device,
             weak=bool(getattr(value, "_advect_weak", False)),
         )
-    if isinstance(value, bool):
-        return ArraySpec((), "bool", weak=True)
-    if isinstance(value, complex):
-        return ArraySpec((), "complex128", weak=True)
-    if isinstance(value, float):
-        return ArraySpec((), "float64", weak=True)
-    if isinstance(value, int):
-        return ArraySpec((), "int64", weak=True)
+    if isinstance(value, PYTHON_SCALAR_TYPES):
+        return python_value_spec(value)
     msg = (
         f"Staged array argument is not array-like: {type(value).__name__}; "
         "declare non-array inputs with StaticSpec(value)"
@@ -519,51 +424,71 @@ def _specs_from_examples(examples: tuple[Any, ...]) -> tuple[Any, ...]:
     return cast("tuple[Any, ...]", tree_unflatten(treedef, specs))
 
 
-def _normalize_weak_runtime_scalar(value: object, spec: ArraySpec) -> object:
-    """Normalize one Python scalar to the exact declared weak dtype category."""
-    if type(value) not in {bool, complex, float, int}:
-        return value
-    dtype = _dtype_name(spec.dtype)
+def _is_python_scalar(value: object) -> bool:
+    """Classify a leaf as ``_value_spec`` does: built-in subclasses count, array scalars do not."""
+    return isinstance(value, PYTHON_SCALAR_TYPES) and (
+        getattr(value, "shape", None) is None or getattr(value, "dtype", None) is None
+    )
+
+
+def _normalize_weak_runtime_scalar(value: Any, spec: ArraySpec) -> object:
+    """Convert one Python scalar to the exact built-in of its declared weak category.
+
+    Built-in subclasses such as ``IntEnum`` members stage as weak scalars, so
+    they are converted too; otherwise NumPy would promote them as strong types.
+    """
+    dtype = spec.dtype
     if dtype == "bool":
-        if type(value) is not bool:
+        if not isinstance(value, bool):
             raise ValueError(
                 f"Weak staged argument expected dtype={dtype}, got {type(value).__name__}"
             )
         return value
     if dtype.startswith("complex"):
-        if type(value) is bool:
+        if isinstance(value, bool):
             raise ValueError(f"Weak staged argument expected dtype={dtype}, got bool")
-        return complex(cast("Any", value))
+        return complex(value)
     if dtype.startswith("float"):
-        if type(value) not in {float, int}:
+        if isinstance(value, (bool, complex)):
             raise ValueError(
                 f"Weak staged argument expected a real scalar for dtype={dtype}, "
                 f"got {type(value).__name__}"
             )
-        return float(cast("Any", value))
+        return float(value)
     if dtype.startswith(("int", "uint")):
-        if type(value) is not int:
+        if isinstance(value, bool) or not isinstance(value, int):
             raise ValueError(
                 f"Weak staged argument expected an integer for dtype={dtype}, "
                 f"got {type(value).__name__}"
             )
-        return value
+        return operator.index(value)
     raise ValueError(f"Unsupported weak staged scalar dtype {spec.dtype!r}")
 
 
-def _spec_key(spec: ArraySpec | StaticSpec) -> tuple[Any, ...]:
-    if isinstance(spec, ArraySpec):
-        return (
-            "array",
-            spec.shape,
-            _dtype_name(spec.dtype),
-            spec.device,
-            spec.weak,
+def _same_static_value(runtime: object, compiled: Any) -> bool:
+    """Compare a runtime value with compiled static metadata by serialized identity.
+
+    Python equality conflates ``1``, ``1.0``, and ``True`` (and ``0.0`` with
+    ``-0.0``), each of which can trace a different graph. The codec encodes
+    only exact builtin types, so values of different types never match.
+    """
+    kind = type(compiled)
+    if type(runtime) is not kind:
+        return False
+    if kind is float:
+        return repr(runtime) == repr(compiled)
+    if kind is list or kind is tuple:
+        return len(runtime) == len(compiled) and all(map(_same_static_value, runtime, compiled))
+    if kind is dict:
+        # Map each compiled key to the runtime's own equal key object.
+        keys = {key: key for key in runtime}
+        return len(keys) == len(compiled) and all(
+            key in keys
+            and _same_static_value(keys[key], key)
+            and _same_static_value(runtime[key], item)
+            for key, item in compiled.items()
         )
-    value = spec.value
-    encoded = _encode_value(value)
-    identity = json.dumps(encoded, sort_keys=True, separators=(",", ":"))
-    return ("static", type(value).__module__, type(value).__qualname__, identity)
+    return runtime == compiled
 
 
 def _snapshot_static_value(value: object) -> object:
@@ -589,12 +514,13 @@ def _flatten_runtime_to_treedef(value: Any, treedef: TreeDef) -> list[Any]:
     children, aux_data = flatten_fn(value)
     if treedef.node_type is dict:
         expected_keys = tuple(treedef.aux_data)
-        actual_keys = tuple(aux_data)
-        if set(actual_keys) != set(expected_keys):
+        entries = {key: (key, child) for key, child in zip(aux_data, children, strict=True)}
+        if entries.keys() != set(expected_keys) or not all(
+            _same_static_value(entries[key][0], key) for key in expected_keys
+        ):
             raise TypeError("Staged call pytree differs from the declared specs")
-        child_by_key = dict(zip(actual_keys, children, strict=True))
-        children = tuple(child_by_key[key] for key in expected_keys)
-    elif aux_data != treedef.aux_data:
+        children = tuple(entries[key][1] for key in expected_keys)
+    elif not _same_static_value(aux_data, treedef.aux_data):
         raise TypeError("Staged call pytree differs from the declared specs")
     if len(children) != len(treedef.children):
         raise TypeError("Staged call pytree differs from the declared specs")
@@ -602,14 +528,6 @@ def _flatten_runtime_to_treedef(value: Any, treedef: TreeDef) -> list[Any]:
     for child, child_treedef in zip(children, treedef.children, strict=True):
         leaves.extend(_flatten_runtime_to_treedef(child, child_treedef))
     return leaves
-
-
-def _capture_location() -> str | None:
-    for frame in reversed(traceback.extract_stack()[:-2]):
-        normalized = frame.filename.replace("\\", "/")
-        if "/advect/core/" not in normalized:
-            return f"{frame.filename}:{frame.lineno} in {frame.name}()"
-    return None
 
 
 class _StageBuilder:
@@ -620,55 +538,41 @@ class _StageBuilder:
         "_constant_values",
         "_global_names",
         "constants",
-        "weak_constant_ids",
     )
 
-    def __init__(self, function: Callable[..., Any], builder: GraphBuilder) -> None:
+    def __init__(self, captures: Sequence[tuple[str, str, object]], builder: GraphBuilder) -> None:
         self._builder = builder
-        closure = getattr(function, "__closure__", None) or ()
-        freevars = getattr(getattr(function, "__code__", None), "co_freevars", ())
+        # The first closure name and the last referenced global name identify a value.
         self._closure_names: dict[int, str] = {}
-        for name, cell in zip(freevars, closure, strict=False):
-            try:
-                value = cell.cell_contents
-            except ValueError:
-                continue
-            self._closure_names.setdefault(id(value), name)
-        globals_map = getattr(function, "__globals__", {})
-        referenced_names = getattr(getattr(function, "__code__", None), "co_names", ())
-        self._global_names = {
-            id(globals_map[name]): name for name in referenced_names if name in globals_map
-        }
-        self._constant_ids: dict[int, int] = {}
+        self._global_names: dict[int, str] = {}
+        for origin, name, value in captures:
+            if origin == "closure":
+                self._closure_names.setdefault(id(value), name)
+            elif origin == "global":
+                self._global_names[id(value)] = name
+        self._constant_ids: dict[tuple[object, tuple[int, ...], str], int] = {}
         # Retaining the objects makes identity deduplication sound: temporary
         # providers cannot recycle an id while this builder is alive.
         self._constant_values: dict[int, Any] = {}
-        self.weak_constant_ids: set[int] = set()
         self.constants: list[ConstantRecord] = []
 
     def add_constant(self, value: Any, spec: ArraySpec) -> int:
         value_identity = id(value)
-        existing = self._constant_ids.get(value_identity)
-        if existing is not None and self._constant_values[value_identity] is value:
-            if spec.weak:
-                self.weak_constant_ids.add(existing)
+        # A staged sub-program's constant is a value, so each call reuses one
+        # node; other objects deduplicate by identity. One object lifted at two
+        # specs, as in asarray(xs, dtype=float32) and asarray(xs), is two constants.
+        portable = isinstance(value, _PortableConstant)
+        key = (value if portable else value_identity, spec.shape, _dtype_name(spec.dtype))
+        existing = self._constant_ids.get(key)
+        if existing is not None and (portable or self._constant_values[value_identity] is value):
             return existing
 
         dtype = normalize_constant_dtype(_dtype_name(spec.dtype))
-        if isinstance(value, _PortableConstant):
-            stored_value = value
-        elif isinstance(value, dict) and value.get("format") == "advect.numeric-constant":
-            stored_value = portable_constant_from_payload(
-                value,
-                shape=spec.shape,
-                dtype=dtype,
-            )
-        else:
-            stored_value = snapshot_constant_parts(
-                value,
-                shape=spec.shape,
-                dtype=dtype,
-            )
+        stored_value = (
+            value
+            if isinstance(value, _PortableConstant)
+            else snapshot_constant_parts(value, shape=spec.shape, dtype=dtype)
+        )
         if stored_value.shape != spec.shape or stored_value.dtype != dtype:
             raise ValueError("Staged constant parts do not match their abstract specification")
         node_id, native_digest = self._builder.append_constant(
@@ -677,8 +581,6 @@ class _StageBuilder:
             dtype,
             kind=stored_value.kind,
         )
-        if native_digest != stored_value.digest:
-            raise RuntimeError("Python and native staged constant digests disagree")
 
         byte_count = len(stored_value.data)
         if value_identity in self._closure_names:
@@ -694,7 +596,7 @@ class _StageBuilder:
             ConstantRecord(
                 value_id=node_id,
                 origin=origin,
-                location=_capture_location(),
+                location=caller_location(),
                 shape=spec.shape,
                 dtype=dtype,
                 bytes=byte_count,
@@ -702,52 +604,32 @@ class _StageBuilder:
                 name=name,
             )
         )
-        self._constant_ids[value_identity] = node_id
+        self._constant_ids[key] = node_id
         self._constant_values[value_identity] = value
-        if spec.weak:
-            self.weak_constant_ids.add(node_id)
         return node_id
 
 
-def _function_captures(function: Callable[..., Any]) -> Iterator[tuple[str, object]]:
+def _function_captures(function: Callable[..., Any]) -> Iterator[tuple[str, str, object]]:
+    """Yield ``(origin, name, value)`` for each value a callable can read."""
     owner = getattr(function, "__self__", None)
     if owner is not None:
-        yield "bound callable", owner
+        yield "bound", "bound callable", owner
     closure = getattr(function, "__closure__", None) or ()
     code = getattr(function, "__code__", None)
     for name, cell in zip(getattr(code, "co_freevars", ()), closure, strict=False):
         try:
-            yield name, cell.cell_contents
+            value = cell.cell_contents
         except ValueError:
             continue
+        yield "closure", name, value
     globals_map = getattr(function, "__globals__", {})
     for name in getattr(code, "co_names", ()):
         if name in globals_map:
-            yield name, globals_map[name]
+            yield "global", name, globals_map[name]
     for index, value in enumerate(getattr(function, "__defaults__", None) or ()):
-        yield f"default argument {index}", value
+        yield "default", f"default argument {index}", value
     for name, value in (getattr(function, "__kwdefaults__", None) or {}).items():
-        yield f"default argument {name}", value
-
-
-def _scalar_output_mask(
-    graph: GraphStore,
-    weak_source_ids: set[int],
-) -> tuple[bool, ...]:
-    """Propagate weak-scalar category through rank-zero numerical operations."""
-    if not weak_source_ids:
-        return tuple(False for _node_id in graph.outputs)
-
-    weak = set(weak_source_ids)
-    for node_id in graph.node_ids():
-        if node_id in weak:
-            continue
-        node = graph.get_node(node_id)
-        if not node.inputs or node.shape:
-            continue
-        if all(parent in weak for parent in node.inputs):
-            weak.add(node_id)
-    return tuple(node_id in weak for node_id in graph.outputs)
+        yield "default", f"default argument {name}", value
 
 
 def _with_scalar_output_mask(
@@ -782,26 +664,31 @@ def _compile_stage(
     call_tree: tuple[tuple[ArraySpec | StaticSpec, ...], dict[str, ArraySpec | StaticSpec]],
     *,
     array_api_version: str,
+    dtype_namespace: object,
 ) -> _CompiledStage:
     graph_builder = create_graph_builder(required_array_api_version=array_api_version)
-    stage_builder = _StageBuilder(function, graph_builder)
+    captures = tuple(_function_captures(function))
+    stage_builder = _StageBuilder(captures, graph_builder)
     array_factory = cast(
         "type[AbstractArray]",
         get_hook("advect.abstract_array_factory") or AbstractArray,
     )
     trace = AbstractTrace(
         graph_builder,
-        profile=_ADVECT_ARRAY_SEMANTIC_PROFILE,
         array_api_version=array_api_version,
         add_constant=stage_builder.add_constant,
         array_factory=array_factory,
+        dtype_namespace=dtype_namespace,
     )
     spec_leaves, call_treedef = tree_flatten(call_tree)
-    stage_scope = array_factory._advect_stage_context(tuple(_function_captures(function)))
+    stage_scope = array_factory._advect_stage_context(
+        tuple((name, value) for _origin, name, value in captures)
+    )
+    call_specs: list[ArraySpec | StaticSpec] = []
     traced_leaves: list[Any] = []
-    weak_input_ids: set[int] = set()
     for index, spec in enumerate(spec_leaves):
         if isinstance(spec, StaticSpec):
+            call_specs.append(spec)
             traced_leaves.append(_snapshot_static_value(spec.value))
             continue
         if not isinstance(spec, ArraySpec):
@@ -810,14 +697,15 @@ def _compile_stage(
                 f"got {type(spec).__name__}"
             )
             raise TypeError(msg)
+        # The artifact, the trace, and every call check use the canonical name.
+        stored_spec = replace(spec, dtype=_staged_dtype(_dtype_name(spec.dtype)))
+        call_specs.append(stored_spec)
         node_id = graph_builder.append_input_node(
-            spec.shape,
-            spec.dtype,
+            stored_spec.shape,
+            stored_spec.dtype,
             name=f"arg{index}",
         )
-        if spec.weak:
-            weak_input_ids.add(node_id)
-        traced_leaves.append(_new_abstract_array(trace, node_id, spec, owned=False))
+        traced_leaves.append(_new_abstract_array(trace, node_id, stored_spec, owned=False))
 
     traced_args, traced_kwargs = tree_unflatten(call_treedef, traced_leaves)
     _set_active_recorder(
@@ -846,70 +734,36 @@ def _compile_stage(
         old_to_new=tuple(old_to_new),
         constants=tuple(stage_builder.constants),
     )
-    constants: list[ConstantRecord] = []
-    for record in stage_builder.constants:
-        try:
-            remapped_id = old_to_new[record.value_id]
-        except IndexError as error:
-            raise RuntimeError("Staged optimizer returned an incomplete ID remap") from error
-        if remapped_id is None:
-            continue
-        constants.append(
-            ConstantRecord(
-                value_id=remapped_id,
-                origin=record.origin,
-                location=record.location,
-                shape=record.shape,
-                dtype=record.dtype,
-                bytes=record.bytes,
-                digest=record.digest,
-                name=record.name,
-            )
-        )
-    optimization = _decode_optimization(raw_optimization)
-    weak_source_ids: set[int] = set()
-    for raw_id in weak_input_ids | stage_builder.weak_constant_ids:
-        try:
-            remapped_id = old_to_new[raw_id]
-        except IndexError as error:
-            raise RuntimeError("Staged optimizer returned an incomplete ID remap") from error
-        if remapped_id is not None:
-            weak_source_ids.add(remapped_id)
-    scalar_output_mask = _scalar_output_mask(graph, weak_source_ids)
-    output_specs = tuple(
-        replace(spec, weak=restore and spec.shape == ())
-        for spec, restore in zip(output_specs, scalar_output_mask, strict=True)
+    # The native remap covers every traced id; None marks a removed node.
+    constants = tuple(
+        replace(record, value_id=remapped_id)
+        for record in stage_builder.constants
+        if (remapped_id := old_to_new[record.value_id]) is not None
     )
+    optimization = _decode_optimization(raw_optimization)
+    output_specs = tuple(replace(spec, dtype=_dtype_name(spec.dtype)) for spec in output_specs)
 
     return _CompiledStage(
         graph=graph,
         execution_plan=_bind_staged_execution(graph),
         call_treedef=call_treedef,
-        call_specs=tuple(spec_leaves),
+        call_specs=tuple(call_specs),
         output_treedef=output_treedef,
         output_specs=output_specs,
-        constants=tuple(constants),
+        constants=constants,
         optimization=optimization,
         trace=trace,
     )
-
-
-def _constant_records_by_id(
-    constants: Sequence[ConstantRecord],
-) -> dict[int, ConstantRecord]:
-    records: dict[int, ConstantRecord] = {}
-    for record in constants:
-        if record.value_id in records:
-            raise ValueError(f"Staged constant manifest repeats value %{record.value_id}")
-        records[record.value_id] = record
-    return records
 
 
 def _validate_constant_manifest(
     graph: GraphStore,
     constants: Sequence[ConstantRecord],
 ) -> None:
-    records = _constant_records_by_id(constants)
+    records: dict[int, ConstantRecord] = {}
+    for record in constants:
+        if records.setdefault(record.value_id, record) is not record:
+            raise ValueError(f"Staged constant manifest repeats value %{record.value_id}")
     graph_ids = set(graph.constant_ids())
     if set(records) != graph_ids:
         missing = sorted(graph_ids - set(records))
@@ -920,18 +774,15 @@ def _validate_constant_manifest(
         )
     for value_id, record in records.items():
         node = graph.get_node(value_id)
+        # advect-runtime has already checked each payload against its node.
         if tuple(node.shape) != record.shape or _dtype_name(node.dtype) != _dtype_name(
             record.dtype
         ):
             raise ValueError(
                 f"Staged constant %{value_id} manifest shape/dtype does not match its graph node"
             )
-        _kind, dtype, shape, data, digest = graph._constant_parts(value_id)
-        if (
-            tuple(shape) != record.shape
-            or _dtype_name(dtype) != _dtype_name(record.dtype)
-            or len(data) != record.bytes
-        ):
+        _kind, _dtype, _shape, data, digest = graph._constant_parts(value_id)
+        if len(data) != record.bytes:
             raise ValueError(
                 f"Staged constant %{value_id} manifest metadata does not match its payload"
             )
@@ -941,19 +792,8 @@ def _validate_constant_manifest(
             )
 
 
-def _encode_graph_payload(
-    graph: GraphStore,
-    constants: Sequence[ConstantRecord],
-) -> dict[str, object]:
-    _validate_constant_manifest(graph, constants)
-    payload = json.loads(graph._to_json())
-    if not isinstance(payload, dict):
-        raise TypeError("Native graph artifact must encode a mapping")
-    return payload
-
-
 def _deserialize_staged_graph(payload: object) -> GraphStore:
-    """Load one already-optimized graph without rerunning the compiler."""
+    """Link one already-optimized graph to the registry and load it without recompiling."""
     if not isinstance(payload, dict):
         raise TypeError("Staged graph payload must be a mapping")
     raw_nodes = payload.get("nodes")
@@ -965,10 +805,19 @@ def _deserialize_staged_graph(payload: object) -> GraphStore:
             raise TypeError("Staged graph node must be a mapping")
         op = raw_node.get("op")
         schema_version = raw_node.get("schema_version")
+        num_outputs = raw_node.get("num_outputs")
         if not isinstance(op, str):
             raise TypeError("Staged graph node op must be a string")
         if type(schema_version) is not int or schema_version < 1:
             raise TypeError("Staged graph node schema_version must be a positive integer")
+        if type(num_outputs) is not int or num_outputs < 1:
+            raise TypeError("Staged graph node num_outputs must be a positive integer")
+        if op.startswith("custom."):
+            try:
+                _record_primitive_output_count(op, num_outputs)
+            except KeyError as error:
+                name = op.removeprefix("custom.")
+                raise ValueError(f"Staged program requires unlinked primitive '{name}'") from error
         op_def = registry.get_optional(op)
         if op_def is None:
             raise ValueError(
@@ -981,27 +830,83 @@ def _deserialize_staged_graph(payload: object) -> GraphStore:
                 f"Staged graph op '{op}' requires schema {schema_version}; "
                 f"linked schema is {expected_schema}"
             )
-
-        num_outputs = raw_node.get("num_outputs")
-        if type(num_outputs) is not int or num_outputs < 1:
-            raise TypeError("Staged graph node num_outputs must be a positive integer")
         if op_def.num_outputs != num_outputs:
             raise ValueError(
                 f"Op '{op}' expects num_outputs={op_def.num_outputs}, got num_outputs={num_outputs}"
             )
 
-    encoded = json.dumps(
-        payload,
-        ensure_ascii=True,
-        sort_keys=True,
-        separators=(",", ":"),
-    )
-    return deserialize_graph_json(encoded)
+    graph = deserialize_graph_json(json.dumps(payload, separators=(",", ":")))
+    # advect-runtime accepted dense node ids, so a list position is its node id.
+    for node_id, raw_node in enumerate(raw_nodes):
+        op = raw_node["op"]
+        if op.startswith("custom."):
+            _validate_custom_call(graph.get_node(node_id))
+        else:
+            _validate_operand_count(graph, node_id, op, len(raw_node["inputs"]))
+    return graph
+
+
+# Operand counts of structural nodes; advect-runtime validates inputs and constants.
+_STRUCTURAL_OPERANDS = {
+    "advect.const": 0,
+    "advect.getitem": 1,
+    "advect.getoutput": 1,
+    "advect.index_update": 2,
+    "advect.input": 0,
+}
+
+
+def _validate_operand_count(graph: GraphStore, node_id: int, op: str, operands: int) -> None:
+    """Reject a built-in node whose operands its evaluator would bind positionally amiss."""
+    rule = get_registry().get(op).abstract_schema
+    if rule is None:
+        expected = _STRUCTURAL_OPERANDS.get(op)
+        if expected is None:
+            raise ValueError(f"Staged graph op {op!r} cannot appear in a staged program")
+    elif rule.sequence_operand:
+        return
+    else:
+        expected = rule.operands
+        if rule.optional_operands:
+            attrs = decode_graph_attrs_from_native(graph.get_node(node_id).attrs)
+            expected += sum(bool(attrs.get(name)) for name in rule.optional_operands)
+    if operands != expected:
+        raise ValueError(
+            f"Staged graph node %{node_id} passes {operands} operands to {op!r}, "
+            f"which takes {expected}"
+        )
+
+
+def _validate_custom_call(node: NativeNode) -> None:
+    """Validate the call metadata needed to link one custom node safely."""
+    try:
+        call_meta, _node_attrs = _split_primitive_attrs(decode_graph_attrs_from_native(node.attrs))
+    except (TypeError, ValueError) as error:
+        raise ValueError(f"Staged custom node {node.op!r} has an invalid call contract") from error
+    if call_meta.output_treedef.num_leaves != node.num_outputs:
+        raise ValueError(
+            f"Staged custom node {node.op!r} output structure does not match its arity"
+        )
+    if len(node.inputs) != sum(call_meta.input_leaf_mask):
+        raise ValueError(
+            f"Staged custom node {node.op!r} input count does not match its call structure"
+        )
+
+
+_ARTIFACT_FIELDS = (
+    "graph",
+    "call_treedef",
+    "call_specs",
+    "output_treedef",
+    "output_specs",
+    "constants",
+    "optimization",
+)
 
 
 def _encode_artifact(artifact: _CompiledStage) -> dict[str, object]:
     return {
-        "graph": _encode_graph_payload(artifact.graph, artifact.constants),
+        "graph": json.loads(artifact.graph._to_json()),
         "call_treedef": _encode_treedef(artifact.call_treedef),
         "call_specs": [_encode_spec(spec) for spec in artifact.call_specs],
         "output_treedef": _encode_treedef(artifact.output_treedef),
@@ -1012,22 +917,8 @@ def _encode_artifact(artifact: _CompiledStage) -> dict[str, object]:
 
 
 def _decode_artifact(payload: object) -> _CompiledStage:
-    if not isinstance(payload, dict):
-        raise TypeError("Staged artifact must be a mapping")
-    required = {
-        "graph",
-        "call_treedef",
-        "call_specs",
-        "output_treedef",
-        "output_specs",
-        "constants",
-        "optimization",
-    }
-    if set(payload) != required:
-        raise ValueError("Staged artifact has invalid fields")
-    registry = get_registry()
-    with registry.transaction():
-        _link_custom_output_counts(payload["graph"])
+    payload = _closed_mapping(payload, "artifact", _ARTIFACT_FIELDS)
+    with get_registry().transaction():
         call_specs_payload = payload["call_specs"]
         output_specs_payload = payload["output_specs"]
         constants_payload = payload["constants"]
@@ -1051,11 +942,10 @@ def _decode_artifact(payload: object) -> _CompiledStage:
         if len(output_specs) != output_treedef.num_leaves:
             raise ValueError("Staged output specs do not match their pytree")
         graph = _deserialize_staged_graph(payload["graph"])
-        _validate_custom_calls(graph)
         input_specs = tuple(spec for spec in call_specs if isinstance(spec, ArraySpec))
         input_nodes = tuple(graph.get_node(node_id) for node_id in graph.inputs)
         if len(input_nodes) != len(input_specs) or any(
-            tuple(node.shape) != spec.shape or _dtype_name(node.dtype) != _dtype_name(spec.dtype)
+            tuple(node.shape) != spec.shape or _dtype_name(node.dtype) != spec.dtype
             for node, spec in zip(input_nodes, input_specs, strict=True)
         ):
             raise ValueError("Staged graph inputs do not match its call specs")
@@ -1063,9 +953,7 @@ def _decode_artifact(payload: object) -> _CompiledStage:
             raise ValueError("Staged graph output count does not match its output pytree")
         for node_id, spec in zip(graph.outputs, output_specs, strict=True):
             node = graph.get_node(node_id)
-            if tuple(node.shape) != spec.shape or _dtype_name(node.dtype) != _dtype_name(
-                spec.dtype
-            ):
+            if tuple(node.shape) != spec.shape or _dtype_name(node.dtype) != spec.dtype:
                 raise ValueError("Staged output specs do not match graph outputs")
         if graph.node_count != optimization.nodes_after:
             raise ValueError("Staged graph node count does not match its optimization report")
@@ -1082,107 +970,44 @@ def _decode_artifact(payload: object) -> _CompiledStage:
         )
 
 
-def _runtime_namespace(
-    values: Sequence[Any],
-    *,
-    array_api_version: str,
-) -> Any | None:
-    resolution = _negotiate_array_namespace_for_call(
-        args=tuple(values),
-        kwargs={},
-        required_version=array_api_version,
-    )
-    if resolution is None:
-        return None
-    _validate_runtime_namespace_profile(
-        resolution.raw_namespace,
-        array_api_version=array_api_version,
-    )
-    return resolution.raw_namespace
-
-
-def _default_array_namespace(*, array_api_version: str) -> Any:
+def _default_array_namespace() -> Any:
+    """Return the namespace of the default frontend, NumPy once it is installed."""
     resolve = get_hook("advect.default_array_namespace")
     if resolve is None:
         raise RuntimeError(
             "A staged call without provider-backed inputs requires a registered "
             "default array namespace"
         )
-    namespace = resolve()
-    _validate_runtime_namespace_profile(
-        namespace,
-        array_api_version=array_api_version,
+    return resolve()
+
+
+def _runtime_namespace(values: Sequence[Any], *, array_api_version: str) -> Any:
+    """Select the provider for one call and require the program's Array API revision."""
+    resolution = _negotiate_array_namespace_for_call(
+        args=tuple(values),
+        kwargs={},
+        required_version=array_api_version,
     )
-    return namespace
-
-
-def _restore_staged_output_tree(
-    value: Any,
-    *,
-    output_specs: Sequence[ArraySpec],
-    restore_scalars: bool,
-) -> Any:
-    leaves, treedef = tree_flatten(value)
-    if len(leaves) != len(output_specs):
-        msg = (
-            "Staged output specifications do not match the runtime output pytree: "
-            f"expected {len(output_specs)} leaves, got {len(leaves)}"
-        )
-        raise RuntimeError(msg)
-    restored: list[Any] = []
-    for leaf, spec in zip(leaves, output_specs, strict=True):
-        if spec.weak:
-            mark_weak = getattr(leaf, "_advect_mark_weak", None)
-            if callable(mark_weak):
-                mark_weak()
-        item = getattr(leaf, "item", None)
-        should_unlift = (
-            restore_scalars and spec.weak and getattr(leaf, "shape", None) == () and callable(item)
-        )
-        restored.append(item() if should_unlift else leaf)
-    return tree_unflatten(treedef, restored)
-
-
-def _validate_runtime_namespace_profile(
-    namespace: Any | None,
-    *,
-    array_api_version: str,
-) -> None:
-    if namespace is None:
-        return
-    backend = _get_backend_key_from_namespace(namespace)
-    if backend is None:
+    namespace = _default_array_namespace() if resolution is None else resolution.raw_namespace
+    if _get_backend_key_from_namespace(namespace) is None:
         raise TypeError("Staged array providers must expose a stable namespace name")
     version = _get_provider_array_api_version(namespace)
-    requested_key = tuple(int(part) for part in array_api_version.split("."))
-    reported_key = (
-        tuple(int(part) for part in version.split("."))
-        if isinstance(version, str) and all(part.isdigit() for part in version.split("."))
-        else None
-    )
-    if reported_key is None or reported_key < requested_key:
+    reported_key = None if version is None else _version_key(version)
+    requested_key = _version_key(array_api_version)
+    if reported_key is None or requested_key is None or reported_key < requested_key:
         raise TypeError(
             f"Staged profile {_ADVECT_ARRAY_SEMANTIC_PROFILE!r} requires Array API "
             f"{array_api_version}; "
             f"the runtime provider exposes {version!r}"
         )
+    return namespace
 
 
-def _runtime_device(
-    values: Sequence[Any],
-    namespace: Any | None,
-    *,
-    array_api_version: str,
-) -> tuple[object | None, str | None]:
-    if namespace is None:
-        return None, None
-    backend = _get_backend_key_from_namespace(namespace)
+def _runtime_device(values: Sequence[Any]) -> tuple[object | None, str | None]:
+    """Return the one device of the negotiated provider's inputs, if any."""
     selected: object | None = None
     selected_key: str | None = None
     for value in values:
-        value_namespace = _get_array_namespace(value, api_version=array_api_version)
-        if value_namespace is None or _get_backend_key_from_namespace(value_namespace) != backend:
-            continue
         device = getattr(value, "device", None)
         if device is None:
             continue
@@ -1200,27 +1025,18 @@ def _runtime_device(
 
 def _coerce_constant(
     value: _PortableConstant,
-    namespace: Any | None,
+    namespace: Any,
     *,
     device: object | None,
 ) -> Any:
+    """Materialize one staged constant on a concrete or abstract provider."""
     dtype_name = value.dtype
     shape = value.shape
     if value.kind == "scalar":
         return next(iter_constant_values(value))
-    if namespace is None:
-        raise RuntimeError("Cannot materialize a staged array constant without an array namespace")
-    raw_namespace = getattr(namespace, "raw_namespace", namespace)
     abstract_materialize = getattr(namespace, "_advect_materialize_constant", None)
-    if not callable(abstract_materialize):
-        abstract_materialize = getattr(raw_namespace, "_advect_materialize_constant", None)
     if callable(abstract_materialize):
-        materialized = abstract_materialize(
-            value,
-            ArraySpec(shape, dtype_name),
-        )
-        if materialized is not NotImplemented:
-            return materialized
+        return abstract_materialize(value, ArraySpec(shape, dtype_name))
     asarray = getattr(namespace, "asarray", None)
     if not callable(asarray):
         raise TypeError("The runtime array namespace does not provide asarray()")
@@ -1230,12 +1046,12 @@ def _coerce_constant(
     kwargs: dict[str, object] = {"dtype": dtype}
     if device is not None:
         kwargs["device"] = device
-    frombuffer = getattr(raw_namespace, "frombuffer", None)
+    frombuffer = getattr(namespace, "frombuffer", None)
     materialized: Any
     if callable(frombuffer):
         # Some providers expose writable tensors over the supplied buffer and
-        # warn (or reject) when handed immutable ``bytes``. Constants own this
-        # invocation-local backing store, so a mutable copy is the portable
+        # warn (or reject) when handed immutable ``bytes``. Each materialized
+        # constant owns its backing store, so a mutable copy is the portable
         # boundary.
         materialized = cast("Any", frombuffer(bytearray(value.data), dtype=dtype))
         if device is not None and str(getattr(materialized, "device", None)) != str(device):
@@ -1254,39 +1070,98 @@ def _coerce_constant(
     actual_dtype = _dtype_name(materialized.dtype)
     if actual_shape != shape or actual_dtype != dtype_name:
         raise TypeError("The runtime provider did not preserve a staged constant's shape and dtype")
+    # Every later call reuses this value, and a constant (or a view of one) can
+    # be returned as an output, so freeze it where the provider can.
+    setflags = getattr(materialized, "setflags", None)
+    if callable(setflags):
+        setflags(write=False)
     return materialized
+
+
+def _output_constant_ids(graph: GraphStore) -> frozenset[int]:
+    """Return the constants whose storage a program output may share."""
+    shared: dict[int, frozenset[int]] = {}
+    for node_id in graph.node_ids():
+        node = graph.get_node(node_id)
+        if node.op == "advect.const":
+            shared[node_id] = frozenset((node_id,))
+            continue
+        positions = shared_operand_positions(node.op)
+        parents = node.inputs if positions is None else [node.inputs[p] for p in positions]
+        shared[node_id] = frozenset().union(*(shared[parent] for parent in parents))
+    return frozenset().union(*(shared[node_id] for node_id in graph.outputs))
 
 
 def _materialize_constants(
     compiled: _CompiledStage,
     state: _ExecutionState,
-    namespace: Any | None,
+    namespace: Any,
     *,
     device: object | None,
     device_key: str | None,
 ) -> tuple[object, ...]:
     if not compiled.constants:
         return ()
-    with state.materialization_lock:
-        for cached in state.materialized_constants:
-            if cached.namespace is namespace and cached.device == device_key:
-                return cached.values
-        values = tuple(
+    # A dynamic tracing namespace wraps the provider that owns the values.
+    provider: Any = getattr(namespace, "raw_namespace", namespace)
+
+    def provider_values() -> tuple[object, ...]:
+        return tuple(
             _coerce_constant(
-                portable_constant_from_native(*compiled.graph._constant_parts(node_id)),
-                namespace,
+                portable_constant_from_native(compiled.graph._constant_parts(node_id)),
+                provider,
                 device=device,
             )
             for node_id in compiled.graph.constant_ids()
         )
-        state.materialized_constants.append(
-            _MaterializedConstants(
-                namespace=namespace,
-                device=device_key,
-                values=values,
+
+    if callable(getattr(provider, "_advect_materialize_constant", None)):
+        # An abstract provider records the constants into its own staging trace.
+        values = provider_values()
+    else:
+        with state.materialization_lock:
+            cached_values = next(
+                (
+                    cached.values
+                    for cached in state.materialized_constants
+                    if cached.namespace is provider and cached.device == device_key
+                ),
+                None,
             )
-        )
+            if cached_values is None:
+                cached_values = provider_values()
+                state.materialized_constants.append(
+                    _MaterializedConstants(
+                        namespace=provider,
+                        device=device_key,
+                        values=cached_values,
+                    )
+                )
+            values = cached_values
+        # A provider without read-only arrays copies, on each call, the
+        # constants an output may share, so writing to it cannot change later
+        # calls.
+        writable = [
+            hasattr(value, "shape") and not callable(getattr(value, "setflags", None))
+            for value in values
+        ]
+        if any(writable):
+            if state.output_constant_ids is None:
+                state.output_constant_ids = _output_constant_ids(compiled.graph)
+            values = tuple(
+                provider.asarray(value, copy=True)
+                if copy and node_id in state.output_constant_ids
+                else value
+                for node_id, value, copy in zip(
+                    compiled.graph.constant_ids(), values, writable, strict=True
+                )
+            )
+    if provider is namespace:
         return values
+    # Each dynamic trace lifts the provider arrays onto its own tape; Python
+    # scalar constants need no provider identity.
+    lift = namespace._advect_materialize_constant
+    return tuple(lift(value, None) if hasattr(value, "shape") else value for value in values)
 
 
 _STAGED_ERROR_NODE = re.compile(r"node %(\d+)")
@@ -1363,20 +1238,10 @@ def _execute_staged(
     compiled: _CompiledStage,
     state: _ExecutionState,
     inputs: Sequence[Any],
-) -> Any:
+) -> list[Any]:
     array_api_version = compiled.graph.required_array_api_version
     namespace = _runtime_namespace(inputs, array_api_version=array_api_version)
-    if namespace is None:
-        namespace = _default_array_namespace(array_api_version=array_api_version)
-    device, device_key = (
-        _runtime_device(
-            inputs,
-            namespace,
-            array_api_version=array_api_version,
-        )
-        if compiled.constants
-        else (None, None)
-    )
+    device, device_key = _runtime_device(inputs) if compiled.constants else (None, None)
     constants = _materialize_constants(
         compiled,
         state,
@@ -1385,7 +1250,7 @@ def _execute_staged(
         device_key=device_key,
     )
     try:
-        output_leaves = execute_graph(
+        return execute_graph(
             compiled.execution_plan,
             inputs,
             constants,
@@ -1394,7 +1259,6 @@ def _execute_staged(
     except Exception as error:
         _add_staged_error_context(error, compiled.graph)
         raise
-    return tree_unflatten(compiled.output_treedef, output_leaves)
 
 
 class StagedProgram:
@@ -1427,8 +1291,17 @@ class StagedProgram:
             function,
             (specs, kw_specs),
             array_api_version=array_api_version,
+            dtype_namespace=_default_array_namespace(),
         )
         self._execution_state = _ExecutionState()
+
+    @classmethod
+    def _from_artifact(cls, artifact: _CompiledStage, compile_seconds: float) -> Self:
+        program = cls.__new__(cls)
+        program._artifact = artifact
+        program._compile_seconds = compile_seconds
+        program._execution_state = _ExecutionState()
+        return program
 
     def __repr__(self) -> str:
         """Return a compact program summary for notebooks and debuggers."""
@@ -1447,6 +1320,7 @@ class StagedProgram:
         ],
         *,
         array_api_version: str,
+        dtype_namespace: object,
     ) -> tuple[_CompiledStage, float]:
         leaves, treedef = tree_flatten(call_tree)
         # The codec is the closed durability boundary for Static aux data and
@@ -1465,6 +1339,7 @@ class StagedProgram:
             function,
             normalized_call_tree,
             array_api_version=array_api_version,
+            dtype_namespace=dtype_namespace,
         )
         return artifact, time.perf_counter() - start
 
@@ -1523,10 +1398,7 @@ class StagedProgram:
     @classmethod
     def from_dict(cls, payload: object) -> StagedProgram:
         """Load a versioned staged artifact after linking custom primitives."""
-        if not isinstance(payload, dict):
-            raise TypeError("Staged program payload must be a mapping")
-        if set(payload) != {"format", "version", "program"}:
-            raise ValueError("Staged program payload has invalid fields")
+        payload = _closed_mapping(payload, "program payload", ("format", "version", "program"))
         if payload["format"] != _STAGED_PROGRAM_FORMAT:
             raise ValueError(f"Unknown staged program format {payload['format']!r}")
         format_version = payload["version"]
@@ -1534,13 +1406,7 @@ class StagedProgram:
             raise TypeError("Staged program format version must be an integer")
         if format_version != _STAGED_PROGRAM_FORMAT_VERSION:
             raise ValueError(f"Unsupported staged program format version {format_version}")
-        with get_registry().transaction():
-            artifact = _decode_artifact(payload["program"])
-        loaded = cls.__new__(cls)
-        loaded._artifact = artifact
-        loaded._compile_seconds = 0.0
-        loaded._execution_state = _ExecutionState()
-        return loaded
+        return cls._from_artifact(_decode_artifact(payload["program"]), 0.0)
 
     def _staged_transform(
         self,
@@ -1564,60 +1430,42 @@ class StagedProgram:
                 list(artifact.output_specs),
             )
             call_tree = (args, {**kwargs, output_argname: output_tree})
-        transformed = self.__class__.__new__(self.__class__)
-        transformed._artifact, transformed._compile_seconds = self._compile(
+        transformed, compile_seconds = self._compile(
             function,
             call_tree,
             array_api_version=artifact.graph.required_array_api_version,
+            dtype_namespace=_default_array_namespace(),
         )
         if scalar_output_override is not None:
             offset, mask = scalar_output_override
-            transformed._artifact = _with_scalar_output_mask(
-                transformed._artifact,
-                offset=offset,
-                mask=mask,
-            )
-        transformed._execution_state = _ExecutionState()
-        return transformed
+            transformed = _with_scalar_output_mask(transformed, offset=offset, mask=mask)
+        return self._from_artifact(transformed, compile_seconds)
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         artifact = self._artifact
-        concrete_tree = (args, kwargs)
-        concrete_leaves = _flatten_runtime_to_treedef(
-            concrete_tree,
-            artifact.call_treedef,
-        )
-        if len(artifact.call_specs) != len(concrete_leaves):
-            raise TypeError("Staged call leaf count differs from its compiled signature")
+        concrete_leaves = _flatten_runtime_to_treedef((args, kwargs), artifact.call_treedef)
         runtime_inputs: list[Any] = []
-        runtime_specs: list[ArraySpec] = []
-        scalar_runtime_inputs: list[bool] = []
+        restore_scalars = False
         for index, (spec, value) in enumerate(
             zip(artifact.call_specs, concrete_leaves, strict=True)
         ):
             if isinstance(spec, StaticSpec):
-                if _spec_key(spec) != _spec_key(StaticSpec(value)):
+                if not _same_static_value(value, spec.value):
                     raise TypeError(f"Static staged argument leaf {index} changed value")
                 continue
-            is_python_scalar = type(value) in {bool, complex, float, int}
-            normalized = (
-                _normalize_weak_runtime_scalar(value, spec)
-                if spec.weak and is_python_scalar
-                else value
-            )
-            actual = (
-                ArraySpec(spec.shape, spec.dtype, device=spec.device, weak=True)
-                if spec.weak and is_python_scalar
-                else _value_spec(normalized)
-            )
-            if not isinstance(actual, ArraySpec):
-                raise TypeError(f"Staged array argument leaf {index} is not array-like")
-            device_matches = spec.device is None or actual.device == spec.device
+            if spec.weak and _is_python_scalar(value):
+                runtime_inputs.append(_normalize_weak_runtime_scalar(value, spec))
+                restore_scalars = True
+                continue
+            actual = _value_spec(value)
+            # Abstract results carry no device; the enclosing program's own
+            # input check owns the device of the values they stand for.
+            unknown_device = actual.device is None and isinstance(value, AbstractArray)
             if (
                 actual.shape != spec.shape
-                or _dtype_name(actual.dtype) != _dtype_name(spec.dtype)
+                or actual.dtype != spec.dtype
                 or actual.weak != spec.weak
-                or not device_matches
+                or (spec.device not in {None, actual.device} and not unknown_device)
             ):
                 raise ValueError(
                     f"Staged argument leaf {index} expected shape={spec.shape}, "
@@ -1625,20 +1473,20 @@ class StagedProgram:
                     f"got shape={actual.shape}, dtype={actual.dtype}, "
                     f"device={actual.device}, weak={actual.weak}"
                 )
-            runtime_inputs.append(normalized)
-            runtime_specs.append(spec)
-            scalar_runtime_inputs.append(is_python_scalar)
+            runtime_inputs.append(_native_byte_order(value))
 
-        restore_scalar_outputs = any(
-            spec.weak and is_scalar
-            for spec, is_scalar in zip(runtime_specs, scalar_runtime_inputs, strict=True)
-        )
-
-        return _restore_staged_output_tree(
-            _execute_staged(artifact, self._execution_state, runtime_inputs),
-            output_specs=artifact.output_specs,
-            restore_scalars=restore_scalar_outputs,
-        )
+        outputs = _execute_staged(artifact, self._execution_state, runtime_inputs)
+        for index, spec in enumerate(artifact.output_specs):
+            if not spec.weak:
+                continue
+            leaf = outputs[index]
+            mark_weak = getattr(leaf, "_advect_mark_weak", None)
+            if callable(mark_weak):
+                mark_weak()
+            item = getattr(leaf, "item", None)
+            if restore_scalars and getattr(leaf, "shape", None) == () and callable(item):
+                outputs[index] = item()
+        return tree_unflatten(artifact.output_treedef, outputs)
 
 
 def stage(
@@ -1681,9 +1529,10 @@ def stage(
     array_api_version
         Array API revision to compile and store in the graph. With concrete
         examples and no explicit revision, Advect selects the newest supported
-        revision served by their common array provider. With ``specs`` alone,
-        it selects Advect's latest supported revision. An explicit revision
-        must be supported by Advect and by the provider of every array example.
+        revision served by their common array provider, which is NumPy when
+        every example is a Python scalar. With ``specs`` alone, it selects
+        Advect's latest supported revision. An explicit revision must be
+        supported by Advect and by the provider of every array example.
 
     Returns
     -------
@@ -1699,14 +1548,22 @@ def stage(
         If neither ``examples`` nor ``specs`` is supplied, if both are
         supplied, if an example is neither array-like nor a supported Python
         scalar nor wrapped in ``StaticSpec``, if a specification contains
-        another leaf type, or if the concrete array examples cannot use one
-        common provider at the selected Array API revision.
+        another leaf type, if an example, specification, or computed array has
+        a dtype that staging does not support, such as an object or bytes
+        dtype, if the staged function reads a dtype that the examples' array
+        provider does not define, such as ``float16`` on ``array_api_strict``,
+        or if the concrete array examples cannot use one common provider at
+        the selected Array API revision.
     ValueError
         If ``array_api_version`` is not a supported revision, or if abstract
         tracing finds incompatible shapes, dtypes, or operation semantics.
 
     Notes
     -----
+    Inside the staged function, ``x.dtype`` is the dtype object of the
+    examples' array provider, or a NumPy dtype object when ``specs`` alone
+    declares the signature.
+
     A returned program accepts only its compiled call pytree and leaf
     contract. At execution time, a changed call structure, non-array leaf, or
     static value raises ``TypeError``; an incompatible array shape, dtype,
@@ -1762,19 +1619,26 @@ def stage(
         if examples
         else None
     )
+    if resolution is None and examples and array_api_version is None:
+        # Python-scalar examples alone run on the default provider.
+        resolution = _negotiate_default_array_namespace()
     selected_array_api_version = (
         resolution.requested_version
         if resolution is not None
         else array_api_version or LATEST_ARRAY_API_VERSION
     )
 
+    # Staged code sees the dtype objects of the examples' provider, else NumPy's.
+    dtype_namespace = _default_array_namespace() if resolution is None else resolution.raw_namespace
+
     def decorate(fn: Callable[..., Any]) -> StagedProgram:
-        return StagedProgram(
+        artifact, compile_seconds = StagedProgram._compile(
             fn,
-            specs=positional_specs,
-            kw_specs={} if kw_specs is None else dict(kw_specs),
+            (positional_specs, {} if kw_specs is None else dict(kw_specs)),
             array_api_version=selected_array_api_version,
+            dtype_namespace=dtype_namespace,
         )
+        return StagedProgram._from_artifact(artifact, compile_seconds)
 
     return decorate if function is None else decorate(function)
 

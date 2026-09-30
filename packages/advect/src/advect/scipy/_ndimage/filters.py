@@ -9,6 +9,7 @@ remain in :mod:`advect.scipy.ndimage`.
 
 from __future__ import annotations
 
+import functools
 import operator
 from collections.abc import Iterable
 from typing import TYPE_CHECKING, Any, cast
@@ -31,6 +32,7 @@ from advect.scipy._ndimage.common import (
     _project_cotangent,
     _require_numpy_values,
     _result_spec,
+    _runtime_mode,
     _runtime_output,
     _sample_array,
     _zero_tangent,
@@ -65,6 +67,9 @@ def _gaussian_kernel(sigma: float, order: int, radius: int) -> np.ndarray:
         coefficients = (derivative + product).dot(coefficients)
     polynomial = (positions[:, None] ** exponents).dot(coefficients)
     return polynomial * gaussian
+
+
+type _AxisStencil = tuple[int, np.ndarray, int, str]
 
 
 def _run_gaussian(
@@ -105,7 +110,35 @@ def _run_gaussian(
     )
 
 
+def _gaussian_stencils(
+    *,
+    one_dimensional: bool,
+    axes: tuple[int, ...],
+    sigmas: tuple[object, ...],
+    orders: tuple[object, ...],
+    modes: tuple[str, ...],
+    truncate: float,
+    radii: tuple[object, ...],
+) -> list[_AxisStencil]:
+    stencils = []
+    for axis, sigma, order, mode, radius in zip(axes, sigmas, orders, modes, radii, strict=True):
+        sigma_value = float(cast("Any", sigma))
+        # SciPy's n-dimensional filter skips axes with a vanishing sigma.
+        if not one_dimensional and sigma_value <= 1e-15:
+            continue
+        radius_value = (
+            int(truncate * sigma_value + 0.5)
+            if radius is None
+            else operator.index(cast("Any", radius))
+        )
+        kernel = _gaussian_kernel(sigma_value, operator.index(cast("Any", order)), radius_value)
+        stencils.append((axis, kernel[::-1], 0, mode))
+    return stencils
+
+
 def _install_gaussian(name: str, *, one_dimensional: bool) -> Primitive[..., Any]:
+    run = functools.partial(_run_gaussian, one_dimensional=one_dimensional)
+
     @primitive(
         name=f"scipy.ndimage.{name}",
         static_argnames=(
@@ -131,11 +164,10 @@ def _install_gaussian(name: str, *, one_dimensional: bool) -> Primitive[..., Any
         output_dtype: str | None,
     ) -> Any:
         _require_numpy_values(name, input, cval)
-        return _run_gaussian(
+        return run(
             input,
             cval,
             _runtime_output(output_dtype),
-            one_dimensional=one_dimensional,
             axes=axes,
             sigmas=sigmas,
             orders=orders,
@@ -144,121 +176,11 @@ def _install_gaussian(name: str, *, one_dimensional: bool) -> Primitive[..., Any
             radii=radii,
         )
 
-    @concrete.def_abstract
-    def abstract(
-        input: AbstractValue,
-        cval: AbstractValue,
-        *,
-        axes: tuple[int, ...],
-        sigmas: tuple[object, ...],
-        orders: tuple[object, ...],
-        modes: tuple[str, ...],
-        truncate: float,
-        radii: tuple[object, ...],
-        output_dtype: str | None,
-    ) -> ArraySpec:
-        sample_shape = (1,) * len(input.spec.shape)
-        result = _run_gaussian(
-            _sample_array(input, shape=sample_shape),
-            _sample_array(cval, shape=()),
-            _runtime_output(output_dtype),
-            one_dimensional=one_dimensional,
-            axes=axes,
-            sigmas=sigmas,
-            orders=orders,
-            modes=modes,
-            truncate=truncate,
-            radii=radii,
-        )
-        return _result_spec(input, result)
-
-    @concrete.def_jvp
-    def jvp_rule(
-        output: Any,
-        primals: tuple[Any, ...],
-        tangents: tuple[Any | None, ...],
-        *,
-        axes: tuple[int, ...],
-        sigmas: tuple[object, ...],
-        orders: tuple[object, ...],
-        modes: tuple[str, ...],
-        truncate: float,
-        radii: tuple[object, ...],
-        output_dtype: str | None,
-    ) -> Any:
-        del output_dtype
-        input, _cval = primals
-        input_tangent, cval_tangent = tangents
-        if input_tangent is None and cval_tangent is None:
-            return np.zeros_like(output)
-        result = concrete(
-            input=_zero_tangent(input, input_tangent),
-            cval=0 if cval_tangent is None else cval_tangent,
-            axes=axes,
-            sigmas=sigmas,
-            orders=orders,
-            modes=modes,
-            truncate=truncate,
-            radii=radii,
-            output_dtype=_operand_dtype(output).str,
-        )
-        return _cast_tangent(result, output)
-
-    @concrete.def_transpose
-    def transpose_rule(
-        cotangent: Any,
-        primals: tuple[Any, ...],
-        output: Any,
-        *,
-        axes: tuple[int, ...],
-        sigmas: tuple[object, ...],
-        orders: tuple[object, ...],
-        modes: tuple[str, ...],
-        truncate: float,
-        radii: tuple[object, ...],
-        output_dtype: str | None,
-        active_input_indices: tuple[int, ...] | None = None,
-    ) -> tuple[Any | None, Any | None]:
-        del output_dtype
-        input, cval = primals
-        active = {0, 1} if active_input_indices is None else set(active_input_indices)
-        if not active:
-            return None, None
-        result = cotangent
-        boundary_cotangent = np.zeros((), dtype=_operand_dtype(cotangent))
-        configurations = tuple(zip(axes, sigmas, orders, modes, radii, strict=True))
-        for axis, sigma, order, mode, radius in reversed(configurations):
-            sigma_value = float(cast("Any", sigma))
-            if not one_dimensional and sigma_value <= 1e-15:
-                continue
-            radius_value = (
-                int(truncate * sigma_value + 0.5)
-                if radius is None
-                else operator.index(cast("Any", radius))
-            )
-            result, boundary = _stencil_input_transpose(
-                result,
-                _gaussian_kernel(
-                    sigma_value,
-                    operator.index(cast("Any", order)),
-                    radius_value,
-                )[::-1],
-                axes=(axis,),
-                origins=(0,),
-                modes=(mode,),
-                convolution=False,
-            )
-            boundary_cotangent = boundary_cotangent + boundary
-        return (
-            _project_cotangent(result, input, output) if 0 in active else None,
-            _project_cotangent(boundary_cotangent, cval, output) if 1 in active else None,
-        )
-
-    return concrete
-
-
-_gaussian_filter_primitive = _install_gaussian("gaussian_filter", one_dimensional=False)
-_gaussian_filter1d_primitive = _install_gaussian("gaussian_filter1d", one_dimensional=True)
+    return _linear_filter_rules(
+        concrete,
+        run,
+        functools.partial(_gaussian_stencils, one_dimensional=one_dimensional),
+    )
 
 
 def _run_uniform(
@@ -293,7 +215,38 @@ def _run_uniform(
     )
 
 
+def _uniform_stencils(
+    *,
+    one_dimensional: bool,
+    axes: tuple[int, ...],
+    sizes: tuple[int, ...],
+    origins: tuple[int, ...],
+    modes: tuple[str, ...],
+) -> list[_AxisStencil]:
+    return [
+        (axis, np.full(size, 1.0 / size), origin, mode)
+        for axis, size, origin, mode in zip(axes, sizes, origins, modes, strict=True)
+        if one_dimensional or size > 1
+    ]
+
+
+def _uniform_is_self_adjoint(
+    *,
+    sizes: tuple[int, ...],
+    origins: tuple[int, ...],
+    modes: tuple[str, ...],
+    **_static: object,
+) -> bool:
+    # A centered odd box is its own adjoint under these boundary modes.
+    return all(
+        size % 2 == 1 and origin == 0 and _mode_name(mode) in {"constant", "reflect", "wrap"}
+        for size, origin, mode in zip(sizes, origins, modes, strict=True)
+    )
+
+
 def _install_uniform(name: str, *, one_dimensional: bool) -> Primitive[..., Any]:
+    run = functools.partial(_run_uniform, one_dimensional=one_dimensional)
+
     @primitive(
         name=f"scipy.ndimage.{name}",
         static_argnames=(
@@ -315,37 +268,46 @@ def _install_uniform(name: str, *, one_dimensional: bool) -> Primitive[..., Any]
         output_dtype: str | None,
     ) -> Any:
         _require_numpy_values(name, input, cval)
-        return _run_uniform(
+        return run(
             input,
-            cval=cval,
-            output=_runtime_output(output_dtype),
-            one_dimensional=one_dimensional,
+            cval,
+            _runtime_output(output_dtype),
             axes=axes,
             sizes=sizes,
             origins=origins,
             modes=modes,
         )
 
+    return _linear_filter_rules(
+        concrete,
+        run,
+        functools.partial(_uniform_stencils, one_dimensional=one_dimensional),
+        self_adjoint=_uniform_is_self_adjoint,
+    )
+
+
+def _linear_filter_rules(
+    concrete: Primitive[..., Any],
+    run: Callable[..., Any],
+    stencils: Callable[..., list[_AxisStencil]],
+    *,
+    self_adjoint: Callable[..., bool] | None = None,
+) -> Primitive[..., Any]:
+    """Derive a separable filter linear in ``input`` and ``cval`` from its axis stencils."""
+
     @concrete.def_abstract
     def abstract(
         input: AbstractValue,
         cval: AbstractValue,
         *,
-        axes: tuple[int, ...],
-        sizes: tuple[int, ...],
-        origins: tuple[int, ...],
-        modes: tuple[str, ...],
         output_dtype: str | None,
+        **static: Any,
     ) -> ArraySpec:
-        result = _run_uniform(
+        result = run(
             _sample_array(input, shape=(1,) * len(input.spec.shape)),
             _sample_array(cval, shape=()),
             _runtime_output(output_dtype),
-            one_dimensional=one_dimensional,
-            axes=axes,
-            sizes=sizes,
-            origins=origins,
-            modes=modes,
+            **static,
         )
         return _result_spec(input, result)
 
@@ -355,11 +317,8 @@ def _install_uniform(name: str, *, one_dimensional: bool) -> Primitive[..., Any]
         primals: tuple[Any, ...],
         tangents: tuple[Any | None, ...],
         *,
-        axes: tuple[int, ...],
-        sizes: tuple[int, ...],
-        origins: tuple[int, ...],
-        modes: tuple[str, ...],
         output_dtype: str | None,
+        **static: Any,
     ) -> Any:
         del output_dtype
         input, _cval = primals
@@ -369,11 +328,8 @@ def _install_uniform(name: str, *, one_dimensional: bool) -> Primitive[..., Any]
         result = concrete(
             input=_zero_tangent(input, input_tangent),
             cval=0 if cval_tangent is None else cval_tangent,
-            axes=axes,
-            sizes=sizes,
-            origins=origins,
-            modes=modes,
             output_dtype=_operand_dtype(output).str,
+            **static,
         )
         return _cast_tangent(result, output)
 
@@ -383,55 +339,33 @@ def _install_uniform(name: str, *, one_dimensional: bool) -> Primitive[..., Any]
         primals: tuple[Any, ...],
         output: Any,
         *,
-        axes: tuple[int, ...],
-        sizes: tuple[int, ...],
-        origins: tuple[int, ...],
-        modes: tuple[str, ...],
         output_dtype: str | None,
         active_input_indices: tuple[int, ...] | None = None,
+        **static: Any,
     ) -> tuple[Any | None, Any | None]:
         del output_dtype
         input, cval = primals
         active = {0, 1} if active_input_indices is None else set(active_input_indices)
         if not active:
             return None, None
-        symmetric = all(
-            size % 2 == 1 and origin == 0 and _mode_name(mode) in {"constant", "reflect", "wrap"}
-            for size, origin, mode in zip(sizes, origins, modes, strict=True)
-        )
-        if active == {0} and symmetric:
-            arguments = {
-                "axes": axes,
-                "sizes": sizes,
-                "origins": origins,
-                "modes": modes,
-            }
+        if active == {0} and self_adjoint is not None and self_adjoint(**static):
             result = (
                 concrete(
                     input=cotangent,
                     cval=0,
                     output_dtype=_operand_dtype(cotangent).str,
-                    **arguments,
+                    **static,
                 )
                 if _is_traced_value(cotangent)
-                else _run_uniform(
-                    cotangent,
-                    0,
-                    None,
-                    one_dimensional=one_dimensional,
-                    **arguments,
-                )
+                else run(cotangent, 0, None, **static)
             )
             return _project_cotangent(result, input, output), None
         result = cotangent
         boundary_cotangent = np.zeros((), dtype=_operand_dtype(cotangent))
-        configurations = tuple(zip(axes, sizes, origins, modes, strict=True))
-        for axis, size, origin, mode in reversed(configurations):
-            if not one_dimensional and size <= 1:
-                continue
+        for axis, kernel, origin, mode in reversed(stencils(**static)):
             result, boundary = _stencil_input_transpose(
                 result,
-                np.full(size, 1.0 / size),
+                kernel,
                 axes=(axis,),
                 origins=(origin,),
                 modes=(mode,),
@@ -446,6 +380,8 @@ def _install_uniform(name: str, *, one_dimensional: bool) -> Primitive[..., Any]
     return concrete
 
 
+_gaussian_filter_primitive = _install_gaussian("gaussian_filter", one_dimensional=False)
+_gaussian_filter1d_primitive = _install_gaussian("gaussian_filter1d", one_dimensional=True)
 _uniform_filter_primitive = _install_uniform("uniform_filter", one_dimensional=False)
 _uniform_filter1d_primitive = _install_uniform("uniform_filter1d", one_dimensional=True)
 
@@ -463,7 +399,7 @@ def _run_correlation(
     modes: tuple[str, ...],
     mode_sequence: bool,
 ) -> Any:
-    runtime_mode: object = modes if mode_sequence else (modes[0] if modes else "reflect")
+    runtime_mode = _runtime_mode(modes, mode_sequence=mode_sequence)
     if one_dimensional:
         return function(
             input,
@@ -553,11 +489,8 @@ def _install_correlation(
         weights: AbstractValue,
         cval: AbstractValue,
         *,
-        axes: tuple[int, ...],
-        origins: tuple[int, ...],
-        modes: tuple[str, ...],
-        mode_sequence: bool,
         output_dtype: str | None,
+        **static: Any,
     ) -> ArraySpec:
         result = _run_correlation(
             function,
@@ -566,10 +499,7 @@ def _install_correlation(
             _sample_array(cval, shape=()),
             _runtime_output(output_dtype),
             one_dimensional=one_dimensional,
-            axes=axes,
-            origins=origins,
-            modes=modes,
-            mode_sequence=mode_sequence,
+            **static,
         )
         return _result_spec(input, result)
 
@@ -579,38 +509,23 @@ def _install_correlation(
         primals: tuple[Any, ...],
         tangents: tuple[Any | None, ...],
         *,
-        axes: tuple[int, ...],
-        origins: tuple[int, ...],
-        modes: tuple[str, ...],
-        mode_sequence: bool,
         output_dtype: str | None,
+        **static: Any,
     ) -> Any:
         del output_dtype
         input, weights, cval = primals
         input_tangent, weights_tangent, cval_tangent = tangents
+        static["output_dtype"] = _operand_dtype(output).str
         result: Any | None = None
         if input_tangent is not None or cval_tangent is not None:
             result = concrete(
                 input=_zero_tangent(input, input_tangent),
                 weights=weights,
                 cval=0 if cval_tangent is None else cval_tangent,
-                axes=axes,
-                origins=origins,
-                modes=modes,
-                mode_sequence=mode_sequence,
-                output_dtype=_operand_dtype(output).str,
+                **static,
             )
         if weights_tangent is not None:
-            weight_term = concrete(
-                input=input,
-                weights=weights_tangent,
-                cval=cval,
-                axes=axes,
-                origins=origins,
-                modes=modes,
-                mode_sequence=mode_sequence,
-                output_dtype=_operand_dtype(output).str,
-            )
+            weight_term = concrete(input=input, weights=weights_tangent, cval=cval, **static)
             result = weight_term if result is None else result + weight_term
         return _cast_tangent(np.zeros_like(output) if result is None else result, output)
 
@@ -623,11 +538,9 @@ def _install_correlation(
         axes: tuple[int, ...],
         origins: tuple[int, ...],
         modes: tuple[str, ...],
-        mode_sequence: bool,
-        output_dtype: str | None,
         active_input_indices: tuple[int, ...] | None = None,
+        **_static: Any,
     ) -> tuple[Any | None, Any | None, Any | None]:
-        del mode_sequence, output_dtype
         input, weights, cval = primals
         active = {0, 1, 2} if active_input_indices is None else set(active_input_indices)
         kernel_axes, kernel_origins, kernel_modes = _correlation_kernel_configuration(

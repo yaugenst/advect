@@ -8,7 +8,7 @@ import numpy as np
 from scipy import optimize as _scipy_optimize
 
 from advect.autodiff.api.implicit import ImplicitSolveError
-from advect.scipy._containers import _as_concrete_array, _restore_container
+from advect.scipy._containers import _as_concrete_array, _RealPacking
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -56,39 +56,14 @@ def root_solver(
     captured_options = None if options is None else dict(options)
 
     def solve(residual: ResidualFunction, initial: object) -> object:
-        initial_array = _as_concrete_array(initial, operation="root")
-        shape = initial_array.shape
-        is_complex = np.iscomplexobj(initial_array)
-        flat_size = initial_array.size
-
-        def unpack(flat: np.ndarray) -> object:
-            if not is_complex:
-                unpacked = flat.reshape(shape)
-            else:
-                unpacked = (flat[:flat_size] + 1j * flat[flat_size:]).reshape(shape)
-            return _restore_container(unpacked, initial)
-
-        def pack(value: object) -> np.ndarray:
-            array = _as_concrete_array(value, operation="root residual")
-            if array.shape != shape:
-                msg = (
-                    "SciPy root residual must return the solution shape "
-                    f"{shape!r}, got {array.shape!r}"
-                )
-                raise ImplicitSolveError(msg)
-            if not is_complex:
-                if np.iscomplexobj(array):
-                    msg = "SciPy root residual returned complex values for a real state"
-                    raise ImplicitSolveError(msg)
-                return np.asarray(array, dtype=float).reshape(-1)
-            return np.concatenate(
-                (
-                    np.asarray(array.real, dtype=float).reshape(-1),
-                    np.asarray(array.imag, dtype=float).reshape(-1),
-                )
-            )
-
-        packed_initial = pack(initial_array)
+        packing = _RealPacking(
+            initial,
+            _as_concrete_array(initial, operation="root"),
+            np.dtype(float),
+            operation="root residual",
+            requirement="return the solution shape",
+        )
+        packed_initial = packing.pack(packing.state)
         solve_kwargs: dict[str, object] = {}
         if method is not None:
             solve_kwargs["method"] = method
@@ -96,7 +71,7 @@ def root_solver(
             solve_kwargs["options"] = dict(captured_options)
 
         def packed_residual(flat: np.ndarray) -> np.ndarray:
-            return pack(residual(unpack(flat)))
+            return packing.pack(residual(packing.unpack(flat)))
 
         result = _scipy_optimize.root(
             packed_residual,
@@ -106,7 +81,7 @@ def root_solver(
         if not result.success:
             msg = f"SciPy root solve did not converge: {result.message}"
             raise ImplicitSolveError(msg)
-        return unpack(np.asarray(result.x))
+        return packing.unpack(np.asarray(result.x))
 
     return solve
 

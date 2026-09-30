@@ -2,12 +2,20 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import pytest
 
 import advect as ad
+from advect_numpy_tests._assertions import (
+    assert_jvp_matches_central_difference,
+    assert_staged_round_trip,
+    assert_tree_close,
+)
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 def test_nested_jvp_can_use_an_operand_from_the_active_outer_trace() -> None:
@@ -43,8 +51,7 @@ def test_clip_supports_static_array_and_one_sided_bounds() -> None:
         np.where((value > lower) & (value < upper), direction, 0.0),
     )
 
-    program = ad.stage(bounded, specs=(ad.ArraySpec(value.shape, value.dtype),))
-    np.testing.assert_array_equal(program(value), bounded(value))
+    assert_staged_round_trip(bounded, value, rtol=0.0)
 
     def minimum_only(x: Any) -> Any:
         return np.clip(x, min=-0.5)
@@ -65,35 +72,36 @@ def test_clip_supports_static_array_and_one_sided_bounds() -> None:
 
 
 @pytest.mark.parametrize(
-    ("operation", "message"),
+    "bounds",
     [
-        (np.clip, "requires bounds"),
-        (lambda x: np.clip(x, 0.0), "only supported during tracing as"),
-        (
-            lambda x: np.clip(x, 0.0, 1.0, min=0.0),
-            "either positionally or via keywords",
-        ),
-        (lambda x: np.clip(x, 1j, 1.0), "got scalar complex"),
+        pytest.param((np.float64(-1.0), np.float64(1.0)), id="numpy-scalars"),
+        pytest.param((np.array(-1.0), np.array(1.0)), id="0d-arrays"),
+        pytest.param((np.int64(-1), None), id="numpy-integer-lower-only"),
+        pytest.param((-1.0, 1.0), id="weak-python-floats"),
     ],
-    ids=("missing", "incomplete-positional", "mixed", "complex"),
 )
-def test_clip_reports_invalid_bound_forms(operation: Any, message: str) -> None:
+def test_clip_scalar_bounds_promote_the_result_as_numpy_does(bounds: tuple[Any, Any]) -> None:
+    # Under NEP 50 only a Python scalar bound is weak; a NumPy scalar or 0-d
+    # bound promotes float32 data, dynamically and inside a staged program.
+    value = np.array([-2.0, 0.5, 3.0], dtype=np.float32)
+    direction = np.array([0.3, -0.4, 0.2], dtype=np.float32)
+
+    def bounded(x: Any) -> Any:
+        return np.clip(x, *bounds)
+
+    expected = bounded(value)
+    expected_tangent = np.where(expected == value, direction, 0).astype(expected.dtype)
+    program = assert_staged_round_trip(bounded, value, rtol=0.0)
+    for function in (bounded, program):
+        primal, tangent = ad.jvp(function)(value, tangents=direction)
+        assert_tree_close(primal, expected, rtol=0.0)
+        assert_tree_close(tangent, expected_tangent, rtol=0.0)
+
+
+def test_clip_reports_complex_scalar_bounds() -> None:
     value = np.arange(3.0)
-    with pytest.raises(ad.TracingError, match=message):
-        ad.jvp(operation)(value, tangents=np.ones_like(value))
-
-
-@pytest.mark.parametrize(
-    "operation",
-    [
-        pytest.param(lambda x: np.where(x > 0), id="where-one-argument"),
-        pytest.param(lambda x: np.var(x, ddof=1, correction=1), id="variance-two-corrections"),
-    ],
-)
-def test_emission_handlers_report_ambiguous_public_calls(operation: Any) -> None:
-    value = np.arange(6.0).reshape(2, 3)
-    with pytest.raises(ad.TracingError):
-        ad.jvp(operation)(value, tangents=np.ones_like(value))
+    with pytest.raises(ad.TracingError, match="got scalar complex"):
+        ad.jvp(lambda x: np.clip(x, 1j, 1.0))(value, tangents=np.ones_like(value))
 
 
 @pytest.mark.parametrize("operation", [np.max, np.nanmax], ids=("max", "nanmax"))
@@ -108,25 +116,10 @@ def test_extrema_differentiate_a_dynamic_initial(operation: Any) -> None:
     def reduce(x: Any, boundary: Any) -> Any:
         return operation(x, axis=1, initial=boundary)
 
-    primal, tangent = ad.jvp(reduce, argnums=(0, 1))(
-        value,
-        initial,
-        tangents=(direction, initial_direction),
+    assert_jvp_matches_central_difference(
+        reduce, (value, initial), (direction, initial_direction), rtol=1e-6, atol=1e-6
     )
-    epsilon = 1e-6
-    finite_difference = (
-        reduce(value + epsilon * direction, initial + epsilon * initial_direction)
-        - reduce(value - epsilon * direction, initial - epsilon * initial_direction)
-    ) / (2 * epsilon)
-
-    np.testing.assert_allclose(primal, reduce(value, initial))
-    np.testing.assert_allclose(tangent, finite_difference, rtol=1e-6, atol=1e-6)
-
-    program = ad.stage(
-        reduce,
-        specs=(ad.ArraySpec(value.shape, value.dtype), ad.ArraySpec((), initial.dtype)),
-    )
-    np.testing.assert_allclose(program(value, initial), reduce(value, initial))
+    assert_staged_round_trip(reduce, value, initial)
 
 
 def test_nanmin_static_initial_and_metadata_survive_staging() -> None:
@@ -139,8 +132,7 @@ def test_nanmin_static_initial_and_metadata_survive_staging() -> None:
     np.testing.assert_allclose(primal, reduce(value))
     np.testing.assert_array_equal(tangent, [[0.0], [1.0]])
 
-    program = ad.stage(reduce, specs=(ad.ArraySpec(value.shape, value.dtype),))
-    np.testing.assert_allclose(program(value), reduce(value))
+    assert_staged_round_trip(reduce, value)
 
 
 def test_variance_static_dtype_and_correction_survive_staging() -> None:
@@ -155,10 +147,7 @@ def test_variance_static_dtype_and_correction_survive_staging() -> None:
     np.testing.assert_allclose(primal, reduce(value))
     np.testing.assert_allclose(tangent, np.zeros(2, dtype=np.float32), atol=1e-6)
 
-    program = ad.stage(reduce, specs=(ad.ArraySpec(value.shape, value.dtype),))
-    staged_result = program(value)
-    assert staged_result.dtype == np.dtype(np.float32)
-    np.testing.assert_allclose(staged_result, reduce(value))
+    assert_staged_round_trip(reduce, value)
 
 
 def test_controlled_variance_honors_requested_accumulator_dtype() -> None:
@@ -169,16 +158,10 @@ def test_controlled_variance_honors_requested_accumulator_dtype() -> None:
     def reduce(x: Any) -> Any:
         return np.var(x, axis=1, where=mask, dtype=np.float64, correction=1)
 
-    primal, tangent = ad.jvp(reduce)(value, tangents=direction)
-    epsilon = 1e-4
-    finite_difference = (
-        reduce(value + epsilon * direction) - reduce(value - epsilon * direction)
-    ) / (2 * epsilon)
-
+    primal, _ = assert_jvp_matches_central_difference(
+        reduce, (value,), (direction,), rtol=2e-3, atol=2e-3, step=1e-4
+    )
     assert primal.dtype == np.dtype(np.float64)
-    assert tangent.dtype == np.dtype(np.float64)
-    np.testing.assert_allclose(primal, reduce(value))
-    np.testing.assert_allclose(tangent, finite_difference, rtol=2e-3, atol=2e-3)
 
 
 def test_controlled_complex_variance_uses_a_real_result_dtype() -> None:
@@ -209,8 +192,103 @@ def test_controlled_integer_mean_uses_numpy_float64_accumulation() -> None:
     assert tangent.dtype == np.dtype(np.float64)
     np.testing.assert_allclose(result, reduce(value))
 
-    program = ad.stage(reduce, specs=(ad.ArraySpec(value.shape, value.dtype),))
-    np.testing.assert_allclose(program(value), reduce(value))
+    assert_staged_round_trip(reduce, value)
+
+
+def _assert_every_lifetime_matches_numpy(function: Any, value: np.ndarray[Any, Any]) -> None:
+    dynamic, _tangent = ad.jvp(function)(value, tangents=np.ones_like(value))
+    assert_tree_close(dynamic, function(value), rtol=0.0)
+    assert_staged_round_trip(function, value, rtol=0.0)
+
+
+@pytest.mark.filterwarnings("ignore::RuntimeWarning")
+@pytest.mark.parametrize("dtype", [np.float32, np.float64])
+@pytest.mark.parametrize("ddof", [2, 3])
+@pytest.mark.parametrize("operation", [np.var, np.std, np.nanvar, np.nanstd])
+def test_controlled_variance_matches_numpy_without_positive_degrees_of_freedom(
+    operation: Any,
+    ddof: int,
+    dtype: type[np.floating[Any]],
+) -> None:
+    value = np.array([[0.0, 1.0, 4.0], [2.0, np.nan, 5.0], [1.0, 3.0, 8.0]], dtype=dtype)
+    mask = np.array([[True, True, False], [True, True, True], [False, False, False]])
+
+    _assert_every_lifetime_matches_numpy(
+        lambda x: operation(x, axis=1, ddof=ddof, where=mask),
+        value,
+    )
+    _assert_every_lifetime_matches_numpy(
+        lambda x: operation(x, axis=1, ddof=ddof + 1, mean=np.mean(x, axis=1, keepdims=True)),
+        value[[0, 2]],
+    )
+
+
+@pytest.mark.filterwarnings("ignore::RuntimeWarning")
+@pytest.mark.parametrize(
+    ("operation", "initial"),
+    [(np.nanmax, -5.0), (np.nanmin, 5.0)],
+    ids=("nanmax", "nanmin"),
+)
+def test_nan_extrema_with_where_let_initial_replace_selected_nans(
+    operation: Any,
+    initial: float,
+) -> None:
+    value = np.array([[np.nan, np.nan, np.nan], [2.0, np.nan, 1.0]])
+    mask = np.array([[True, True, True], [True, True, False]])
+
+    _assert_every_lifetime_matches_numpy(
+        lambda x: operation(x, axis=1, where=mask, initial=initial),
+        value,
+    )
+
+
+@pytest.mark.parametrize(
+    "operation",
+    [
+        lambda x, mask: np.where(mask, x, 0.25),
+        lambda x, mask: np.where(mask, 1, x),
+        lambda x, mask: np.max(x, axis=1, where=mask, initial=0.25),
+        lambda x, mask: np.nanmin(x, axis=1, where=mask, initial=2),
+        lambda x, _mask: np.concatenate((x, 0.25), axis=None),
+    ],
+    ids=("where-float", "where-int", "max-initial", "nanmin-initial", "concatenate"),
+)
+def test_python_scalar_operands_stay_weak_like_numpy(operation: Any) -> None:
+    value = np.array([[0.5, np.nan, 1.5], [2.5, -1.0, 0.0]], dtype=np.float32)
+    mask = np.array([[True, False, True], [False, True, True]])
+
+    _assert_every_lifetime_matches_numpy(lambda x: operation(x, mask), value)
+    _primal, tangent = ad.jvp(lambda x: operation(x, mask))(value, tangents=np.ones_like(value))
+    assert tangent.dtype == np.dtype(np.float32)
+
+
+@pytest.mark.parametrize(
+    "operation",
+    [
+        lambda x, s: np.concatenate((x, s), axis=None),
+        np.dot,
+        lambda x, s: np.tensordot(x, s, axes=0),
+        lambda x, s: np.stack((x[0, 0], s)),
+    ],
+    ids=("concatenate-weak", "dot-strong", "tensordot-strong", "stack-strong"),
+)
+def test_weak_scalar_inputs_promote_per_numpy_function(operation: Any) -> None:
+    # Captured Python scalars are drawn in test_lifetime_parity_properties.
+    value = np.array([[0.5, -1.0, 1.5], [2.5, -2.0, 0.0]], dtype=np.float32)
+    specs = (ad.ArraySpec(value.shape, value.dtype), ad.ArraySpec((), "float64", weak=True))
+    expected = operation(value, 0.25)
+    program = ad.stage(operation, specs=specs)
+    for staged in (program, ad.StagedProgram.from_dict(program.to_dict())):
+        actual = staged(value, 0.25)
+        assert actual.dtype == expected.dtype
+        np.testing.assert_array_equal(actual, expected)
+
+    def loss(x: Any, s: Any) -> Any:
+        return np.sum(operation(x, s) ** 2)
+
+    dynamic = ad.grad(loss, argnums=(0, 1))(value, 0.25)
+    staged_grad = ad.grad(ad.stage(loss, specs=specs), argnums=(0, 1))(value, 0.25)
+    assert_tree_close(staged_grad, dynamic, rtol=1e-6)
 
 
 def test_like_constructor_accepts_a_scalar_shape_override() -> None:
@@ -223,5 +301,47 @@ def test_like_constructor_accepts_a_scalar_shape_override() -> None:
     np.testing.assert_array_equal(primal, np.zeros(3))
     np.testing.assert_array_equal(tangent, np.zeros(3))
 
-    program = ad.stage(construct, specs=(ad.ArraySpec(value.shape, value.dtype),))
-    np.testing.assert_array_equal(program(value), np.zeros(3))
+    assert_staged_round_trip(construct, value, rtol=0.0)
+
+
+@pytest.mark.parametrize("operation", [np.sum, np.nanmin])
+@pytest.mark.parametrize("initial", [np.float32(0.5), np.array(0.5)], ids=("scalar", "0-d"))
+def test_staged_reductions_accept_numpy_initial_values(
+    operation: Callable[..., Any],
+    initial: object,
+) -> None:
+    values = np.arange(6.0, dtype=np.float32).reshape(2, 3)
+
+    assert_staged_round_trip(lambda array: operation(array, axis=1, initial=initial), values)
+
+
+# Array API 2022.12 sums float32 in float64; NumPy's functions and methods must not.
+@pytest.mark.parametrize("array_api_version", [None, "2022.12"], ids=("default", "2022.12"))
+def test_controlled_float32_reductions_stage_without_dtype_creep(
+    array_api_version: str | None,
+) -> None:
+    value = np.arange(6, dtype=np.float32).reshape(2, 3)
+    mask = np.array([[True, False, True], [True, True, False]])
+    functions = (
+        lambda array: np.mean(array, axis=1, keepdims=True, where=mask),
+        lambda array: np.var(
+            array,
+            axis=1,
+            correction=1,
+            keepdims=True,
+            where=mask,
+        ),
+        lambda array: array.sum(1),
+        lambda array: array.mean(),
+    )
+
+    for function in functions:
+        program = ad.stage(
+            function,
+            specs=(ad.ArraySpec(value.shape, value.dtype),),
+            array_api_version=array_api_version,
+        )
+        result = program(value)
+        reference = function(value)
+        assert result.dtype == np.dtype(np.float32)
+        np.testing.assert_allclose(result, reference)

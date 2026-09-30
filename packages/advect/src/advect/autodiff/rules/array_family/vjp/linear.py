@@ -3,50 +3,33 @@
 from __future__ import annotations
 
 from functools import partial
-from math import comb, prod
+from math import prod
 from typing import Any, cast
 
 from advect.autodiff.rules.array_family._backend_runtime import (
     _array_constructor_like,
     _moveaxis,
+    _scalar_like,
+    _zero_pad_axis,
     xp,
 )
 from advect.autodiff.rules.array_family._transpose_utils import (
+    _axis_slice,
     _conjugate_transpose as _h,
+    _difference,
+    _normalize_axis,
+    _ravel_axes,
+    _shape_of,
+    _tile_layout,
 )
+from advect.autodiff.rules.array_family.vjp.linalg.contractions import _contraction_vjp
 
 _PAD_PAIR_LENGTH = 2
 _MIN_GRADIENT_POINTS = 2
 _MIN_SECOND_ORDER_GRADIENT_POINTS = 3
 _SECOND_EDGE_ORDER = 2
 _CROSS_VECTOR_LENGTH = 3
-
-
-def _shape(value: object) -> tuple[int, ...]:
-    return tuple(int(dimension) for dimension in cast("Any", value).shape)
-
-
-def _normalize_axis(axis: int, *, ndim: int) -> int:
-    normalized = axis
-    if normalized < 0:
-        normalized += ndim
-    if normalized < 0 or normalized >= ndim:
-        msg = f"axis {axis} is out of bounds for rank {ndim}"
-        raise ValueError(msg)
-    return normalized
-
-
-def _axis_slice(
-    *,
-    ndim: int,
-    axis: int,
-    start: int | None = None,
-    stop: int | None = None,
-    index: int | None = None,
-) -> tuple[int | slice, ...]:
-    result: list[int | slice] = [slice(None)] * ndim
-    result[axis] = index if index is not None else slice(start, stop)
-    return tuple(result)
+_MATRIX_RANK = 2
 
 
 def _vjp_concatenate(
@@ -63,16 +46,16 @@ def _vjp_concatenate(
         offset = 0
         outputs: list[xp.ndarray] = []
         for value in inputs:
-            size = prod(_shape(value))
-            outputs.append(xp.reshape(flat[offset : offset + size], _shape(value)))
+            size = prod(_shape_of(value))
+            outputs.append(xp.reshape(flat[offset : offset + size], _shape_of(value)))
             offset += size
         return tuple(outputs)
 
-    normalized_axis = _normalize_axis(axis, ndim=g.ndim)
+    normalized_axis = _normalize_axis(axis, ndim=g.ndim, op_name="concatenate")
     offset = 0
     outputs = []
     for value in inputs:
-        width = _shape(value)[normalized_axis]
+        width = _shape_of(value)[normalized_axis]
         index = _axis_slice(
             ndim=g.ndim,
             axis=normalized_axis,
@@ -93,7 +76,7 @@ def _vjp_stack(
 ) -> tuple[xp.ndarray, ...]:
     """Remove the inserted stack axis for each source cotangent."""
     _ = ans, attrs
-    normalized_axis = _normalize_axis(axis, ndim=g.ndim)
+    normalized_axis = _normalize_axis(axis, ndim=g.ndim, op_name="stack")
     return tuple(
         g[_axis_slice(ndim=g.ndim, axis=normalized_axis, index=index)]
         for index in range(len(inputs))
@@ -105,11 +88,17 @@ def _vjp_ravel(
     x: xp.ndarray,
     *rest: xp.ndarray,
     g: xp.ndarray,
+    order: str | None = None,
     **attrs: Any,
 ) -> tuple[xp.ndarray]:
-    """Restore the source shape after flattening."""
+    """Restore the source shape in the order NumPy's ravel read the primal."""
     _ = ans, rest, attrs
-    return (xp.reshape(g, _shape(x)),)
+    axes = _ravel_axes(x, order)
+    source_shape = _shape_of(x)
+    restored = xp.reshape(g, tuple(source_shape[axis] for axis in axes))
+    if axes == tuple(sorted(axes)):
+        return (restored,)
+    return (xp.permute_dims(restored, tuple(axes.index(axis) for axis in range(len(axes)))),)
 
 
 def _vjp_swapaxes(
@@ -177,7 +166,7 @@ def _vjp_rollaxis(
 ) -> tuple[xp.ndarray]:
     """Move the rolled output axis back to its source position."""
     _ = ans, inputs, attrs
-    source_axis = _normalize_axis(axis, ndim=g.ndim)
+    source_axis = _normalize_axis(axis, ndim=g.ndim, op_name="rollaxis")
     destination = start
     if destination < 0:
         destination += g.ndim
@@ -208,26 +197,46 @@ _vjp_atleast = _vjp_ravel
 
 def _vjp_diag(
     ans: xp.ndarray,
-    *inputs: xp.ndarray,
+    x: xp.ndarray,
+    *rest: xp.ndarray,
     g: xp.ndarray,
     k: int = 0,
     **attrs: Any,
 ) -> tuple[xp.ndarray]:
-    """Apply the adjoint diagonal map."""
-    _ = ans, inputs, attrs
+    """Transpose building a diagonal matrix or extracting a matrix diagonal."""
+    _ = rest, attrs
+    if x.ndim == _MATRIX_RANK:
+        # The source matrix may be rectangular; its shape fixes the adjoint.
+        return _vjp_diagonal(ans, x, g=g, offset=k)
     return (xp.diag(g, k=k),)
 
 
-def _diagonal_positions(
+def _matrix_axes(x: xp.ndarray, axis1: int, axis2: int, *, operation: str) -> tuple[int, int]:
+    first_axis = _normalize_axis(axis1, ndim=x.ndim, op_name=operation)
+    second_axis = _normalize_axis(axis2, ndim=x.ndim, op_name=operation)
+    if first_axis == second_axis:
+        msg = f"{operation} axes must be distinct"
+        raise ValueError(msg)
+    return first_axis, second_axis
+
+
+def _place_on_diagonal(
+    g: xp.ndarray,
+    spread: xp.ndarray,
+    x: xp.ndarray,
     *,
-    first_length: int,
-    second_length: int,
     offset: int,
-) -> tuple[tuple[int, int], ...]:
-    first_start = max(0, -offset)
-    second_start = max(0, offset)
-    length = min(first_length - first_start, second_length - second_start)
-    return tuple((first_start + index, second_start + index) for index in range(max(0, length)))
+    axes: tuple[int, int],
+) -> xp.ndarray:
+    """Select ``spread`` on the ``offset`` diagonal of ``axes`` and zero elsewhere.
+
+    Selecting rather than multiplying by a 0/1 basis keeps non-finite
+    cotangent entries on the diagonal; the zeros are built in the trace of ``g``.
+    """
+    rows, columns = (int(x.shape[axis]) for axis in axes)
+    mask = _array_constructor_like(g, "eye", rows, columns, k=offset, dtype=xp.bool)
+    placed = xp.where(mask, spread, _scalar_like(0, g))
+    return _moveaxis(placed, (-2, -1), axes)
 
 
 def _vjp_diagonal(
@@ -240,27 +249,21 @@ def _vjp_diagonal(
     axis2: int = 1,
     **attrs: Any,
 ) -> tuple[xp.ndarray]:
-    """Scatter a diagonal cotangent back into the source axes."""
+    """Spread a diagonal cotangent back into the source axes."""
     _ = ans, rest, attrs
-    first_axis = _normalize_axis(axis1, ndim=x.ndim)
-    second_axis = _normalize_axis(axis2, ndim=x.ndim)
-    if first_axis == second_axis:
-        msg = "diagonal axes must be distinct"
-        raise ValueError(msg)
-    result = _array_constructor_like(g, "zeros_like", x)
-    positions = _diagonal_positions(
-        first_length=int(x.shape[first_axis]),
-        second_length=int(x.shape[second_axis]),
-        offset=offset,
-    )
-    for diagonal_index, (first_index, second_index) in enumerate(positions):
-        destination: list[int | slice] = [slice(None)] * x.ndim
-        destination[first_axis] = first_index
-        destination[second_axis] = second_index
-        source: list[int | slice] = [slice(None)] * g.ndim
-        source[-1] = diagonal_index
-        result[tuple(destination)] += g[tuple(source)]
-    return (result,)
+    axes = _matrix_axes(x, axis1, axis2, operation="diagonal")
+    rows, columns = (int(x.shape[axis]) for axis in axes)
+    # Diagonal entry d sits in row d above the main diagonal and in column d
+    # below it, so zero-pad the cotangent to that axis and select the diagonal.
+    batch = _shape_of(g)[:-1]
+    length = _shape_of(g)[-1]
+    if offset >= 0:
+        rows_first = _zero_pad_axis(g, axis=-1, before=0, after=rows - length)
+        spread = xp.reshape(rows_first, (*batch, rows, 1))
+    else:
+        columns_first = _zero_pad_axis(g, axis=-1, before=0, after=columns - length)
+        spread = xp.reshape(columns_first, (*batch, 1, columns))
+    return (_place_on_diagonal(g, spread, x, offset=offset, axes=axes),)
 
 
 def _vjp_trace(
@@ -273,25 +276,11 @@ def _vjp_trace(
     axis2: int = 1,
     **attrs: Any,
 ) -> tuple[xp.ndarray]:
-    """Scatter one trace cotangent across the selected diagonal."""
+    """Spread one trace cotangent across the selected diagonal."""
     _ = ans, rest, attrs
-    first_axis = _normalize_axis(axis1, ndim=x.ndim)
-    second_axis = _normalize_axis(axis2, ndim=x.ndim)
-    if first_axis == second_axis:
-        msg = "trace axes must be distinct"
-        raise ValueError(msg)
-    result = _array_constructor_like(g, "zeros_like", x)
-    positions = _diagonal_positions(
-        first_length=int(x.shape[first_axis]),
-        second_length=int(x.shape[second_axis]),
-        offset=offset,
-    )
-    for first_index, second_index in positions:
-        destination: list[int | slice] = [slice(None)] * x.ndim
-        destination[first_axis] = first_index
-        destination[second_axis] = second_index
-        result[tuple(destination)] += g
-    return (result,)
+    axes = _matrix_axes(x, axis1, axis2, operation="trace")
+    spread = xp.reshape(g, (*_shape_of(g), 1, 1))
+    return (_place_on_diagonal(g, spread, x, offset=offset, axes=axes),)
 
 
 def _vjp_cumsum(
@@ -307,8 +296,8 @@ def _vjp_cumsum(
     if axis is None:
         flat = xp.reshape(g, (-1,))
         pulled = xp.flip(xp.cumsum(xp.flip(flat, axis=0), axis=0), axis=0)
-        return (xp.reshape(pulled, _shape(x)),)
-    normalized_axis = _normalize_axis(axis, ndim=g.ndim)
+        return (xp.reshape(pulled, _shape_of(x)),)
+    normalized_axis = _normalize_axis(axis, ndim=g.ndim, op_name="cumsum")
     return (
         xp.flip(
             xp.cumsum(xp.flip(g, axis=normalized_axis), axis=normalized_axis),
@@ -354,7 +343,7 @@ def _vjp_pad(
     widths = _normalized_pad_width(pad_width, ndim=x.ndim)
     index = tuple(
         slice(before, before + size)
-        for (before, _after), size in zip(widths, _shape(x), strict=True)
+        for (before, _after), size in zip(widths, _shape_of(x), strict=True)
     )
     return (g[index],)
 
@@ -366,7 +355,7 @@ def _static_axis_extent(value: object | None, *, axis: int, ndim: int) -> int:
     if not shape:
         return 1
     value_shape = tuple(int(dimension) for dimension in shape)
-    normalized = _normalize_axis(axis, ndim=ndim)
+    normalized = _normalize_axis(axis, ndim=ndim, op_name="diff")
     return value_shape[normalized]
 
 
@@ -380,9 +369,13 @@ def _vjp_diff(
     prepend: object | None = None,
     append: object | None = None,
     **attrs: Any,
-) -> tuple[xp.ndarray]:
-    """Transpose finite differences, including static prepend/append values."""
-    _ = ans, rest, attrs
+) -> tuple[xp.ndarray, ...]:
+    """Transpose finite differences, including prepend and append operands.
+
+    The adjoint of ``diff`` over the extended axis is
+    ``(-1)**n * diff(pad(g, n, n), n)``; each operand receives its segment.
+    """
+    _ = ans
     order = n
     if order < 0:
         msg = f"numpy.diff transpose requires n >= 0 (got {n})"
@@ -390,38 +383,37 @@ def _vjp_diff(
     if order == 0:
         return (g,)
 
-    normalized_axis = _normalize_axis(axis, ndim=x.ndim)
-    input_length = _shape(x)[normalized_axis]
-    output_length = _shape(g)[normalized_axis]
-    prepend_length = _static_axis_extent(prepend, axis=normalized_axis, ndim=x.ndim)
-    _ = append
+    normalized_axis = _normalize_axis(axis, ndim=x.ndim, op_name="diff")
+    operands = iter(rest)
+    prepend_is_input = bool(attrs.get("_advect_diff_prepend_input", False))
+    append_is_input = bool(attrs.get("_advect_diff_append_input", False))
+    prepend_value = next(operands) if prepend_is_input else prepend
+    append_value = next(operands) if append_is_input else append
+    prepend_length = _static_axis_extent(prepend_value, axis=normalized_axis, ndim=x.ndim)
+    input_stop = prepend_length + _shape_of(x)[normalized_axis]
+    append_stop = input_stop + _static_axis_extent(
+        append_value,
+        axis=normalized_axis,
+        ndim=x.ndim,
+    )
 
-    # The zero-times-sum term lifts a concrete zero base into an enclosing
-    # trace before functional indexed updates add tracer cotangents.
-    result = _array_constructor_like(g, "zeros_like", x)
-    for k in range(order + 1):
-        coefficient = (-1) ** (order - k) * comb(order, k)
-        offset = prepend_length - k
-        destination_start = max(0, -offset)
-        destination_stop = min(input_length, output_length - offset)
-        if destination_start >= destination_stop:
-            continue
-        source_start = destination_start + offset
-        source_stop = destination_stop + offset
-        destination = _axis_slice(
-            ndim=x.ndim,
-            axis=normalized_axis,
-            start=destination_start,
-            stop=destination_stop,
-        )
-        source = _axis_slice(
-            ndim=g.ndim,
-            axis=normalized_axis,
-            start=source_start,
-            stop=source_stop,
-        )
-        result[destination] += coefficient * g[source]
-    return (result,)
+    extended = _difference(
+        _zero_pad_axis(g, axis=normalized_axis, before=order, after=order),
+        order=order,
+        axis=normalized_axis,
+    )
+    if order % 2:
+        extended = -extended
+
+    def segment(start: int, stop: int) -> xp.ndarray:
+        return extended[_axis_slice(ndim=x.ndim, axis=normalized_axis, start=start, stop=stop)]
+
+    contributions = [segment(prepend_length, input_stop)]
+    if prepend_is_input:
+        contributions.append(segment(0, prepend_length))
+    if append_is_input:
+        contributions.append(segment(input_stop, append_stop))
+    return tuple(contributions)
 
 
 def _vjp_repeat(
@@ -440,15 +432,14 @@ def _vjp_repeat(
         msg = f"repeat transpose requires repeats >= 0 (got {repeats})"
         raise ValueError(msg)
 
-    source_shape = _shape(x)
-    if axis is None:
-        source_size = 1
-        for extent in source_shape:
-            source_size *= extent
-        grouped = xp.reshape(g, (source_size, repeat_count))
+    source_shape = _shape_of(x)
+    if axis is None or not source_shape:
+        # NumPy repeats a rank-0 source along axis 0 or -1 as its one-element
+        # flattening.
+        grouped = xp.reshape(g, (prod(source_shape), repeat_count))
         return (xp.reshape(xp.sum(grouped, axis=1), source_shape),)
 
-    normalized_axis = _normalize_axis(axis, ndim=x.ndim)
+    normalized_axis = _normalize_axis(axis, ndim=x.ndim, op_name="repeat")
     grouped_shape = (
         *source_shape[: normalized_axis + 1],
         repeat_count,
@@ -468,27 +459,12 @@ def _vjp_tile(
 ) -> tuple[xp.ndarray]:
     """Sum cotangents over every tiled copy."""
     _ = ans, rest, attrs
-    repetitions = (reps,) if isinstance(reps, int) else tuple(reps)
-    if any(value < 0 for value in repetitions):
+    source_shape = _shape_of(x)
+    _, pairs = _tile_layout(source_shape, reps)
+    if any(count < 0 for count in pairs[::2]):
         msg = f"tile transpose requires non-negative reps (got {reps!r})"
         raise ValueError(msg)
-
-    source_shape = _shape(x)
-    rank = max(len(source_shape), len(repetitions))
-    padded_source = (1,) * (rank - len(source_shape)) + source_shape
-    padded_repetitions = (1,) * (rank - len(repetitions)) + repetitions
-    grouped_shape = tuple(
-        extent
-        for repetition, source_extent in zip(
-            padded_repetitions,
-            padded_source,
-            strict=True,
-        )
-        for extent in (repetition, source_extent)
-    )
-    grouped = xp.reshape(g, grouped_shape)
-    repetition_axes = tuple(range(0, 2 * rank, 2))
-    reduced = xp.sum(grouped, axis=repetition_axes)
+    reduced = xp.sum(xp.reshape(g, pairs), axis=tuple(range(0, len(pairs), 2)))
     return (xp.reshape(reduced, source_shape),)
 
 
@@ -508,7 +484,7 @@ def _vjp_gradient(
         msg = f"gradient transpose only supports edge_order=1 or 2 (got {edge_order})"
         raise NotImplementedError(msg)
 
-    normalized_axis = _normalize_axis(axis, ndim=x.ndim)
+    normalized_axis = _normalize_axis(axis, ndim=x.ndim, op_name="gradient")
     length = int(x.shape[normalized_axis])
     minimum_length = (
         _MIN_SECOND_ORDER_GRADIENT_POINTS if order == _SECOND_EDGE_ORDER else _MIN_GRADIENT_POINTS
@@ -520,46 +496,30 @@ def _vjp_gradient(
         )
         raise ValueError(msg)
 
-    result = _array_constructor_like(g, "zeros_like", x)
-    first = _axis_slice(ndim=x.ndim, axis=normalized_axis, index=0)
-    second = _axis_slice(ndim=x.ndim, axis=normalized_axis, index=1)
-    third = _axis_slice(ndim=x.ndim, axis=normalized_axis, index=2)
-    antepenultimate = _axis_slice(ndim=x.ndim, axis=normalized_axis, index=length - 3)
-    penultimate = _axis_slice(ndim=x.ndim, axis=normalized_axis, index=length - 2)
-    last = _axis_slice(ndim=x.ndim, axis=normalized_axis, index=length - 1)
-    if order == 1:
-        result[first] += -g[first]
-        result[second] += g[first]
-        result[penultimate] += -g[last]
-        result[last] += g[last]
-    else:
-        result[first] += -1.5 * g[first]
-        result[second] += 2.0 * g[first]
-        result[third] += -0.5 * g[first]
-        result[antepenultimate] += 0.5 * g[last]
-        result[penultimate] += -2.0 * g[last]
-        result[last] += 1.5 * g[last]
+    def along(start: int, stop: int) -> tuple[int | slice, ...]:
+        return _axis_slice(ndim=x.ndim, axis=normalized_axis, start=start, stop=stop)
+
+    def place(value: xp.ndarray, start: int) -> xp.ndarray:
+        width = _shape_of(value)[normalized_axis]
+        return _zero_pad_axis(
+            value,
+            axis=normalized_axis,
+            before=start,
+            after=length - start - width,
+        )
+
+    # One-sided edge stencils, then the central interior stencil.
+    head_weights, tail_weights = (
+        ((-1.0, 1.0), (-1.0, 1.0)) if order == 1 else ((-1.5, 2.0, -0.5), (0.5, -2.0, 1.5))
+    )
+    first = g[along(0, 1)]
+    last = g[along(length - 1, length)]
+    head = xp.concatenate(tuple(weight * first for weight in head_weights), axis=normalized_axis)
+    tail = xp.concatenate(tuple(weight * last for weight in tail_weights), axis=normalized_axis)
+    result = place(head, 0) + place(tail, length - len(tail_weights))
     if length > _MIN_GRADIENT_POINTS:
-        interior = _axis_slice(
-            ndim=x.ndim,
-            axis=normalized_axis,
-            start=1,
-            stop=length - 1,
-        )
-        before = _axis_slice(
-            ndim=x.ndim,
-            axis=normalized_axis,
-            start=0,
-            stop=length - 2,
-        )
-        after = _axis_slice(
-            ndim=x.ndim,
-            axis=normalized_axis,
-            start=2,
-            stop=length,
-        )
-        result[before] += -0.5 * g[interior]
-        result[after] += 0.5 * g[interior]
+        interior = 0.5 * g[along(1, length - 1)]
+        result = result + place(interior, 2) - place(interior, 0)
     return (result,)
 
 
@@ -575,19 +535,17 @@ def _vjp_inner(
     _ = ans, rest, attrs
     if a.ndim == 0 or b.ndim == 0:
         return g * xp.conj(b), g * xp.conj(a)
-
-    a_prefix_rank = a.ndim - 1
-    b_prefix_rank = b.ndim - 1
-    g_b_axes = tuple(range(a_prefix_rank, a_prefix_rank + b_prefix_rank))
-    b_prefix_axes = tuple(range(b_prefix_rank))
-    a_grad = xp.tensordot(g, xp.conj(b), axes=(g_b_axes, b_prefix_axes))
-
-    a_prefix_axes = tuple(range(a_prefix_rank))
-    g_a_axes = tuple(range(a_prefix_rank))
-    b_grad = xp.tensordot(xp.conj(a), g, axes=(a_prefix_axes, g_a_axes))
-    if b_prefix_rank:
-        b_grad = _moveaxis(b_grad, 0, -1)
-    return a_grad, b_grad
+    return cast(
+        "tuple[xp.ndarray, xp.ndarray]",
+        _contraction_vjp(
+            a=a,
+            b=b,
+            g=g,
+            a_axes=(a.ndim - 1,),
+            b_axes=(b.ndim - 1,),
+            op_name="numpy.inner",
+        ),
+    )
 
 
 def _vjp_outer(
@@ -602,8 +560,8 @@ def _vjp_outer(
     _ = ans, rest, attrs
     a_flat = xp.reshape(a, (-1,))
     b_flat = xp.reshape(b, (-1,))
-    a_grad = xp.reshape(xp.matmul(g, xp.conj(b_flat)), _shape(a))
-    b_grad = xp.reshape(xp.matmul(xp.conj(a_flat), g), _shape(b))
+    a_grad = xp.reshape(xp.matmul(g, xp.conj(b_flat)), _shape_of(a))
+    b_grad = xp.reshape(xp.matmul(xp.conj(a_flat), g), _shape_of(b))
     return a_grad, b_grad
 
 
@@ -621,12 +579,12 @@ def _vjp_cross(
 ) -> tuple[xp.ndarray, xp.ndarray]:
     """Transpose a three-dimensional vector cross product."""
     _ = ans, rest, attrs
-    a_axis = _normalize_axis(axis if axis is not None else axisa, ndim=a.ndim)
-    b_axis = _normalize_axis(axis if axis is not None else axisb, ndim=b.ndim)
+    a_axis = _normalize_axis(axis if axis is not None else axisa, ndim=a.ndim, op_name="cross")
+    b_axis = _normalize_axis(axis if axis is not None else axisb, ndim=b.ndim, op_name="cross")
     if int(a.shape[a_axis]) != _CROSS_VECTOR_LENGTH or int(b.shape[b_axis]) != _CROSS_VECTOR_LENGTH:
         msg = "cross transpose supports only three-component vectors"
         raise NotImplementedError(msg)
-    g_axis = _normalize_axis(axis if axis is not None else axisc, ndim=g.ndim)
+    g_axis = _normalize_axis(axis if axis is not None else axisc, ndim=g.ndim, op_name="cross")
     a_grad = xp.cross(
         xp.conj(b),
         g,
@@ -660,8 +618,8 @@ def _vjp_kron(
     if rank == 0:
         return g * xp.conj(b), g * xp.conj(a)
 
-    a_shape = (1,) * (rank - a.ndim) + _shape(a)
-    b_shape = (1,) * (rank - b.ndim) + _shape(b)
+    a_shape = (1,) * (rank - a.ndim) + _shape_of(a)
+    b_shape = (1,) * (rank - b.ndim) + _shape_of(b)
     grouped_shape = tuple(
         extent
         for a_extent, b_extent in zip(a_shape, b_shape, strict=True)
@@ -679,8 +637,8 @@ def _vjp_kron(
         axis=tuple(range(0, 2 * rank, 2)),
     )
     return (
-        xp.reshape(a_grad, _shape(a)),
-        xp.reshape(b_grad, _shape(b)),
+        xp.reshape(a_grad, _shape_of(a)),
+        xp.reshape(b_grad, _shape_of(b)),
     )
 
 
@@ -696,11 +654,9 @@ def _vjp_linspace(
     """Transpose the affine interpolation from start and stop."""
     _ = ans, inputs, attrs
     sample_count = num
-    normalized_axis = _normalize_axis(axis, ndim=g.ndim)
+    normalized_axis = _normalize_axis(axis, ndim=g.ndim, op_name="linspace")
     denominator = sample_count - 1 if endpoint and sample_count > 1 else max(sample_count, 1)
     positions = xp.arange(sample_count, dtype=xp.real(g).dtype) / denominator
-    if endpoint and sample_count == 1:
-        positions = positions * 0
     coefficient_shape = [1] * g.ndim
     coefficient_shape[normalized_axis] = sample_count
     stop_weight = xp.reshape(positions, tuple(coefficient_shape))
@@ -721,7 +677,7 @@ def _vjp_solve(
     _ = rest, attrs
     rhs_grad = xp.linalg.solve(_h(a), g)
     if ans.ndim == a.ndim - 1:
-        matrix_grad = -rhs_grad[..., :, None] * xp.conj(ans[..., None, :])
+        matrix_grad = -xp.multiply(rhs_grad[..., :, None], xp.conj(ans[..., None, :]))
     else:
         matrix_grad = -xp.matmul(rhs_grad, _h(ans))
     return cast("xp.ndarray", matrix_grad), cast("xp.ndarray", rhs_grad)

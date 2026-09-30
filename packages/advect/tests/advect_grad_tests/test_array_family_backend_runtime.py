@@ -1,121 +1,120 @@
-"""Tests for array-family backend runtime wrappers."""
+"""Contracts for the array-family backend-provider scope and ``xp`` proxy."""
 
 from __future__ import annotations
 
+import inspect
 from dataclasses import dataclass
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Any
+from typing import Any
+
+import pytest
 
 import advect.autodiff.rules.array_family._backend_runtime as backend_runtime
 from advect.autodiff.rules.array_family.providers import ArrayFamilyBackendProvider
 
-if TYPE_CHECKING:
-    import pytest
-
 
 @dataclass(frozen=True, slots=True)
-class _TestProvider(ArrayFamilyBackendProvider):
+class _Provider(ArrayFamilyBackendProvider):
     backend: str
     namespace: Any
     ext: Any | None = None
 
 
-def test_wrap_vjp_uses_active_provider_without_re_resolving(
+def _run(provider: _Provider, fn: Any, /, *args: object, **kwargs: object) -> object:
+    return backend_runtime.run_with_array_family_backend_provider(provider, fn, *args, **kwargs)
+
+
+def test_wrap_jvp_resolves_a_provider_only_outside_an_active_scope(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    provider = _TestProvider(backend="numpy", namespace=SimpleNamespace(__name__="numpy"))
+    active = _Provider(backend="numpy", namespace=SimpleNamespace(__name__="numpy"))
+    resolved = _Provider(backend="numpy", namespace=SimpleNamespace(__name__="numpy"))
+    resolutions: list[tuple[object, ...]] = []
 
-    def _fail_resolve(*_values: object) -> _TestProvider:
-        msg = "wrapper should not resolve provider when context is already active"
-        raise AssertionError(msg)
+    def resolve(*values: object) -> _Provider:
+        resolutions.append(values)
+        return resolved
 
-    monkeypatch.setattr(backend_runtime, "_resolve_provider_for_call", _fail_resolve)
-    token = backend_runtime._CURRENT_ARRAY_FAMILY_PROVIDER.set(provider)
-    try:
-        seen: dict[str, object] = {}
+    monkeypatch.setattr(backend_runtime, "resolve_array_family_backend_provider", resolve)
+    seen: list[ArrayFamilyBackendProvider | None] = []
 
-        def _rule(ans: object, *inputs: object, g: object, **attrs: object) -> tuple[object]:
-            _ = ans, inputs, attrs
-            seen["provider"] = backend_runtime.current_array_backend_provider()
-            return (g,)
+    def rule(ans: object, *inputs: object, tangents: tuple[object | None, ...]) -> object:
+        del inputs, tangents
+        seen.append(backend_runtime.current_array_backend_provider())
+        return ans
 
-        wrapped = backend_runtime.wrap_array_family_vjp_rule(_rule)
-        assert wrapped(1.0, g=2.0) == (2.0,)
-        assert seen["provider"] is provider
-    finally:
-        backend_runtime._CURRENT_ARRAY_FAMILY_PROVIDER.reset(token)
+    wrapped = backend_runtime.wrap_array_family_jvp_rule(rule)
 
-
-def test_wrap_jvp_uses_active_provider_without_re_resolving(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    provider = _TestProvider(backend="numpy", namespace=SimpleNamespace(__name__="numpy"))
-
-    def _fail_resolve(*_values: object) -> _TestProvider:
-        msg = "wrapper should not resolve provider when context is already active"
-        raise AssertionError(msg)
-
-    monkeypatch.setattr(backend_runtime, "_resolve_provider_for_call", _fail_resolve)
-    token = backend_runtime._CURRENT_ARRAY_FAMILY_PROVIDER.set(provider)
-    try:
-        seen: dict[str, object] = {}
-
-        def _rule(
-            ans: object, *inputs: object, tangents: tuple[object | None, ...], **attrs: object
-        ) -> object:
-            _ = inputs, tangents, attrs
-            seen["provider"] = backend_runtime.current_array_backend_provider()
-            return ans
-
-        wrapped = backend_runtime.wrap_array_family_jvp_rule(_rule)
-        assert wrapped(1.0, tangents=(2.0,)) == 1.0
-        assert seen["provider"] is provider
-    finally:
-        backend_runtime._CURRENT_ARRAY_FAMILY_PROVIDER.reset(token)
+    assert _run(active, wrapped, 1.0, 5.0, tangents=(2.0,)) == 1.0
+    assert wrapped(3.0, 5.0, tangents=(4.0,)) == 3.0
+    assert seen == [active, resolved]
+    assert resolutions == [(3.0, 5.0, 4.0)]
+    assert backend_runtime.current_array_backend_provider() is None
+    assert backend_runtime._maybe_unwrap_array_family_jvp_rule(wrapped) is rule
+    assert backend_runtime._maybe_unwrap_array_family_jvp_rule(rule) is None
 
 
-def test_wrap_jvp_resolves_provider_and_restores_context(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    provider = _TestProvider(backend="numpy", namespace=SimpleNamespace(__name__="numpy"))
-    monkeypatch.setattr(
-        backend_runtime,
-        "resolve_array_family_backend_provider",
-        lambda *_values: provider,
+def test_namespace_proxy_falls_back_to_the_provider_extension() -> None:
+    provider = _Provider(
+        backend="test-extension-fallback",
+        namespace=SimpleNamespace(),
+        ext=SimpleNamespace(extension_only="extension-value"),
     )
-    assert backend_runtime.current_array_backend_provider() is None
 
-    def _rule(
-        ans: object, *inputs: object, tangents: tuple[object | None, ...], **attrs: object
-    ) -> object:
-        _ = inputs, tangents, attrs
-        assert backend_runtime.current_array_backend_provider() is provider
-        return ans
-
-    wrapped = backend_runtime.wrap_array_family_jvp_rule(_rule)
-    assert wrapped(3.0, tangents=(1.0,)) == 3.0
-    assert backend_runtime.current_array_backend_provider() is None
+    assert _run(provider, lambda: backend_runtime.xp.extension_only) == "extension-value"
 
 
-def test_wrap_vjp_exposes_unwrapped_rule_for_specialization() -> None:
-    def _rule(ans: object, *inputs: object, g: object, **attrs: object) -> tuple[object]:
-        _ = ans, inputs, attrs
-        return (g,)
+def test_namespace_proxy_reports_an_unknown_attribute() -> None:
+    provider = _Provider(
+        backend="test-missing-attribute",
+        namespace=SimpleNamespace(),
+        ext=SimpleNamespace(),
+    )
 
-    wrapped = backend_runtime.wrap_array_family_vjp_rule(_rule)
-    unwrapped = backend_runtime._maybe_unwrap_array_family_vjp_rule(wrapped)
-    assert unwrapped is _rule
-    assert backend_runtime._maybe_unwrap_array_family_vjp_rule(_rule) is None
+    with pytest.raises(AttributeError, match=r"test-missing-attribute.*unknown"):
+        _run(provider, lambda: backend_runtime.xp.unknown)
 
 
-def test_wrap_jvp_exposes_unwrapped_rule_for_specialization() -> None:
-    def _rule(
-        ans: object, *inputs: object, tangents: tuple[object | None, ...], **attrs: object
-    ) -> object:
-        _ = inputs, tangents, attrs
-        return ans
+def test_namespace_proxy_routes_functions_but_not_classes_of_a_standard_namespace() -> None:
+    """Dtype-category classes such as ``complexfloating`` are compared by identity."""
 
-    wrapped = backend_runtime.wrap_array_family_jvp_rule(_rule)
-    unwrapped = backend_runtime._maybe_unwrap_array_family_jvp_rule(wrapped)
-    assert unwrapped is _rule
-    assert backend_runtime._maybe_unwrap_array_family_jvp_rule(_rule) is None
+    class Category:
+        pass
+
+    def function() -> str:
+        return "called"
+
+    provider = _Provider(
+        backend="test-standard",
+        namespace=SimpleNamespace(__array_api_version__="2024.12", function=function),
+        ext=SimpleNamespace(Category=Category),
+    )
+    category, routed = _run(
+        provider, lambda: (backend_runtime.xp.Category, backend_runtime.xp.function)
+    )
+
+    assert category is Category
+    assert routed is not function
+    assert routed() == "called"
+
+
+def test_namespace_proxy_resolves_attributes_once_per_scope() -> None:
+    namespace = SimpleNamespace(value="first")
+    provider = _Provider(backend="test-scope-cache", namespace=namespace)
+
+    def read_twice() -> tuple[object, object]:
+        first = backend_runtime.xp.value
+        namespace.value = "second"
+        return first, backend_runtime.xp.value
+
+    assert _run(provider, read_twice) == ("first", "first")
+    assert _run(provider, lambda: backend_runtime.xp.value) == "second"
+
+
+def test_namespace_proxy_requires_an_active_provider() -> None:
+    with pytest.raises(RuntimeError, match="active backend provider"):
+        _ = backend_runtime.xp.sum
+
+
+def test_namespace_proxy_supports_standard_callable_introspection() -> None:
+    assert inspect.unwrap(backend_runtime.xp) is backend_runtime.xp

@@ -7,18 +7,19 @@ from math import prod
 from typing import Any, cast
 
 from advect.autodiff.rules.array_family._backend_runtime import (
-    _scalar_like,
+    _count_like,
+    _zeros_in_trace,
     decode_array_index,
     xp,
 )
+from advect.autodiff.rules.array_family._transpose_utils import _shape_of
 from advect.autodiff.rules.array_family.jvp.common import (
     _asarray_unwrapped,
     _astype_preserving_trace,
+    _normalize_axis_tuple,
 )
-
-
-def _is_traced_leaf(value: object) -> bool:
-    return callable(getattr(value, "_advect_snapshot", None))
+from advect.autodiff.rules.array_family.vjp.gather import _vjp_take
+from advect.core._protocols import _is_traced
 
 
 def _is_basic_index(index: object) -> bool:
@@ -86,7 +87,9 @@ def _reduction_pullback(
         msg = "reduction derivatives do not support where/out control operands"
         raise NotImplementedError(msg)
     source_shape = _shape_of(source)
-    axes = _reduction_axes(axis, ndim=len(source_shape))
+    axes = (
+        None if axis is None else tuple(sorted(_normalize_axis_tuple(axis, ndim=len(source_shape))))
+    )
     expanded: Any = cotangent
     if mean:
         dimensions = source_shape if axes is None else tuple(source_shape[item] for item in axes)
@@ -94,41 +97,13 @@ def _reduction_pullback(
         if divisor == 0:
             msg = "mean derivative received an empty reduction axis"
             raise ValueError(msg)
-        expanded = expanded / _scalar_like(divisor, expanded)
+        expanded = expanded / _count_like(divisor, expanded)
     if not keepdims and axes is not None:
         for item in axes:
             expanded = xp.expand_dims(expanded, axis=item)
     if _shape_of(expanded) != source_shape:
         expanded = xp.broadcast_to(expanded, source_shape)
-    source_dtype = getattr(source, "dtype", None)
-    if source_dtype is None:
-        source_dtype = _asarray_unwrapped(source).dtype
-    if getattr(expanded, "dtype", None) == source_dtype:
-        return cast("xp.ndarray", expanded)
-    return cast("xp.ndarray", _astype_preserving_trace(expanded, dtype=source_dtype))
-
-
-def _reduction_axes(
-    axis: int | tuple[int, ...] | None,
-    *,
-    ndim: int,
-) -> tuple[int, ...] | None:
-    if axis is None:
-        return None
-    raw_axes = (axis,) if isinstance(axis, int) else tuple(axis)
-    normalized: list[int] = []
-    for raw_axis in raw_axes:
-        item = raw_axis
-        if item < 0:
-            item += ndim
-        if item < 0 or item >= ndim:
-            msg = f"reduction derivative axis {raw_axis} is out of range for rank {ndim}"
-            raise ValueError(msg)
-        if item in normalized:
-            msg = "reduction derivative axis contains duplicates"
-            raise ValueError(msg)
-        normalized.append(item)
-    return tuple(sorted(normalized))
+    return cast("xp.ndarray", expanded)
 
 
 def _vjp_getitem(
@@ -142,7 +117,7 @@ def _vjp_getitem(
     """VJP for advect.getitem."""
     _ = ans, rest, attrs
     idx = cast("Any", decode_array_index(index))
-    if _is_traced_leaf(g) or _is_traced_leaf(x):
+    if _is_traced(g) or _is_traced(x):
         if not _is_basic_index(idx):
             msg = (
                 "Higher-order pullbacks for advanced indexing require an explicit "
@@ -154,16 +129,16 @@ def _vjp_getitem(
             g,
             dtype=x_dtype,
         )
-        grad = xp.zeros_like(x, dtype=x_dtype)
-        if not _is_traced_leaf(grad):
-            # A traced cotangent can flow through a pullback closed over concrete
-            # primals. Lift the zero base into that trace before functionalizing
-            # the indexed write; assigning a tracer into a raw ndarray would
-            # otherwise invoke the deliberately forbidden ``__array__`` path.
-            traced_zero = cast("Any", grad_contrib).sum() * xp.asarray(0, dtype=x_dtype)
-            grad = grad + traced_zero
+        # A traced cotangent can flow through a pullback closed over concrete
+        # primals. The zero base then enters the cotangent's trace, because
+        # assigning a tracer into a raw array invokes the forbidden ``__array__``.
+        grad = (
+            xp.zeros_like(x, dtype=x_dtype)
+            if _is_traced(x)
+            else _zeros_in_trace(grad_contrib, _shape_of(x), x_dtype)
+        )
         grad[idx] = grad_contrib
-        return cast("tuple[xp.ndarray]", (grad,))
+        return (grad,)
 
     x_arr = xp.asarray(x)
     g_arr = xp.asarray(g)
@@ -174,18 +149,63 @@ def _vjp_getitem(
         grad[idx] = grad_contrib
         return (grad,)
     scatter_add = getattr(xp.add, "at", None)
-    if scatter_add is None:
-        grad[idx] = grad[idx] + grad_contrib
-    else:
+    if scatter_add is not None:
         scatter_add(grad, idx, grad_contrib)
-    return (grad,)
+        return (grad,)
+    components = idx if isinstance(idx, tuple) else (idx,)
+    if not any(_is_integer_array(component) for component in components):
+        # Boolean masks select each position at most once.
+        grad[idx] = grad_contrib
+        return (grad,)
+    return (_leading_integer_index_pullback(ans, x_arr, components, g=grad_contrib),)
 
 
-def _shape_of(value: object) -> tuple[int, ...]:
-    shape = getattr(value, "shape", None)
-    if shape is None:
-        shape = _asarray_unwrapped(value).shape
-    return tuple(int(dimension) for dimension in shape)
+def _is_integer(value: object) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _is_integer_array(value: object) -> bool:
+    dtype = getattr(value, "dtype", None)
+    if dtype is None:
+        return False
+    kind = getattr(dtype, "kind", None)
+    return kind in {"i", "u"} if kind is not None else "int" in str(dtype)
+
+
+def _leading_integer_index_pullback(
+    ans: xp.ndarray,
+    x: xp.ndarray,
+    components: tuple[object, ...],
+    *,
+    g: xp.ndarray,
+) -> xp.ndarray:
+    """Scatter-add through leading integer indices without ``add.at``.
+
+    Integer arrays and integers on the leading axes gather from those axes
+    flattened into one, which is a ``take`` whose portable transpose
+    accumulates repeated indices.
+    """
+    shape = _shape_of(x)
+    if len(components) > len(shape) or not all(
+        _is_integer_array(component) or _is_integer(component) for component in components
+    ):
+        msg = (
+            "Advanced-index pullbacks on providers without add.at support "
+            "boolean masks, and integer arrays and integers on the leading axes, only."
+        )
+        raise NotImplementedError(msg)
+    leading = shape[: len(components)]
+    linear: Any = None
+    for component, size in zip(components, leading, strict=True):
+        index: Any = component
+        if _is_integer(index):
+            index %= size
+        else:
+            index = xp.where(index < 0, index + size, index)
+        linear = index if linear is None else linear * size + index
+    source = xp.reshape(x, (prod(leading), *shape[len(components) :]))
+    pulled, _ = _vjp_take(ans, source, linear, g=g, axis=0)
+    return xp.reshape(pulled, shape)
 
 
 def _vjp_index_update(
@@ -198,9 +218,15 @@ def _vjp_index_update(
     """Real-adjoint VJP using only cotangent and structural index metadata."""
     _ = ans, attrs
     idx = cast("Any", decode_array_index(index))
+    replacement_grad = cast("Any", g)[idx]
 
     if mode == "add":
         base_grad = g
+    elif mode == "set" and not _shape_of(g):
+        # An index into a rank-0 base either replaces its one element or, like
+        # ``False``, selects nothing. Its cotangent may be an immutable NumPy
+        # scalar, so it is not assigned into.
+        base_grad = g if 0 in _shape_of(replacement_grad) else xp.zeros_like(g)
     elif mode == "set":
         copy_value = getattr(g, "copy", None)
         base_grad = cast(
@@ -212,5 +238,4 @@ def _vjp_index_update(
         msg = f"Unsupported index_update mode {mode!r}"
         raise ValueError(msg)
 
-    replacement_grad = cast("Any", g)[idx]
     return cast("tuple[xp.ndarray, xp.ndarray]", (base_grad, replacement_grad))

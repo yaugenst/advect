@@ -8,6 +8,11 @@ program with the same input signature and Array API revision.
 [`vjp_program`](staging.md#advect.vjp_program) builds a reusable staged
 pullback. The other transforms operate dynamically.
 
+A Python-scalar cotangent for a zero-dimensional output is seeded as `grad`
+seeds that output, so [`vjp`](transforms.md#advect.vjp) and
+[`LinearMap`](transforms.md#advect.LinearMap) pullbacks return the gradient
+types that `grad` returns.
+
 The [gradient](../tutorials/gradients.md),
 [linear-map](../tutorials/linear-maps.md),
 [higher-order](../tutorials/advanced-differentiation.md), and

@@ -9,8 +9,10 @@ derivative engine.  Composite morphology and all public signatures remain in
 
 from __future__ import annotations
 
+import functools
 import operator
 from collections.abc import Iterable
+from dataclasses import asdict, replace
 from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
@@ -27,15 +29,16 @@ from advect.scipy._ndimage.common import (
     _normalize_sequence,
     _require_numpy_values,
     _result_spec,
+    _runtime_mode,
     _runtime_output,
     _sample_array,
     _static_scalar,
 )
 from advect.scipy._ndimage.selection import (
-    _Neighborhood,
     _neighborhood,
     _selection_jvp,
     _selection_transpose,
+    _Selector,
     _static_footprint,
 )
 
@@ -44,6 +47,7 @@ if TYPE_CHECKING:
 
     from advect.core import AbstractValue, ArraySpec
     from advect.core._primitive import Primitive
+    from advect.scipy._ndimage.selection import _Neighborhood
 
 
 def _runtime_footprint(
@@ -92,10 +96,7 @@ def _run_selection(
     grey: bool,
     rank_kind: str | None,
 ) -> Any:
-    runtime_mode: object = (
-        public_modes if mode_sequence else (public_modes[0] if public_modes else "reflect")
-    )
-    runtime_footprint = _runtime_footprint(footprint_shape, footprint_values)
+    mode = _runtime_mode(public_modes, mode_sequence=mode_sequence)
     if one_dimensional:
         if sizes is None:
             raise AssertionError("One-dimensional selection requires a size")
@@ -104,55 +105,23 @@ def _run_selection(
             sizes[0],
             axis=public_axes[0],
             output=output,
-            mode=runtime_mode,
+            mode=mode,
             cval=cval,
             origin=public_origins[0],
         )
-    if rank_kind is not None:
-        if rank_kind == "median":
-            return function(
-                input,
-                size=sizes,
-                footprint=runtime_footprint,
-                output=output,
-                mode=runtime_mode,
-                cval=cval,
-                origin=public_origins,
-                axes=public_axes,
-            )
-        return function(
-            input,
-            rank_value,
-            size=sizes,
-            footprint=runtime_footprint,
-            output=output,
-            mode=runtime_mode,
-            cval=cval,
-            origin=public_origins,
-            axes=public_axes,
-        )
+    options = {
+        "size": sizes,
+        "footprint": _runtime_footprint(footprint_shape, footprint_values),
+        "output": output,
+        "mode": mode,
+        "cval": cval,
+        "origin": public_origins,
+        "axes": public_axes,
+    }
     if grey:
-        return function(
-            input,
-            size=sizes,
-            footprint=runtime_footprint,
-            structure=structure if has_structure else None,
-            output=output,
-            mode=runtime_mode,
-            cval=cval,
-            origin=public_origins,
-            axes=public_axes,
-        )
-    return function(
-        input,
-        size=sizes,
-        footprint=runtime_footprint,
-        output=output,
-        mode=runtime_mode,
-        cval=cval,
-        origin=public_origins,
-        axes=public_axes,
-    )
+        options["structure"] = structure if has_structure else None
+    rank = () if rank_kind in {None, "median"} else (rank_value,)
+    return function(input, *rank, **options)
 
 
 def _selection_neighborhood(
@@ -170,16 +139,13 @@ def _selection_neighborhood(
     rank_filter: bool,
     dilation: bool,
 ) -> _Neighborhood:
-    runtime_mode: object = (
-        public_modes if mode_sequence else (public_modes[0] if public_modes else "reflect")
-    )
     neighborhood = _neighborhood(
         input,
         size=sizes,
         footprint=_runtime_footprint(footprint_shape, footprint_values),
         structure=structure if has_structure else None,
         origin=public_origins,
-        mode=runtime_mode,
+        mode=_runtime_mode(public_modes, mode_sequence=mode_sequence),
         axes=public_axes,
         rank_filter=rank_filter,
     )
@@ -194,13 +160,7 @@ def _selection_neighborhood(
             zip(neighborhood.axes, neighborhood.origins, strict=True)
         )
     )
-    return _Neighborhood(
-        axes=neighborhood.axes,
-        shape=neighborhood.shape,
-        footprint=neighborhood.footprint,
-        origins=corrected_origins,
-        modes=neighborhood.modes,
-    )
+    return replace(neighborhood, origins=corrected_origins)
 
 
 def _install_selection(
@@ -212,7 +172,14 @@ def _install_selection(
     rank_kind: str | None = None,
 ) -> Primitive[..., Any]:
     nondiff = () if grey else ("structure",)
-    function = cast("Callable[..., Any]", getattr(_scipy_ndimage, name))
+    dilation = grey and selection == "maximum"
+    run = functools.partial(
+        _run_selection,
+        cast("Callable[..., Any]", getattr(_scipy_ndimage, name)),
+        one_dimensional=one_dimensional,
+        grey=grey,
+        rank_kind=rank_kind,
+    )
 
     @primitive(
         name=f"scipy.ndimage.{name}",
@@ -247,8 +214,7 @@ def _install_selection(
         output_dtype: str | None,
     ) -> Any:
         _require_numpy_values(name, input, structure, cval)
-        return _run_selection(
-            function,
+        return run(
             input,
             structure,
             cval,
@@ -262,9 +228,6 @@ def _install_selection(
             public_modes=public_modes,
             mode_sequence=mode_sequence,
             rank_value=rank_value,
-            one_dimensional=one_dimensional,
-            grey=grey,
-            rank_kind=rank_kind,
         )
 
     @concrete.def_abstract
@@ -273,79 +236,56 @@ def _install_selection(
         structure: AbstractValue,
         cval: AbstractValue,
         *,
-        sizes: tuple[int, ...] | None,
-        footprint_shape: tuple[int, ...] | None,
-        footprint_values: tuple[bool, ...],
-        has_structure: bool,
-        public_axes: tuple[int, ...],
-        public_origins: tuple[int, ...],
-        public_modes: tuple[str, ...],
-        mode_sequence: bool,
-        rank_value: object,
         output_dtype: str | None,
+        **static: Any,
     ) -> ArraySpec:
-        result = _run_selection(
-            function,
+        result = run(
             _sample_array(input, shape=(1,) * len(input.spec.shape)),
-            _sample_array(structure) if has_structure else np.ones(()),
+            _sample_array(structure) if static["has_structure"] else np.ones(()),
             _sample_array(cval, shape=()),
             _runtime_output(output_dtype),
-            sizes=sizes,
-            footprint_shape=footprint_shape,
-            footprint_values=footprint_values,
-            has_structure=has_structure,
-            public_axes=public_axes,
-            public_origins=public_origins,
-            public_modes=public_modes,
-            mode_sequence=mode_sequence,
-            rank_value=rank_value,
-            one_dimensional=one_dimensional,
-            grey=grey,
-            rank_kind=rank_kind,
+            **static,
         )
         return _result_spec(input, result)
+
+    def selector(
+        input: Any,
+        structure: Any,
+        *,
+        rank_value: object,
+        output_dtype: str | None,
+        **static: Any,
+    ) -> _Selector:
+        del output_dtype
+        neighborhood = _selection_neighborhood(
+            input,
+            structure,
+            rank_filter=rank_kind is not None,
+            dilation=dilation,
+            **static,
+        )
+        rank = (
+            None
+            if rank_kind is None
+            else _resolve_rank(rank_kind, rank_value, sum(neighborhood.footprint))
+        )
+        return _Selector(
+            **asdict(neighborhood),
+            selection=selection,
+            dilation=dilation,
+            rank=rank,
+            has_structure=static["has_structure"],
+        )
 
     @concrete.def_jvp
     def jvp_rule(
         output: Any,
         primals: tuple[Any, ...],
         tangents: tuple[Any | None, ...],
-        *,
-        sizes: tuple[int, ...] | None,
-        footprint_shape: tuple[int, ...] | None,
-        footprint_values: tuple[bool, ...],
-        has_structure: bool,
-        public_axes: tuple[int, ...],
-        public_origins: tuple[int, ...],
-        public_modes: tuple[str, ...],
-        mode_sequence: bool,
-        rank_value: object,
-        output_dtype: str | None,
+        **static: Any,
     ) -> Any:
-        del output_dtype
         input, structure, cval = primals
         input_tangent, structure_tangent, cval_tangent = tangents
-        neighborhood = _selection_neighborhood(
-            input,
-            structure,
-            sizes=sizes,
-            footprint_shape=footprint_shape,
-            footprint_values=footprint_values,
-            has_structure=has_structure,
-            public_axes=public_axes,
-            public_origins=public_origins,
-            public_modes=public_modes,
-            mode_sequence=mode_sequence,
-            rank_filter=rank_kind is not None,
-            dilation=grey and selection == "maximum",
-        )
-        resolved_rank = None
-        if rank_kind is not None:
-            resolved_rank = _resolve_rank(
-                rank_kind,
-                rank_value,
-                sum(neighborhood.footprint),
-            )
         return _selection_jvp(
             output,
             input,
@@ -354,11 +294,7 @@ def _install_selection(
             structure_tangent,
             cval,
             cval_tangent,
-            neighborhood=neighborhood,
-            selection=selection,
-            dilation=grey and selection == "maximum",
-            rank=resolved_rank,
-            has_structure=has_structure,
+            selector(input, structure, **static),
         )
 
     @concrete.def_transpose
@@ -367,55 +303,18 @@ def _install_selection(
         primals: tuple[Any, ...],
         output: Any,
         *,
-        sizes: tuple[int, ...] | None,
-        footprint_shape: tuple[int, ...] | None,
-        footprint_values: tuple[bool, ...],
-        has_structure: bool,
-        public_axes: tuple[int, ...],
-        public_origins: tuple[int, ...],
-        public_modes: tuple[str, ...],
-        mode_sequence: bool,
-        rank_value: object,
-        output_dtype: str | None,
         active_input_indices: tuple[int, ...] | None = None,
+        **static: Any,
     ) -> tuple[Any | None, Any | None, Any | None]:
-        del output_dtype
         input, structure, cval = primals
-        neighborhood = _selection_neighborhood(
-            input,
-            structure,
-            sizes=sizes,
-            footprint_shape=footprint_shape,
-            footprint_values=footprint_values,
-            has_structure=has_structure,
-            public_axes=public_axes,
-            public_origins=public_origins,
-            public_modes=public_modes,
-            mode_sequence=mode_sequence,
-            rank_filter=rank_kind is not None,
-            dilation=grey and selection == "maximum",
-        )
-        resolved_rank = (
-            None
-            if rank_kind is None
-            else _resolve_rank(
-                rank_kind,
-                rank_value,
-                sum(neighborhood.footprint),
-            )
-        )
         contributions = _selection_transpose(
             cotangent,
             input,
             structure,
             cval,
             output,
-            neighborhood=neighborhood,
-            selection=selection,
-            dilation=grey and selection == "maximum",
-            rank=resolved_rank,
-            has_structure=has_structure,
-            active_input_indices=active_input_indices,
+            selector(input, structure, **static),
+            active_input_indices,
         )
         active = {0, 1, 2} if active_input_indices is None else set(active_input_indices)
         return (

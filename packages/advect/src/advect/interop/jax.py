@@ -168,9 +168,23 @@ def wrap(
             has_aux=has_aux,
             boundary="JAX output cotangents",
         )
-        concrete_cotangents = _numpy_tree(value_cotangents)
-        _, pullback = ad.vjp(differentiable_function)(concrete_call)
-        gradients = pullback(conjugate_complex_tree(concrete_cotangents))
+        output, pullback = ad.vjp(differentiable_function)(concrete_call)
+        with pullback:
+            # JAX orders cotangent leaves as it orders the output's own leaves. Place them
+            # in the trace's structure, whose named results and dict order may differ.
+            output_leaves, output_treedef = tree_flatten(output)
+            positions = tree_unflatten(output_treedef, list(range(len(output_leaves))))
+            by_position = dict(
+                zip(
+                    jax.tree_util.tree_leaves(positions),
+                    jax.tree_util.tree_leaves(_numpy_tree(value_cotangents)),
+                    strict=True,
+                )
+            )
+            cotangent = tree_unflatten(
+                output_treedef, [by_position[i] for i in range(len(by_position))]
+            )
+            gradients = pullback(conjugate_complex_tree(cotangent))
         return _gradient_payloads(gradients, (concrete_call,))
 
     def call(call_tree: Any) -> Any:

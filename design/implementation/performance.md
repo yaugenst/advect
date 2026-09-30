@@ -77,8 +77,8 @@ extensions with shipping diagnostics.
 
 Memory measurement uses one child process per case and run. Profiling workers
 and timing workers are separate. Every acceptance scenario first runs a small
-deterministic correctness preflight in another worker, so reference allocations
-cannot contaminate the measured process.
+deterministic correctness preflight. One separate preflight worker checks every
+scenario, so reference allocations cannot contaminate a measured process.
 
 Acceptance requires one exact profile:
 

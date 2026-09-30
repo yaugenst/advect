@@ -53,9 +53,87 @@ def test_array_constructs_a_sequence_from_a_lifted_python_scalar() -> None:
     assert gradient == pytest.approx(3.0)
 
 
-def test_asarray_copy_false_rejects_sequence_construction() -> None:
-    with pytest.raises(ValueError, match="avoid a copy"):
-        ad.grad(lambda x: np.sum(ad.asarray([x[0]], copy=False)))(np.array([1.0]))
+def test_array_constructs_a_sequence_of_tracers_and_constants() -> None:
+    assert_allclose(
+        ad.grad(lambda x: np.sum(ad.array([x[0], 2.0])))(np.array([1.0, 2.0])),
+        np.array([1.0, 0.0]),
+    )
+
+
+@pytest.mark.parametrize(
+    ("construct", "value", "match"),
+    [
+        pytest.param(
+            lambda x: ad.asarray([x[0]], copy=False),
+            np.array([1.0]),
+            "avoid a copy",
+            id="sequence",
+        ),
+        pytest.param(
+            lambda x: ad.asarray(x, dtype=np.float32, copy=False),
+            np.array([1.0, 2.0]),
+            "avoid a copy while changing dtype",
+            id="dtype-change",
+        ),
+        # As np.asarray(0.5, copy=False) does, since a Python scalar is no array.
+        pytest.param(
+            lambda x: ad.asarray(x, copy=False),
+            0.5,
+            "avoid a copy",
+            id="python-scalar",
+        ),
+    ],
+)
+def test_asarray_copy_false_rejects_a_required_copy(
+    construct: Any, value: np.ndarray | float, match: str
+) -> None:
+    with pytest.raises(ValueError, match=match):
+        ad.grad(lambda x: np.sum(construct(x)))(value)
+
+
+def test_concrete_constructors_honor_provider_dtype_and_copy_forms() -> None:
+    default = ad.asarray([1, 2], dtype=np.float32)
+    source = np.array([1.0, 2.0])
+    borrowed = ad.asarray(source, copy=False)
+    owned = ad.array(source)
+    strict_source = strict.asarray([1.0, 2.0], dtype=strict.float32)
+    strict_converted = ad.asarray(strict_source, dtype=strict.float64, copy=True)
+
+    assert default.dtype == np.dtype(np.float32)
+    assert np.shares_memory(borrowed, source)
+    assert not np.shares_memory(owned, source)
+    assert type(strict_converted) is type(strict_source)
+    assert strict_converted.dtype == strict.float64
+
+
+class _NamespaceWithoutAsarray:
+    __advect_namespace_is_instance_specific__ = True
+
+    def __array_namespace__(self, *, api_version: str | None = None) -> object:
+        assert api_version == "2024.12"
+        return object()
+
+
+def _cyclic_list() -> list[Any]:
+    cycle: list[Any] = []
+    cycle.append(cycle)
+    return cycle
+
+
+@pytest.mark.parametrize(
+    ("value", "error", "match"),
+    [
+        pytest.param(_cyclic_list(), ValueError, "does not accept cyclic sequences", id="cycle"),
+        pytest.param(
+            _NamespaceWithoutAsarray(), TypeError, "does not provide asarray", id="no-asarray"
+        ),
+    ],
+)
+def test_asarray_rejects_unconvertible_values(
+    value: object, error: type[Exception], match: str
+) -> None:
+    with pytest.raises(error, match=match):
+        ad.asarray(value)
 
 
 def test_explicit_constructors_are_available_from_the_numpy_frontend() -> None:

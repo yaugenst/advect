@@ -1,6 +1,6 @@
 //! Closed node metadata.
 
-use crate::{AttrMap, DTypeDescriptor, GraphError, NodeId, RawArena};
+use crate::{AttrMap, DTypeDescriptor, GraphError, NodeId, OpId, OpSchema, Parents};
 
 /// Shape and dtype of one flat runtime value.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -105,6 +105,14 @@ impl NodeMetadata {
         &self.attrs
     }
 
+    /// The same metadata with already validated replacement attributes.
+    pub(crate) fn with_attrs(&self, attrs: AttrMap) -> Self {
+        Self {
+            attrs,
+            ..self.clone()
+        }
+    }
+
     /// Primary output shape.
     #[must_use]
     pub fn shape(&self) -> &[usize] {
@@ -186,27 +194,29 @@ pub struct NodeRecord {
     pub metadata: NodeMetadata,
 }
 
-impl NodeRecord {
-    pub(crate) fn snapshot(
-        arena: &RawArena,
-        metadata: &NodeMetadata,
-        node_id: NodeId,
-    ) -> Result<Self, GraphError> {
-        let node = arena
-            .node(node_id)
-            .ok_or_else(|| GraphError::at_node(node_id, "node does not exist"))?;
-        let schema = arena
-            .op_schema(node.op())
-            .ok_or_else(|| GraphError::at_node(node_id, "operation schema is invalid"))?;
-        let inputs = arena
-            .parents(node)
-            .ok_or_else(|| GraphError::at_node(node_id, "parent range is invalid"))?;
-        Ok(Self {
-            id: node_id,
-            op: schema.name().to_owned(),
-            schema_version: schema.schema_version(),
-            inputs: inputs.to_vec(),
-            metadata: metadata.clone(),
-        })
+/// Borrowed view of one graph node.
+#[derive(Clone, Copy, Debug)]
+pub struct NodeRef<'a> {
+    /// Dense node ID.
+    pub id: NodeId,
+    /// Arena-local operation identity.
+    pub op: OpId,
+    /// Stable operation name and schema version.
+    pub schema: &'a OpSchema,
+    /// Parent node IDs.
+    pub parents: Parents<'a>,
+    /// Closed node metadata.
+    pub metadata: &'a NodeMetadata,
+}
+
+impl From<NodeRef<'_>> for NodeRecord {
+    fn from(node: NodeRef<'_>) -> Self {
+        Self {
+            id: node.id,
+            op: node.schema.name().to_owned(),
+            schema_version: node.schema.schema_version(),
+            inputs: node.parents.to_vec(),
+            metadata: node.metadata.clone(),
+        }
     }
 }

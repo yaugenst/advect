@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import operator
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING
 
@@ -13,14 +14,42 @@ if TYPE_CHECKING:
     type ArrayIndexDecoder = Callable[[object, str, tuple[int, ...]], object]
 
 
+def _basic_component(item: object) -> object:
+    if isinstance(item, bool):
+        msg = "Boolean scalar indexing is not supported"
+        raise TracingError(msg)
+    if isinstance(item, int):
+        return operator.index(item)
+    if isinstance(item, slice):
+        bounds = (item.start, item.stop, item.step)
+        try:
+            return slice(*(None if bound is None else operator.index(bound) for bound in bounds))
+        except TypeError:
+            msg = "slice indices must be integers or None or have an __index__ method"
+            raise TypeError(msg) from None
+    if item is None or item is Ellipsis:
+        return item
+    msg = "Basic indexing supports only integers, slices, new axes, and one ellipsis"
+    raise TracingError(msg)
+
+
+def normalize_basic_index(index: object) -> tuple[object, ...]:
+    """Return basic-index components with every integer as an exact Python ``int``.
+
+    Integer components must be Python integers. Only a frontend can tell its
+    integer scalars from zero-dimensional integer arrays, which NumPy treats as
+    advanced (copying) indices, so each frontend converts its own scalars
+    first. Slice bounds always select a view and convert through ``__index__``.
+    Boolean scalars stay rejected.
+    """
+    items = index if isinstance(index, tuple) else (index,)
+    return tuple(_basic_component(item) for item in items)
+
+
 def encode_basic_index(index: object) -> list[dict[str, object]]:
     """Encode integers, slices, new axes, and ellipses as graph attributes."""
-    items = index if isinstance(index, tuple) else (index,)
     encoded: list[dict[str, object]] = []
-    for item in items:
-        if isinstance(item, bool):
-            msg = "Boolean scalar indexing is not supported"
-            raise TracingError(msg)
+    for item in normalize_basic_index(index):
         if isinstance(item, int):
             encoded.append({"type": "int", "value": item})
         elif isinstance(item, slice):
@@ -34,11 +63,8 @@ def encode_basic_index(index: object) -> list[dict[str, object]]:
             )
         elif item is None:
             encoded.append({"type": "newaxis"})
-        elif item is Ellipsis:
-            encoded.append({"type": "ellipsis"})
         else:
-            msg = "Basic indexing supports only integers, slices, new axes, and one ellipsis"
-            raise TracingError(msg)
+            encoded.append({"type": "ellipsis"})
     return encoded
 
 
@@ -141,4 +167,4 @@ def decode_basic_index(payload: object) -> tuple[object, ...]:
     return decoded
 
 
-__all__ = ["decode_basic_index", "decode_index", "encode_basic_index"]
+__all__ = ["decode_basic_index", "decode_index", "encode_basic_index", "normalize_basic_index"]

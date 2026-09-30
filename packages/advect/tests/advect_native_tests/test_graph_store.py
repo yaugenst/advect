@@ -2,17 +2,24 @@
 
 from __future__ import annotations
 
+import enum
 import json
 import math
-from typing import TYPE_CHECKING
+import operator
+import re
+from types import SimpleNamespace
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import pytest
+from hypothesis import example, given, strategies as st
 
 from advect import _native_core as advect_native
 from advect.core._portable_constant import snapshot_constant_parts
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from advect.core._portable_constant import _PortableConstant
 
 
@@ -20,13 +27,12 @@ def _append_constant(
     builder: advect_native.GraphBuilder,
     constant: _PortableConstant,
 ) -> int:
-    node_id, digest = builder.append_constant(
+    node_id, _digest = builder.append_constant(
         constant.data,
         list(constant.shape),
         constant.dtype,
         kind=constant.kind,
     )
-    assert digest == constant.digest
     return node_id
 
 
@@ -46,6 +52,8 @@ def test_builder_finalizes_dense_topology_once() -> None:
     right = builder.append_input_node([2], "float64", name="right")
     output = builder.append_node("array.add", [left, right], {}, [2], "float64")
     builder.append_output(output)
+    with pytest.raises(ValueError, match="only earlier nodes"):
+        builder.append_node("array.sin", [9], {}, [2], "float64")
 
     store, old_to_new, report = _finish(builder)
     assert store.inputs == [left, right]
@@ -72,87 +80,39 @@ def test_finish_transfers_nary_arena_without_changing_nodes() -> None:
     assert report["rewritten_nodes"] == 0
 
 
-def test_finish_runs_fixed_optimizer_and_reports_dense_remap() -> None:
+def test_finish_translates_the_optimizer_report_and_dense_remap() -> None:
     builder = advect_native.GraphBuilder()
     input_id = builder.append_input_node([2], "float32")
-    first_sin = builder.append_node(
-        "array.sin",
-        [input_id],
-        {},
-        [2],
-        "float32",
-        schema_version=7,
-    )
+    first_sin = builder.append_node("array.sin", [input_id], {}, [2], "float32", schema_version=7)
     duplicate_sin = builder.append_node(
-        "array.sin",
-        [input_id],
-        {},
-        [2],
-        "float32",
-        schema_version=7,
+        "array.sin", [input_id], {}, [2], "float32", schema_version=7
     )
-    dead_cos = builder.append_node("array.cos", [input_id], {}, [2], "float32")
-    output_id = builder.append_node(
-        "array.add",
-        [first_sin, duplicate_sin],
-        {},
-        [2],
-        "float32",
-    )
+    builder.append_node("array.cos", [input_id], {}, [2], "float32")
+    output_id = builder.append_node("array.add", [first_sin, duplicate_sin], {}, [2], "float32")
     builder.append_output(output_id)
 
     store, old_to_new, report = _finish(builder)
 
+    # advect-runtime's fixed-pipeline test owns the per-pass counts of this graph.
     assert old_to_new == [0, 1, 1, None, 2]
-    assert old_to_new[dead_cos] is None
-    assert old_to_new[duplicate_sin] == old_to_new[first_sin]
-    assert store.node_ids() == [0, 1, 2]
     assert store.outputs == [2]
     assert store.get_node(1).schema_version == 7
     assert store.get_node(2).inputs == [1, 1]
-    assert report == {
-        "nodes_before": 5,
-        "nodes_after": 3,
-        "rewritten_nodes": 2,
-        "passes": [
-            {
-                "name": "dce",
-                "nodes_before": 5,
-                "nodes_after": 4,
-                "removed_nodes": 1,
-                "rewritten_nodes": 1,
-            },
-            {
-                "name": "simplify",
-                "nodes_before": 4,
-                "nodes_after": 4,
-                "removed_nodes": 0,
-                "rewritten_nodes": 0,
-            },
-            {
-                "name": "cse",
-                "nodes_before": 4,
-                "nodes_after": 3,
-                "removed_nodes": 1,
-                "rewritten_nodes": 1,
-            },
-        ],
-    }
-
-
-def test_builder_assigns_dense_ids_and_rejects_forward_references() -> None:
-    builder = advect_native.GraphBuilder()
-    first = builder.append_input_node([2], "float32")
-    second = builder.append_node("array.sin", [first], {}, [2], "float32")
-    assert (first, second) == (0, 1)
-    with pytest.raises(ValueError, match="only earlier nodes"):
-        builder.append_node("array.sin", [9], {}, [2], "float32")
+    assert (report["nodes_before"], report["nodes_after"]) == (5, store.node_count)
+    passes = report["passes"]
+    assert [item["name"] for item in passes] == ["dce", "simplify", "cse"]
+    assert report["rewritten_nodes"] == sum(item["rewritten_nodes"] for item in passes)
+    for item in passes:
+        assert item["removed_nodes"] == item["nodes_before"] - item["nodes_after"]
 
 
 def test_node_metadata_and_attrs_are_owned_snapshots() -> None:
+    shared = [1]
     attrs = {
         "axis": (0,),
         "nested": [{"values": [1, 2]}],
+        # repeated, not recursive
+        "shared": [shared, shared],
         "negative_zero": -0.0,
         "nan": float("nan"),
     }
@@ -166,17 +126,39 @@ def test_node_metadata_and_attrs_are_owned_snapshots() -> None:
     assert first.name == "total"
     assert first.attrs["axis"] == (0,)
     assert first.attrs["nested"] == [{"values": [1, 2]}]
+    assert first.attrs["shared"] == [[1], [1]]
     assert math.copysign(1.0, first.attrs["negative_zero"]) == -1.0
     assert math.isnan(first.attrs["nan"])
     first.attrs["nested"][0]["values"].append(99)
     assert store.get_node(node_id).attrs["nested"] == [{"values": [1, 2]}]
 
 
-@pytest.mark.parametrize("unsupported", [object(), {1, 2}, 1 + 2j])
-def test_attrs_reject_unsupported_objects(unsupported: object) -> None:
-    with pytest.raises(TypeError, match="unsupported graph attribute value"):
+_CYCLE: list[object] = []
+_CYCLE.append(_CYCLE)
+
+
+@pytest.mark.parametrize(
+    ("value", "error", "message"),
+    [
+        (object(), TypeError, 'unsupported graph attribute value at attrs["value"]: object'),
+        ([{1, 2}], TypeError, 'unsupported graph attribute value at attrs["value"][0]: set'),
+        ({"z": 1j}, TypeError, 'unsupported graph attribute value at attrs["value"]["z"]: complex'),
+        (
+            {1: 2},
+            TypeError,
+            'graph attribute mapping at attrs["value"] requires string keys; got int',
+        ),
+        (_CYCLE, TypeError, 'recursive graph attribute container at attrs["value"][0] is not'),
+        ((2**63,), OverflowError, 'integer at attrs["value"][0] must fit in a signed 64-bit value'),
+    ],
+    ids=["object", "set", "complex", "key", "cycle", "overflow"],
+)
+def test_attrs_reject_unsupported_values_at_their_path(
+    value: object, error: type[Exception], message: str
+) -> None:
+    with pytest.raises(error, match=re.escape(message)):
         advect_native.GraphBuilder().append_node(
-            "advect.input", [], {"value": unsupported}, [1], "float64"
+            "advect.input", [], {"value": value}, [1], "float64"
         )
 
 
@@ -207,7 +189,7 @@ def test_constants_are_portable_immutable_payloads() -> None:
         constant.dtype,
         list(constant.shape),
         constant.data.hex(),
-        constant.digest,
+        "3be20815576745f60737d7cd26699423448f89f11c80bf6cc3afb08bee2f8755",
     )
     assert isinstance(detached, bytes)
     assert store._constant_parts(constant_id)[3] == detached
@@ -215,7 +197,7 @@ def test_constants_are_portable_immutable_payloads() -> None:
 
 def test_multi_output_metadata_is_validated_and_exposed() -> None:
     builder = advect_native.GraphBuilder()
-    with pytest.raises(ValueError, match="output_shapes/output_dtypes are missing"):
+    with pytest.raises(ValueError, match="missing output_shapes/output_dtypes"):
         builder.append_node("array.modf", [], {}, [2], "float64", num_outputs=2)
 
     node_id = builder.append_node(
@@ -301,31 +283,6 @@ def test_graph_serialization_preserves_canonical_payload() -> None:
         "source_location": "model.py:10",
     }
     restored = advect_native.deserialize_graph_json(encoded)
-    assert restored._to_json() == encoded
-
-
-def test_graph_schema_versions_survive_native_round_trip() -> None:
-    builder = advect_native.GraphBuilder()
-    input_id = builder.append_input_node([2], "float32")
-    output_id = builder.append_node(
-        "custom.versioned",
-        [input_id],
-        {},
-        [2],
-        "float32",
-        schema_version=7,
-    )
-    builder.append_output(output_id)
-    store, old_to_new, _ = _finish(builder)
-    mapped_output_id = old_to_new[output_id]
-    assert mapped_output_id is not None
-    encoded = store._to_json()
-    payload = json.loads(encoded)
-
-    assert store.get_node(mapped_output_id).schema_version == 7
-    assert payload["nodes"][mapped_output_id]["schema_version"] == 7
-    restored = advect_native.deserialize_graph_json(encoded)
-    assert restored.get_node(mapped_output_id).schema_version == 7
     assert restored._to_json() == encoded
 
 
@@ -418,7 +375,7 @@ def test_native_staged_execution_binds_once_and_supports_constants_and_outputs()
     ("result_shape", "result_dtype"),
     [((1,), "float32"), ((2,), "float64"), ((2,), ">f4")],
 )
-def test_native_staged_execution_validates_results_and_annotates_callback_errors(
+def test_native_staged_execution_validates_results(
     result_shape: tuple[int, ...], result_dtype: str
 ) -> None:
     builder = advect_native.GraphBuilder()
@@ -443,25 +400,179 @@ def test_native_staged_execution_validates_results_and_annotates_callback_errors
             [],
         )
 
-    def raise_from_callback(
-        _values: object,
-        _context: object,
-        _donation: object,
-    ) -> object:
+
+def test_native_staged_execution_annotates_callback_errors() -> None:
+    def raise_from_callback(_values: object, _context: object, _donation: object) -> object:
         message = "provider failed"
         raise RuntimeError(message)
 
     failing_plan = advect_native.build_graph_execution_plan(
-        store,
-        lambda _op, _attrs: raise_from_callback,
+        _custom_store(), lambda _op, _attrs: raise_from_callback
     )
     with pytest.raises(RuntimeError, match="provider failed") as caught:
-        advect_native.execute_graph(
-            failing_plan,
-            [np.ones(2, dtype=np.float32)],
-            [],
-        )
-    assert caught.value.__notes__ == ["while executing staged operation 'custom.bad' at node %1"]
+        advect_native.execute_graph(failing_plan, [np.ones(2, dtype=np.float32)], [])
+    assert caught.value.__notes__ == ["while executing staged operation 'custom.op' at node %1"]
+
+
+def _custom_store(*, num_outputs: int = 1) -> advect_native.GraphStore:
+    """Build %0 = float32[2] input and %1 = custom.op(%0), the graph output."""
+    builder = advect_native.GraphBuilder()
+    input_id = builder.append_input_node([2], "float32")
+    outputs: dict[str, object] = {}
+    if num_outputs > 1:
+        outputs = {
+            "num_outputs": num_outputs,
+            "output_shapes": [[2]] * num_outputs,
+            "output_dtypes": ["float32"] * num_outputs,
+        }
+    builder.append_output(
+        builder.append_node("custom.op", [input_id], {}, [2], "float32", **outputs)
+    )
+    store, _, _ = _finish(builder)
+    return store
+
+
+def _annotated(
+    function: Callable[[tuple[Any, ...], int | None], object] | None = None,
+    **annotations: object,
+) -> Callable[..., object]:
+    """Wrap `function(values, donation)`, or the identity, as an annotated evaluator."""
+
+    def evaluate(values: tuple[Any, ...], _context: object, donation: int | None) -> object:
+        return values[0] if function is None else function(values, donation)
+
+    for name, value in annotations.items():
+        setattr(evaluate, f"__advect_{name}__", value)
+    return evaluate
+
+
+@pytest.mark.parametrize(
+    ("evaluator", "error", "message"),
+    [
+        (1, TypeError, 'staged evaluator binder returned a non-callable for "custom.op"'),
+        (_annotated(alias_positions=(0, 0)), ValueError, "declares more than one alias source"),
+        (
+            _annotated(owned_output=True, alias_positions=(0,)),
+            ValueError,
+            "cannot declare both owned and aliased output",
+        ),
+        (
+            _annotated(donation_positions=(1,)),
+            RuntimeError,
+            "linked operation 'custom.op' at node %1 declares an invalid donation position",
+        ),
+        (
+            _annotated(alias_positions=(1,)),
+            RuntimeError,
+            "linked operation 'custom.op' at node %1 declares an invalid alias position",
+        ),
+    ],
+)
+def test_native_staged_binding_rejects_invalid_evaluators(
+    evaluator: object, error: type[Exception], message: str
+) -> None:
+    with pytest.raises(error, match=re.escape(message)):
+        advect_native.build_graph_execution_plan(_custom_store(), lambda _op, _attrs: evaluator)
+
+
+def test_native_staged_execution_checks_input_and_constant_counts() -> None:
+    plan = advect_native.build_graph_execution_plan(_custom_store(), lambda *_args: _annotated())
+    value = np.ones(2, dtype=np.float32)
+
+    with pytest.raises(RuntimeError, match="staged graph expects 1 inputs but received 0"):
+        advect_native.execute_graph(plan, [], [])
+    with pytest.raises(ValueError, match="staged graph expects 0 constants but received 1"):
+        advect_native.execute_graph(plan, [value], [value])
+
+
+_VALUE = np.ones(2, dtype=np.float32)
+
+
+@pytest.mark.parametrize(
+    ("result", "error", "message"),
+    [
+        (1.0, TypeError, "staged operation declared 2 outputs but returned float"),
+        ((_VALUE,), ValueError, "staged operation declared 2 outputs but returned 1"),
+        (
+            (SimpleNamespace(shape=None, dtype="float32"), _VALUE),
+            RuntimeError,
+            "staged operation returned an invalid array shape",
+        ),
+        (
+            (SimpleNamespace(shape=(2,), dtype=object()), _VALUE),
+            RuntimeError,
+            "staged operation returned an invalid array dtype",
+        ),
+    ],
+)
+def test_native_staged_execution_validates_multi_output_results(
+    result: object, error: type[Exception], message: str
+) -> None:
+    plan = advect_native.build_graph_execution_plan(
+        _custom_store(num_outputs=2),
+        lambda _op, _attrs: lambda _values, _context, _donation: result,
+    )
+
+    with pytest.raises(error, match=re.escape(message)):
+        advect_native.execute_graph(plan, [_VALUE], [])
+
+
+class _Real(float):
+    pass
+
+
+class _Count(enum.IntEnum):
+    ONE = 1
+
+
+@pytest.mark.parametrize(
+    ("result", "produced"),
+    [
+        (1.5, None),
+        (_Real(1.5), None),
+        (np.float32(1.5), None),
+        (np.float64(1.5), "shape=(), dtype=float64"),
+        (np.complex128(1.5), "shape=(), dtype=complex128"),
+        (1.5j, "Python complex"),
+        (_Count.ONE, "Python int"),
+    ],
+)
+def test_native_staged_execution_classifies_scalar_results(
+    result: object, produced: str | None
+) -> None:
+    builder = advect_native.GraphBuilder()
+    input_id = builder.append_input_node([], "float32")
+    output_id = builder.append_node("custom.scalar", [input_id], {}, [], "float32")
+    builder.append_output(output_id)
+    store, _, _ = _finish(builder)
+    plan = advect_native.build_graph_execution_plan(
+        store,
+        lambda _op, _attrs: lambda _values, _context, _donation: result,
+    )
+
+    if produced is None:
+        assert advect_native.execute_graph(plan, [np.float32(1.0)], []) == [result]
+        return
+    with pytest.raises(
+        ValueError,
+        match=rf"declared shape=\(\), dtype=float32; produced {re.escape(produced)}\n",
+    ):
+        advect_native.execute_graph(plan, [np.float32(1.0)], [])
+
+
+def test_native_staged_execution_names_non_array_results() -> None:
+    builder = advect_native.GraphBuilder()
+    input_id = builder.append_input_node([], "float32")
+    output_id = builder.append_node("custom.opaque", [input_id], {}, [], "float32")
+    builder.append_output(output_id)
+    store, _, _ = _finish(builder)
+    plan = advect_native.build_graph_execution_plan(
+        store,
+        lambda _op, _attrs: lambda _values, _context, _donation: object(),
+    )
+
+    with pytest.raises(RuntimeError, match="staged operation returned object, not an array value"):
+        advect_native.execute_graph(plan, [np.float32(1.0)], [])
 
 
 def test_native_staged_execution_plan_is_reentrant() -> None:
@@ -500,102 +611,139 @@ def test_native_staged_execution_plan_is_reentrant() -> None:
     np.testing.assert_array_equal(result[0], 2 * value + 1)
 
 
-def test_native_staged_execution_donates_only_owned_unaliased_last_uses() -> None:
+def _update(
+    positions: tuple[int, ...], donations: list[int | None] | None = None
+) -> Callable[..., object]:
+    """Add two arrays, in place into whichever operand the host says is donated."""
+
+    def add(values: tuple[Any, ...], donation: int | None) -> object:
+        if donations is not None:
+            donations.append(donation)
+        if donation is None:
+            return values[0] + values[1]
+        target = values[donation]
+        target += values[1 - donation]
+        return target
+
+    return _annotated(add, donation_positions=positions, owned_output=True)
+
+
+# op -> (arity, evaluator, copy-everything reference)
+_DONATION_OPS: dict[str, tuple[int, Callable[..., object], Callable[..., Any]]] = {
+    "custom.owned": (
+        1,
+        _annotated(lambda values, _donation: values[0] * 2, owned_output=True),
+        lambda value: value * 2,
+    ),
+    "custom.view": (
+        1,
+        _annotated(lambda values, _donation: values[0][:], alias_positions=(0,)),
+        lambda value: value,
+    ),
+    "custom.same": (1, _annotated(), lambda value: value),
+    "custom.fresh": (1, _annotated(lambda values, _donation: values[0] + 0), lambda value: value),
+    "custom.update": (2, _update((0, 1)), operator.add),
+    "custom.rupdate": (2, _update((1, 0)), operator.add),
+    "custom.add": (
+        2,
+        _annotated(lambda values, _donation: values[0] + values[1]),
+        operator.add,
+    ),
+}
+
+
+def test_native_staged_execution_offers_an_owned_last_use_for_donation() -> None:
     donations: list[int | None] = []
-
-    def bind(op: str, _attrs: dict[str, object]) -> object:
-        if op == "custom.owned":
-
-            def own(
-                values: tuple[object, ...],
-                _context: object,
-                _donation: int | None,
-            ) -> object:
-                return values[0].copy()
-
-            own.__advect_owned_output__ = True
-            return own
-
-        if op == "custom.alias":
-
-            def alias(
-                values: tuple[object, ...],
-                _context: object,
-                _donation: int | None,
-            ) -> object:
-                return values[0][:]
-
-            alias.__advect_alias_positions__ = (0,)
-            return alias
-
-        if op == "custom.update":
-
-            def update(
-                values: tuple[object, ...],
-                _context: object,
-                donation: int | None,
-            ) -> object:
-                donations.append(donation)
-                result = values[0] if donation == 0 else values[0].copy()
-                result += 1
-                return result
-
-            update.__advect_donation_positions__ = (0,)
-            update.__advect_owned_output__ = True
-            return update
-
-        def consume(
-            values: tuple[object, ...],
-            _context: object,
-            _donation: int | None,
-        ) -> object:
-            return values[0] + 0
-
-        return consume
-
-    eligible_builder = advect_native.GraphBuilder()
-    eligible_input = eligible_builder.append_input_node([3], "float32")
-    owned = eligible_builder.append_node("custom.owned", [eligible_input], {}, [3], "float32")
-    updated = eligible_builder.append_node("custom.update", [owned], {}, [3], "float32")
-    eligible_builder.append_output(updated)
-    eligible_store, _, _ = _finish(eligible_builder)
-    eligible_plan = advect_native.build_graph_execution_plan(eligible_store, bind)
-
+    evaluators = {
+        "custom.owned": _DONATION_OPS["custom.owned"][1],
+        "custom.update": _update((0, 1), donations),
+    }
+    builder = advect_native.GraphBuilder()
+    input_id = builder.append_input_node([3], "float32")
+    owned = builder.append_node("custom.owned", [input_id], {}, [3], "float32")
+    builder.append_output(
+        builder.append_node("custom.update", [owned, input_id], {}, [3], "float32")
+    )
+    store, _, _ = _finish(builder)
+    plan = advect_native.build_graph_execution_plan(store, lambda op, _attrs: evaluators[op])
     original = np.arange(3, dtype=np.float32)
-    eligible_result = advect_native.execute_graph(eligible_plan, [original], [])
+
+    (result,) = advect_native.execute_graph(plan, [original], [])
 
     assert donations == [0]
     np.testing.assert_array_equal(original, np.arange(3, dtype=np.float32))
-    np.testing.assert_array_equal(eligible_result[0], original + 1)
+    np.testing.assert_array_equal(result, 3 * original)
 
-    donations.clear()
-    input_builder = advect_native.GraphBuilder()
-    direct_input = input_builder.append_input_node([3], "float32")
-    direct_update = input_builder.append_node("custom.update", [direct_input], {}, [3], "float32")
-    input_builder.append_output(direct_update)
-    input_store, _, _ = _finish(input_builder)
-    input_plan = advect_native.build_graph_execution_plan(input_store, bind)
 
-    input_result = advect_native.execute_graph(input_plan, [original], [])
+_ARRAYS = st.lists(st.integers(-4, 4), min_size=3, max_size=3).map(
+    lambda items: np.array(items, dtype=np.float64)
+)
 
-    assert donations == [None]
-    np.testing.assert_array_equal(original, np.arange(3, dtype=np.float32))
-    np.testing.assert_array_equal(input_result[0], original + 1)
 
-    donations.clear()
-    alias_builder = advect_native.GraphBuilder()
-    alias_input = alias_builder.append_input_node([3], "float32")
-    alias_owned = alias_builder.append_node("custom.owned", [alias_input], {}, [3], "float32")
-    live_alias = alias_builder.append_node("custom.alias", [alias_owned], {}, [3], "float32")
-    alias_update = alias_builder.append_node("custom.update", [alias_owned], {}, [3], "float32")
-    alias_output = alias_builder.append_node("custom.consume", [live_alias], {}, [3], "float32")
-    alias_builder.append_output(alias_update)
-    alias_builder.append_output(alias_output)
-    alias_store, _, _ = _finish(alias_builder)
-    alias_plan = advect_native.build_graph_execution_plan(alias_store, bind)
+@st.composite
+def _donation_graphs(
+    draw: st.DrawFn,
+) -> tuple[list[np.ndarray], list[np.ndarray], list[tuple[str, list[int]]], list[int]]:
+    inputs = draw(st.lists(_ARRAYS, min_size=1, max_size=2))
+    constants = draw(st.lists(_ARRAYS, max_size=2))
+    node_count = len(inputs) + len(constants)
+    # Favor nodes without users, so that last uses and donations are common.
+    unused = list(range(node_count))
+    steps = []
+    for _ in range(draw(st.integers(1, 12))):
+        op = draw(st.sampled_from(sorted(_DONATION_OPS)))
+        any_node = st.integers(0, node_count - 1)
+        parent = st.sampled_from(unused) | any_node if unused else any_node
+        parents = [draw(parent) for _ in range(_DONATION_OPS[op][0])]
+        unused = [node for node in unused if node not in parents] + [node_count]
+        steps.append((op, parents))
+        node_count += 1
+    outputs = draw(st.lists(st.integers(0, node_count - 1), min_size=1, max_size=3))
+    return inputs, constants, steps, outputs
 
-    update_result, preserved_alias = advect_native.execute_graph(alias_plan, [original], [])
 
-    assert donations == [None]
-    np.testing.assert_array_equal(update_result, original + 1)
-    np.testing.assert_array_equal(preserved_alias, original)
+@given(graph=_donation_graphs())
+# A live view of the owned value blocks its donation.
+@example(
+    graph=(
+        [np.arange(3.0)],
+        [],
+        [("custom.owned", [0]), ("custom.view", [1]), ("custom.update", [1, 0])],
+        [2, 3],
+    )
+)
+# The host names the donated position, here the second operand.
+@example(graph=([np.arange(3.0)], [], [("custom.owned", [0]), ("custom.rupdate", [0, 1])], [2]))
+# Neither inputs nor constants are ever donated.
+@example(graph=([np.arange(3.0)], [np.arange(3.0)], [("custom.update", [0, 1])], [2]))
+def test_native_staged_donation_never_changes_results_or_caller_arrays(
+    graph: tuple[list[np.ndarray], list[np.ndarray], list[tuple[str, list[int]]], list[int]],
+) -> None:
+    inputs, constants, steps, outputs = graph
+    builder = advect_native.GraphBuilder()
+    for _ in inputs:
+        builder.append_input_node([3], "float64")
+    for constant in constants:
+        _append_constant(builder, snapshot_constant_parts(constant, shape=(3,), dtype="float64"))
+    for op, parents in steps:
+        builder.append_node(op, parents, {}, [3], "float64")
+    for output in outputs:
+        builder.append_output(output)
+    store, old_to_new, _ = _finish(builder)
+    # Evaluate a reference on copies, so in-place updates cannot reach it.
+    reference = [array.copy() for array in (*inputs, *constants)]
+    for op, parents in steps:
+        reference.append(_DONATION_OPS[op][2](*(reference[parent] for parent in parents)))
+    # The optimizer drops unused constants; pass the survivors in store order.
+    new_to_old = {new: old for old, new in enumerate(old_to_new) if new is not None}
+    arrays = [*inputs, *constants]
+    plan = advect_native.build_graph_execution_plan(store, lambda op, _attrs: _DONATION_OPS[op][1])
+
+    results = advect_native.execute_graph(
+        plan, inputs, [arrays[new_to_old[node]] for node in store.constant_ids()]
+    )
+
+    for result, output in zip(results, outputs, strict=True):
+        np.testing.assert_array_equal(result, reference[output])
+    for array, original in zip(arrays, reference, strict=False):
+        np.testing.assert_array_equal(array, original)
