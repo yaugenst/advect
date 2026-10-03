@@ -1,7 +1,12 @@
-<!-- markdownlint-disable-next-line MD033 -->
-<h1 align="center"><img src="https://raw.githubusercontent.com/yaugenst/advect/main/docs-theme/img/logo.svg" alt="Advect"></h1>
-
 <!-- markdownlint-disable MD033 -->
+<!-- PyPI drops <source> and always shows the light wordmark on its light pages. -->
+<h1 align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/yaugenst/advect/main/docs-theme/img/logo-dark.svg">
+    <img src="https://raw.githubusercontent.com/yaugenst/advect/main/docs-theme/img/logo.svg" alt="Advect">
+  </picture>
+</h1>
+
 <p align="center">
   <a href="https://github.com/yaugenst/advect/actions/workflows/ci.yml"><img src="https://github.com/yaugenst/advect/actions/workflows/ci.yml/badge.svg?branch=main&amp;event=push" alt="CI"></a>
   <a href="https://app.codecov.io/gh/yaugenst/advect"><img src="https://codecov.io/gh/yaugenst/advect/branch/main/graph/badge.svg" alt="Coverage"></a>
