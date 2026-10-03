@@ -66,7 +66,7 @@ uv run pytest packages/advect/tests/advect_native_tests
 uv build --package advect --wheel --out-dir dist/wheelhouse --clear
 ```
 
-CI runs the locked workspace Clippy and test gates on both Rust 1.94 and the current stable toolchain.
+CI runs the locked workspace test gate on both Rust 1.94 and the current stable toolchain, and the Clippy gate on stable only, because Clippy versions can disagree about the same code.
 
 For an internal `advect-runtime` change whose adapter contract is unchanged, the focused Clippy and test forms (`-p advect-runtime`) plus format and `cargo deny` are sufficient while iterating. Run the workspace forms above for a native change. A runtime change also needs the Python/native boundary tests and wheel build when it alters the accepted graph format, validation result, ownership, execution behavior, or another adapter-visible contract.
 

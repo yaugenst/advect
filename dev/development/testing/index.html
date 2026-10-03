@@ -143,8 +143,9 @@ nonsmooth case.</p>
 </span><span id="__span-3-6"><a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </span>packages/advect/tests/advect_native_tests
 </span><span id="__span-3-7"><a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>uv<span class="w"> </span>build<span class="w"> </span>--package<span class="w"> </span>advect<span class="w"> </span>--wheel<span class="w"> </span>--out-dir<span class="w"> </span>dist/wheelhouse<span class="w"> </span>--clear
 </span></code></pre></div>
-<p>CI runs the locked workspace Clippy and test gates on both Rust 1.94 and the
-current stable toolchain.</p>
+<p>CI runs the locked workspace test gate on both Rust 1.94 and the current stable
+toolchain, and the Clippy gate on stable only, because Clippy versions can
+disagree about the same code.</p>
 <p>For an internal <code>advect-runtime</code> change whose adapter contract is unchanged,
 the focused Clippy and test forms (<code>-p advect-runtime</code>) plus format and
 <code>cargo deny</code> are sufficient while iterating. Run the workspace forms above for
