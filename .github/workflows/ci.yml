@@ -409,7 +409,9 @@ jobs:
         if: matrix.rust-version == 'stable'
         run: cargo fmt --all --check
 
+      # Clippy versions disagree about some lints; lint on the newest only.
       - name: Lint
+        if: matrix.rust-version == 'stable'
         run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 
       - name: Test
