@@ -367,7 +367,6 @@ impl RawArena {
     }
 
     /// Iterate over operation names in dense ID order.
-    #[must_use]
     pub fn op_names(&self) -> impl ExactSizeIterator<Item = &str> {
         self.ops.names()
     }
