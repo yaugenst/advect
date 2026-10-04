@@ -709,9 +709,23 @@ def test_consuming_reverse_skips_an_unreached_operation_without_a_transpose() ->
     assert tape.is_consumed
 
 
-def test_reusable_reverse_retains_and_closes_residual_once() -> None:
+@pytest.mark.parametrize("forward", [False, True], ids=["reverse", "forward"])
+def test_reusable_traversal_retains_and_closes_residual_once(*, forward: bool) -> None:
     events: list[object] = []
-    residual = _Residual("token", events)
+    token = object()
+    residual = _Residual(token, events)
+
+    def pushforward(
+        _output: object,
+        _operands: object,
+        tangents: tuple[float],
+        _attrs: object,
+        _source: object,
+        payload: object,
+    ) -> float:
+        assert payload is token
+        assert residual.close_count == 0
+        return tangents[0]
 
     def transpose(
         _output: object,
@@ -723,7 +737,8 @@ def test_reusable_reverse_retains_and_closes_residual_once() -> None:
         _parent_specs: object,
         _source: object,
     ) -> list[float]:
-        assert payload == "token"
+        assert payload is token
+        assert residual.close_count == 0
         return [cotangent]
 
     tape = native.DynamicTape()
@@ -732,17 +747,20 @@ def test_reusable_reverse_retains_and_closes_residual_once() -> None:
     tape.mark_output(output)
     _freeze(
         tape,
+        jvps={"identity": pushforward},
         vjps={"identity": transpose},
         reverse_needs={"identity": (False, False, True)},
     )
 
-    assert native.dynamic_vjp(tape, [(output, 2.0)], [value]) == [2.0]
-    assert native.dynamic_vjp(tape, [(output, 3.0)], [value]) == [3.0]
+    traverse = native.dynamic_jvp if forward else native.dynamic_vjp
+    source, destination = (value, output) if forward else (output, value)
+    assert traverse(tape, [(source, 2.0)], [destination]) == [2.0]
+    assert traverse(tape, [(source, 3.0)], [destination]) == [3.0]
     assert residual.close_count == 0
     tape.release_payloads()
     tape.release_payloads()
     assert residual.close_count == 1
-    assert events == ["token"]
+    assert events == [token]
 
 
 def test_consuming_reverse_releases_literals_after_their_callback() -> None:
@@ -821,14 +839,41 @@ def test_sparse_tuple_cotangents_accumulate_slotwise() -> None:
     tape.release_payloads()
 
 
-def test_reverse_allows_outer_tape_reentry_and_rejects_same_tape_recursion() -> None:
+@pytest.mark.parametrize("forward", [False, True], ids=["reverse", "forward"])
+def test_traversal_allows_outer_tape_reentry_and_rejects_same_tape_recursion(
+    *, forward: bool
+) -> None:
     outer = native.DynamicTape()
     outer_input = _input(outer, 4.0)
     recursive_errors: list[str] = []
 
     inner = native.DynamicTape()
     inner_input = _input(inner, 2.0)
-    inner_output = _operation(inner, "identity", [inner_input], 2.0)
+    residual = _Residual(object(), [])
+    inner_output = _operation(inner, "identity", [inner_input], 2.0, residual=residual)
+    traverse = native.dynamic_jvp if forward else native.dynamic_vjp
+    source, destination = (inner_input, inner_output) if forward else (inner_output, inner_input)
+
+    def reenter(seed: object, payload: object) -> None:
+        assert payload is residual.payload
+        _operation(outer, "nested", [outer_input], 4.0)
+        with pytest.raises(RuntimeError, match="already executing") as error:
+            traverse(inner, [(source, seed)], [destination])
+        recursive_errors.append(str(error.value))
+        with pytest.raises(RuntimeError, match="during traversal"):
+            inner.release_payloads()
+        assert residual.close_count == 0
+
+    def pushforward(
+        _output: object,
+        _operands: object,
+        tangents: tuple[object],
+        _attrs: object,
+        _source: object,
+        payload: object,
+    ) -> object:
+        reenter(tangents[0], payload)
+        return tangents[0]
 
     def transpose(
         _output: object,
@@ -836,27 +881,30 @@ def test_reverse_allows_outer_tape_reentry_and_rejects_same_tape_recursion() -> 
         cotangent: object,
         _attrs: object,
         _active: object,
-        _residual: object,
+        payload: object,
         _parent_specs: object,
         _source: object,
     ) -> list[object]:
-        _operation(outer, "nested", [outer_input], 4.0)
-        with pytest.raises(RuntimeError, match="already executing") as error:
-            native.dynamic_vjp(inner, [(inner_output, cotangent)], [inner_input])
-        recursive_errors.append(str(error.value))
+        reenter(cotangent, payload)
         return [cotangent]
 
     inner.mark_output(inner_output)
-    _freeze(inner, vjps={"identity": transpose})
-
-    assert native.dynamic_vjp(
+    _freeze(
         inner,
-        [(inner_output, 1.0)],
-        [inner_input],
+        jvps={"identity": pushforward},
+        vjps={"identity": transpose},
+        reverse_needs={"identity": (False, False, True)},
+    )
+
+    assert traverse(
+        inner,
+        [(source, 1.0)],
+        [destination],
         consume=True,
     ) == [1.0]
     assert outer.node_count == 2
     assert recursive_errors
+    assert residual.close_count == 1
     inner.release_payloads()
     outer.release_payloads()
 
@@ -902,7 +950,8 @@ def test_release_closes_every_residual_once_and_propagates_first_error() -> None
     assert tape.is_consumed
 
 
-def test_consume_releases_payloads_even_when_reverse_callback_fails() -> None:
+@pytest.mark.parametrize("forward", [False, True], ids=["reverse", "forward"])
+def test_consume_releases_payloads_even_when_callback_fails(*, forward: bool) -> None:
     events: list[object] = []
     residual = _Residual(_Payload(), events)
     payload = _Payload()
@@ -917,11 +966,13 @@ def test_consume_releases_payloads_even_when_reverse_callback_fails() -> None:
     value = _input(tape, payload)
     output = _operation(tape, "fail", [value], _Payload(), residual=residual)
     tape.mark_output(output)
-    _freeze(tape, vjps={"fail": fail})
+    _freeze(tape, jvps={"fail": fail}, vjps={"fail": fail})
     del payload
 
+    traverse = native.dynamic_jvp if forward else native.dynamic_vjp
+    source, destination = (value, output) if forward else (output, value)
     with pytest.raises(ValueError, match="expected callback failure"):
-        native.dynamic_vjp(tape, [(output, 1.0)], [value], consume=True)
+        traverse(tape, [(source, 1.0)], [destination], consume=True)
     gc.collect()
 
     assert residual.close_count == 1
@@ -931,7 +982,8 @@ def test_consume_releases_payloads_even_when_reverse_callback_fails() -> None:
     assert tape.stats()["retained_value_count"] == 0
 
 
-def test_consume_closes_residual_when_payload_access_fails() -> None:
+@pytest.mark.parametrize("forward", [False, True], ids=["reverse", "forward"])
+def test_consume_closes_residual_when_payload_access_fails(*, forward: bool) -> None:
     events: list[object] = []
 
     class BrokenPayload(_Residual):
@@ -955,12 +1007,15 @@ def test_consume_closes_residual_when_payload_access_fails() -> None:
     tape.mark_output(output)
     _freeze(
         tape,
+        jvps={"identity": lambda *_args: 1.0},
         vjps={"identity": lambda *_args: [1.0]},
         reverse_needs={"identity": (False, False, True)},
     )
 
+    traverse = native.dynamic_jvp if forward else native.dynamic_vjp
+    source, destination = (value, output) if forward else (output, value)
     with pytest.raises(ValueError, match="expected payload failure"):
-        native.dynamic_vjp(tape, [(output, 1.0)], [value], consume=True)
+        traverse(tape, [(source, 1.0)], [destination], consume=True)
 
     assert residual.close_count == 1
     assert events == ["token"]

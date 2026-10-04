@@ -25,7 +25,6 @@ struct ReverseInvocation {
     parent_active: Vec<bool>,
     active_positions: Py<PyTuple>,
     parent_specs: Py<PyTuple>,
-    residual: Py<PyAny>,
 }
 
 /// Apply one reverse VJP over a frozen concrete tape.
@@ -214,7 +213,7 @@ fn prepare_invocation(
             None => Ok(py.None()),
         })
         .collect::<PyResult<Vec<_>>>()?;
-    let residual = if needs.residual {
+    rule.residual = if needs.residual {
         state
             .node(node_index)?
             .residual
@@ -240,7 +239,6 @@ fn prepare_invocation(
         parent_active: snapshot.parent_active,
         active_positions: PyTuple::new(py, active_positions)?.unbind(),
         parent_specs: PyTuple::new(py, parent_specs)?.unbind(),
-        residual,
     })
 }
 
@@ -261,7 +259,7 @@ impl ReverseInvocation {
                 cotangents,
                 self.rule.attrs.bind(py),
                 self.active_positions.bind(py),
-                self.residual.bind(py),
+                self.rule.residual.bind(py),
                 self.parent_specs.bind(py),
                 self.rule.source_location.as_deref(),
             ),

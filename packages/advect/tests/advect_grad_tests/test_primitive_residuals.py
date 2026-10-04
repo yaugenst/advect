@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
 from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
@@ -50,6 +52,213 @@ def _square_with_residual(
         return (cotangent * cast("np.ndarray", residual),)
 
     return primitive
+
+
+def _square_with_residual_jvp(
+    name: str,
+    *,
+    released: list[object],
+    forwards: list[object],
+    seen: list[object],
+) -> Primitive[..., Any]:
+    primitive = _square_with_residual(
+        name,
+        released=released,
+        forwards=forwards,
+        jvp=False,
+    )
+
+    @primitive.def_jvp
+    def jvp_rule(
+        output: np.ndarray,
+        primals: tuple[np.ndarray, ...],
+        tangents: tuple[np.ndarray, ...],
+        *,
+        residual: object,
+    ) -> np.ndarray:
+        del output, primals
+        assert any(residual is value for value in forwards)
+        assert not any(residual is value for value in released)
+        seen.append(residual)
+        return cast("np.ndarray", residual) * tangents[0]
+
+    return primitive
+
+
+def test_one_shot_jvp_consumes_the_exact_forward_residual_once() -> None:
+    released: list[object] = []
+    forwards: list[object] = []
+    seen: list[object] = []
+    primitive = _square_with_residual_jvp(
+        "tests.residual.jvp_pairing",
+        released=released,
+        forwards=forwards,
+        seen=seen,
+    )
+    x = np.array([0.5, 1.5])
+    direction = np.array([0.25, -2.0])
+
+    value, tangent = ad.jvp(lambda value: primitive(value) + 3 * primitive(value + 1))(
+        x,
+        tangents=direction,
+    )
+
+    assert_allclose(value, x * x + 3 * (x + 1) ** 2)
+    assert_allclose(tangent, (2 * x + 6 * (x + 1)) * direction)
+    assert len(forwards) == len(seen) == len(released) == 2
+    assert all(actual is expected for actual, expected in zip(seen, forwards, strict=True))
+    assert {id(value) for value in released} == {id(value) for value in forwards}
+
+
+def test_residual_jvp_linear_map_reuses_one_forward_until_close() -> None:
+    released: list[object] = []
+    forwards: list[object] = []
+    seen: list[object] = []
+    primitive = _square_with_residual_jvp(
+        "tests.residual.jvp_linear_map",
+        released=released,
+        forwards=forwards,
+        seen=seen,
+    )
+    x = np.array([0.5, 1.5])
+    directions = (np.array([0.25, -2.0]), np.array([-1.0, 0.5]))
+
+    value, linear = ad.linearize(primitive, x)
+    assert_allclose(value, x * x)
+    assert len(forwards) == 1
+    assert seen == released == []
+    for direction in directions:
+        assert_allclose(linear(direction), 2 * x * direction)
+    for actual, direction in zip(linear.apply_many(directions), directions, strict=True):
+        assert_allclose(actual, 2 * x * direction)
+    assert_allclose(linear.pullback(directions[0]), 2 * x * directions[0])
+    assert len(forwards) == 1
+    assert len(seen) == 4
+    assert all(residual is forwards[0] for residual in seen)
+    assert released == []
+
+    linear.close()
+    linear.close()
+    assert len(released) == 1
+    assert released[0] is forwards[0]
+    with pytest.raises(RuntimeError, match="closed or consumed"):
+        linear(directions[0])
+
+
+def test_residual_jvp_independent_live_linear_maps_keep_their_own_residuals() -> None:
+    released: list[object] = []
+    forwards: list[object] = []
+    seen: list[object] = []
+    primitive = _square_with_residual_jvp(
+        "tests.residual.jvp_live_maps",
+        released=released,
+        forwards=forwards,
+        seen=seen,
+    )
+    left = np.array([0.5, 1.5])
+    right = np.array([4.0, -2.0])
+    direction = np.array([0.25, -2.0])
+
+    _, left_map = ad.linearize(primitive, left)
+    with left_map:
+        _, right_map = ad.linearize(primitive, right)
+        with right_map:
+            assert_allclose(right_map(direction), 2 * right * direction)
+            assert_allclose(left_map(direction), 2 * left * direction)
+            left_map.close()
+            assert len(released) == 1
+            assert released[0] is forwards[0]
+            assert_allclose(right_map(direction), 2 * right * direction)
+            assert [id(value) for value in seen] == [
+                id(forwards[1]),
+                id(forwards[0]),
+                id(forwards[1]),
+            ]
+    assert len(forwards) == len(released) == 2
+    assert released[1] is forwards[1]
+
+
+def test_concurrent_residual_jvp_traces_do_not_share_invocation_state() -> None:
+    released: list[object] = []
+    forwards: list[object] = []
+    seen: list[object] = []
+    primitive = _square_with_residual_jvp(
+        "tests.residual.jvp_concurrent",
+        released=released,
+        forwards=forwards,
+        seen=seen,
+    )
+    ready = Barrier(2, timeout=10)
+
+    def differentiate(x: np.ndarray) -> np.ndarray:
+        _, linear = ad.linearize(primitive, x)
+        with linear:
+            ready.wait()
+            return linear(np.ones_like(x))
+
+    points = (np.array([0.5, 1.5]), np.array([4.0, -2.0]))
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = tuple(executor.map(differentiate, points))
+
+    for actual, point in zip(results, points, strict=True):
+        assert_allclose(actual, 2 * point)
+    assert len(forwards) == len(seen) == len(released) == 2
+    assert {id(value) for value in seen} == {id(value) for value in forwards}
+    assert {id(value) for value in released} == {id(value) for value in forwards}
+
+
+@pytest.mark.parametrize("transform", ["jvp", "linear", "apply_many"])
+def test_residual_jvp_failure_releases_the_owning_trace(transform: str) -> None:
+    released: list[object] = []
+    token = object()
+
+    @ad.primitive(name=f"tests.residual.jvp_failure_{transform}", residual=True)
+    def primitive(x: np.ndarray) -> ad.PrimitiveResult[np.ndarray]:
+        return ad.PrimitiveResult(x * x, token, release=released.append)
+
+    @primitive.def_jvp
+    def failing_jvp(output: object, primals: object, tangents: object, *, residual: object):
+        del output, primals, tangents
+        assert residual is token
+        assert released == []
+        raise RuntimeError("JVP failed")
+
+    x = np.array([1.0, 2.0])
+
+    def run_transform() -> None:
+        if transform == "jvp":
+            ad.jvp(primitive)(x, tangents=x)
+        else:
+            _, linear = ad.linearize(primitive, x)
+            with linear:
+                if transform == "linear":
+                    linear(x)
+                else:
+                    linear.apply_many((x, x))
+
+    with pytest.raises(RuntimeError, match="JVP failed"):
+        run_transform()
+
+    assert released == [token]
+
+
+def test_residual_jvp_without_explicit_transpose_fails_clearly_and_releases() -> None:
+    released: list[object] = []
+    token = object()
+
+    @ad.primitive(name="tests.residual.jvp_requires_transpose", residual=True)
+    def primitive(x: np.ndarray) -> ad.PrimitiveResult[np.ndarray]:
+        return ad.PrimitiveResult(x * x, token, release=released.append)
+
+    @primitive.def_jvp
+    def jvp_rule(output: object, primals: tuple, tangents: tuple, *, residual: object):
+        del output
+        assert residual is token
+        return 2 * primals[0] * tangents[0]
+
+    with pytest.raises(ad.NoVJPError, match=r"[Rr]esidual|def_transpose|explicit.*transpose"):
+        ad.grad(lambda x: np.sum(primitive(x)))(np.array([0.5, 1.5]))
+    assert released == [token]
 
 
 def test_one_shot_grad_pairs_and_releases_each_exact_residual() -> None:
@@ -276,6 +485,12 @@ def test_none_is_a_valid_exact_residual_payload() -> None:
     def primitive(x: np.ndarray) -> ad.PrimitiveResult[np.ndarray]:
         return ad.PrimitiveResult(x, None, release=released.append)
 
+    @primitive.def_jvp
+    def jvp_rule(output: object, primals: object, tangents: tuple, *, residual: object):
+        del output, primals
+        assert residual is None
+        return tangents[0]
+
     @primitive.def_transpose
     def transpose_rule(
         cotangent: np.ndarray,
@@ -293,6 +508,11 @@ def test_none_is_a_valid_exact_residual_payload() -> None:
         np.ones_like(x),
     )
     assert released == [None]
+
+    value, tangent = ad.jvp(primitive)(x, tangents=2 * x)
+    assert_allclose(value, x)
+    assert_allclose(tangent, 2 * x)
+    assert released == [None, None]
 
 
 def test_primitive_result_rejects_a_noncallable_release() -> None:

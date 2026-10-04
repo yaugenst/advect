@@ -50,7 +50,8 @@ capability state.
 
 A residual-capable implementation returns
 `PrimitiveResult(output, residual, release=None)`. Advect passes the exact
-same-invocation output and residual to its transpose, releases owned residuals
+same-invocation output and residual to its transpose and to a JVP that requests
+a keyword-only `residual` parameter, releases owned residuals
 deterministically, and never serializes them. During differentiation, ownership
 transfers into the invocation-local `DynamicTape`. An ordinary primitive call,
 including plain staged replay, releases the unused residual before returning;
@@ -58,6 +59,9 @@ staged replay under an enclosing dynamic transform records one atomic custom
 node and transfers its residual to that outer tape. Residuals never enter
 `RawArena`, `GraphStore`, node attributes, staged constants, or output pytrees.
 Opaque residual primitives are first-order-only.
+Derivative rules borrow that residual and keep it usable for repeated
+directions and transposes on the same linear map. A one-shot JVP releases it
+after traversal; reusable linear maps retain it until closed.
 Because `GraphStore` has no residual table, they are also barriers to staged
 derivative compilation.
 

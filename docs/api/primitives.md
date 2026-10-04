@@ -40,10 +40,21 @@ These methods belong to the object returned by `advect.primitive`:
 
 ## Exact residuals
 
-Set `residual=True` only when reverse mode needs exact opaque data from the
-forward invocation. Residual primitives require an explicit transpose and form
-a first-order boundary; the object docstring below defines their lifetime and
-cleanup contract.
+Set `residual=True` when a derivative needs exact opaque data from the forward
+invocation, such as a solver factorization. A JVP can request that invocation's
+residual by declaring a keyword-only `residual` parameter. Its ordinary
+`output`, `primals`, and `tangents` arguments stay unchanged. An explicit
+transpose receives the same residual as its fourth positional argument.
+
+Advect owns the residual and its cleanup. A direct `jvp` evaluates the forward
+once and releases the residual after the derivative. A reusable `linearize`
+map keeps it for subsequent directions and transposes until the map is closed.
+Derivative rules must therefore preserve the residual for subsequent calls.
+
+Residual primitives require an explicit transpose for reverse mode and remain
+a first-order boundary. They cannot be checkpointed or embedded in staged or
+higher-order derivatives. The object docstring below defines their lifetime
+and cleanup contract.
 
 ::: advect.PrimitiveResult
 

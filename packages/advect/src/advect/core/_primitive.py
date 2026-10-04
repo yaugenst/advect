@@ -266,12 +266,14 @@ class Primitive[**P, R]:
         *,
         rule: str,
         positional_count: int,
+        keyword_names: tuple[str, ...] = (),
     ) -> None:
         signature = _callable_signature(
             function,
             label=f"{rule} rule for primitive {self.name!r}",
         )
         static = dict.fromkeys(self.static_argnames, _RULE_SENTINEL)
+        static.update(dict.fromkeys(keyword_names, _RULE_SENTINEL))
         try:
             signature.bind(*((_RULE_SENTINEL,) * positional_count), **static)
         except TypeError as error:
@@ -458,6 +460,13 @@ class Primitive[**P, R]:
         for leaves of a declared nondifferentiable argument. Static arguments
         are passed by name. Return a tangent with the output pytree.
 
+        A primitive declared with ``residual=True`` may request its exact
+        forward residual with a keyword-only ``residual`` parameter. Advect
+        retains ownership: the rule must keep that residual usable for other
+        directions and transposes on the same linear map. Residual primitives
+        remain first-order-only and require an explicit transpose for reverse
+        mode. Rules without this parameter keep the ordinary JVP signature.
+
         Write the rule as traceable, real-linear code so Advect can transpose
         it structurally and differentiate it again. The function is returned
         unchanged for decorator use.
@@ -465,7 +474,23 @@ class Primitive[**P, R]:
         if self._jvp_rule is not None:
             msg = f"Primitive '{self.name}' already has a JVP rule"
             raise ValueError(msg)
-        self._validate_derivative_signature(fn, rule="JVP", positional_count=3)
+        residual_parameter = _callable_signature(
+            fn, label=f"JVP rule for primitive {self.name!r}"
+        ).parameters.get("residual")
+        needs_residual = (
+            residual_parameter is not None
+            and residual_parameter.kind is inspect.Parameter.KEYWORD_ONLY
+            and "residual" not in self.static_argnames
+        )
+        if needs_residual and not self.has_residual:
+            msg = f"Primitive '{self.name}' JVP residual requires residual=True"
+            raise TypeError(msg)
+        self._validate_derivative_signature(
+            fn,
+            rule="JVP",
+            positional_count=3,
+            keyword_names=("residual",) if needs_residual else (),
+        )
 
         @functools.wraps(fn)
         def runtime_jvp(
@@ -474,6 +499,9 @@ class Primitive[**P, R]:
             tangents: tuple[Any | None, ...],
             **attrs: Any,
         ) -> Any:
+            residual = None
+            if self.has_residual:
+                residual, inputs = inputs[0], inputs[1:]
             meta, static_attrs = self._rule_static_attrs(attrs)
             nondiff_mask = meta.nondiff_mask(len(inputs))
             active_tangents = tuple(
@@ -485,6 +513,8 @@ class Primitive[**P, R]:
                 answer,
                 label="JVP primal output",
             )
+            if needs_residual:
+                static_attrs["residual"] = residual
             output_tangent = fn(
                 public_output,
                 tuple(inputs),
