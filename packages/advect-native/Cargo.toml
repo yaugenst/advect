@@ -22,8 +22,5 @@ crate-type = [ "cdylib" ]
 advect-runtime = { path = "../advect-runtime" }
 pyo3 = { workspace = true }
 
-[features]
-extension-module = [ "pyo3/extension-module" ]
-
 [lints]
 workspace = true

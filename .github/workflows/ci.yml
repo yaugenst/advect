@@ -412,7 +412,7 @@ jobs:
       # Clippy versions disagree about some lints; lint on the newest only.
       - name: Lint
         if: matrix.rust-version == 'stable'
-        run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+        run: cargo clippy --locked --workspace --all-targets -- -D warnings
 
       - name: Test
         run: cargo test --locked --workspace --all-targets
@@ -422,7 +422,6 @@ jobs:
         uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
         with:
           command: check
-          arguments: --all-features
           command-arguments: -W unmaintained
 
   native-wheels:
