@@ -27,8 +27,8 @@ These are routes, not a checklist. Read only what the change needs:
 ## Verify
 
 - `cargo fmt --all --check`
-- `cargo clippy --locked --workspace --all-targets --all-features -- -D warnings`
+- `cargo clippy --locked --workspace --all-targets -- -D warnings`
 - `cargo test --locked --workspace --all-targets`
-- `cargo deny --all-features check -W unmaintained`
+- `cargo deny check -W unmaintained`
 - `uv run pytest packages/advect/tests/advect_native_tests`
 - `uv build --package advect --wheel --out-dir dist/wheelhouse --clear`

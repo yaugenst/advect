@@ -402,9 +402,9 @@ For an internal runtime change whose adapter contract is unchanged, run:
 
 ```bash
 cargo fmt --all --check
-cargo clippy --locked -p advect-runtime --all-targets --all-features -- -D warnings
+cargo clippy --locked -p advect-runtime --all-targets -- -D warnings
 cargo test --locked -p advect-runtime --all-targets
-cargo deny --all-features check -W unmaintained
+cargo deny check -W unmaintained
 ```
 
 If the accepted graph format, validation result, or Python-visible graph
@@ -424,9 +424,9 @@ runtime change:
 
 ```bash
 cargo fmt --all --check
-cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+cargo clippy --locked --workspace --all-targets -- -D warnings
 cargo test --locked --workspace --all-targets
-cargo deny --all-features check -W unmaintained
+cargo deny check -W unmaintained
 uv run pytest packages/advect/tests/advect_native_tests
 uv build --package advect --wheel --out-dir dist/wheelhouse --clear
 ```

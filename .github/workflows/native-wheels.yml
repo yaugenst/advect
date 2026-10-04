@@ -184,19 +184,14 @@ jobs:
 
       - name: Build and verify source distribution
         run: |
-          uv build --package advect --sdist --out-dir dist/sdist --clear
-          uv build \
-            --wheel \
-            dist/sdist/advect-*.tar.gz \
-            --out-dir dist/sdist-wheel \
-            --clear
+          uv build --package advect --out-dir dist/sdist --clear
           python - <<'PY'
           from pathlib import Path
           import tarfile
           import zipfile
 
           sdist = next(Path("dist/sdist").glob("advect-*.tar.gz"))
-          wheel = next(Path("dist/sdist-wheel").glob("advect-*.whl"))
+          wheel = next(Path("dist/sdist").glob("advect-*.whl"))
           root = sdist.name.removesuffix(".tar.gz")
           with tarfile.open(sdist) as archive:
               names = set(archive.getnames())
@@ -221,7 +216,7 @@ jobs:
             --python .sdist-smoke/bin/python \
             --no-cache \
             --no-index \
-            --find-links dist/sdist-wheel \
+            --find-links dist/sdist \
             advect
           .sdist-smoke/bin/python scripts/smoke_wheel_install.py base
 

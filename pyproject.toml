@@ -84,7 +84,6 @@ required-version = "==0.12.3"
 
 [tool.maturin]
 exclude = [ "**/AGENTS.md" ]
-features = [ "extension-module" ]
 locked = true
 manifest-path = "packages/advect-native/Cargo.toml"
 module-name = "advect._native_core"

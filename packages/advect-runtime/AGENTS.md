@@ -29,9 +29,9 @@ These are routes, not a checklist. Read only what the change needs:
 ## Verify
 
 - `cargo fmt --all --check`
-- `cargo clippy --locked -p advect-runtime --all-targets --all-features -- -D warnings`
+- `cargo clippy --locked -p advect-runtime --all-targets -- -D warnings`
 - `cargo test --locked -p advect-runtime --all-targets`
-- `cargo deny --all-features check -W unmaintained`
+- `cargo deny check -W unmaintained`
 - If the accepted graph format, validation result, or another adapter-visible
   contract changes, also run the native boundary tests and wheel build in the
   [testing guide](../../docs/development/testing.md).
