@@ -1,6 +1,7 @@
 //! Native forward-mode traversal for a concrete dynamic tape.
 
 use pyo3::exceptions::PyRuntimeError;
+use pyo3::intern;
 use pyo3::prelude::*;
 use pyo3::types::PyTuple;
 
@@ -87,6 +88,7 @@ fn forward(
                     tangents,
                     invocation.attrs.bind(py),
                     invocation.source_location.as_deref(),
+                    invocation.residual.bind(py),
                 ),
             )?;
             if !tangent.is_none() {
@@ -147,6 +149,10 @@ fn prepare_invocation(
     let mut invocation = Invocation::bind(py, &state, TraversalKind::Forward, node_index, node)?;
     invocation.output = state.required_value(py, node_index, "output", invocation.node_id)?;
     invocation.operands = PyTuple::new(py, snapshot.operands)?.unbind();
+    // Every lane borrows the same forward payload; the tape keeps ownership.
+    if let Some(residual) = &state.node(node_index)?.residual {
+        invocation.residual = residual.bind(py).getattr(intern!(py, "payload"))?.unbind();
+    }
     Ok(Some((invocation, lane_tangents)))
 }
 

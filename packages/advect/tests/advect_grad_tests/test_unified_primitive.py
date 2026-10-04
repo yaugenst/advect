@@ -208,6 +208,128 @@ def test_static_and_nondiff_arguments_have_one_call_contract() -> None:
     )
 
 
+def test_static_argument_named_residual_keeps_the_ordinary_jvp_contract() -> None:
+    @ad.primitive(name="tests.unified.static_residual", static_argnames=("residual",))
+    def primitive(x: np.ndarray, *, residual: float = 1.0) -> np.ndarray:
+        return x * residual
+
+    @primitive.def_abstract
+    def abstract(x: ad.AbstractValue, *, residual: float = 1.0) -> ad.ArraySpec:
+        del residual
+        return x.spec
+
+    @primitive.def_jvp
+    def jvp_rule(
+        output: np.ndarray,
+        primals: tuple[np.ndarray, ...],
+        tangents: tuple[np.ndarray, ...],
+        *,
+        residual: float = 1.0,
+    ) -> np.ndarray:
+        del output, primals
+        return tangents[0] * residual
+
+    x = np.array([0.5, 1.5])
+    direction = np.array([0.25, -0.75])
+    value, tangent = ad.jvp(lambda value: primitive(value, residual=3.0))(
+        x,
+        tangents=direction,
+    )
+    assert_allclose(value, 3 * x)
+    assert_allclose(tangent, 3 * direction)
+    check_primitive(
+        primitive,
+        primals=(x,),
+        static={"residual": 3.0},
+        tangents=(direction,),
+    )
+
+
+@pytest.mark.parametrize("has_residual", [False, True])
+def test_positional_tangents_named_residual_keep_the_ordinary_jvp_contract(
+    *, has_residual: bool
+) -> None:
+    token = object()
+    released: list[object] = []
+
+    @ad.primitive(
+        name=f"tests.unified.tangents_named_residual_{has_residual}", residual=has_residual
+    )
+    def primitive(x: np.ndarray):
+        output = x * x
+        return (
+            ad.PrimitiveResult(output, token, release=released.append) if has_residual else output
+        )
+
+    @primitive.def_jvp
+    def jvp_rule(output: object, primals: tuple, residual: tuple):
+        del output
+        return 2 * primals[0] * residual[0]
+
+    x = np.array([0.5, 1.5])
+    direction = np.array([0.25, -0.75])
+    value, tangent = ad.jvp(primitive)(x, tangents=direction)
+
+    assert_allclose(value, x * x)
+    assert_allclose(tangent, 2 * x * direction)
+    assert released == ([token] if has_residual else [])
+
+
+@pytest.mark.parametrize("has_residual", [False, True])
+def test_static_primitive_residual_argument_does_not_collide_with_jvp_payload(
+    *, has_residual: bool
+) -> None:
+    token = object()
+    released: list[object] = []
+
+    @ad.primitive(
+        name=f"tests.unified.static_primitive_residual_{has_residual}",
+        static_argnames=("_primitive_residual",),
+        residual=has_residual,
+    )
+    def primitive(x: np.ndarray, *, _primitive_residual: float):
+        output = x * _primitive_residual
+        return (
+            ad.PrimitiveResult(output, token, release=released.append) if has_residual else output
+        )
+
+    if has_residual:
+
+        @primitive.def_jvp
+        def residual_jvp(
+            output: object,
+            primals: tuple,
+            tangents: tuple,
+            *,
+            _primitive_residual: float,
+            residual: object,
+        ):
+            del output, primals
+            assert residual is token
+            assert released == []
+            return _primitive_residual * tangents[0]
+
+    else:
+
+        @primitive.def_jvp
+        def ordinary_jvp(
+            output: object, primals: tuple, tangents: tuple, *, _primitive_residual: float
+        ):
+            del output, primals
+            return _primitive_residual * tangents[0]
+
+    x = np.array([0.5, 1.5])
+    direction = np.array([0.25, -0.75])
+    value, tangent = ad.jvp(lambda value: primitive(value, _primitive_residual=3.0))(
+        x,
+        tangents=direction,
+    )
+
+    assert_allclose(value, 3 * x)
+    assert_allclose(tangent, 3 * direction)
+    assert released == ([token] if has_residual else [])
+
+
 def test_primitive_transpose_can_skip_inactive_input_contributions() -> None:
     active_calls: list[tuple[int, ...] | None] = []
 
@@ -644,6 +766,105 @@ def test_forward_mode_allows_a_transpose_only_primitive_on_an_enclosing_value() 
         return primal
 
     assert_allclose(ad.grad(outer)(np.array(2.0)), np.array(4.0))
+
+
+@pytest.mark.parametrize("optional_residual", [False, True])
+def test_check_primitive_accepts_residual_jvp_rules(*, optional_residual: bool) -> None:
+    forwards: list[object] = []
+    released: list[object] = []
+    seen: list[object] = []
+
+    @ad.primitive(
+        name=f"tests.unified.residual_jvp_check_{optional_residual}",
+        static_argnames=("scale",),
+        nondiff_argnames=("offset",),
+        residual=True,
+    )
+    def primitive(x: np.ndarray, scale: float, offset: np.ndarray):
+        output = scale * x * x + offset
+        residual = (output, 2 * scale * x.copy())
+        forwards.append(residual)
+        return ad.PrimitiveResult(output, residual, release=released.append)
+
+    @primitive.def_abstract
+    def abstract(x: ad.AbstractValue, scale: float, offset: ad.AbstractValue):
+        del scale, offset
+        return x.spec
+
+    def apply_residual(output: object, tangents: tuple, residual: object):
+        assert residual is not None
+        assert any(residual is value for value in forwards)
+        assert not any(residual is value for value in released)
+        original_output, derivative = cast("tuple[np.ndarray, np.ndarray]", residual)
+        assert output is original_output
+        assert tangents[1] is None
+        seen.append(residual)
+        return derivative * tangents[0]
+
+    if optional_residual:
+
+        @primitive.def_jvp
+        def optional_jvp(
+            output: object,
+            primals: tuple,
+            tangents: tuple,
+            *,
+            scale: float,
+            residual: object = None,
+        ):
+            del primals, scale
+            return apply_residual(output, tangents, residual)
+
+    else:
+
+        @primitive.def_jvp
+        def required_jvp(
+            output: object,
+            primals: tuple,
+            tangents: tuple,
+            *,
+            scale: float,
+            residual: object,
+        ):
+            del primals, scale
+            return apply_residual(output, tangents, residual)
+
+    @primitive.def_transpose
+    def transpose_rule(
+        cotangent: np.ndarray,
+        primals: tuple,
+        output: object,
+        residual: object,
+        *,
+        scale: float,
+    ):
+        del primals, output, scale
+        _, derivative = cast("tuple[np.ndarray, np.ndarray]", residual)
+        return cotangent * derivative, None
+
+    x = np.array([0.5, 1.5])
+    offset = np.array([3.0, -2.0])
+    direction = np.array([0.25, -0.75])
+    value, tangent = ad.jvp(lambda left, right: primitive(left, 2.0, right), argnums=(0, 1))(
+        x,
+        offset,
+        tangents=(direction, np.full_like(offset, 123.0)),
+    )
+    assert_allclose(value, 2 * x * x + offset)
+    assert_allclose(tangent, 4 * x * direction)
+    assert len(forwards) == len(released) == len(seen) == 1
+
+    check_primitive(
+        primitive,
+        primals=(x, offset),
+        static={"scale": 2.0},
+        tangents=(direction, np.full_like(offset, 123.0)),
+        cotangent=np.array([1.5, -0.5]),
+    )
+
+    assert len(seen) > 1
+    assert len(released) == len(forwards)
+    assert {id(value) for value in released} == {id(value) for value in forwards}
 
 
 def test_check_primitive_accepts_a_transpose_only_residual_boundary() -> None:

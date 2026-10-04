@@ -247,6 +247,7 @@ def _jvp_binding(op: str) -> Callable[..., object]:
         tangents: tuple[object | None, ...],
         raw_attrs: object,
         source_location: str | None,
+        residual: object,
     ) -> object:
         if active_rule is None:
             if definition.non_differentiable_reason is not None and _is_locally_constant(
@@ -259,11 +260,14 @@ def _jvp_binding(op: str) -> Callable[..., object]:
         if reads_arrays:
             operands = _as_rule_arrays(operands)
             tangents = _as_rule_arrays(tangents)
+        # Invocation payloads are not user attributes or differentiable operands.
+        # The authored residual primitive wrapper unpacks this private argument.
+        rule_inputs = (residual, *operands) if definition.has_residual else operands
         with _numerics_context("JVP propagation", source_location):
             return _checked_numerics(
                 _project_output_tangent(
                     answer,
-                    active_rule(answer, *operands, tangents=tangents, **attrs),
+                    active_rule(answer, *rule_inputs, tangents=tangents, **attrs),
                 ),
                 phase="JVP propagation",
                 op=op,
@@ -850,6 +854,9 @@ def _apply_vjp_binding(  # noqa: PLR0913 - mirrors the native callback ABI
 
     vjp_rule = rule.vjp
     if vjp_rule is None:
+        if definition.has_residual:
+            msg = f"Residual primitive '{op}' requires an explicit transpose rule"
+            raise NoVJPError(msg, op=op, source_location=source_location)
         if definition.jvp is None:
             msg = (
                 f"Cannot transpose primitive '{op}': no structurally validated "
@@ -922,6 +929,9 @@ def _apply_structural_vjp_binding_many(  # noqa: PLR0913 - mirrors callback ABI
 ) -> tuple[list[object | None], ...]:
     definition = rule.definition
     jvp_rule = definition.jvp
+    if definition.has_residual:
+        msg = f"Residual primitive '{op}' requires an explicit transpose rule"
+        raise NoVJPError(msg, op=op, source_location=source_location)
     if rule.vjp is not None or jvp_rule is None:
         msg = f"Primitive '{op}' does not have a JVP-only batched transpose"
         raise NoVJPError(msg, op=op, source_location=source_location)

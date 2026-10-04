@@ -520,16 +520,26 @@ def check_primitive(  # noqa: C901, PLR0912, PLR0913, PLR0915
         negative = invoke(cast("tuple[Any, ...]", tree_unflatten(primal_treedef, negative_leaves)))
         return _tree_difference(positive, negative, 2 * epsilon)
 
-    jvp_result = (
-        jvp_rule(
+    if jvp_rule is not None and primitive.has_residual:
+        from advect.autodiff.api.forward import jvp  # noqa: PLC0415
+
+        # The actual transform owns the invocation residual and releases it
+        # after the rule, just as it does for application code.
+        selected = tuple(
+            index for index, name in enumerate(dynamic_names) if name not in nondiff_top_level
+        )
+        _value, jvp_result = jvp(dynamic_call, argnums=selected)(
+            *primals, tangents=tuple(tangent_tree[index] for index in selected)
+        )
+    elif jvp_rule is not None:
+        jvp_result = jvp_rule(
             rule_concrete,
             tuple(primal_leaves),
             active_tangents,
             **static_arguments,
         )
-        if jvp_rule is not None
-        else None
-    )
+    else:
+        jvp_result = None
 
     if {"jvp", "complex"}.intersection(requested):
         finite_difference = finite_difference_directional()

@@ -190,11 +190,12 @@ pub(super) struct Invocation {
     pub(super) operands: Py<PyTuple>,
     pub(super) attrs: Py<PyAny>,
     pub(super) source_location: Option<String>,
+    pub(super) residual: Py<PyAny>,
 }
 
 impl Invocation {
-    /// Bind one node's rule callback and attributes. The output and operands
-    /// start as `None` and an empty tuple for the caller to fill.
+    /// Bind one node's rule callback and attributes. The output, residual and
+    /// operands start as `None`, `None` and an empty tuple for the caller to fill.
     pub(super) fn bind(
         py: Python<'_>,
         state: &DynamicTape,
@@ -235,6 +236,7 @@ impl Invocation {
                 .as_ref()
                 .map_or_else(|| py.None(), |value| value.clone_ref(py)),
             source_location: record.source_location.clone(),
+            residual: py.None(),
         })
     }
 

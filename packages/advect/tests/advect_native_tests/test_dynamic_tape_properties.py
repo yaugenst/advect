@@ -182,15 +182,20 @@ def _cases(draw: st.DrawFn) -> _Case:
     )
 
 
-def _jvp_rule(rule: _Rule) -> Callable[..., int]:
+def _jvp_rule(rule: _Rule, residuals: list[_Residual]) -> Callable[..., int]:
     def jvp(
         _output: object,
         operands: tuple[Any, ...],
         tangents: tuple[int | None, ...],
         _attrs: object,
         _source: object,
+        residual: tuple[int | None, ...] | None,
     ) -> int:
-        return _dot(rule.partials(operands), tangents)
+        assert (residual is not None) is rule.needs_residual
+        if residual is not None:
+            assert any(saved.payload is residual and saved.close_count == 0 for saved in residuals)
+        partials = rule.partials(operands) if residual is None else residual
+        return _dot(partials, tangents)
 
     return jvp
 
@@ -256,7 +261,7 @@ def _record(case: _Case) -> tuple[native.DynamicTape, list[_Residual]]:
         tape.mark_output(output)
     rules = [_RULES.get(op) for op in tape.op_names]
     tape.freeze(
-        [None if rule is None else _jvp_rule(rule) for rule in rules],
+        [None if rule is None else _jvp_rule(rule, residuals) for rule in rules],
         [None if rule is None else _vjp_rule(rule, batched=case.batched) for rule in rules],
         [
             None if rule is None else (False, rule.needs_primals, rule.needs_residual)
@@ -279,6 +284,18 @@ _REPEATED_PARENTS = _Program(
         _REPEATED_PARENTS,
         tangent_lanes=(((0, 1), (1, 1)), ((0, 1),), ((1, 1),)),
         cotangent_lanes=(((3, 1),), ((3, 2),)),
+        batched=False,
+    )
+)
+@example(
+    case=_Case(
+        _Program(
+            inputs=((2, True),),
+            steps=(_Step("square", (0,)), _Step("square", (1,))),
+            outputs=(1, 2),
+        ),
+        tangent_lanes=(((0, 1),), ((0, 2),), ()),
+        cotangent_lanes=(((1, 1), (2, 1)),),
         batched=False,
     )
 )
