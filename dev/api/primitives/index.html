@@ -306,6 +306,12 @@ array/scalar leaf, in implementation-parameter and pytree order.
 Tangents may be <code>None</code> for inactive leaves and are always <code>None</code>
 for leaves of a declared nondifferentiable argument. Static arguments
 are passed by name. Return a tangent with the output pytree.</p>
+<p>A primitive declared with <code>residual=True</code> may request its exact
+forward residual with a keyword-only <code>residual</code> parameter. Advect
+retains ownership: the rule must keep that residual usable for other
+directions and transposes on the same linear map. Residual primitives
+remain first-order-only and require an explicit transpose for reverse
+mode. Rules without this parameter keep the ordinary JVP signature.</p>
 <p>Write the rule as traceable, real-linear code so Advect can transpose
 it structurally and differentiate it again. The function is returned
 unchanged for decorator use.</p>
@@ -349,10 +355,19 @@ decorator use.</p>
     </div>
 
 </div><h2 id="exact-residuals">Exact residuals<a class="headerlink" href="#exact-residuals" title="Permanent link">&para;</a></h2>
-<p>Set <code>residual=True</code> only when reverse mode needs exact opaque data from the
-forward invocation. Residual primitives require an explicit transpose and form
-a first-order boundary; the object docstring below defines their lifetime and
-cleanup contract.</p>
+<p>Set <code>residual=True</code> when a derivative needs exact opaque data from the forward
+invocation, such as a solver factorization. A JVP can request that invocation's
+residual by declaring a keyword-only <code>residual</code> parameter. Its ordinary
+<code>output</code>, <code>primals</code>, and <code>tangents</code> arguments stay unchanged. An explicit
+transpose receives the same residual as its fourth positional argument.</p>
+<p>Advect owns the residual and its cleanup. A direct <code>jvp</code> evaluates the forward
+once and releases the residual after the derivative. A reusable <code>linearize</code>
+map keeps it for subsequent directions and transposes until the map is closed.
+Derivative rules must therefore preserve the residual for subsequent calls.</p>
+<p>Residual primitives require an explicit transpose for reverse mode and remain
+a first-order boundary. They cannot be checkpointed or embedded in staged or
+higher-order derivatives. The object docstring below defines their lifetime
+and cleanup contract.</p>
 
 
 <div class="doc doc-object doc-class">
@@ -383,12 +398,12 @@ cleanup contract.</p>
 <p><code>output</code> is the only value returned to the caller. Advect retains
 <code>residual</code> for the matching derivative invocation and calls <code>release</code>
 exactly once when that invocation state is discarded. The output must
-remain valid after the residual is released. A JVP never receives the
-residual; an explicit transpose on a primitive declared with
-<code>residual=True</code> receives it after <code>output</code>. A plain call or plain
-staged replay releases before returning. A one-shot reverse trace releases
-after consumption; a reusable linear map retains the residual until the
-map is closed.</p>
+remain valid after the residual is released. A JVP can request the
+residual with a keyword-only <code>residual</code> parameter; an explicit transpose
+on a primitive declared with <code>residual=True</code> receives it after <code>output</code>.
+A plain call or plain staged replay releases before returning. A one-shot
+derivative trace releases after consumption; a reusable linear map retains
+the residual until the map is closed.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -406,7 +421,8 @@ map is closed.</p>
               (<code><span title="typing.Any">Any</span></code>)
           –
           <div class="doc-md-description">
-            <p>Opaque invocation-local data retained for reverse mode.</p>
+            <p>Opaque invocation-local data retained for derivative rules. Rules must
+keep it usable across directions and transposes on a reusable linear map.</p>
           </div>
         </li>
         <li class="doc-section-item field-body">

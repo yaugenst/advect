@@ -123,12 +123,16 @@ and transpose contributions. One argument cannot be both.</p>
 and higher-order paths can reuse it. Add an explicit transpose only when the
 real adjoint cannot be derived or a measured hot path justifies it. A
 transpose-only primitive supports reverse mode but not forward mode.</p>
-<p>Use <code>residual=True</code> only when reverse mode needs exact opaque data from the
+<p>Use <code>residual=True</code> when a derivative needs exact opaque data from the
 forward invocation. Return <code>PrimitiveResult(output, residual, release=...)</code>
-and provide an explicit transpose. Advect retains the residual until the owning
+and provide an explicit transpose for reverse mode. A JVP requests that same
+residual by declaring a keyword-only <code>residual</code> parameter; existing JVP rules
+without it receive their ordinary arguments. Advect retains the residual until the owning
 pullback or linear map releases it, calling <code>release</code> exactly once. This is a
 first-order boundary: the primal may stage, but staged derivatives,
-higher-order derivatives, and <code>checkpoint</code> cannot retain the residual.</p>
+higher-order derivatives, and <code>checkpoint</code> cannot retain the residual.
+Derivative rules must keep the residual usable for repeated directions and
+transposes on a reusable linear map.</p>
 <p>Use <code>variable_output_arity=True</code> only when a concrete invocation determines
 the number of output leaves. The ordinary primitive call records that realized
 pytree for dynamic differentiation. Variable-arity primitives do not stage;

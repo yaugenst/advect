@@ -135,6 +135,8 @@ Attach `fn(output, primals, tangents, **static_attrs)` as the JVP.
 
 `output` has the implementation's public output pytree. `primals` and `tangents` are flat tuples with one entry per dynamic array/scalar leaf, in implementation-parameter and pytree order. Tangents may be `None` for inactive leaves and are always `None` for leaves of a declared nondifferentiable argument. Static arguments are passed by name. Return a tangent with the output pytree.
 
+A primitive declared with `residual=True` may request its exact forward residual with a keyword-only `residual` parameter. Advect retains ownership: the rule must keep that residual usable for other directions and transposes on the same linear map. Residual primitives remain first-order-only and require an explicit transpose for reverse mode. Rules without this parameter keep the ordinary JVP signature.
+
 Write the rule as traceable, real-linear code so Advect can transpose it structurally and differentiate it again. The function is returned unchanged for decorator use.
 
 ## def_transpose
@@ -151,7 +153,11 @@ A rule may accept the optional keyword-only `active_input_indices=None` and retu
 
 ## Exact residuals
 
-Set `residual=True` only when reverse mode needs exact opaque data from the forward invocation. Residual primitives require an explicit transpose and form a first-order boundary; the object docstring below defines their lifetime and cleanup contract.
+Set `residual=True` when a derivative needs exact opaque data from the forward invocation, such as a solver factorization. A JVP can request that invocation's residual by declaring a keyword-only `residual` parameter. Its ordinary `output`, `primals`, and `tangents` arguments stay unchanged. An explicit transpose receives the same residual as its fourth positional argument.
+
+Advect owns the residual and its cleanup. A direct `jvp` evaluates the forward once and releases the residual after the derivative. A reusable `linearize` map keeps it for subsequent directions and transposes until the map is closed. Derivative rules must therefore preserve the residual for subsequent calls.
+
+Residual primitives require an explicit transpose for reverse mode and remain a first-order boundary. They cannot be checkpointed or embedded in staged or higher-order derivatives. The object docstring below defines their lifetime and cleanup contract.
 
 ## PrimitiveResult
 
@@ -165,12 +171,12 @@ PrimitiveResult(
 
 A primitive's public output and private same-invocation residual.
 
-`output` is the only value returned to the caller. Advect retains `residual` for the matching derivative invocation and calls `release` exactly once when that invocation state is discarded. The output must remain valid after the residual is released. A JVP never receives the residual; an explicit transpose on a primitive declared with `residual=True` receives it after `output`. A plain call or plain staged replay releases before returning. A one-shot reverse trace releases after consumption; a reusable linear map retains the residual until the map is closed.
+`output` is the only value returned to the caller. Advect retains `residual` for the matching derivative invocation and calls `release` exactly once when that invocation state is discarded. The output must remain valid after the residual is released. A JVP can request the residual with a keyword-only `residual` parameter; an explicit transpose on a primitive declared with `residual=True` receives it after `output`. A plain call or plain staged replay releases before returning. A one-shot derivative trace releases after consumption; a reusable linear map retains the residual until the map is closed.
 
 Parameters:
 
 - **`output`** (`R`) – Public primitive result returned to the caller.
-- **`residual`** (`Any`) – Opaque invocation-local data retained for reverse mode.
+- **`residual`** (`Any`) – Opaque invocation-local data retained for derivative rules. Rules must keep it usable across directions and transposes on a reusable linear map.
 - **`release`** (`Callable[[Any], None] | None`, default: `None` ) – Optional cleanup callback invoked exactly once with residual when Advect releases the invocation state.
 
 Examples:
