@@ -242,11 +242,12 @@ def test_residual_jvp_failure_releases_the_owning_trace(transform: str) -> None:
     assert released == [token]
 
 
-def test_residual_jvp_without_explicit_transpose_fails_clearly_and_releases() -> None:
+@pytest.mark.parametrize("transform", ["grad", "transpose_many"])
+def test_residual_jvp_without_explicit_transpose_fails_clearly_and_releases(transform: str) -> None:
     released: list[object] = []
     token = object()
 
-    @ad.primitive(name="tests.residual.jvp_requires_transpose", residual=True)
+    @ad.primitive(name=f"tests.residual.jvp_requires_transpose_{transform}", residual=True)
     def primitive(x: np.ndarray) -> ad.PrimitiveResult[np.ndarray]:
         return ad.PrimitiveResult(x * x, token, release=released.append)
 
@@ -256,8 +257,17 @@ def test_residual_jvp_without_explicit_transpose_fails_clearly_and_releases() ->
         assert residual is token
         return 2 * primals[0] * tangents[0]
 
-    with pytest.raises(ad.NoVJPError, match=r"[Rr]esidual|def_transpose|explicit.*transpose"):
-        ad.grad(lambda x: np.sum(primitive(x)))(np.array([0.5, 1.5]))
+    x = np.array([0.5, 1.5])
+    if transform == "grad":
+        with pytest.raises(ad.NoVJPError, match="requires an explicit transpose rule"):
+            ad.grad(lambda x: np.sum(primitive(x)))(x)
+    else:
+        _, linear = ad.linearize(primitive, x)
+        with linear:
+            direction = np.ones_like(x)
+            assert_allclose(linear(direction), 2 * x)
+            with pytest.raises(ad.NoVJPError, match="requires an explicit transpose rule"):
+                linear.transpose_many((direction, -direction))
     assert released == [token]
 
 

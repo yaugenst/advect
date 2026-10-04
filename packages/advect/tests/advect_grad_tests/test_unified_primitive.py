@@ -592,6 +592,24 @@ def test_primitive_rejects_invalid_declarations(
         ad.primitive(implementation, **options)
 
 
+def test_jvp_residual_requires_a_residual_primitive() -> None:
+    @ad.primitive(name="tests.lifecycle.jvp_residual_without_declaration")
+    def primitive(x: np.ndarray) -> np.ndarray:
+        return x * x
+
+    def invalid_jvp(_output, _primals, tangents, *, residual):
+        return residual * tangents[0]
+
+    with pytest.raises(TypeError, match="JVP residual requires residual=True"):
+        primitive.def_jvp(invalid_jvp)
+
+    primitive.def_jvp(lambda _output, primals, tangents: 2 * primals[0] * tangents[0])
+    x = np.array([0.5, 1.5])
+    value, tangent = ad.jvp(primitive)(x, tangents=np.ones_like(x))
+    assert_allclose(value, x * x)
+    assert_allclose(tangent, 2 * x)
+
+
 def test_primitive_validates_calls_and_rule_registration() -> None:
     @ad.primitive(name="tests.lifecycle.rules")
     def primitive(x: object, scale: int = 1) -> object:
