@@ -6,7 +6,7 @@ Every listed function works in dynamic transforms. **Stage/save** says whether t
 
 | Integration                                                                         | Contract                                                  |
 | ----------------------------------------------------------------------------------- | --------------------------------------------------------- |
-| [NumPy](https://yaugenst.github.io/advect/dev/compatibility/numpy/index.md)         | 394 callable forms; NumPy 2.0-2.5 (2.5.2 in this build)   |
+| [NumPy](https://yaugenst.github.io/advect/dev/compatibility/numpy/index.md)         | 394 callable forms; NumPy 2.0-2.5                         |
 | [Array API](https://yaugenst.github.io/advect/dev/compatibility/array-api/index.md) | 169 namespace functions across revisions 2022.12-2024.12  |
 | [CuPy](https://yaugenst.github.io/advect/dev/compatibility/cupy/index.md)           | Single-device Array API provider path                     |
 | [SciPy](https://yaugenst.github.io/advect/dev/compatibility/scipy/index.md)         | 42 functions and 2 solver adapters behind `advect[scipy]` |
