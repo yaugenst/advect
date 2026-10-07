@@ -364,6 +364,22 @@ def test_compatibility_tables_show_user_capabilities(pages: dict[str, str]) -> N
     assert "| `arange` | no | no |" in array_api
 
 
+@pytest.mark.parametrize("extension", ["numpy", "scipy"])
+def test_compatibility_pages_do_not_depend_on_installed_package_versions(
+    catalog: dict[str, Any],
+    pages: dict[str, str],
+    extension: str,
+) -> None:
+    updated = {
+        **catalog,
+        "extensions": {
+            **catalog["extensions"],
+            extension: {**catalog["extensions"][extension], "version": "999.0.0"},
+        },
+    }
+    assert render_pages(updated) == pages
+
+
 def test_compact_table_preserves_asymmetric_capabilities() -> None:
     rows = [
         {
