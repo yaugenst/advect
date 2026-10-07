@@ -149,7 +149,6 @@ def _render_index(catalog: dict[str, object]) -> str:
     extensions = cast("dict[str, dict[str, object]]", catalog["extensions"])
     array_api = cast("list[dict[str, object]]", extensions["array_api"]["functions"])
     numpy = cast("list[dict[str, object]]", extensions["numpy"]["functions"])
-    numpy_version = str(extensions["numpy"]["version"])
     scipy = cast("list[dict[str, object]]", extensions["scipy"]["functions"])
     scipy_functions = sum(row["kind"] == "function" for row in scipy)
     scipy_adapters = sum(row["kind"] == "adapter" for row in scipy)
@@ -169,10 +168,7 @@ def _render_index(catalog: dict[str, object]) -> str:
         "",
         "| Integration | Contract |",
         "|---|---|",
-        (
-            f"| [NumPy](numpy.md) | {len(numpy)} callable forms; {_NUMPY_RANGE} "
-            f"({numpy_version} in this build) |"
-        ),
+        f"| [NumPy](numpy.md) | {len(numpy)} callable forms; {_NUMPY_RANGE} |",
         (
             f"| [Array API](array-api.md) | {len(array_api)} namespace functions "
             f"across revisions {_ARRAY_API_RANGE} |"
@@ -205,8 +201,7 @@ def _render_numpy(catalog: dict[str, object]) -> str:
         (
             "NumPy is Advect's first-class frontend, intercepted through NumPy's own "
             "protocols (`__array_ufunc__`, `__array_function__`, and constructor "
-            f"`like=` dispatch). The qualified range is {_NUMPY_RANGE}. This build uses "
-            f"NumPy {extension['version']} against Advect's Array API "
+            f"`like=` dispatch). The qualified range is {_NUMPY_RANGE}, against Advect's Array API "
             f"{extension['array_api_version']} target. Only the forms listed below "
             "are qualified."
         ),
@@ -452,7 +447,7 @@ def _render_scipy(catalog: dict[str, object]) -> str:
     lines.extend(
         [
             (
-                f"SciPy {scipy['version']} compatibility functions are explicit "
+                "SciPy compatibility functions are explicit "
                 "`advect.scipy` entry points rather than transparent interception of "
                 "direct `scipy.*` calls. The module is installed by the "
                 "`advect[scipy]` extra, and an artifact that contains one of these "
