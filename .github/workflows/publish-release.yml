@@ -33,13 +33,13 @@ jobs:
       id-token: write # TestPyPI trusted publishing exchanges the OIDC identity
     steps:
       - name: Download release distributions
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: advect-release-distributions-${{ needs.candidate.outputs.version }}
           path: dist
 
       - name: Publish distributions with trusted publishing
-        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # release/v1
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # release/v1
         with:
           packages-dir: dist
           repository-url: https://test.pypi.org/legacy/
@@ -54,7 +54,7 @@ jobs:
           persist-credentials: false
           ref: ${{ needs.candidate.outputs.source_revision }}
 
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
         with:
           enable-cache: false
           version-file: pyproject.toml
@@ -138,13 +138,13 @@ jobs:
       contents: write # this job creates the GitHub release
     steps:
       - name: Download release distributions
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: advect-release-distributions-${{ needs.candidate.outputs.version }}
           path: release
 
       - name: Download release provenance
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: advect-release-provenance-${{ needs.candidate.outputs.version }}
           path: release
@@ -192,13 +192,13 @@ jobs:
       id-token: write # PyPI trusted publishing exchanges the OIDC identity
     steps:
       - name: Download release distributions
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: advect-release-distributions-${{ needs.candidate.outputs.version }}
           path: dist
 
       - name: Publish distributions with trusted publishing
-        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # release/v1
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # release/v1
         with:
           packages-dir: dist
 
@@ -212,7 +212,7 @@ jobs:
           persist-credentials: false
           ref: ${{ needs.candidate.outputs.source_revision }}
 
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
         with:
           enable-cache: false
           version-file: pyproject.toml
